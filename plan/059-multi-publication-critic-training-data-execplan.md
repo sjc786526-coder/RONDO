@@ -280,16 +280,13 @@ linked worktree 不共享主根的 ignored `eval-data/`，因此下列执行期�
 
 ### 当前工作
 
-- ExecPlan 已完成规划复核并冻结；尚未创建 Plan 059 数据合同、teacher batch、正式数据、split、token census、bundle 或实现代码。
+- 干净上下文聚焦审查发现 v1 的跨 split 固定文本 shortcut，执行者确认真实并判定 v1 数据 NO-GO。revision v2 的显式场景文本、轻量
+  model-visible fragment 门禁与 rehearsal 已完成，正在从 clean implementation freeze 执行正式生成、复核和冻结。
 
 ### 本任务剩余步骤
 
-- 冻结 data-design lock 与实际 teacher 身份，关闭阶段 A 合同。
-- 提取少量公共场景锚点，完成生成、独立复核及必要返修/重生成。
-- 完成 group/split、dedup/捷径检查、全量 exact-tokenizer census 和正式 freeze。
-- 实现并验证 C1/C2/C3 consumer 与 train-only smoke bundle。
-- 完成聚焦独立验收；普通 finding 修复并重新冻结受影响集合后，给出数据 GO/NO-GO。
-- 精炼更新任务状态、方向 3 WBS 与 agent log，检查并提交 059 worktree，等待用户决定合并/推送。
+- 完成干净上下文聚焦审查；普通 finding 修复后重新冻结受影响集合并复验。
+- 检查 staged diff、tracked/ignored 资产与 main/059 状态，完成 059 本地分支提交并交回计划制定者。
 
 ### 阻塞项
 
@@ -299,7 +296,11 @@ linked worktree 不共享主根的 ignored `eval-data/`，因此下列执行期�
 
 ### 当前验收状态
 
-- ExecPlan 规划验收通过，Plan 059 实现与数据验收待执行；当前不能给出 M3-B1b 数据 GO。
+- v1 `formal-v3` 的结构、review、token 与 consumer 门禁通过，但干净上下文审查复算出固定 Q-/Within-PASS marker 在多个 split 中标签独占；
+  该结论推翻 v1 provisional GO，失败冻结只保留为 ignored 修复证据，不提交训练正文。
+- revision v2 rehearsal 已完成 12/12 candidate、6/6 pair 独立 accept，显式 Q-/soft 文本、模型可见 fragment shortcut、exact tokenizer、
+  split、dedup、manifest 与 consumer 全链路通过；正式数据和再次干净上下文审查仍待完成。
+- 当前数据建议为 NO-GO；M3-B1b 尚未解锁。
 
 ### 交接边界
 
@@ -327,3 +328,5 @@ linked worktree 不共享主根的 ignored `eval-data/`，因此下列执行期�
 | 009 | 普通数据/设施问题允许返修和重跑；上游语义冲突或最终数据不足才停/NO-GO | 给 AI 执行充分收敛余量，同时不跨原则边界 | 失败恢复、验收 | 已采纳 |
 | 010 | 本次规划提交一次性同步用户确认的 Plan 058 active 边界；059 实施只更新方向 3 指针，方向 1 结果和 COMPLETED 留给对应任务/主线整合 | 让权威入口一致，同时不替 Plan 058 写未验收结论 | 文档、并行合并 | 已采纳 |
 | 011 | GPT-5.6-sol 执行者直接合成，独立 GPT-5.6-sol 子会话复核；先小批打通和抽样，再冻结并 clean full finalization | 减少交接与整版返工，保留已验证进度并控制无意义的数据合成成本 | generation、review、freeze | 已采纳 |
+| 012 | coverage/stop lock 冻结正式目标为 72 candidate、30 Boundary、6 Within-PASS，达到全部稀疏覆盖后立即停止 | 在覆盖四类 publication、五项 hard requirement、三 split 和关键薄弱切片的同时避免无意义扩量 | scale、coverage、stop | 已执行 |
+| 013 | rehearsal 与正式分批 review 的真实 finding 只重生成受影响 endpoint，并以逐行内容相等门禁复用未变化 review | 保留有效生成进度，同时确保任何 Scenario/packet/supervision/pair 漂移都触发局部重审 | review、repair、freeze | 已执行 |

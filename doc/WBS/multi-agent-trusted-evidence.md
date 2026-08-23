@@ -1,7 +1,7 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
 最后更新：2026-08-23 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
-状态：**第一期、第二期、M3-A1 与 M3-A2 已完成；Plan 055 / M3-B2a 与 Plan 057 / M3-B2b 已主线整合；Plan 059 / M3-B1a 已完成规划、待执行**
+状态：**第一期、第二期、M3-A1 与 M3-A2 已完成；Plan 055 / M3-B2a 与 Plan 057 / M3-B2b 已主线整合；Plan 059 / M3-B1a 正在执行数据 revision v2 修复**
 
 ## 当前定位
 
@@ -107,7 +107,10 @@ M3-C1 继续等待 M3-B1c 提供至少一个训练候选。
 **宏观验收**：数据覆盖核心质量边界，没有明显模板、标签或近重复捷径；训练输入规模、split 和各阶段监督范围明确，能够独立
 交给 M3-B1b，而不需要在付费 smoke 中继续改数据合同。
 
-**当前状态**：Plan 059 已从合入 Plan 054 的 clean main 建立专用 worktree 与任务合同，数据生成、复核和冻结尚未开始；M3-B1b 仍未解锁。
+**当前状态**：Plan 059 首次正式冻结的结构、review、tokenizer、consumer 门禁虽通过，但提交前干净上下文审查发现跨 split 固定 Q- /
+Within-PASS 文本可完美预测 Binary label，因此 v1 数据判定 NO-GO。revision v2 已把 30 个 Q- 和 6 个 Within-PASS endpoint 改为逐场景
+显式文本，并新增“跨至少两个 split、支持数至少 4、标签独占”的模型可见 char-4-gram fail-closed 门禁；v2 rehearsal 已完成 12/12
+candidate、6/6 pair 独立 accept 和全链路 finalization。正式生成、复核与冻结仍待执行，M3-B1b 未解锁。
 
 #### M3-B1b：H100 训练资格 smoke（独立 go/no-go 门）
 
