@@ -30,11 +30,11 @@
   },
   "contracts": {
     "eval/templates/publication-critic/training-data-design-lock-v1.json": "cc56ba61778d84bddce468070333deaafce2f888507e2ea2f52fe1be1dd7843b",
-    "eval/templates/publication-critic/training-data-design-lock-v2.json": "cfc44c6a8806d52bfa59b4384e3e19d659bb478f9ad7cf0f671b122af0ba806b",
+    "eval/templates/publication-critic/training-data-design-lock-v2.json": "6d9848c5b89c24398b58df3535caa3125450a28654de6ac64c76b7c826b92453",
     "eval/templates/publication-critic/training-data-schema-v1.json": "4cdd069d8e2ed7ee3ba9b008bb1fab567da113f387f6f7e222e6bb3359bc484c",
     "eval/templates/publication-critic/training-data-generator-prompt-v2.md": "733e563c5234ab1b8337c03506a5524577ec8e27ffbecac3539efd4ea82a4c05",
     "eval/templates/publication-critic/training-data-reviewer-prompt-v1.md": "38235f56bcb3a0a29ce39dd90b6ca1d32dda4e6c9866c430bf9f72db25878d2c",
-    "eval/tools/generate_publication_critic_training_data.py": "4d571aba6972273e4c3ed203fe91a209aef5281fc907e31c90204ff43f514356",
+    "eval/tools/generate_publication_critic_training_data.py": "c84955815c3729461a8e6ffefaeac2e21736c482920b5be7884f78307a34be87",
     "eval/tools/finalize_publication_critic_training_data.py": "a93f25db3d6fbca47074e6622e2615976c4e2540e32d557aeb1655991ab78147",
     "eval/rondo_eval/publication_critic/training_data/__init__.py": "961161380af3469822a296d1f2ead42e34b624c0f2407f468c7ef2918b4a78f2",
     "eval/rondo_eval/publication_critic/training_data/consumer.py": "b5025c34a1aa94c52f585e6edd6a897692840d6eeb4d16181878bc76695cef23",
@@ -46,12 +46,12 @@
     "eval/rondo_eval/publication_critic/training_data/token_census.py": "2179a28beccab354847d6bb49718b1c2ebfd3a9161fdafc80dd1183705e64a82"
   },
   "rehearsal": {
-    "run_id": "plan059-rehearsal-v4",
-    "generator_run_sha256": "559eb658ef5fc6427780a84c9db6dcb23ed2b2a0975d34210d12650ba768b734",
-    "reviewer_run_sha256": "3485f7b5f7c042e833667006fa5d16ad72eb6f2c6dc198c40712555f89a86cff",
-    "candidate_reviews_sha256": "f20ccfaaa4153ef61799f263a8175257818c2a1326695845360441d2874e82d7",
-    "pair_reviews_sha256": "fc44e9b58afce58beeca0024a47f898abd8d96de836714789ac1ce5926edb078",
-    "finalization_manifest_sha256": "1cfe5a6912c50439b39134d4f17eaf2e539e0dd08c8ecf1a11d544d7db2c4521",
+    "run_id": "plan059-rehearsal-v5",
+    "generator_run_sha256": "221ae3ca0a0846777443ad72f31c72f65c5f249633706bafc7f9c083fd021e66",
+    "reviewer_run_sha256": "c2c6985f084bffe5c14ec701386d7f1c0eaeb5c46021620997cdc90478380684",
+    "candidate_reviews_sha256": "b82ec50254a6616059b7434cc1b7de9e073fba25a8e4a38d9c3f1f283c07296f",
+    "pair_reviews_sha256": "3921b6b486f8e4021d54426e8298b4c1d93934841449898933540cb3c5ccabd4",
+    "finalization_manifest_sha256": "427d5f67a060729ff0c695d3254ff23881505f768e02ba0e755cf8bcde057f02",
     "candidate_count": 12,
     "candidate_decisions": {
       "accept": 12,
@@ -64,7 +64,7 @@
       "downgrade": 0,
       "exclude": 0
     },
-    "token_total": 7462,
+    "token_total": 7465,
     "dropped_oldest_publications_total": 0,
     "model_visible_text_shortcuts": 0,
     "plan054_reference_matches": 0,

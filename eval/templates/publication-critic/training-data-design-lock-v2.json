@@ -7,7 +7,7 @@
     "sha256": "cc56ba61778d84bddce468070333deaafce2f888507e2ea2f52fe1be1dd7843b"
   },
   "overrides": {
-    "split_seed": "plan059-publication-critic-split-v2",
+    "split_seed": "plan059-publication-critic-split-v1",
     "generator_prompt_relative_path": "eval/templates/publication-critic/training-data-generator-prompt-v2.md",
     "visible_text_shortcut_contract": {
       "fields": [
