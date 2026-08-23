@@ -440,11 +440,25 @@ diagnostic 绝对槽硬编码为初始扫尾范围 `8..20`，未落实决策 021
 formal 仍必须完整 20/20，初始 sweep 历史不变。第 4 槽与越界/倒序回归补齐，相关 Python 回归 `106/106` 通过。
 本次为零 API 本地设施失败，不创建或复活 identity；从新 clean commit 重冻 runtime 后再初始化 diagnostic-v8。
 
+从 clean `99f053015829f1945d613f551b84978edbc4bec5` 复用该零 API attempt 未绑定 identity 的 Plan 058 独占 target
+做增量重建，legacy/companion 分别 `1.52s`/`0.59s`，watchdog 均 `stop=none`。新 runtime 的 CLI/host/bwrap
+SHA-256 与前次一致，manifest SHA-256 为
+`dd26b0e9fe868ae1f7138eec9a23e4abcad174c1ec988e54a6a3130471f353a0`；所有 prepare/verify proof 仍使用独立
+metrics identity。旧 `199849b` bin/metrics 作为零 API 失败现场保留，target 精确迁移且未被任何 campaign 引用。
+
+`plan058-direction1-c2-diagnostic-v8` 已只冻结并完成绝对槽 4。零 API preflight `1/1`；paid run 完整执行
+agent、Harbor、verifier、Guardian evidence binding、schema-v2 投影、预算与发布，task pass/reward `1`，12 个可靠
+attempts、0 transport retry、`0.235429 USD`。raw exact-C2 为 3 次/`5,656 ms`：失败后状态确认、检查权限/状态后的
+cherry-pick 恢复、成功变更后的终态确认各一次，均有明确失败恢复或状态变化依据，故 refined harmful/reasonable/
+insufficient 为 `0/3/0`，无害四门通过。累计 task budget `15.393502 USD`、reserved `0`、剩余
+`34.606498 USD`。Docker/VHDX 增长 `0`，最终 Docker 11.5 GB 且无容器/卷/cache，Windows C: 实际余量
+`200631042048` bytes。formal-v5 暴露的局部设施缺口至此闭环，下一步提交证据并从新 clean commit 冻结全新 formal。
+
 ### 本任务剩余步骤
 
-1. Phase C/D 局部复验与再冻结：只为 formal-v5 受影响的绝对槽 4 建立 diagnostic identity；打通后提交并从新 clean
-   source 重建/复验 binary/manifest，再以全新干净 identity 按 `8 → 18 → 1–7 → 9–17 → 19–20` 从执行位置
-   1/20 串行完成固定 10 题 × 2 round 的 20 个唯一正式逻辑结果，不复用旧 formal 或 diagnostic 结果。
+1. Phase C/D 再冻结与正式运行：提交 diagnostic-v8 证据，从新 clean source 重建/复验 binary/manifest，再以全新
+   干净 identity 按 `8 → 18 → 1–7 → 9–17 → 19–20` 从执行位置 1/20 串行完成固定 10 题 × 2 round 的
+   20 个唯一正式逻辑结果，不复用旧 formal 或 diagnostic 结果。
 2. Phase E：比较 raw/refined C2、耗时、任务结果和正确性保护，作出保留/调整/撤销决定，完成文档、精确清理、
    聚焦独立验收、整改和工作树提交。
 
@@ -588,3 +602,4 @@ Plan 058 worktree，但执行阶段以下 I/O 会由 worktree 中的受控命令
 | 030 | 若项目容量达到限制，只允许在 exact ownership 核对后清理 Plan 058 工作树独占 target/二进制 | 为长时运行提供受控容量恢复，同时保护 Plan 056、共享缓存和其他并行工作树 | 资源、精确清理 | 用户授权，硬边界 |
 | 031 | formal-v5 因把 Guardian 中间 API turn 误当独立终态 review 而永久作废；raw 请求仍按 3 次计费/限额，证据只绑定每个连续 Guardian 组的末次请求，并只以新 diagnostic 复验绝对槽 4 | fix-git 的运行链实际 completed/reward 1；3 个 Guardian 请求组成 2 个 review 并产生 2 份终态证据。请求数与 review 数职责不同，强行一一对应会把有效结果误判为设施故障；按 021 不重复已打通的其他题目 | Guardian evidence、结果发布、diagnostic、正式重启 | 已采纳，硬合同 |
 | 032 | diagnostic range 从旧扫尾专用 `8..20` 扩展为冻结正式分母内任意有界闭区间 `1..20`；首次第 4 槽 initialize 失败保持零 API、无 identity | 决策 021 要求后续 formal 的局部修复只复验实际问题题目，旧常量错误地把初始 8–20 sweep 的历史范围固化成永久能力边界；formal 分母与顺序不变 | diagnostic identity、局部 commissioning | 已采纳，硬合同 |
+| 033 | diagnostic-v8 有效 1/1 后关闭 formal-v5 Guardian review binding 与 targeted range 两个局部设施缺口；3 次 raw repeat 均按预冻规则归为 reasonable | 三次分别是失败后确认、恢复重试和成功状态变化后的验证，均不是无进展机械重复；task pass、证据绑定、预算/资源和工具真值完整 | commissioning、refined classification、正式冻结 | 已采纳 |
