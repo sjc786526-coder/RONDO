@@ -3,7 +3,13 @@
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
-from .render import ADOPTED_CONTEXT_WINDOW, RenderPlan, component_spans, fit_to_window
+from .render import (
+    ADOPTED_CONTEXT_WINDOW,
+    RenderPlan,
+    canonical_title_span,
+    component_spans,
+    fit_to_window,
+)
 
 
 class TokenizationError(ValueError):
@@ -93,6 +99,7 @@ class ExactTokenizer:
         if len(ids) != len(offsets):
             raise TokenizationError("offset mapping does not match input ids")
         spans = component_spans(rendered)
+        title_start, title_end = canonical_title_span(rendered)
         buckets = {
             "policy": 0,
             "packet_framing": 0,
@@ -115,6 +122,12 @@ class ExactTokenizer:
                 buckets["special_tokens"] += 1
                 continue
             start, end = int(offset[0]), int(offset[1])
+            if title_start <= start and end <= title_end:
+                buckets["candidate"] += 1
+                continue
+            if start < title_end and end > title_start:
+                buckets["cross_segment_framing"] += 1
+                continue
             matches = [
                 component_bucket[name]
                 for name, (left, right) in spans.items()

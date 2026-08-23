@@ -221,42 +221,35 @@ Hugging Face/Python 配置，不得把模型复制进 worktree 或用 symlink �
 
 ### 已完成
 
-- 已确认规划基线为 clean `main@be427b471edfa0b585c847fd8db4418aa735ea45`，与 `origin/main` 一致；Plan 053/055/057 已完成并进入
-  主线，方向 3 当前唯一已解锁工作包为 M3-A2。
-- 已创建 `.claude/worktrees/054-publication-critic-eval-baseline` / `worktree-054-publication-critic-eval-baseline`；规划阶段未修改主工作区
-  tracked/ignored 文件，未下载模型/依赖，未运行 tokenizer、模型、GPU、Docker、Cargo、测试、API 或训练。
-- 已核对根规则、README、顶层/方向 3 WBS、plan 模板、Plan 053/055/057、M3-A1 产品合同、相关完成/验收日志、两份 2026-08-21
-  研究材料、数据布局，以及现行 PublicationPacket/identity/scorer、Team State canonical preparation 和 Plan 057 packet builder/tests。
-- 已确认 Plan 054 必须直接复用现行 typed packet/canonical preparation；当前最可能需要的窄共享缺口是 Plan 057 private packet bridge，具体
-  采用纯函数、exporter/validator 或 parity fixture 留给执行者决定。
-- 已确认受控 scorer 的 `[0,1]`、`0.5`、test render/model identity 不是 Skywork 事实；真实 scalar projection/domain 与临时 threshold 必须
-  在 exact model smoke 后冻结。
-- 已纳入并行 Plan 058 边界：两任务轻量工作可并行，真实模型/Docker/重型 Cargo/真实 API 共用全局资源槽；054 使用方向 3 专用
-  eval/model namespace，不争写顶层 WBS、WBS-COMPLETED 和共享入口，M3-C1 保持未启动。
-- 已由多个只读子智能体分别复核产品/typed 合同、live code 复用面、评价/ignored 资产和资源授权边界；规划者依据 live repo 独立取舍并冻结
-  本计划。该复核只用于规划，不替代实现后的正式独立验收。
+- 已建立 Rust/Python PublicationPacket v1 parity、24 条监督物理分离样本、两条 cap census case、版本化输入/render/overflow/scalar
+  合同、Publication Critic 专用 runner/归档/指标以及 exact 环境/model/freeze identity；没有修改产品 review cycle 或 Team State mutation。
+- 已下载并离线校验 exact Skywork revision `e51ea3e08fb81326c3b812a7ff0cb9cee83e59cc`。CPU BF16 finite scalar 未满足
+  `1e-4` batch parity，正式 identity 采用 CPU FP32。
+- v1 run `plan054-20260823T021754Z-measurement-fp32` 产生 16 条 finite scalar；独立验收发现 freeze identity、全 cohort parity 和
+  render 描述不一致，因此 v1 结果只保留为 superseded 历史 attempt，不作为完成证据。
+- v2 已修正资格/render/output shape/CLI/calibration artifact/committed-freeze identity，并对 8 条 calibration scored row 完成
+  single、repeat、标准左右 padding 和替代 composition parity，最大 projected delta `1.5709748450998262e-06`；独立 16,384-token
+  context forward finite。校准 run `plan054-20260823T040900Z-calibration-v2` 固定临时 threshold `0.9350569011196121`。
+- v2 freeze SHA-256 为 `abb06abfa218695d38b8c9d681c939cbd37f8197d631c42ab3ccd63fa733797e`；24 个 Python focused tests、
+  Rust typed identity 定向测试、`just fix -p codex-core`、format 与 diff check 已通过。
 
 ### 当前工作
 
-- 本 ExecPlan 已冻结，等待用户把执行提示词和一次性授权交给执行者。
+- 正在把 v2 freeze 固定到 clean Git commit；随后从该提交执行一次正式 16 样本 measurement。
 
 ### 本任务剩余步骤
 
-1. 阶段 A：只读核对 HF exact metadata/license/files，下载一个 immutable Skywork revision；用真实 tokenizer/model smoke 关闭输入形态、
-   scalar、padding/batch 和声明/可用窗口事实。
-2. 阶段 B：实现共享 packet→render/scoring 合同、代表样本、token census、runner、指标/归档和 focused tests；冻结正式 measurement 前口径。
-3. 阶段 C：取得共享资源槽，完成有界真实基座 inference，发布小型可复跑结果、错误切片、token/资源基线；普通 bug 按本计划自主修复重跑。
-4. 阶段 D：形成 Skywork go/no-go 与 M3-B1a 数据重点，精炼同步方向 3 子 WBS/plan/log；检查 tracked/ignored/并行现场，在 054 worktree
-   本地提交并交给计划审查者做一次聚焦独立验收，整改后仍只提交本分支。
+1. 从 v2 clean freeze commit 执行正式 measurement，归档 tracked/raw 结果并同步本节、方向 3 WBS 与精炼日志。
+2. 交回同一干净上下文独立审查者复验；确认真实 finding 后窄修并再次交回，直到 PASS。
+3. 复核 tracked/ignored 资产和资源结果，精确清理本任务不再需要的下载分块，完成 054 本地分支最终提交并保持 clean。
 
 ### 阻塞项
 
-- 当前无阻塞。Plan 058 并行不是内容阻塞；进入真实模型或任一重型阶段前必须协调并取得同一全局资源槽。
+- 当前无阻塞。
 
 ### 当前验收状态
 
-- 仅完成规划和只读事实核对。真实 model/tokenizer revision、license、render、scalar output、context、样本、runner、测试、基座质量和资源结果
-  均尚待执行，不能视为已通过。
+- v2 实现、真实校准、context smoke、measurement freeze 和 focused freeze 自检已通过；正式 v2 measurement 与最终独立验收待执行。
 
 ### 交接边界
 
@@ -282,3 +275,9 @@ Hugging Face/Python 配置，不得把模型复制进 worktree 或用 symlink �
 | 007 | 054 与 058 使用独立 eval namespace并共享单一重型资源槽；顶层 WBS/COMPLETED/共享入口留后续整合 | 允许两方向并行而不争写状态、依赖或宿主资源 | 并行、文档、资源 | 已采纳 |
 | 008 | 允许必要的专用新能力，也允许职责匹配时复用/窄抽公共能力；不以改动最少或强行复用为目标 | 保持架构契合、干净且不重复建设第二套体系 | 实现架构 | 已采纳 |
 | 009 | no-go 是有效结论，但不自动扩池、训练或启动 M3-C1 | 负面基线仍可指导 B1a/路线，原则边界不能靠扩大任务掩盖 | 结论、WBS | 已采纳 |
+| 010 | 用 Rust canonical preparation 生成 parity fixture，再由 Python strict loader 消费；不公开生产 private bridge | 保证现行产品 packet 一致，又避免为离线评价扩大产品 API | packet、测试 | 已采纳 |
+| 011 | 采用 16,384-token window，完整保留必需 candidate，仅整条丢最旧 continuity 并显式编码新增 omission | exact tokenizer census 与真实 context smoke 均支持推荐窗口，同时维持产品语义 | render、overflow | 已采纳 |
+| 012 | CPU BF16 作为已记录不合格 attempt；正式 identity 采用通过 `1e-4` batch parity 的 CPU FP32 | 不用放宽容差掩盖同一输入在 batch 中的数值漂移 | model、scoring、资源 | 已采纳 |
+| 013 | v1 质量事实曾指向工程/数据建设 GO、未微调 direct-product NO-GO；最终结论必须由 v2 重新确认 | v1 的 7/8 pair ranking 与错误切片仍可作历史观察，但不能越过无效 freeze 冒充正式结论 | 结果、交接 | 被 014 取代，待 v2 |
+| 014 | v1 正式 run 因 identity/parity/render 合同不一致降级为 superseded attempt；升级 v2 后完整重跑 | 已产生 scalar 不等于满足冻结合同，不能用文档修饰替代重新测量 | identity、runner、结果 | 已采纳 |
+| 015 | parity 覆盖全部 calibration/measurement scored row；两条 `token_census_only` cap 只做 exact census，另以独立 16k forward 验证 context | census cap 不参与 threshold/quality，强塞入 batch parity 会扭曲 `every_scored_row` 语义并放大无关计算 | parity、census、资源 | 已采纳 |

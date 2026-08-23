@@ -786,7 +786,11 @@ mod tests {
     use codex_publication_critic::MAX_SUMMARY_SCALARS;
     use codex_publication_critic::MAX_TITLE_BYTES;
     use codex_publication_critic::MAX_TITLE_SCALARS;
+    use codex_publication_critic::ModelIdentity;
+    use codex_publication_critic::PassRule;
+    use codex_publication_critic::QualificationIdentity;
     use codex_publication_critic::RuntimeLimits;
+    use codex_publication_critic::ScoringIdentity;
     use codex_publication_critic::controlled_test_descriptor;
     use codex_team_state::FactCategory;
     use codex_team_state::HistoryQuery;
@@ -899,6 +903,90 @@ mod tests {
             expected.clone()
         );
         actual
+    }
+
+    #[test]
+    fn measurement_freeze_v2_matches_typed_publication_critic_identities() {
+        let freeze_path = codex_utils_cargo_bin::find_resource!(
+            "../../../eval/manifests/publication-critic/measurement-freeze-v2.json"
+        )
+        .expect("measurement freeze path must resolve");
+        let freeze: Value =
+            serde_json::from_slice(&std::fs::read(&freeze_path).unwrap_or_else(|error| {
+                panic!(
+                    "failed to read measurement freeze {}: {error}",
+                    freeze_path.display()
+                )
+            }))
+            .expect("measurement freeze must be valid JSON");
+
+        let qualification_value = freeze["qualification_identity"].clone();
+        let qualification: QualificationIdentity =
+            serde_json::from_value(qualification_value.clone())
+                .expect("qualification identity must match the Plan 055 type");
+        assert_eq!(
+            serde_json::to_value(&qualification).expect("qualification identity must serialize"),
+            qualification_value
+        );
+        assert_eq!(
+            qualification.packet_schema.name(),
+            "rondo-publication-packet"
+        );
+        assert_eq!(qualification.packet_schema.revision(), "v1");
+        assert_eq!(
+            qualification.rubric.name(),
+            "rondo-publication-qualification"
+        );
+        assert_eq!(qualification.rubric.revision(), "v1");
+
+        let model_value = freeze["model_identity"].clone();
+        let model: ModelIdentity = serde_json::from_value(model_value.clone())
+            .expect("model identity must match the Plan 055 type");
+        assert_eq!(
+            serde_json::to_value(&model).expect("model identity must serialize"),
+            model_value
+        );
+        assert_eq!(model.model.name(), "skywork-reward-v2-qwen3-1.7b");
+        assert_eq!(
+            model.model.revision(),
+            "e51ea3e08fb81326c3b812a7ff0cb9cee83e59cc"
+        );
+        assert_eq!(
+            model.tokenizer.name(),
+            "skywork-reward-v2-qwen3-1.7b-tokenizer"
+        );
+        assert_eq!(
+            model.tokenizer.revision(),
+            "e51ea3e08fb81326c3b812a7ff0cb9cee83e59cc"
+        );
+
+        let scoring_value = freeze["scoring_identity"].clone();
+        let scoring: ScoringIdentity = serde_json::from_value(scoring_value.clone())
+            .expect("scoring identity must match the Plan 055 type");
+        scoring.validate().expect("scoring identity must validate");
+        assert_eq!(
+            serde_json::to_value(&scoring).expect("scoring identity must serialize"),
+            scoring_value
+        );
+        assert_eq!(scoring.domain.min(), 0.0);
+        assert_eq!(scoring.domain.max(), 1.0);
+        assert_eq!(scoring.threshold(), 0.9350569011196121);
+        assert_eq!(
+            scoring.pass_rule,
+            PassRule::ScoreGreaterThanOrEqualToThreshold
+        );
+        assert_eq!(
+            scoring.input_template.name(),
+            "rondo-publication-packet-render"
+        );
+        assert_eq!(
+            scoring.input_template.revision(),
+            "v2-sha256-7765e03093e55b680fb9b6cfff5ee3974cfdd6a5b95362521756be918bb5cf9d"
+        );
+        assert_eq!(
+            freeze["inference_contract"]["output_shape"],
+            serde_json::json!(["batch", 1])
+        );
     }
 
     #[test]

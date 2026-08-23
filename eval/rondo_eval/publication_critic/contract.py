@@ -83,7 +83,7 @@ def load_fixed_input_contract(
     rubric = _read_text(root / _TEMPLATE_DIR / "qualification-rubric-v1.md")
     if not rubric.strip():
         _fail("qualification rubric must not be empty")
-    render = _load_json(root / _TEMPLATE_DIR / "render-contract-v1.json")
+    render = _load_json(root / _TEMPLATE_DIR / "render-contract-v2.json")
     _validate_render_contract(render)
     limits = _load_json(root / _TEMPLATE_DIR / "product-packet-limits-v1.json")
     _validate_product_limits(limits)
@@ -176,12 +176,22 @@ def _validate_render_contract(value: Any) -> None:
     contract = _require_object(value, "render contract")
     _require_exact_keys(
         contract,
-        {"schema_version", "name", "revision", "messages", "chat_template", "context", "padding"},
+        {
+            "schema_version",
+            "name",
+            "revision",
+            "messages",
+            "token_accounting",
+            "render_compatibility",
+            "chat_template",
+            "context",
+            "padding",
+        },
         "render contract",
     )
     _require_literal(contract["schema_version"], 1, "render contract.schema_version")
     _require_literal(contract["name"], "rondo-publication-critic-render", "render contract.name")
-    _require_literal(contract["revision"], "v1", "render contract.revision")
+    _require_literal(contract["revision"], "v2", "render contract.revision")
 
     messages = _require_object(contract["messages"], "render contract.messages")
     _require_exact_keys(messages, {"system", "count", "user", "assistant"}, "render contract.messages")
@@ -189,20 +199,109 @@ def _validate_render_contract(value: Any) -> None:
     _require_literal(messages["count"], 2, "render contract.messages.count")
 
     user = _require_object(messages["user"], "render contract.messages.user")
-    _require_exact_keys(user, {"order", "public_context_fields", "excluded_fields"}, "render contract.messages.user")
+    _require_exact_keys(user, {"order", "components", "excluded_fields"}, "render contract.messages.user")
     _require_sequence_literal(user["order"], ["qualification_rubric", "public_context"], "render contract.messages.user.order")
-    _require_sequence_literal(
-        user["public_context_fields"],
-        ["qualification", "actor_role", "target_kind", "local_scope", "continuity", "evidence_v1"],
-        "render contract.messages.user.public_context_fields",
-    )
     _require_sequence_literal(user["excluded_fields"], ["candidate", "supervision"], "render contract.messages.user.excluded_fields")
 
+    components = _require_object(user["components"], "render contract.messages.user.components")
+    _require_exact_keys(components, {"packet", "continuity", "evidence_v1"}, "render contract.messages.user.components")
+    packet_component = _require_object(components["packet"], "render contract.messages.user.components.packet")
+    _require_exact_keys(packet_component, {"fields"}, "render contract.messages.user.components.packet")
+    _require_sequence_literal(
+        packet_component["fields"],
+        ["qualification", "actor_role", "target_kind", "local_scope.title"],
+        "render contract.messages.user.components.packet.fields",
+    )
+    continuity_component = _require_object(
+        components["continuity"],
+        "render contract.messages.user.components.continuity",
+    )
+    _require_exact_keys(continuity_component, {"fields"}, "render contract.messages.user.components.continuity")
+    _require_sequence_literal(
+        continuity_component["fields"],
+        ["continuity"],
+        "render contract.messages.user.components.continuity.fields",
+    )
+    evidence_component = _require_object(
+        components["evidence_v1"],
+        "render contract.messages.user.components.evidence_v1",
+    )
+    _require_exact_keys(evidence_component, {"fields"}, "render contract.messages.user.components.evidence_v1")
+    _require_sequence_literal(
+        evidence_component["fields"],
+        ["evidence_v1"],
+        "render contract.messages.user.components.evidence_v1.fields",
+    )
+
     assistant = _require_object(messages["assistant"], "render contract.messages.assistant")
-    _require_exact_keys(assistant, {"content", "fields", "title_source"}, "render contract.messages.assistant")
-    _require_literal(assistant["content"], "complete_candidate", "render contract.messages.assistant.content")
-    _require_sequence_literal(assistant["fields"], ["title", "summary", "handoff"], "render contract.messages.assistant.fields")
-    _require_literal(assistant["title_source"], "local_scope.title", "render contract.messages.assistant.title_source")
+    _require_exact_keys(assistant, {"component", "fields"}, "render contract.messages.assistant")
+    _require_literal(assistant["component"], "candidate", "render contract.messages.assistant.component")
+    _require_sequence_literal(
+        assistant["fields"],
+        ["candidate.summary", "candidate.handoff"],
+        "render contract.messages.assistant.fields",
+    )
+
+    token_accounting = _require_object(contract["token_accounting"], "render contract.token_accounting")
+    _require_exact_keys(
+        token_accounting,
+        {"candidate_semantic_fields", "canonical_title"},
+        "render contract.token_accounting",
+    )
+    _require_sequence_literal(
+        token_accounting["candidate_semantic_fields"],
+        ["local_scope.title", "candidate.summary", "candidate.handoff"],
+        "render contract.token_accounting.candidate_semantic_fields",
+    )
+    canonical_title = _require_object(
+        token_accounting["canonical_title"],
+        "render contract.token_accounting.canonical_title",
+    )
+    _require_exact_keys(
+        canonical_title,
+        {"source", "message_role", "render_component", "token_bucket"},
+        "render contract.token_accounting.canonical_title",
+    )
+    _require_literal(
+        canonical_title["source"],
+        "local_scope.title",
+        "render contract.token_accounting.canonical_title.source",
+    )
+    _require_literal(
+        canonical_title["message_role"],
+        "user",
+        "render contract.token_accounting.canonical_title.message_role",
+    )
+    _require_literal(
+        canonical_title["render_component"],
+        "packet",
+        "render contract.token_accounting.canonical_title.render_component",
+    )
+    _require_literal(
+        canonical_title["token_bucket"],
+        "candidate",
+        "render contract.token_accounting.canonical_title.token_bucket",
+    )
+
+    compatibility = _require_object(
+        contract["render_compatibility"],
+        "render contract.render_compatibility",
+    )
+    _require_exact_keys(
+        compatibility,
+        {"model_visible_bytes", "message_roles"},
+        "render contract.render_compatibility",
+    )
+    _require_literal(
+        compatibility["model_visible_bytes"],
+        "identical_to_rondo-publication-critic-render@v1",
+        "render contract.render_compatibility.model_visible_bytes",
+    )
+    _require_sequence_literal(
+        compatibility["message_roles"],
+        ["user", "assistant"],
+        "render contract.render_compatibility.message_roles",
+    )
 
     chat_template = _require_object(contract["chat_template"], "render contract.chat_template")
     _require_exact_keys(chat_template, {"source", "add_generation_prompt"}, "render contract.chat_template")
@@ -212,7 +311,11 @@ def _validate_render_contract(value: Any) -> None:
     context = _require_object(contract["context"], "render contract.context")
     _require_exact_keys(context, {"adopted_window_tokens", "mandatory", "candidate_truncation", "overflow"}, "render contract.context")
     _require_literal(context["adopted_window_tokens"], 16_384, "render contract.context.adopted_window_tokens")
-    _require_sequence_literal(context["mandatory"], ["qualification_rubric", "complete_candidate"], "render contract.context.mandatory")
+    _require_sequence_literal(
+        context["mandatory"],
+        ["qualification_rubric", "local_scope.title", "candidate.summary", "candidate.handoff"],
+        "render contract.context.mandatory",
+    )
     _require_literal(context["candidate_truncation"], "forbidden", "render contract.context.candidate_truncation")
 
     overflow = _require_object(context["overflow"], "render contract.context.overflow")
@@ -231,7 +334,7 @@ def _validate_render_contract(value: Any) -> None:
     _require_literal(overflow["strategy"], "drop_oldest_continuity_item", "render contract.context.overflow.strategy")
     _require_literal(overflow["unit"], "whole_prior_publication", "render contract.context.overflow.unit")
     _require_literal(overflow["rerender_and_retokenize_after_each_drop"], True, "render contract.context.overflow.rerender_and_retokenize_after_each_drop")
-    _require_literal(overflow["render_only_omission_field"], "render_window_omitted_prior_publication_count", "render contract.context.overflow.render_only_omission_field")
+    _require_literal(overflow["render_only_omission_field"], "model_window_additional_oldest_omitted", "render contract.context.overflow.render_only_omission_field")
     _require_literal(overflow["render_only_omission_is_additional_to_packet_coverage"], True, "render contract.context.overflow.render_only_omission_is_additional_to_packet_coverage")
     _require_literal(overflow["mandatory_content_overflow"], "typed_input_failure", "render contract.context.overflow.mandatory_content_overflow")
 

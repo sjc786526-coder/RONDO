@@ -41,8 +41,30 @@ class PublicationCriticContractTests(unittest.TestCase):
         self.assertIn("transcript, reasoning, private context", fixed.input_contract)
         self.assertIn("Useful state transfer", fixed.rubric)
         self.assertIn("Do not claim to verify factual truth", fixed.rubric)
+        self.assertEqual(fixed.render_contract["revision"], "v2")
         self.assertEqual(fixed.render_contract["messages"]["system"], "absent")
         self.assertEqual(fixed.render_contract["messages"]["count"], 2)
+        self.assertEqual(
+            fixed.render_contract["messages"]["user"]["components"]["packet"]["fields"],
+            ("qualification", "actor_role", "target_kind", "local_scope.title"),
+        )
+        self.assertEqual(
+            fixed.render_contract["messages"]["assistant"]["fields"],
+            ("candidate.summary", "candidate.handoff"),
+        )
+        self.assertEqual(
+            fixed.render_contract["token_accounting"]["canonical_title"],
+            {
+                "source": "local_scope.title",
+                "message_role": "user",
+                "render_component": "packet",
+                "token_bucket": "candidate",
+            },
+        )
+        self.assertEqual(
+            fixed.render_contract["render_compatibility"]["message_roles"],
+            ("user", "assistant"),
+        )
         self.assertEqual(fixed.render_contract["context"]["adopted_window_tokens"], 16_384)
         self.assertEqual(fixed.render_contract["context"]["candidate_truncation"], "forbidden")
         self.assertEqual(
@@ -191,7 +213,7 @@ class PublicationCriticContractTests(unittest.TestCase):
 
     def test_rejects_render_contract_drift(self) -> None:
         with self._copied_repo() as root:
-            path = root / "eval/templates/publication-critic/render-contract-v1.json"
+            path = root / "eval/templates/publication-critic/render-contract-v2.json"
             render = json.loads(path.read_text(encoding="utf-8"))
             render["context"]["adopted_window_tokens"] = 8192
             path.write_text(json.dumps(render), encoding="utf-8")

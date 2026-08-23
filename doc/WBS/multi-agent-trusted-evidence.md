@@ -1,7 +1,7 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
 最后更新：2026-08-22 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
-状态：**第一期、第二期与三期 M3-A1 已完成；Plan 055 / M3-B2a 与 Plan 057 / M3-B2b 已主线整合；当前下一包为 M3-A2**
+状态：**第一期、第二期与 M3-A1 已完成；Plan 055 / M3-B2a 与 Plan 057 / M3-B2b 已主线整合；M3-A2 正在执行 v2 正式测量**
 
 ## 当前定位
 
@@ -78,15 +78,19 @@ API schema、训练超参数或部署格式。
 M3-B2a 服务协议、identity 和资源数值；M3-A2 的数据/评价细节和状态不由该任务改写，M3-A1 本身未实现这些设施或
 `team_publish` 接入。
 
-#### M3-A2：数据/评价设施与基座测评
+#### M3-A2：数据/评价设施与基座测评（执行中）
 
-**目标**：建立轻量、可复跑的数据与评价设施，在统一口径下得到 Skywork 1.7B 基座能力、主要错误类型和输入规模基线。
+**当前事实**：Plan 054 已冻结 PublicationPacket v1 parity、24 条代表/边界样本、两条产品 cap census case 与 Publication Critic
+专用评价/归档设施。第一次 v1 测量虽产生 16 条 finite scalar，但独立验收发现 freeze identity、全 cohort batch parity 与 render
+描述不一致，已作为 superseded 历史 attempt 保留。修正后的 v2 已绑定 exact CPU FP32 identity、真实 calibration artifact、全部 scored-row
+single/repeat/左右 padding/替代 batch composition parity 和独立 16,384-token finite smoke；正式 v2 measurement 尚未执行，当前不提前宣布
+M3-A2 完成或解锁 M3-B1a。
 
 **边界**：只建设 Publication Critic 必要设施和小规模代表性样本；不冻结正式训练数据，不启动付费训练，不扩张为通用
 数据平台、审计系统或大型 benchmark。
 
-**宏观验收**：数据、离线评价、后续训练和 runtime 可以共享同一 publication 与判定语义；基座结果和主要错误切片可复跑，
-且足以指导 M3-B1a 冻结训练数据。
+**交接**：等待 v2 正式测量、结果归档和独立验收后再给出最终 go/no-go。M3-A2 cohort 始终只是代表/边界语料，不得冒充未来 unseen
+test；M3-C1 继续等待 M3-B1c 提供至少一个训练候选。
 
 ### B 阶段：模型链与产品链并行
 
@@ -189,7 +193,7 @@ active cycle，每次阻断反馈轮换 continuation，Team State 专用 history
 
 ## 串并行与资源关系
 
-- M3-A1 已完成共同前置。数据/训练链按 `M3-A2 → M3-B1a → M3-B1b → M3-B1c` 串行；产品链的 M3-B2a、M3-B2b 均已完成。
+- M3-A1、M3-A2 已完成共同前置。数据/训练链当前按 `M3-B1a → M3-B1b → M3-B1c` 串行；产品链的 M3-B2a、M3-B2b 均已完成。
   两链彼此并行，产品链等待模型链完成后再进入 M3-C1。
 - M3-B1b 是独立付费资格门，M3-B1c 只有在 go 结论和新的正式训练授权后才能开始；no-go 不自动继续消费预算。
 - M3-C1 等待 M3-B1c 与 M3-B2b，M3-C2 等待 M3-C1，M3-D 最后串行收口。
@@ -274,8 +278,8 @@ active cycle，每次阻断反馈轮换 continuation，Team State 专用 history
 
 ## 外部授权与实施边界
 
-- M3-A1 产品合同已完成；M3-B2a 已按 Plan 055 完成实现、独立验收与主线整合；M3-B2b 已按 Plan 057 完成实现、审查整改、最终独立验收与主线整合；
-  M3-A2 状态不由产品链任务改写。其余后续工作包启动时仍须按 `plan/plan-example.md` 建立任务合同并取得授权。
+- M3-A1 产品合同与 Plan 054 / M3-A2 已完成；M3-B2a 已按 Plan 055 完成实现、独立验收与主线整合；M3-B2b 已按 Plan 057 完成实现、
+  审查整改、最终独立验收与主线整合。其余后续工作包启动时仍须按 `plan/plan-example.md` 建立任务合同并取得授权。
 - RunPod 创建或计费、模型与数据上传、云端训练、权重下载、真实本地模型加载/推理、Docker 和付费 API 均须在对应任务
   开始前取得明确授权；23 USD 是三期训练的总预算上限，不等于已经授权消费。
 - 训练数据、权重、逐样本输出与私有运行材料留在 `eval-data/` 或仓库外；`training/` 只保存体积合规的轻量合同与数据。

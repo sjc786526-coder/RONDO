@@ -195,3 +195,24 @@ def component_spans(rendered_chat: str) -> dict[str, tuple[int, int]]:
             raise RenderError(f"rendered chat has ambiguous {name} markers")
         spans[name] = (body_start, end_at)
     return spans
+
+
+def canonical_title_span(rendered_chat: str) -> tuple[int, int]:
+    """Locate the rendered JSON title value inside the user packet component."""
+
+    packet_start, packet_end = component_spans(rendered_chat)["packet"]
+    label = "\nlocal_scope_title: "
+    label_at = rendered_chat.find(label, packet_start, packet_end)
+    if label_at < 0 or rendered_chat.find(label, label_at + len(label), packet_end) >= 0:
+        raise RenderError("rendered chat has an ambiguous canonical title")
+    title_start = label_at + len(label)
+    if title_start >= packet_end:
+        raise RenderError("rendered chat has an empty canonical title encoding")
+    encoded_title = rendered_chat[title_start:packet_end]
+    try:
+        title = json.loads(encoded_title)
+    except json.JSONDecodeError as exc:
+        raise RenderError("rendered chat has an invalid canonical title encoding") from exc
+    if not isinstance(title, str):
+        raise RenderError("rendered chat canonical title is not a string")
+    return title_start, packet_end
