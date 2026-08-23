@@ -1,8 +1,8 @@
 {
-  "active_lock": null,
-  "active_lock_sha256": null,
+  "active_lock": "eval/locks/plan058-direction1-c2-diagnostic-v3.json",
+  "active_lock_sha256": "d8e26f73fe4eed170b74c646915ffe342583594329ed3bd2e0af4d878b4396d7",
   "kind": "rondo_direction1_c2_behavior",
-  "last_lock": "eval/locks/plan058-direction1-c2-formal-v2.json",
-  "last_lock_sha256": "75e68c0b9cc7cdb8a491a96539fb4a1448653e35b7a2bb0c7eb5430bcf93ee5e",
+  "last_lock": "eval/locks/plan058-direction1-c2-diagnostic-v3.json",
+  "last_lock_sha256": "d8e26f73fe4eed170b74c646915ffe342583594329ed3bd2e0af4d878b4396d7",
   "schema_version": 1
 }
