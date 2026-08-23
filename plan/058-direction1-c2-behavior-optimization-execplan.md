@@ -383,17 +383,32 @@ classifier 已窄修为仍要求：恰好 3 个唯一 Guardian API metadata、ag
 `guardian_logical_request_limit_exceeded`、verifier 结果存在、所有 terminal evidence 都绑定已发送 metadata，且仅有
 一个唯一的额外 failed-closed/session-error 证据；但允许 3 个预算内请求包含没有 terminal decision 的 Guardian
 内部工具轮次。真实 formal-v4 工件现离线分类为有效 `agent_failed`/reward `1`，相关 C2、预算和结果模块回归
-`159/159` 通过。按硬合同不复活 v4；下一步只以全新 diagnostic identity 复验受影响槽 8，成功后再次冻结并用全新
-formal 从 1/20 完整运行。
+`159/159` 通过。按硬合同不复活 v4。
+
+从 clean `e8898f937c1f12e27ccb85484c7e439170d63d74` 重建 diagnostic-v7 runtime 时，第一次 legacy publication
+因 shell 同行临时变量尚未进入参数展开而向解析器传入空 JSON，第二次虽有完整 JSON，但从相对路径调用
+`scripts/with-build-lock.sh`，被 live proof 正确拒绝为非 canonical wrapper。两次都没有生成发布产物、Docker 或 API；
+证据保留后，以独立零 API watchdog diagnosis 确认父进程命令行必须包含绝对 canonical wrapper，再用绝对路径和全新
+metrics identity 成功 prepare/verify legacy、companion、bwrap 与 runtime。CLI/host/bwrap SHA-256 分别为
+`ff6273bb34ea8749747d0499abc173bb0686dee4553dd10def684795998455fa`、
+`b642f82b0346f19c4d19b1b27ddb440f153c6ff70ea24a1c6de5bfc9c3484f97`、
+`77360cb751ccedc5971391444ac86a8a33c15b04d6b4a6fe45f5d25496e62c4c`，runtime manifest SHA-256 为
+`a75687c43c2bae1f16ae398c24132836447e2a3669a31ce0d9573713f3b557b3`。
+
+`plan058-direction1-c2-diagnostic-v7` 已完成 preflight/result/source validation/finalize `1/1`：槽 8 在 22 main、
+3 Guardian 后由冻结的第 4 次 Guardian 本地上限终止 agent，Harbor/verifier 继续并得 task pass/reward `1`，证明
+中间 Guardian 工具轮次路径已完整打通。25 个可靠 attempts、0 transport retry、`0.900171 USD`；raw C2 `3` 次/
+`5,207 ms` 均有改动后复查、清理后复测或只读 `.git/index.lock` 失败后恢复依据，故 refined harmful/reasonable/
+insufficient 为 `0/3/0`，无害四门通过。累计 task budget `13.399248 USD`、reserved `0`、剩余
+`36.600752 USD`；Docker/VHDX 增长 `0`，Windows C: 最终余量 `202295300096` bytes。槽 8 局部
+commissioning 再次闭环，下一步从新 clean source 冻结全新 formal-v5 并完整运行 20/20。
 
 ### 本任务剩余步骤
 
-1. Phase C 局部再验收：提交 formal-v4 设施修复，以全新 diagnostic identity 只复验受影响槽 8；不重跑已在脏版本
-   打通的 9–20，也不把 diagnostic 或旧 formal 数据放入正式分母。
-2. Phase C/D 再冻结与正式运行：从 diagnostic 成功后的新 clean source 重建/复验 binary/manifest；以全新干净
+1. Phase C/D 再冻结与正式运行：提交 diagnostic-v7 证据，从该新 clean source 重建/复验 binary/manifest；以全新干净
    identity 按 `8 → 18 → 1–7 → 9–17 → 19–20` 从执行位置 1/20 串行完成固定 10 题 × 2 round 的 20 个唯一
    正式逻辑结果，不复用旧 formal 或 diagnostic 结果。
-3. Phase E：比较 raw/refined C2、耗时、任务结果和正确性保护，作出保留/调整/撤销决定，完成文档、精确清理、
+2. Phase E：比较 raw/refined C2、耗时、任务结果和正确性保护，作出保留/调整/撤销决定，完成文档、精确清理、
    聚焦独立验收、整改和工作树提交。
 
 ### 阻塞项
@@ -460,6 +475,11 @@ formal 从 1/20 完整运行。
   1 transport retry、`1.924235 USD`，Docker/VHDX 增长 `0`，Windows C: 最终余量 `202307883008` bytes；累计
   task budget `12.499077 USD`、reserved `0`。真实工件离线复验与相关回归 `159/159` 已通过，待新 diagnostic
   只复验槽 8。
+- diagnostic-v7：新 runtime 与 preflight/result/source validation/finalize 均 `1/1`；冻结 Guardian 上限发生在
+  22 main/3 Guardian 后，agent 非零但 verifier reward `1`/task pass 有效保留。25 attempts、0 transport retry、
+  `0.900171 USD`；raw C2 `3` 次均分类为 reasonable，refined harmful `0`、无害四门通过。Docker/VHDX 增长
+  `0`，Windows C: 最终余量 `202295300096` bytes；累计 task budget `13.399248 USD`、reserved `0`，局部
+  commissioning 闭环。runtime publication 前两次无产品失败及 absolute canonical wrapper 修复证据已保留。
 - 未运行：可信正式 20-result、正式比较/决策、本地模型、训练、完整数据集、Codex 对照、validation、holdout、CI
   或 PR。
 
@@ -473,6 +493,8 @@ Plan 058 worktree，但执行阶段以下 I/O 会由 worktree 中的受控命令
   `eval-data/budgets/` 和 `eval-data/bin/rondo/` bundle/manifest；不得修改、复制、清理或续写。
 - Plan 058 新建的 `eval-data/campaigns/`、`budgets/`、`runs/`、`bin/rondo/`、`build/`、`work/`、分类证据、
   预算和临时对象；必须使用 Plan 058 exact identity/namespace，不得覆盖其他任务资产。
+- 只有确实触发项目容量限制时，才可在核对 exact path、commit/identity 与归属后删除 Plan 058 本工作树独占
+  `target` 和二进制；不得把该授权扩大到共享 cache、Plan 056、其他 worktree 或来源不明资产。
 - 主物理根已有 `eval/.venv`、`eval-data/uv-cache` 和其他职责吻合的项目局部共享缓存可复用，但不修改全局 Python
   或清理共享缓存。`rondo.local.toml` 只可由既有路径读取非密钥机器参数；`.env.local` 仍只做根 AGENTS 允许的
   静默门禁和最小变量注入。
@@ -524,3 +546,6 @@ Plan 058 worktree，但执行阶段以下 I/O 会由 worktree 中的受控命令
 | 025 | diagnostic-v4 因固定工具参数验证错误未被 projector 识别而永久作废；只 allowlist 该完整 pre-runtime 终态，新 diagnostic 仍只复验槽 8 | 参数验证发生在 native runtime 前但是真实 failed tool result；应诚实保留而非补造执行。泛化接受任意参数错误会削弱 fail-closed，因此只冻结当前产品合同 | projector、工具真值、diagnostic | 已采纳 |
 | 026 | formal-v3 因未识别类型化 `response.failed/upstream_error` 上游暂态而永久作废；只把精确终态加入 pure-transport 分类，新 diagnostic 仍只复验槽 8 | 该终态不是鉴权、配额、模型/配置错误，前 6 请求正常且第 7 次无 usage；应按同一逻辑槽直接重试。泛化所有 `response.failed` 会把 `model_failed` 等有效硬错伪装成暂态，故保持精确 allowlist | transport retry、预算、diagnostic、正式重启 | 已采纳，硬合同 |
 | 027 | formal-v4 因 Guardian 中间工具轮次未产生 terminal decision 而被旧 classifier 误判，永久作废；typed local-limit 合同允许预算内非终态 Guardian 轮次，但仍严格绑定 3 个已发送 metadata、唯一额外 failed-closed、agent exit 和 verifier；新 diagnostic 只复验槽 8 | Guardian review 是多轮 agent，会先调用只读工具再形成决策；把“逻辑请求”误等同“terminal decision”会丢弃 verifier 已评分的有效任务结果。只放宽集合关系而保留精确上限、证据形状与失败语义，避免接受普通非零退出或缺失证据 | Guardian-limit 分类、预算、diagnostic、正式重启 | 已采纳，硬合同 |
+| 028 | diagnostic-v7 有效 1/1 后关闭 formal-v4 局部设施缺口；raw 3 次 repeat 均按预冻规则归为 reasonable，不能为追求 raw 下降误记为 harmful | 三次分别发生在改动后复查、清理后复测和只读 Git 失败后的恢复，均有明确状态或结果依据；verifier reward 1 且工具/恢复/用户控制保持 | refined classification、commissioning、正式冻结 | 已采纳 |
+| 029 | runtime publication 必须以绝对路径调用 canonical build wrapper，并让 JSON/manifest 参数在调用前完成绑定；失败 proof 与成功 proof 使用不同 metrics identity | 相对 wrapper 不满足 live parent-chain proof；同行临时赋值不能供同一简单命令的参数展开。两次 fail-closed 均应显式保留，不能静默吞掉或混入成功证明 | BinaryManifest、build proof、日志 | 已采纳 |
+| 030 | 若项目容量达到限制，只允许在 exact ownership 核对后清理 Plan 058 工作树独占 target/二进制 | 为长时运行提供受控容量恢复，同时保护 Plan 056、共享缓存和其他并行工作树 | 资源、精确清理 | 用户授权，硬边界 |
