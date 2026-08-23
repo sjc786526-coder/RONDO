@@ -10,7 +10,7 @@
     "role": "direct_plan059_generator",
     "prompt_sha256": "733e563c5234ab1b8337c03506a5524577ec8e27ffbecac3539efd4ea82a4c05",
     "date": "2026-08-23",
-    "session_identity": "01a02d8e-e011-71e0-a2b7-503a04bb2119"
+    "session_identity": "01a02ec2-6085-73a1-95bf-dee63931a3c1"
   },
   "reviewer": {
     "model": "gpt-5.6-sol",
@@ -18,7 +18,7 @@
     "role": "independent_teacher_reviewer",
     "prompt_sha256": "38235f56bcb3a0a29ce39dd90b6ca1d32dda4e6c9866c430bf9f72db25878d2c",
     "date": "2026-08-23",
-    "session_identity": "/root/teacher_reviewer"
+    "session_identity": "/root/teacher_reviewer_v2"
   },
   "input_identity": {
     "packet_schema": "rondo-publication-packet@v1",
@@ -34,8 +34,8 @@
     "eval/templates/publication-critic/training-data-schema-v1.json": "4cdd069d8e2ed7ee3ba9b008bb1fab567da113f387f6f7e222e6bb3359bc484c",
     "eval/templates/publication-critic/training-data-generator-prompt-v2.md": "733e563c5234ab1b8337c03506a5524577ec8e27ffbecac3539efd4ea82a4c05",
     "eval/templates/publication-critic/training-data-reviewer-prompt-v1.md": "38235f56bcb3a0a29ce39dd90b6ca1d32dda4e6c9866c430bf9f72db25878d2c",
-    "eval/tools/generate_publication_critic_training_data.py": "c84955815c3729461a8e6ffefaeac2e21736c482920b5be7884f78307a34be87",
-    "eval/tools/finalize_publication_critic_training_data.py": "a93f25db3d6fbca47074e6622e2615976c4e2540e32d557aeb1655991ab78147",
+    "eval/tools/generate_publication_critic_training_data.py": "b63a5376824ebb32505e56ad0b4110b18826d21adde406d0d884bc5fe1c11737",
+    "eval/tools/finalize_publication_critic_training_data.py": "cd2d472137e966ef21f7034aa534538d7a87ebbed4da71e4c22fc2e74844f656",
     "eval/rondo_eval/publication_critic/training_data/__init__.py": "961161380af3469822a296d1f2ead42e34b624c0f2407f468c7ef2918b4a78f2",
     "eval/rondo_eval/publication_critic/training_data/consumer.py": "b5025c34a1aa94c52f585e6edd6a897692840d6eeb4d16181878bc76695cef23",
     "eval/rondo_eval/publication_critic/training_data/contract.py": "4c117cc6dcb3a9dc8addaba811f54e3161a5704feaa816fbb711a56215e156c5",
@@ -46,25 +46,25 @@
     "eval/rondo_eval/publication_critic/training_data/token_census.py": "2179a28beccab354847d6bb49718b1c2ebfd3a9161fdafc80dd1183705e64a82"
   },
   "rehearsal": {
-    "run_id": "plan059-rehearsal-v5",
-    "generator_run_sha256": "221ae3ca0a0846777443ad72f31c72f65c5f249633706bafc7f9c083fd021e66",
-    "reviewer_run_sha256": "c2c6985f084bffe5c14ec701386d7f1c0eaeb5c46021620997cdc90478380684",
-    "candidate_reviews_sha256": "b82ec50254a6616059b7434cc1b7de9e073fba25a8e4a38d9c3f1f283c07296f",
-    "pair_reviews_sha256": "3921b6b486f8e4021d54426e8298b4c1d93934841449898933540cb3c5ccabd4",
-    "finalization_manifest_sha256": "427d5f67a060729ff0c695d3254ff23881505f768e02ba0e755cf8bcde057f02",
-    "candidate_count": 12,
+    "run_id": "plan059-rehearsal-v6",
+    "generator_run_sha256": "2a0a5d6ce109e6927d33c580fbf15e89a5a2b3ec0c3b9097cf7e7596d0642c23",
+    "reviewer_run_sha256": "20c8a653ae385c9ab8fec4d101318e6fbc5877fde088d53efbc4aa1036fd8538",
+    "candidate_reviews_sha256": "d2b775692436fd0b292b608423ba801d19fffe79bca2ae5e9a4f21c5eba8c2b7",
+    "pair_reviews_sha256": "7cd40adf8386a6892c22c2dd3e6e52bcb343350790b1e54ff8172871bc436ea8",
+    "finalization_manifest_sha256": "a753a029ad989f2b1a9075939827955632981782583751a02dbf43fd10edd75d",
+    "candidate_count": 14,
     "candidate_decisions": {
-      "accept": 12,
+      "accept": 14,
       "revise": 0,
       "exclude": 0
     },
-    "pair_count": 6,
+    "pair_count": 7,
     "pair_decisions": {
-      "accept": 6,
+      "accept": 7,
       "downgrade": 0,
       "exclude": 0
     },
-    "token_total": 7465,
+    "token_total": 9082,
     "dropped_oldest_publications_total": 0,
     "model_visible_text_shortcuts": 0,
     "plan054_reference_matches": 0,
@@ -75,7 +75,8 @@
     "origin": "clean_context_acceptance_F059-01",
     "v1_status": "data_no_go",
     "finding": "cross-scenario fixed Q- and Within-PASS phrases were label-exclusive across splits while template_group was scenario-local",
-    "v2_resolution": "all 30 Q- and six Within-PASS endpoints use explicitly authored scenario-specific text; a cross-split label-exclusive model-visible char-4-gram gate now fails closed"
+    "v2_resolution": "all 30 Q- and six Within-PASS endpoints use explicitly authored scenario-specific text; a cross-split label-exclusive model-visible char-4-gram gate now fails closed",
+    "formal_review_repairs": "six continuity Q- endpoints now omit a usable continuation state, five scope Q- endpoints now bury the core state in scenario-specific process noise, and rehearsal-v6 independently confirmed the repaired dimensions and pair atomicity"
   },
   "formal_scale": {
     "candidate_target": 72,

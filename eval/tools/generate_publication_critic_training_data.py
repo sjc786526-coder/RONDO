@@ -515,12 +515,12 @@ NEGATIVE_CANDIDATES: dict[str, tuple[str, str | None]] = {
         "已改为保留跨块 CR，分块矩阵通过；缓冲拼接错误被直接认定为旧遗漏来源，处理已经结束。",
         None,
     ),
-    "b-continuity-01": ("成员结果已回传，协作与影响链均被观察到；外部 verifier 仍失败，事项未完成。", "继续定位剩余问题。"),
-    "b-continuity-02": ("空页之后会再次返回前一游标；普通非空分页保持正确，事项未完成。", "后续再处理。"),
-    "b-continuity-03": ("父进程已响应取消，但孙进程仍存活；job object 继承尚未接入。", "按现状继续。"),
-    "b-continuity-04": ("正向迁移已通过；重复索引场景的回滚仍失败，事项未完成。", "跟进失败路径。"),
-    "b-continuity-05": ("有输出的恢复点验证通过；空输出时 checkpoint 尚未落盘。", "再做一次验证。"),
-    "b-continuity-06": ("英文与中文资源已加载；西班牙语仍回退到英文，资源键映射尚未补齐。", "以后完善。"),
+    "b-continuity-01": ("成员回传与影响链已经确认；verifier 后续没有留下可接手的进展说明。", None),
+    "b-continuity-02": ("普通非空分页保持正确；空页分支的处置情况没有写入这个公开状态。", None),
+    "b-continuity-03": ("父进程取消已经回收；孙进程部分没有说明当前处理落点。", None),
+    "b-continuity-04": ("正向迁移已通过；回滚覆盖仍待处理，但没有保留进展或继续起点。", None),
+    "b-continuity-05": ("有输出的恢复点验证通过；空输出分支没有留下当前进展。", None),
+    "b-continuity-06": ("英文与中文资源已加载；西班牙语支持没有交代做到哪一步。", None),
     "b-scope-01": (
         " ".join(
             f"界面操作记录 {index}：调整面板宽度，翻看配色选项，记录滚动位置，再等待一次无关刷新。"
@@ -530,23 +530,43 @@ NEGATIVE_CANDIDATES: dict[str, tuple[str, str | None]] = {
         None,
     ),
     "b-scope-02": (
-        "排查时反复调整终端主题并记录滚动位置。普通目录预算稳定；符号链接环会重复计入目录，修复尚未验证。",
+        " ".join(
+            f"目录预算旁记 {index}：调换青色终端主题，观察提示符动画，保存字体缩放截图，逐项重排无关面板。"
+            for index in range(1, 9)
+        )
+        + " 普通目录预算稳定；符号链接环会重复计入目录，修复尚未验证。",
         "先按 inode 去重目录，再复跑环与普通目录用例。",
     ),
     "b-scope-03": (
-        "过程中整理了窗口排列、文件颜色和命令历史。只在轮换与写入同毫秒发生时丢首条记录，常规写入稳定。",
+        " ".join(
+            f"轮换排查杂记 {index}：整理下载文件名，试验编辑器配色，重放无关帮助命令，抄录窗口坐标。"
+            for index in range(1, 9)
+        )
+        + " 只在轮换与写入同毫秒发生时丢首条记录，常规写入稳定。",
         "固定轮换边界时钟并检查文件句柄交换顺序。",
     ),
     "b-scope-04": (
-        "先花时间核对编辑器布局与无关目录列表。活动谓词已统一使用双生命周期；关闭但仍待 Root 处理的事件只显示一次，回归通过。",
+        " ".join(
+            f"状态面板过程 {index}：浏览图标候选，移动侧栏分隔线，刷新空白示例页，统计无关菜单项。"
+            for index in range(1, 9)
+        )
+        + " 活动谓词已统一使用双生命周期；关闭但仍待 Root 处理的事件只显示一次，回归通过。",
         None,
     ),
     "b-scope-05": (
-        "执行时多次切换标签页并抄录等待时长。帮助文本已与配置默认值统一为 4317，快照测试通过。",
+        " ".join(
+            f"帮助文本操作 {index}：更换键盘布局预览，折叠侧栏目录，调整光标闪烁，整理无关标签页。"
+            for index in range(1, 9)
+        )
+        + " 帮助文本已与配置默认值统一为 4317，快照测试通过。",
         None,
     ),
     "b-scope-06": (
-        "检查期间记下终端尺寸和每次光标移动。取消只在每个目录结束后检查；单个大目录可延迟数秒，尚未调整。",
+        " ".join(
+            f"取消扫描日志 {index}：测量鼠标停留时间，变换窗口尺寸，排序桌面快捷方式，记下无关时钟读数。"
+            for index in range(1, 9)
+        )
+        + " 取消只在每个目录结束后检查；单个大目录可延迟数秒，尚未调整。",
         "把取消检查移到每批条目后，并测量一万文件目录。",
     ),
     "b-consistency-01": (
@@ -678,7 +698,7 @@ MIXED_SPECS = (
         "summary": "旧字段读取与新字段迁移都通过，事项已完成；期间依次打开了编辑器、搜索了目录、调整了终端颜色并记录了午间构建耗时。",
         "handoff": "继续修复仍然失败的旧字段读取。",
         "label": "REWRITE",
-        "defects": ["scope_and_signal", "internal_consistency"],
+        "defects": ["internal_consistency"],
         "prior_summary": "旧字段读取失败，新字段路径正常。",
         "style": "formal",
         "unicode": False,
@@ -709,6 +729,7 @@ REHEARSAL_BOUNDARY_IDS = {
     "b-honest-01",
     "b-continuity-01",
     "b-scope-01",
+    "b-scope-02",
     "b-consistency-01",
 }
 
@@ -1160,6 +1181,8 @@ def generate(args: argparse.Namespace) -> dict[str, Any]:
     all_boundary_ids = {spec.scenario_id for spec in BOUNDARY_SPECS}
     if set(NEGATIVE_CANDIDATES) != all_boundary_ids:
         raise RuntimeError("explicit Q- authoring registry does not match Boundary scenarios")
+    if not REHEARSAL_BOUNDARY_IDS <= all_boundary_ids:
+        raise RuntimeError("rehearsal Boundary registry contains an unknown scenario")
     expected_soft_ids = {spec.scenario_id for spec in BOUNDARY_SPECS if spec.within_pass}
     if set(SOFT_CANDIDATES) != expected_soft_ids:
         raise RuntimeError("explicit Within-PASS authoring registry does not match soft scenarios")
@@ -1204,7 +1227,11 @@ def generate(args: argparse.Namespace) -> dict[str, Any]:
         if pair["preferred_candidate_id"] not in candidate_ids or pair["dispreferred_candidate_id"] not in candidate_ids:
             raise RuntimeError(f"pair has a dangling endpoint: {pair['pair_id']}")
 
-    expected_count = 12 if args.mode == "rehearsal" else 72
+    expected_count = (
+        sum(3 if spec.within_pass else 2 for spec in boundary_specs) + len(mixed_specs)
+        if args.mode == "rehearsal"
+        else 72
+    )
     if len(packet_rows) != expected_count:
         raise RuntimeError(
             f"{args.mode} candidate count drifted: expected {expected_count}, got {len(packet_rows)}"
