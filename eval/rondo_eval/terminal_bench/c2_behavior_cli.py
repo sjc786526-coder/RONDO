@@ -1462,7 +1462,12 @@ def finalize(paths: RepoPaths, *, snapshot_date: str, refined_classification: Pa
         try:
             records = load_slot_records(paths, identity, state)
             for slot, record in zip(identity.slots, records, strict=True):
-                _revalidate_record_sources(paths=paths, identity=identity, slot=slot, record=record)
+                _revalidate_plan058_record_sources(
+                    paths=paths,
+                    identity=identity,
+                    slot=slot,
+                    record=record,
+                )
                 logical_run = budget["runs"].get(slot.logical_run_id)
                 if (
                     not isinstance(logical_run, Mapping)

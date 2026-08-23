@@ -52,6 +52,7 @@ from rondo_eval.terminal_bench.c2_behavior_cli import (
     _make_request,
     _read_agent_execution_receipt,
     _transition_preflight_worker_failure,
+    finalize,
     status,
 )
 from rondo_eval.terminal_bench.tasksets import FrozenTask
@@ -1084,6 +1085,94 @@ class C2BehaviorInitializationTests(unittest.TestCase):
 
 
 class C2BehaviorPublicationTests(unittest.TestCase):
+    def test_finalize_revalidates_the_plan058_agent_failure_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            paths = RepoPaths(common_root=root, worktree_root=root)
+            slot = SimpleNamespace(logical_run_id="logical-run")
+            identity = SimpleNamespace(
+                campaign_id="plan058-direction1-c2-diagnostic-finalize-test",
+                slots=(slot,),
+                public_result_relative_path=Path("result.json"),
+            )
+            state_file = root / "state.json"
+            state_file.write_text(
+                json.dumps(
+                    {
+                        "status": "ready_to_finalize",
+                        "final_storage": {},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            classification = (
+                root
+                / "eval-data/campaigns"
+                / identity.campaign_id
+                / "classification/refined.json"
+            )
+            classification.parent.mkdir(parents=True)
+            classification.write_text("{}", encoding="utf-8")
+            record = {"logical_budget": {"run_sha256": "a" * 64}}
+            budget = {
+                "runs": {"logical-run": {}},
+                "spent_usd": "0.000000",
+            }
+            result = {"status": "valid", "outcome": "diagnostic_complete"}
+
+            with (
+                patch(
+                    "rondo_eval.terminal_bench.c2_behavior_cli.load_identity",
+                    return_value=identity,
+                ),
+                patch(
+                    "rondo_eval.terminal_bench.c2_behavior_cli.state_path",
+                    return_value=state_file,
+                ),
+                patch(
+                    "rondo_eval.terminal_bench.c2_behavior_cli._load_budget_snapshot",
+                    return_value=budget,
+                ),
+                patch(
+                    "rondo_eval.terminal_bench.c2_behavior_cli.load_slot_records",
+                    return_value=[record],
+                ),
+                patch(
+                    "rondo_eval.terminal_bench.c2_behavior_cli._json_sha256",
+                    return_value="a" * 64,
+                ),
+                patch(
+                    "rondo_eval.terminal_bench.c2_behavior_cli._revalidate_plan058_record_sources"
+                ) as plan058_revalidate,
+                patch(
+                    "rondo_eval.terminal_bench.c2_behavior_cli._revalidate_record_sources",
+                    side_effect=AssertionError("generic revalidator must not run"),
+                ),
+                patch(
+                    "rondo_eval.terminal_bench.c2_behavior_cli.public_result",
+                    return_value=result,
+                ),
+                patch(
+                    "rondo_eval.terminal_bench.c2_behavior_cli.close_envelope_and_pointer"
+                ),
+                patch(
+                    "rondo_eval.terminal_bench.c2_behavior_cli.C2BehaviorState"
+                ),
+            ):
+                actual = finalize(
+                    paths,
+                    snapshot_date="2026-08-23",
+                    refined_classification=classification,
+                )
+
+            self.assertEqual(actual, result)
+            plan058_revalidate.assert_called_once_with(
+                paths=paths,
+                identity=identity,
+                slot=slot,
+                record=record,
+            )
+
     def test_plan058_request_enables_only_the_frozen_product_variable(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)

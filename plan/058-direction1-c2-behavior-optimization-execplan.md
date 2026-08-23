@@ -307,8 +307,15 @@ projector 已窄修并通过真实 formal-v2 私有 trace 重投影：missing-pr
 Guardian 拒绝保留 failed/zero-output 且不冒充本地 409 logical-limit；其他 missing-runtime 继续 fail-closed。body-free
 投影为 20 responses（18 main、2 Guardian）、17 tools、13 command tools、1 次 exact repeat、1 次
 repeated-after-failure。相关 Python 定向回归 `368/368`、compile 与 diff check 通过。当前按局部 commissioning 硬合同，
-只为受影响的绝对槽 8 建立全新 diagnostic identity；打通后提交、重建/复验新 runtime，再建立全新 formal identity
-完整运行 20/20，不重跑 9–20 的脏版本，也不拼接 formal-v2 数据。
+只为受影响的绝对槽 8 建立全新 diagnostic identity。
+
+`plan058-direction1-c2-diagnostic-v3` 的 preflight `1/1`，单槽真实链路完成 record 发布：reward `1`/task pass，
+17 个可靠 attempts（14 main、3 Guardian）、`0.554663 USD`，raw C2 为 `0`。finalize 却误用通用 Plan 056 source
+revalidator，未保留 Plan 058 已冻结的 agent 非零但 verifier reward 有效合同，故同一 record 在终态复验被错误判为
+`Terminal-Bench projection drifted`。v3 已按本地发布设施故障作废并结算，累计费用 `7.906444 USD`、reserved `0`；
+修复仅使 finalize 复用写入/恢复路径已有的 Plan 058 专用 revalidator，不改变 Guardian、agent exit 或 reward 语义。
+真实 v3 record 只读重验证和相关回归 `149/149` 通过。当前将以新 diagnostic-v4 仍只复验槽 8；打通后提交、
+重建/复验新 runtime，再建立全新 formal identity 完整运行 20/20，不重跑 9–20 的脏版本，也不拼接任何旧数据。
 
 ### 本任务剩余步骤
 
@@ -358,6 +365,11 @@ repeated-after-failure。相关 Python 定向回归 `368/368`、compile 与 diff
   Docker/VHDX 增长 `0`，Windows C: 最终余量 `201807400960` bytes；累计 task budget `7.351781 USD`、reserved
   `0`。同一 trace 的 missing-process 与固定 Guardian 拒绝现均可诚实投影，定向回归 `368/368` 通过；待新
   diagnostic 只复验槽 8。
+- diagnostic-v3：preflight `1/1`，槽 8 的 agent/Harbor/verifier/projector/预算/record 链路完成，但 finalize 使用
+  错误的通用 revalidator 而作废为 `published_slot_source_integrity_failed`。17 个可靠 attempts（14 main/3
+  Guardian）、`0.554663 USD` 已结算，Docker/VHDX 增长 `0`，Windows C: 最终余量 `202379096064` bytes；累计
+  task budget `7.906444 USD`、reserved `0`。finalize 已切回既有 Plan 058 专用 source 合同，待 diagnostic-v4
+  只复验槽 8。
 - 未运行：正式 20-result、正式比较/决策、本地模型、训练、完整数据集、Codex 对照、validation、holdout、CI 或 PR。
 
 ### 主工作区 ignored 资产
@@ -417,3 +429,4 @@ Plan 058 worktree，但执行阶段以下 I/O 会由 worktree 中的受控命令
 | 021 | 首轮剩余槽覆盖完成后，若新 formal 暴露本地设施故障，修复后的 commissioning/diagnostic 只复验受影响或未打通题目；重新冻结后的 formal 仍从 1/20 完整重跑 | “局部重跑”描述的是脏版本/修复版重新打通，不是缩短正式分母；已有完整且未受修复影响的题目不做无意义重复，正式结果仍保持同一冻结版本和全新 identity | commissioning、修复、正式重启 | 用户确认，硬合同 |
 | 022 | 下一 formal 在 identity 创建前冻结执行顺序为 `8 → 18 → 1–7 → 9–17 → 19–20` | 绝对槽 8 是已知最高风险 canary，18 次之；二者在同一正式 campaign 内优先暴露问题。18 不在后续区间重复，仍是 20 个唯一结果、无额外试跑或旧结果拼接 | formal identity、执行顺序 | 用户建议，已采纳 |
 | 023 | formal-v2 因 typed missing-process `write_stdin` 的本地投影缺口永久作废；结算真实 20 attempts 后，窄修 projector 并只以新 diagnostic 复验槽 8，再重新冻结全新完整 formal | 首槽的 agent/verifier 有真实终态但 projector fail-closed，不能当有效 task 结果，也不能把错误载荷中的零逻辑发布误当零 API；局部 commissioning 与新 20/20 formal 分别遵守 021 的两层边界 | projector、预算、diagnostic、正式重启 | 已采纳，硬合同 |
+| 024 | diagnostic-v3 因 finalize 误用通用 source revalidator 永久作废；finalize 改为复用既有 Plan 058 专用入口，新 diagnostic 仍只复验槽 8 | Plan 058 明确允许 agent 非零但 verifier reward 有效的 typed Guardian stop，写入/恢复已按专用合同验证；终态不得换用通用解析语义，也不得复活已作废 identity | source revalidation、发布、diagnostic | 已采纳 |
