@@ -244,6 +244,7 @@ def _rehearsal_assignments(
         "b-useful-01": "train",
         "b-scope-01": "train",
         "b-scope-02": "validation",
+        "b-scope-04": "unseen_test",
         "b-honest-01": "validation",
         "mixed-01": "validation",
         "b-continuity-01": "unseen_test",

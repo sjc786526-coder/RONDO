@@ -38,8 +38,8 @@
     "eval/templates/publication-critic/training-data-schema-v1.json": "4cdd069d8e2ed7ee3ba9b008bb1fab567da113f387f6f7e222e6bb3359bc484c",
     "eval/templates/publication-critic/training-data-generator-prompt-v3.md": "0706c5be6d1e82ffebc4f54481dfb67f3a5ccbc46611bfcd978a769aeee5661a",
     "eval/templates/publication-critic/training-data-reviewer-prompt-v1.md": "38235f56bcb3a0a29ce39dd90b6ca1d32dda4e6c9866c430bf9f72db25878d2c",
-    "eval/tools/generate_publication_critic_training_data.py": "28d738f403bd9ac9ab7aad7d26b6f6cd27d6b7abcbbcc1447aeba67a9892fb32",
-    "eval/tools/finalize_publication_critic_training_data.py": "9e397f5abfc3d6215d354b0708614e4019af987cbbe3843e14029324de550d84",
+    "eval/tools/generate_publication_critic_training_data.py": "5d0e1a9e3bebcf60376fa745a8487d2b7d5525d07bac4f0ad27844c49b6a1e1c",
+    "eval/tools/finalize_publication_critic_training_data.py": "d76422b252162be34d5d01aa6a370812bd9cd0cb322f5b072fd11ef2b50337c7",
     "eval/rondo_eval/publication_critic/training_data/__init__.py": "ee834503a2f7ea76ca056e0099b253ffd8a345b465b962fb0f94685e4acec8b2",
     "eval/rondo_eval/publication_critic/training_data/consumer.py": "b5025c34a1aa94c52f585e6edd6a897692840d6eeb4d16181878bc76695cef23",
     "eval/rondo_eval/publication_critic/training_data/contract.py": "4c117cc6dcb3a9dc8addaba811f54e3161a5704feaa816fbb711a56215e156c5",
@@ -50,25 +50,25 @@
     "eval/rondo_eval/publication_critic/training_data/token_census.py": "2179a28beccab354847d6bb49718b1c2ebfd3a9161fdafc80dd1183705e64a82"
   },
   "rehearsal": {
-    "run_id": "plan059-rehearsal-v8",
-    "generator_run_sha256": "768b78a9edeaab4340c576c3ec8800adae1da08e1736e856c7db012b0f9c6aef",
-    "reviewer_run_sha256": "46e197ed1f7ec483dafaced16cb2dc52aa6c7aa679bfb48dfbf6aba66c8ca7c1",
-    "candidate_reviews_sha256": "fb37f26ef7d97b040e2b4501836ba153c7c1fad0aa7c5947e42095d1f4f7d11c",
-    "pair_reviews_sha256": "5506b7f02ab7c0a6533d1686666460ff700ba8afc2ea0c79754f4037ce865ac8",
-    "finalization_manifest_sha256": "a6cc945036b74a621b652f3dca2028cd68c07130f54697eeef7385c8ba55e21b",
-    "candidate_count": 14,
+    "run_id": "plan059-rehearsal-v9",
+    "generator_run_sha256": "298b1d64341b05014dedfa1c1c85153d4e6fce31d71d8ff908d1be11fffb4238",
+    "reviewer_run_sha256": "856f8f5f08a0776dc09c40749e9a7777fd301cf33cc86b6f710c9013f6b7992c",
+    "candidate_reviews_sha256": "3fd79fa928c723439a9564b12a88508214e0de798c7f5b4bdccf1b60e0fceece",
+    "pair_reviews_sha256": "721dd09cb2870240e9db9d6dba71f5791c74bb6058d4a5ef322444431743b009",
+    "finalization_manifest_sha256": "85f60682435a5124354b8d8bb2ddce92d5a2e067368b290a5b382e365e5b51b2",
+    "candidate_count": 17,
     "candidate_decisions": {
-      "accept": 14,
+      "accept": 17,
       "revise": 0,
       "exclude": 0
     },
-    "pair_count": 7,
+    "pair_count": 9,
     "pair_decisions": {
-      "accept": 7,
+      "accept": 9,
       "downgrade": 0,
       "exclude": 0
     },
-    "token_total": 8806,
+    "token_total": 10941,
     "dropped_oldest_publications_total": 0,
     "model_visible_text_shortcuts": 0,
     "model_visible_candidate_length_shortcuts": 0,
@@ -80,7 +80,7 @@
     "origin": "clean_context_acceptance_F059-V2-FINAL-01",
     "v2_status": "data_no_go",
     "finding": "the six scope Q- candidates were the only exact-token candidate buckets above 80 and therefore perfectly predicted REWRITE across all splits",
-    "v3_resolution": "scope Q+ and Q- endpoints use comparable interleaved candidate lengths while differing in relevant state versus process noise; exact-token at-most and at-least threshold shortcuts now fail closed"
+    "v3_resolution": "scope Q+ and Q- endpoints use comparable interleaved candidate lengths while differing in relevant state versus process noise; exact-token at-most and at-least threshold shortcuts now fail closed; scope-04 soft repetition preserves a valid directness-and-lower-repetition Within-PASS direction"
   },
   "formal_scale": {
     "candidate_target": 72,

@@ -110,8 +110,9 @@ M3-C1 继续等待 M3-B1c 提供至少一个训练候选。
 **当前状态**：Plan 059 的 v1 因跨 split 固定 Q-/Within-PASS 文本可完美预测 Binary label 而判定数据 NO-GO。revision v2 关闭文本
 shortcut 后，最终干净审查又发现 6 个 scope Q- 是唯一超过 80 candidate tokens 的样本，形成跨三个 split 的完美 REWRITE 长度捷径，
 故 v2 同样判定数据 NO-GO。revision v3 已让 scope Q+/Q- 使用相近且交错的 exact-token candidate 长度，只以相关公共状态与无关过程淹没
-区分，并新增支持数至少 6、跨至少两个 split 的 exact-token at-most/at-least threshold fail-closed 门禁；rehearsal-v8 已完成 14/14
-candidate、7/7 pair 独立 accept 和全链路 finalization。正式生成、复核与冻结仍待执行，M3-B1b 未解锁。
+区分，并新增支持数至少 6、跨至少两个 split 的 exact-token at-most/at-least threshold fail-closed 门禁；rehearsal-v9 已完成 17/17
+candidate、9/9 pair 独立 accept，含 scope-04 Boundary/Within-PASS 局部返修和全链路 finalization。正式生成、复核与冻结仍待执行，
+M3-B1b 未解锁。
 
 #### M3-B1b：H100 训练资格 smoke（独立 go/no-go 门）
 

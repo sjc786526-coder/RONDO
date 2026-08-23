@@ -614,7 +614,7 @@ SOFT_CANDIDATES: dict[str, tuple[str, str | None]] = {
         "先把孙进程加入同一 job object，再验证超时与显式取消。",
     ),
     "b-scope-04": (
-        "活动谓词已统一使用双生命周期；关闭但仍待 Root 处理的事件只显示一次，回归通过。这里不延伸到其他事件筛选策略。",
+        "活动谓词已统一按 producer 与 Root 双生命周期计算，面板不再拼接两份结果；关闭但 Root pending 的事件只显示一次，Root resolved 对照也通过。换句话说，producer closed 与 Root pending 的组合已经用同一谓词覆盖，普通活动和 resolved 组合也分别验证，事件身份保持不变；这些结果再次说明双生命周期计算和去重显示都已完成，事项已完成。",
         None,
     ),
     "b-consistency-05": (
@@ -730,6 +730,7 @@ REHEARSAL_BOUNDARY_IDS = {
     "b-continuity-01",
     "b-scope-01",
     "b-scope-02",
+    "b-scope-04",
     "b-consistency-01",
 }
 
