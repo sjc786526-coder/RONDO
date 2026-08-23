@@ -972,6 +972,14 @@ mod tests {
         assert_eq!(scoring.domain.max(), 1.0);
         assert_eq!(scoring.threshold(), 0.9350569011196121);
         assert_eq!(
+            scoring.definition.name(),
+            "skywork-reward-scalar-higher-better"
+        );
+        assert_eq!(
+            scoring.definition.revision(),
+            "e51ea3e08fb81326c3b812a7ff0cb9cee83e59cc-fp32-v1"
+        );
+        assert_eq!(
             scoring.pass_rule,
             PassRule::ScoreGreaterThanOrEqualToThreshold
         );
@@ -981,7 +989,7 @@ mod tests {
         );
         assert_eq!(
             scoring.input_template.revision(),
-            "v2-sha256-7765e03093e55b680fb9b6cfff5ee3974cfdd6a5b95362521756be918bb5cf9d"
+            "v3-sha256-dc3209af0d284dfe4be57403873717ba5f2790e2257cd4a39a2376de5696044c"
         );
         assert_eq!(
             freeze["inference_contract"]["output_shape"],
