@@ -27,6 +27,9 @@ E-A 轻量离线冻结回放当前不恢复。Plan 052 已确认现有资产、�
   `4.985650 USD`。Plan 058 全生命周期累计 `20.379152 USD`、reservation 0。
 - 正式 raw C2 为 7 次/4 slot/3 task、9,693 ms；逐项按预冻规则分类为 harmful `0`、reasonable `7`、
   insufficient `0`，四项无害门通过。正式决策为保留该默认关闭 opt-in；不以 raw 数下降为由压制七次合理复测与恢复。
+- 独立验收后按预冻 `adjust` 边界进一步把最终 guidance 收窄到同 requester/tool path 且全部调用参数不变，并明确
+  任何条件不确定即照常执行；formal-v6 公共结果仍如实绑定原冻结文案，不把收窄后的版本冒充为正式原样被测版本。
+  同一上下文干净审查者在整改后复验 `PASS`，无未解功能 finding。
 - Docker/VHDX 增长均为 0，最终无容器、volume 或 build cache；未运行 Codex 对照、validation、holdout、额外
   题目/round、完整数据集、本地模型、训练、CI 或 PR。详细合同、失效 campaign 与设施修复证据见 Plan 058 及日志。
 

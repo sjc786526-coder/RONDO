@@ -711,6 +711,21 @@ async fn exec_command_repeat_guidance_is_feature_gated_and_excluded_from_guardia
             .description
             .contains(EXEC_COMMAND_REPEAT_GUIDANCE)
     );
+    assert!(
+        enabled_exec
+            .description
+            .contains("same requester/tool path with every invocation argument unchanged")
+    );
+    assert!(
+        enabled_exec.description.contains(
+            "when the requester/tool path or any invocation argument differs; execute that call normally"
+        )
+    );
+    assert!(
+        enabled_exec
+            .description
+            .contains("condition is uncertain, execute normally")
+    );
 
     let guardian = probe(|turn| {
         set_features(

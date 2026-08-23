@@ -68,9 +68,9 @@
       Plan 054、共享缓存或来源不明的镜像、容器、卷、build cache 和文件。
 - [x] 只运行受影响模块所需的格式、静态检查、定向测试和相称构建，不运行全 workspace、CI 或 PR；测试证据明确
       区分 fake、受控回归、Docker、真实 API 和未运行项。
-- [ ] 完成一次聚焦独立验收。普通 finding 由执行者自主窄修和复验；若 finding 改变正式产品、冻结评价口径或
+- [x] 完成一次聚焦独立验收。普通 finding 由执行者自主窄修和复验；若 finding 改变正式产品、冻结评价口径或
       数据有效性，则旧正式 campaign 不冒充有效结果，按 §3 的本地设施规则重新收敛。
-- [ ] 只同步方向 1 子 WBS、本计划当前状态、必要的 body-free 结果/快照和一份精炼 agent log；顶层 WBS、
+- [x] 只同步方向 1 子 WBS、本计划当前状态、必要的 body-free 结果/快照和一份精炼 agent log；顶层 WBS、
       WBS-COMPLETED 与共享入口留给后续主线整合者基于届时 `main` 窄同步。Plan 058 分支提交后 worktree 干净，
       不合并、不推送、不归档。
 
@@ -483,16 +483,23 @@ Python 回归仍为 `106/106`。用 finalized identity、20 条 record、冻结 
 `40e894bb51caf70e1062717d2f0dce07e6de91a8bb70c909eeb72b59be864fcc`。该补全不改变 trace、判据、分母、费用、
 任务结果或 retain 决策，故不把有效正式 campaign 误作废，也不重发 API。
 
+独立验收首轮指出 formal-v6 所测 guidance 明说 command/cwd 相同，却没有在文案内明确排除不同 requester/tool path
+或其他调用参数。该 finding 符合 Phase A “参数/cwd/requester 不同不是同一次 C2”的冻结边界。正式 public result
+仍如实绑定 `0706bf0` 原文与 `retain` 结果，不重写历史；最终分支按预冻 `adjust` 规则只做非材料收窄：仅在同一
+requester/tool path 且全部调用参数不变时适用 guidance，任一身份、状态、进展、恢复或副作用条件不确定均照常执行。
+新增 tool-spec 文案断言，两个修改文件经 `rustfmt --check` 且源码断言 `3/3`；共享 watchdog 测试在 Cargo 前因
+开发 sandbox 无权连接 systemd user bus fail-closed，宿主执行又被开发工具用量上限拒绝，故新增 Rust 断言未冒充
+已执行。正式冻结版本已有的 Rust `4/4`、真实 20/20 与 Python `106/106` 证据保持原范围。同一上下文干净的
+独立审查者复验上述代码、文档与限制后返回 `PASS`，没有第二个未解 finding。
+
 ### 本任务剩余步骤
 
-1. Phase E：同步方向 1 子 WBS、精炼日志和最终测试/资源事实。
-2. 由上下文干净的独立子智能体完成聚焦正确性/功能性验收；真实 finding 自主窄修并交回同一审查者复验。
-3. 只提交 Plan 058 本地 worktree 分支并确认干净，不合并、不推送、不归档。
+无。本计划实现、正式 20/20、费用/资源收尾、最终 `adjust`、独立验收整改与本地分支提交均已完成；后续只由主线
+整合者按方向 1 WBS 处理合并，不在本计划继续维护路线。
 
 ### 阻塞项
 
-无当前阻塞。用户一次性执行授权已取得；进入重型 Cargo、Docker 或真实 API 前仍须机械取得共享资源槽并满足宿主
-容量门。
+无。新增 Rust 断言未执行是如实记录的验证限制，不隐藏为通过；独立审查者已在知悉该限制后完成代码复验并 `PASS`。
 
 ### 当前验收状态
 
@@ -568,8 +575,10 @@ Python 回归仍为 `106/106`。用 finalized identity、20 条 record、冻结 
   `0/7/0`，无害四门通过，决策 `retain`。Docker 与 VHDX 增长均 `0`，最终 Docker 11.5 GB 且
   container/volume/cache 均为 `0`，Windows C: campaign final `196718600192` bytes、人工收尾复核
   `196716306432` bytes；项目容量 `166231814144` bytes。
-- 最终定向 Python 回归 `106/106` 通过；Rust 产品代码自受监管 `4/4` 后未再修改，最终 runtime 已完成真实
-  20/20，故没有为重复证明重建已清理 target。
+- 最终定向 Python 回归 `106/106` 通过；formal 冻结 Rust 产品在受监管 `4/4` 后完成真实 20/20。独立验收后
+  又对 guidance 做非材料收窄；两个修改文件通过 targeted `rustfmt --check` 与源码断言
+  `3/3`，但其新增 Rust test 因 sandbox systemd user bus fail-closed 且宿主授权被开发工具用量上限拒绝而未执行。
+- 聚焦独立验收：首轮 P2 finding 经核实后按决策 036 收窄；同一上下文干净审查者复验 `PASS`，无未解 finding。
 - 未运行：本地模型、训练、完整数据集、Codex 对照、validation、holdout、额外题目/round、CI、PR、全 workspace
   测试。
 
@@ -644,3 +653,4 @@ Plan 058 worktree，但执行阶段以下 I/O 会由 worktree 中的受控命令
 | 033 | diagnostic-v8 有效 1/1 后关闭 formal-v5 Guardian review binding 与 targeted range 两个局部设施缺口；3 次 raw repeat 均按预冻规则归为 reasonable | 三次分别是失败后确认、恢复重试和成功状态变化后的验证，均不是无进展机械重复；task pass、证据绑定、预算/资源和工具真值完整 | commissioning、refined classification、正式冻结 | 已采纳 |
 | 034 | 首个可信 formal-v6 达到 harmful `1 → 0` 且四项无害门通过，保留默认关闭、显式 opt-in 的 C2 tool-spec guidance | 20/20 与 Phase A 同为 8 pass/12 fail；7 次 raw repeat 均有状态/结果变化、失败恢复或改码后复测依据，不能为降低 raw 指标压制合理调用 | 产品变量、方向 1 结论、回滚边界 | 已采纳，正式决策 |
 | 035 | formal-v6 public result 离线补齐 body-free affected slot/task 聚合，不重跑正式 API | 字段可由同一冻结 records 确定性导出，完整结果重生成与 tracked JSON 一致；它只修复报告完整性，不改变评价口径或 campaign 有效性 | 结果发布、验收证据 | 已采纳 |
+| 036 | 独立验收后按预冻 `adjust` 规则把 guidance 收窄到 requester/tool path 与全部调用参数均相同，任一条件不确定即照常执行；formal-v6 结果仍绑定原 `0706bf0` 文案 | 首轮 P2 finding 真实，原文没有明确表达参数/requester 排除；收窄不增加干预、不改变执行资格或历史结果，避免把未正式测试的新文案冒充 formal-v6 原样版本 | 最终产品文案、独立验收、正式结果边界 | 已采纳，非材料收窄 |
