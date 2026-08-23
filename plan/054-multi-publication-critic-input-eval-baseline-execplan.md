@@ -238,16 +238,18 @@ Hugging Face/Python 配置，不得把模型复制进 worktree 或用 symlink �
   名称不存在于正式 annotation/result，v2 因此只保留为 superseded attempt，不作为完成证据。
 - v3 已对齐 10 个真实 measurement slice，把 pair 只保留为独立 `atomic_boundary_pair_ranking`，并新增 cohort 与 `quality.by_slice`
   双重覆盖校验；不改变 sample、render、model、scalar、threshold 或 calibration artifact，正式 measurement 将从新 clean freeze 完整重跑。
+- 正式 run `plan054-20260823T051600Z-measurement-v3` 从 clean commit `3206c953bcab506f6bff61297862fd274c5f6a3b`
+  一次完成：16/16 valid、零 typed failure，全部 10 个 declared slice 存在，all-row parity 最大 delta `4.523673587608634e-06`，
+  accuracy / balanced accuracy `0.6875`、ROC AUC `0.765625`、atomic pair `7/8`。基座工程路径与 M3-B1a 数据建设 GO，
+  未微调 direct-product NO-GO。
 
 ### 当前工作
 
-- 正在固定 v3 freeze clean commit；随后完整重跑正式 16 样本 measurement。
+- Plan 054 已完成；同一干净上下文独立审查者最终结论为 `FINAL PASS`，当前只待最终本地提交与 clean 交付。
 
 ### 本任务剩余步骤
 
-1. 从 v3 clean freeze commit 完整重跑正式 measurement，并同步 tracked/raw 结果、报告、方向 3 WBS 与日志。
-2. 交回同一干净上下文独立审查者复验；确认真实 finding 后窄修并再次交回，直到 PASS。
-3. 复核 tracked/ignored 资产和资源结果，精确清理本任务不再需要的下载分块，完成 054 本地分支最终提交并保持 clean。
+- 无任务内实现、测量、审查或清理步骤剩余。
 
 ### 阻塞项
 
@@ -255,7 +257,7 @@ Hugging Face/Python 配置，不得把模型复制进 worktree 或用 symlink �
 
 ### 当前验收状态
 
-- v3 slice identity 与覆盖校验 focused tests 已通过；等待新 freeze commit、正式 v3 measurement 和最终独立复验。
+- v3 实现、freeze、正式 measurement、tracked/raw 归档、10 个 declared-slice 双重覆盖、focused 自检与同一独立审查者最终复验均通过。
 
 ### 交接边界
 

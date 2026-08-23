@@ -1,7 +1,7 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
 最后更新：2026-08-22 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
-状态：**第一期、第二期与 M3-A1 已完成；Plan 055 / M3-B2a 与 Plan 057 / M3-B2b 已主线整合；M3-A2 正在执行 v3 正式测量**
+状态：**第一期、第二期、M3-A1 与 M3-A2 已完成；Plan 055 / M3-B2a 与 Plan 057 / M3-B2b 已主线整合；当前下一包为 M3-B1a**
 
 ## 当前定位
 
@@ -78,17 +78,21 @@ API schema、训练超参数或部署格式。
 M3-B2a 服务协议、identity 和资源数值；M3-A2 的数据/评价细节和状态不由该任务改写，M3-A1 本身未实现这些设施或
 `team_publish` 接入。
 
-#### M3-A2：数据/评价设施与基座测评（执行中）
+#### M3-A2：数据/评价设施与基座测评（已完成）
 
-**当前事实**：Plan 054 已冻结 PublicationPacket v1 parity、24 条代表/边界样本、两条产品 cap census case 和专用评价/归档设施。
-v1 因 qualification/output-shape/parity/render finding、v2 因 declared slice 名称与实际 annotation/result 键不一致，均保留为
-superseded 历史 attempt。v3 已把声明切片对齐 `freshness_known_stale`、`handoff_empty` 等真实 measurement 键，并增加 cohort/result
-双重覆盖校验；正式 v3 measurement 尚未执行，当前不宣布 M3-A2 完成或解锁 M3-B1a。
+**结果**：Plan 054 已冻结 PublicationPacket v1 parity、输入/render/tokenizer/scalar identity、24 条代表/边界样本、两条产品 cap
+census case 和专用评价/归档设施。exact Skywork 1.7B 在 CPU FP32 下通过全部 scored-row single/repeat/左右 padding/替代 batch
+composition parity 与独立 16,384-token smoke；正式 16 样本 v3 基座结果为 accuracy / balanced accuracy `0.6875`、ROC AUC
+`0.765625`、atomic pair `7/8`，`16/16` 有效、零 typed failure，10 个冻结 error slice 均存在于正式结果。v1/v2 保留为
+superseded 历史 attempt；正式身份、切片、资源和 go/no-go 见
+[`baseline v3`](../../eval/results/publication-critic/skywork-reward-v2-qwen3-1.7b-baseline-v3.md)。
 
 **边界**：只建设 Publication Critic 必要设施和小规模代表性样本；不冻结正式训练数据，不启动付费训练，不扩张为通用
 数据平台、审计系统或大型 benchmark。
 
-**交接**：等待 v3 正式测量、结果归档和同一独立审查者复验后给出最终 go/no-go。M3-A2 cohort 始终不是未来 unseen test；
+**交接**：基座工程路径与 M3-B1a 数据建设 GO，未微调模型直接产品使用 NO-GO。M3-B1a 应建立独立
+train/validation/unseen-test split，优先补足 `internal_consistency` 精致 hard negative、new/completed useful-state 边界、
+threshold-near handoff 与 continuity/evidence omission 对照，并避免长度、角色和模板捷径。M3-A2 cohort 不得冒充未来 unseen test；
 M3-C1 继续等待 M3-B1c 提供至少一个训练候选。
 
 ### B 阶段：模型链与产品链并行

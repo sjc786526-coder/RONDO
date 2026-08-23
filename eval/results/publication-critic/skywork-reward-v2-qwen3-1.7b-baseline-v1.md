@@ -4,7 +4,8 @@
 > model-visible rubric revision/output shape, did not exercise every scored row across alternate batch
 > compositions, and described the title's message placement incorrectly. Its finite scalars and resource facts
 > are retained, but it is not formal Plan 054 acceptance evidence. Baseline v2 was also superseded after a
-> declared-slice identity finding; the corrected v3 measurement is pending.
+> declared-slice identity finding; the corrected
+> [`baseline v3`](skywork-reward-v2-qwen3-1.7b-baseline-v3.md) is authoritative.
 
 Plan 054 measured the immutable `Skywork/Skywork-Reward-V2-Qwen3-1.7B` revision
 `e51ea3e08fb81326c3b812a7ff0cb9cee83e59cc` on a frozen, product-shaped M3-A2 cohort. The cohort is

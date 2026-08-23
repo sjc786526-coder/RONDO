@@ -22,8 +22,15 @@
   retained as a superseded attempt despite correct scalar/parity observations.
 - v3 aligns declared slices to actual measurement keys, leaves pair ranking as its independent metric, and
   requires every declared slice in both the frozen cohort and `quality.by_slice`. Sample/model/render/scalar,
-  the successful v2 calibration artifact and threshold remain unchanged; formal v3 measurement is pending.
-- Focused verification: 24 Python tests, the Rust typed freeze identity test, `just fix -p codex-core`,
+  the successful v2 calibration artifact and threshold remain unchanged. Formal run
+  `plan054-20260823T051600Z-measurement-v3` completed once from clean commit
+  `3206c953bcab506f6bff61297862fd274c5f6a3b`: 16/16 valid, zero failures, all ten declared slices present,
+  maximum parity delta `4.523673587608634e-06`, accuracy/balanced accuracy 0.6875, AUC 0.765625 and 7/8 pair wins.
+  Engineering/M3-B1a data work is GO; unfinetuned direct-product use is NO-GO.
+- Focused verification: 25 Python tests, the Rust typed freeze identity test, `just fix -p codex-core`,
   `multidev/just fmt`, environment lock, strict freeze/calibration binding and diff checks passed. All real model
-  runs used the shared watchdog; the successful calibration/measurement had zero swap/resource stop. Final
-  independent re-acceptance remains pending.
+  runs used the shared watchdog. Successful calibration had zero swap; v3 measurement peaked at 14,467,072
+  swap bytes, and both had `stop_reason=none`.
+- The same clean-context independent reviewer verified the v3 slice remediation, identities, formal result and
+  resource facts, then returned `FINAL PASS`. Exact temporary direct-download chunks (3,247,542,425 bytes) and
+  one 256,000,000-byte incomplete blob were removed; the retained immutable HF snapshot still verifies 12/12.
