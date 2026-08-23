@@ -290,8 +290,9 @@
 `9bdf51f516df46eb613810ef86e5a4cfb5683875`；legacy musl 重建在最终链接阶段收到人工 `SIGINT`，共享 watchdog
 已停止整个 scope 并记录 `wrapper_status=signal_INT`、`final_rc=130`，没有残留 Cargo/rustc/lock 进程。约
 `7.18GB` 的 Plan 058 独占增量 target 保留；尚未 prepare/publish 新 binary/runtime，也未创建下一 formal identity
-或发送新的 API 请求。恢复时沿用该 target，但须使用新的 metrics root（旧 root 保留中断 summary，不能混入成功
-build proof），再完成 build → prepare/verify → companion/runtime 冻结。
+或发送新的 API 请求。该 target 精确绑定 `9bdf51f`，随后新增的只有本中断交接 plan/log；正式 identity 仍要求 binary
+source commit 与初始化 HEAD 精确相同。因此恢复时以届时最终 HEAD 新建 target 和 metrics root 后重建最稳妥；旧 target
+与旧 metrics 只保留为中断现场，不得冒充成功 build proof。
 
 formal-v1 已因本地 runner 缺陷作废并关闭；旧 formal 的 7 个完整槽只作诊断历史。Guardian-limit 后继续 verifier、
 真实 exit receipt、非 `/tmp` CODEX_HOME 与 typed pre-runtime failure 投影已全部窄修。diagnostic-v1 完成绝对槽 8–17
