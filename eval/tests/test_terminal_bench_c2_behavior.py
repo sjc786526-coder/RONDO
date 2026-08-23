@@ -1339,6 +1339,15 @@ class C2BehaviorPublicationTests(unittest.TestCase):
         self.assertTrue(
             _is_typed_guardian_limit_result(parsed, **common)
         )
+        # A Guardian can use one of its three paid logical requests for an
+        # intermediate tool turn.  It then has only two terminal decisions
+        # before the fourth, locally rejected request records failed-closed.
+        intermediate_evidence = (evidence[0], evidence[1], evidence[3])
+        self.assertTrue(
+            _is_typed_guardian_limit_result(
+                parsed, **{**common, "evidence": intermediate_evidence}
+            )
+        )
         bad_receipt = dict(common["receipt"])
         bad_receipt["exit_code"] = 137
         self.assertFalse(
@@ -1356,6 +1365,25 @@ class C2BehaviorPublicationTests(unittest.TestCase):
         self.assertFalse(
             _is_typed_guardian_limit_result(
                 parsed, **{**common, "evidence": evidence[:3]}
+            )
+        )
+        outside_metadata = SimpleNamespace(
+            canonical_request_sha256="e" * 64,
+            decision="approved",
+            terminal_status="approved",
+            failure_reason=None,
+        )
+        self.assertFalse(
+            _is_typed_guardian_limit_result(
+                parsed,
+                **{
+                    **common,
+                    "evidence": (
+                        evidence[0],
+                        outside_metadata,
+                        evidence[3],
+                    ),
+                },
             )
         )
 

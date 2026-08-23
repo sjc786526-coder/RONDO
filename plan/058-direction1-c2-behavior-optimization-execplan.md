@@ -360,15 +360,39 @@ typed pure transport。下一步只用全新 diagnostic identity 复验受影响
 Guardian 本地上限处 agent 非零，但 verifier 完整运行，reward `0`/task fail 作为有效结果保留；raw/refined C2
 `0/0`，无害四门全通过。23 个可靠 attempts（20 main、3 Guardian）、0 transport retry、`0.723168 USD`；累计
 task budget `10.574842 USD`、reserved `0`、剩余 `39.425158 USD`。Docker/VHDX 增长 `0`，Windows C: 最终余量
-`202302005248` bytes。formal-v3 暴露的局部设施缺口至此闭环；下一步从包含 v6 证据的新 clean source 重建并冻结
-全新完整 formal，不复用 diagnostic 结果。
+`202302005248` bytes。formal-v3 暴露的局部设施缺口至此闭环。
+
+已从 clean `8f2f0838cf1b755067f2ffea47866a1942baa933` 经共享 lock/watchdog 增量重建并复验 legacy、companion、
+bwrap 与 runtime bundle；CLI/host/bwrap SHA-256 仍分别为
+`ff6273bb34ea8749747d0499abc173bb0686dee4553dd10def684795998455fa`、
+`b642f82b0346f19c4d19b1b27ddb440f153c6ff70ea24a1c6de5bfc9c3484f97`、
+`77360cb751ccedc5971391444ac86a8a33c15b04d6b4a6fe45f5d25496e62c4c`，新 runtime manifest SHA-256 为
+`363819e50d00a0c99f3533179fea21195e6c0b63c2a5391d3f6b966a9588c5fd`。formal-v4 冻结 identity 与顺序后完成
+零 API preflight `10/10`。
+
+`plan058-direction1-c2-formal-v4` 的首个槽 8 attempt 1 在 7 次 main 请求后发生 `upstream_clean_eof`，被正确保留
+为 pure transport 并自动以同一逻辑槽 attempt 2 重试；前一 attempt 的 7 次请求和 `1.187595 USD` 未丢失。
+attempt 2 完成 18 main、3 Guardian 请求，第 4 次 Guardian 被本地冻结上限拒绝，agent 非零；Harbor verifier
+完整运行并得 reward `1`。本次 Guardian 的第 3 个已付费逻辑请求是 review 内部 code-mode/tool 中间轮次而非终态
+决策，因此真实证据为 2 个 terminal approval 加 1 个额外请求的 failed-closed，而旧 classifier 错误要求每个已付费
+Guardian 请求都有 terminal decision，遂把有效 task pass 误判为本地设施故障。formal-v4 已永久作废并 body-free
+发布为 `0/20`；共 28 upstream attempts、`1.924235 USD`，累计 task budget `12.499077 USD`、reserved `0`、剩余
+`37.500923 USD`。Docker/VHDX 增长 `0`，Windows C: 最终余量 `202307883008` bytes。
+
+classifier 已窄修为仍要求：恰好 3 个唯一 Guardian API metadata、agent exit `1`/tee `0`、预算精确停在
+`guardian_logical_request_limit_exceeded`、verifier 结果存在、所有 terminal evidence 都绑定已发送 metadata，且仅有
+一个唯一的额外 failed-closed/session-error 证据；但允许 3 个预算内请求包含没有 terminal decision 的 Guardian
+内部工具轮次。真实 formal-v4 工件现离线分类为有效 `agent_failed`/reward `1`，相关 C2、预算和结果模块回归
+`159/159` 通过。按硬合同不复活 v4；下一步只以全新 diagnostic identity 复验受影响槽 8，成功后再次冻结并用全新
+formal 从 1/20 完整运行。
 
 ### 本任务剩余步骤
 
-1. Phase C 再冻结：提交 diagnostic-v6 证据，从该 clean source 重新构建/复验 binary/manifest，冻结
-   正式配置；不把任何 diagnostic 或旧 formal 数据放入正式分母。
-2. Phase D：以全新干净 identity 按 `8 → 18 → 1–7 → 9–17 → 19–20` 从执行位置 1/20 串行完成固定 10 题 ×
-   2 round 的 20 个唯一正式逻辑结果；不得复用旧 formal 或 diagnostic 结果。
+1. Phase C 局部再验收：提交 formal-v4 设施修复，以全新 diagnostic identity 只复验受影响槽 8；不重跑已在脏版本
+   打通的 9–20，也不把 diagnostic 或旧 formal 数据放入正式分母。
+2. Phase C/D 再冻结与正式运行：从 diagnostic 成功后的新 clean source 重建/复验 binary/manifest；以全新干净
+   identity 按 `8 → 18 → 1–7 → 9–17 → 19–20` 从执行位置 1/20 串行完成固定 10 题 × 2 round 的 20 个唯一
+   正式逻辑结果，不复用旧 formal 或 diagnostic 结果。
 3. Phase E：比较 raw/refined C2、耗时、任务结果和正确性保护，作出保留/调整/撤销决定，完成文档、精确清理、
    聚焦独立验收、整改和工作树提交。
 
@@ -429,7 +453,13 @@ task budget `10.574842 USD`、reserved `0`、剩余 `39.425158 USD`。Docker/VHD
 - diagnostic-v6：preflight/result/source validation/finalize 均 `1/1`；agent 在冻结 Guardian 上限处非零，verifier
   reward `0`/task fail 作为有效结果，raw/refined C2 `0/0`、无害四门通过。23 attempts（20 main/3 Guardian）、
   `0.723168 USD`，Docker/VHDX 增长 `0`，Windows C: 最终余量 `202302005248` bytes；累计 task budget
-  `10.574842 USD`、reserved `0`。transport 局部 commissioning 已闭环，待重建正式 runtime。
+  `10.574842 USD`、reserved `0`。transport 局部 commissioning 已闭环。
+- formal-v4：新 runtime 与 preflight `10/10` 通过；槽 8 attempt 1 的 `upstream_clean_eof` 被正确保留并自动同槽
+  重试，attempt 2 的 Guardian 在预算内使用中间工具轮次后触发第 4 次本地上限，verifier reward `1`，但 classifier
+  错误要求 3 个已付费 Guardian 请求各有 terminal decision，campaign 因本地设施缺口作废为 `0/20`。28 attempts、
+  1 transport retry、`1.924235 USD`，Docker/VHDX 增长 `0`，Windows C: 最终余量 `202307883008` bytes；累计
+  task budget `12.499077 USD`、reserved `0`。真实工件离线复验与相关回归 `159/159` 已通过，待新 diagnostic
+  只复验槽 8。
 - 未运行：可信正式 20-result、正式比较/决策、本地模型、训练、完整数据集、Codex 对照、validation、holdout、CI
   或 PR。
 
@@ -493,3 +523,4 @@ Plan 058 worktree，但执行阶段以下 I/O 会由 worktree 中的受控命令
 | 024 | diagnostic-v3 因 finalize 误用通用 source revalidator 永久作废；finalize 改为复用既有 Plan 058 专用入口，新 diagnostic 仍只复验槽 8 | Plan 058 明确允许 agent 非零但 verifier reward 有效的 typed Guardian stop，写入/恢复已按专用合同验证；终态不得换用通用解析语义，也不得复活已作废 identity | source revalidation、发布、diagnostic | 已采纳 |
 | 025 | diagnostic-v4 因固定工具参数验证错误未被 projector 识别而永久作废；只 allowlist 该完整 pre-runtime 终态，新 diagnostic 仍只复验槽 8 | 参数验证发生在 native runtime 前但是真实 failed tool result；应诚实保留而非补造执行。泛化接受任意参数错误会削弱 fail-closed，因此只冻结当前产品合同 | projector、工具真值、diagnostic | 已采纳 |
 | 026 | formal-v3 因未识别类型化 `response.failed/upstream_error` 上游暂态而永久作废；只把精确终态加入 pure-transport 分类，新 diagnostic 仍只复验槽 8 | 该终态不是鉴权、配额、模型/配置错误，前 6 请求正常且第 7 次无 usage；应按同一逻辑槽直接重试。泛化所有 `response.failed` 会把 `model_failed` 等有效硬错伪装成暂态，故保持精确 allowlist | transport retry、预算、diagnostic、正式重启 | 已采纳，硬合同 |
+| 027 | formal-v4 因 Guardian 中间工具轮次未产生 terminal decision 而被旧 classifier 误判，永久作废；typed local-limit 合同允许预算内非终态 Guardian 轮次，但仍严格绑定 3 个已发送 metadata、唯一额外 failed-closed、agent exit 和 verifier；新 diagnostic 只复验槽 8 | Guardian review 是多轮 agent，会先调用只读工具再形成决策；把“逻辑请求”误等同“terminal decision”会丢弃 verifier 已评分的有效任务结果。只放宽集合关系而保留精确上限、证据形状与失败语义，避免接受普通非零退出或缺失证据 | Guardian-limit 分类、预算、diagnostic、正式重启 | 已采纳，硬合同 |

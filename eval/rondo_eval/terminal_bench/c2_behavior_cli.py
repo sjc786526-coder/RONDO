@@ -834,12 +834,18 @@ def _is_typed_guardian_limit_result(
         and len(guardians) == max_guardian_logical_requests
         and len(metadata_hashes) == len(set(metadata_hashes))
         and all(isinstance(item, str) and len(item) == 64 for item in metadata_hashes)
-        and len(evidence) == max_guardian_logical_requests + 1
         and len(evidence_hashes) == len(set(evidence_hashes))
-        and len(terminal) == max_guardian_logical_requests
         and len(failed_closed) == 1
+        # One Guardian review can spend logical requests on intermediate tool
+        # turns before it emits a terminal decision.  Those paid requests are
+        # present in API metadata but intentionally have no terminal evidence
+        # bundle.  The local request beyond the frozen limit must still leave
+        # exactly one failed-closed session record, and no other evidence shape
+        # is accepted.
+        and len(evidence) == len(terminal) + 1
+        and len(terminal) <= max_guardian_logical_requests
         and {item.canonical_request_sha256 for item in terminal}
-        == set(metadata_hashes)
+        <= set(metadata_hashes)
         and failed_closed[0].canonical_request_sha256 not in set(metadata_hashes)
     )
 
