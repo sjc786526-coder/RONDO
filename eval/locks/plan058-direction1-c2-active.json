@@ -1,0 +1,8 @@
+{
+  "active_lock": "eval/locks/plan058-direction1-c2-commissioning-v1.json",
+  "active_lock_sha256": "4232069e709af611205676e3f75ab28dbf5da9039ba288cc372308f08c79469e",
+  "kind": "rondo_direction1_c2_behavior",
+  "last_lock": "eval/locks/plan058-direction1-c2-commissioning-v1.json",
+  "last_lock_sha256": "4232069e709af611205676e3f75ab28dbf5da9039ba288cc372308f08c79469e",
+  "schema_version": 1
+}
