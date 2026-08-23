@@ -1,12 +1,13 @@
 # 方向 1：Harness 优化
 
-最后更新：2026-08-22 ｜ 状态：**Plan 056 已完成有效 20/20 并选择 C2；行为优化尚未立项** ｜
+最后更新：2026-08-23 ｜ 状态：**Plan 058 已完成有效 20/20；保留默认关闭的 C2 guidance** ｜
 源码位置：`mydev/` ｜ Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md`
 
 ## 当前状态
 
-方向 1 已完成 Plan 052 的观测设施和 Plan 056 的有界真实复测。默认关闭的原生 trace opt-in、任务级安全离线
-投影、历史普查器与日期冻结证据已经落地；Plan 056 只选择了 C2 候选，没有实施 C1—C13 行为优化，也不涉及方向 3。
+方向 1 已完成 Plan 052 的观测设施、Plan 056 的候选复测和 Plan 058 的单变量 C2 行为优化。默认关闭的原生 trace
+opt-in、任务级安全离线投影、历史普查器与日期冻结证据继续复用；Plan 058 只新增默认关闭、显式 opt-in 的
+`exec_command` repeat guidance，不改变工具执行资格、Guardian、审批、sandbox 或方向 2/3。
 
 此前教师 harness 的只读研究 T1—T3 已完成。研究交付
 `doc/research/teacher-harness-performance-candidates.md` 保留为形成时点的证据与候选池；候选进入实现仍必须由
@@ -14,6 +15,20 @@
 
 E-A 轻量离线冻结回放当前不恢复。Plan 052 已确认现有资产、原生事实投影和一次有界真实复测足以承接下一步；
 只有未来已经选定的机制确需反复低成本实验时，才重新评估必要的最小 replay 能力。
+
+## Plan 058 结论
+
+- Phase A 将 Plan 056 的 9 次 raw C2 occurrence 冻结为 harmful `1`、reasonable `8`、insufficient `0`；
+  主要收益门为 harmful 降至 `0`，并要求合理重复、恢复/用户控制、工具可执行性与任务正确性四项无害门全部通过。
+- 产品只在主 agent 的 `exec_command` tool spec 增加有界 guidance；feature 为 UnderDevelopment、默认关闭，
+  Guardian 明确不接入。写入、网络或副作用未知调用仍执行，关闭态保持 Plan 056 行为。
+- 最终 `formal-v6` 绑定同一 v28 十题、两个 round、Terra medium/low 与冻结顺序，完成可信 `20/20`：
+  20 completed、8 pass/12 fail，225 upstream attempts、1 次同槽 pure transport retry，campaign
+  `4.985650 USD`。Plan 058 全生命周期累计 `20.379152 USD`、reservation 0。
+- 正式 raw C2 为 7 次/4 slot/3 task、9,693 ms；逐项按预冻规则分类为 harmful `0`、reasonable `7`、
+  insufficient `0`，四项无害门通过。正式决策为保留该默认关闭 opt-in；不以 raw 数下降为由压制七次合理复测与恢复。
+- Docker/VHDX 增长均为 0，最终无容器、volume 或 build cache；未运行 Codex 对照、validation、holdout、额外
+  题目/round、完整数据集、本地模型、训练、CI 或 PR。详细合同、失效 campaign 与设施修复证据见 Plan 058 及日志。
 
 ## Plan 052 结论
 
@@ -31,7 +46,7 @@ E-A 轻量离线冻结回放当前不恢复。Plan 052 已确认现有资产、�
 - 第三轮整改关闭了 public `exec` 早期错误被误计为零的缺口；最终 Python 51/51、Rust 2/2 通过，独立验收 PASS，
   未发现新的功能性回归或冗余设施问题。
 
-## Plan 056 结论与下一边界
+## Plan 056 冻结输入
 
 - `formal-v6` 使用同一冻结 10 题、两个完整 round、RONDO Local、main `gpt-5.6-terra/medium` 与 Guardian
   `gpt-5.6-terra/low` 完成可信 20/20；20 个 slot 均为 `completed`，8 pass/12 fail，来源、usage、投影与 Docker
@@ -42,8 +57,8 @@ E-A 轻量离线冻结回放当前不恢复。Plan 052 已确认现有资产、�
   未达门槛，C7 仍不可测。结果只支持“选择 C2 作为下一候选”，不证明具体优化一定有收益。
 - 当前可测 C2 只指同一 trace 内 requester、完整命令字符串与 cwd 均相同的重复 `exec_command`，影响值来自重复调用
   本身的工具耗时；不能把它直接外推成所有停滞循环、重复工具或无进展状态。
-- 下一方向内工作须为 C2 单独建立 ExecPlan，先复现并冻结行为/正确性边界，再定义成功、停止和回滚条件。不得把
-  本次候选结论直接扩张成 prompt、工具、Guardian、调度、审批或安全语义改造；真实 API/Docker/费用仍须另行授权。
+- Plan 058 已按该边界完成 C2 单独 ExecPlan、正确性/恢复规则、真实授权与正式决策；Plan 056 的历史 identity、
+  trace、账本、终态和公共结果保持只读，不与 Plan 058 数据拼接。
 
 ## 持续实验原则
 

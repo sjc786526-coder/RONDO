@@ -28,18 +28,18 @@
 
 ### 完成/验收标准
 
-- [ ] 只读复核 `formal-v6` 6 个 C2 命中 slot 的 9 次 occurrence 及其任务终态、工具结果、文件/环境/进程或
+- [x] 只读复核 `formal-v6` 6 个 C2 命中 slot 的 9 次 occurrence 及其任务终态、工具结果、文件/环境/进程或
       服务变化和运行时间线；必要对照有明确选择理由。每次 occurrence 至少归为“有害无进展”“合理重复”或
       “证据不足”，并给出简短证据理由；证据不足不作为限制工具执行的依据。
-- [ ] 分类与回归覆盖：无新结果/文件变化/错误变化的重复、合理轮询、改码后复测、同命令但文件/环境/进程/
+- [x] 分类与回归覆盖：无新结果/文件变化/错误变化的重复、合理轮询、改码后复测、同命令但文件/环境/进程/
       服务状态变化、transport 或上游失败重试、compact/resume/user steer/明确继续、同命令不同结果或错误、
       写入/网络/未知副作用，以及参数/cwd/requester 不同。
-- [ ] 在正式测评前冻结触发、豁免、恢复、生命周期/重置、关闭、回滚、收益、无害和停止规则；正式结果产生后
+- [x] 在正式测评前冻结触发、豁免、恢复、生命周期/重置、关闭、回滚、收益、无害和停止规则；正式结果产生后
       不再放宽判据。tracked 记录只保留 body-free 分类与聚合，不复制 prompt、响应、完整命令或工具正文。
-- [ ] 只实现一个 C2 主要变量；关闭态保持 Plan 056 被测产品行为。启用态不得仅凭 exact identity 改变执行资格，
+- [x] 只实现一个 C2 主要变量；关闭态保持 Plan 056 被测产品行为。启用态不得仅凭 exact identity 改变执行资格，
       写入/网络/未知副作用调用继续执行；任何安全只读干预都必须有界、可恢复且诚实表达，不篡改已执行工具的
       原始结果、exit/error、审批、sandbox、Guardian、安全策略或用户控制语义，也不产生硬停止或不可恢复终态。
-- [ ] 定向测试证明有害无进展场景得到预期的有界纠偏，同时上述合理/恢复/副作用/不同身份场景不被误阻断；
+- [x] 定向测试证明有害无进展场景得到预期的有界纠偏，同时上述合理/恢复/副作用/不同身份场景不被误阻断；
       关闭、取消、恢复、compact、steer 和任务结束后的状态边界清楚，状态不无界增长或错误跨任务复用。
 - [x] 至少一个独立 commissioning identity 完整走通 initialize → run → observe/project → settle → publish；
       commissioning 不进入正式分母，但其 main/Guardian 请求和任何重试全部计入 Plan 058 总预算。
@@ -47,26 +47,26 @@
       formal-v1 尚未证明运行链完整的第 `8..20` 槽（含首尾，共 `13` 槽）；这些槽全部完成 agent → Terminal-Bench
       → verifier → observe/project → settle → diagnostic record 后，才允许统一冻结并启动下一次 formal。sweep 不
       重复诊断旧 formal-v1 已完成链路的前 7 槽，也不得把旧 formal 或 diagnostic 数据拼入正式分母。
-- [ ] commissioning 完成后提交并冻结实际被测源码，重新构建和复验 RONDO Local binary/manifest，并为正式
+- [x] commissioning 完成后提交并冻结实际被测源码，重新构建和复验 RONDO Local binary/manifest，并为正式
       campaign 创建全新 campaign/batch/run/task-budget/pointer/result namespace；不复用 Plan 056 身份或账本。
-- [ ] 正式复测只使用 v28 lock SHA-256
+- [x] 正式复测只使用 v28 lock SHA-256
       `a9567cb0ddeaa9c8e7cdfbd7253000a8453ec1ebbb03ca359deae2c048f7880b` 的同一 10 题、镜像与冻结顺序，
       两个完整 round 形成恰好 20 个正式逻辑结果；不运行 Codex 对照、validation、holdout、额外题目/round、
       E-A、完整数据集、本地模型或训练。
-- [ ] 下一 formal identity 在创建前把 20 个唯一绝对槽位的执行顺序冻结为
+- [x] 下一 formal identity 在创建前把 20 个唯一绝对槽位的执行顺序冻结为
       `8 → 18 → 1–7 → 9–17 → 19–20`；8/18 是同一 campaign 内最先运行的高风险 canary，不是额外试跑。
       每个绝对槽恰好出现一次，正式分母仍为同一冻结代码、配置和 identity 的完整 `20/20`。
-- [ ] 每个正式结果都有唯一 Terminal-Bench 终态、API usage/预算终态、原生 trace/C2 与正确性投影及对应
+- [x] 每个正式结果都有唯一 Terminal-Bench 终态、API usage/预算终态、原生 trace/C2 与正确性投影及对应
       Docker receipt。网络 attempts 不扩大正式分母；有效任务失败、reward 0 或 C2 未改善不重跑、不补位。
-- [ ] 公共结果同时报告原始 exact-C2 occurrence、影响 slot/task、重复调用耗时、任务 pass/fail，以及冻结的
+- [x] 公共结果同时报告原始 exact-C2 occurrence、影响 slot/task、重复调用耗时、任务 pass/fail，以及冻结的
       harmful/reasonable refined 指标；私有 trace 和正文不进入 Git、公共结果、日志或终端汇报。
-- [ ] 只有预冻收益门和无害门同时满足才保留启用的优化。无收益、负收益、不可接受误报、正确性/恢复/用户控制
+- [x] 只有预冻收益门和无害门同时满足才保留启用的优化。无收益、负收益、不可接受误报、正确性/恢复/用户控制
       退化或可信 20/20 不成立时，不宣称正向性能结论，并关闭或撤销行为变化；必要回归、观测和负面/不完整结果保留。
-- [ ] Plan 058 所有 commissioning、诊断、无效本地设施运行、网络重试、main 与 Guardian attempts 合计不超过
+- [x] Plan 058 所有 commissioning、诊断、无效本地设施运行、网络重试、main 与 Guardian attempts 合计不超过
       `50.000000 USD`；最终 reservation/未决账闭合，或达到硬上限后停止新请求并诚实记录未完成项。
-- [ ] Docker 与 Windows `C:` 前后资源事实闭合，只精确清理本任务创建且不再需要的对象；不清理 Plan 056、
+- [x] Docker 与 Windows `C:` 前后资源事实闭合，只精确清理本任务创建且不再需要的对象；不清理 Plan 056、
       Plan 054、共享缓存或来源不明的镜像、容器、卷、build cache 和文件。
-- [ ] 只运行受影响模块所需的格式、静态检查、定向测试和相称构建，不运行全 workspace、CI 或 PR；测试证据明确
+- [x] 只运行受影响模块所需的格式、静态检查、定向测试和相称构建，不运行全 workspace、CI 或 PR；测试证据明确
       区分 fake、受控回归、Docker、真实 API 和未运行项。
 - [ ] 完成一次聚焦独立验收。普通 finding 由执行者自主窄修和复验；若 finding 改变正式产品、冻结评价口径或
       数据有效性，则旧正式 campaign 不冒充有效结果，按 §3 的本地设施规则重新收敛。
@@ -454,13 +454,40 @@ insufficient 为 `0/3/0`，无害四门通过。累计 task budget `15.393502 US
 `34.606498 USD`。Docker/VHDX 增长 `0`，最终 Docker 11.5 GB 且无容器/卷/cache，Windows C: 实际余量
 `200631042048` bytes。formal-v5 暴露的局部设施缺口至此闭环，下一步提交证据并从新 clean commit 冻结全新 formal。
 
+从 clean `0706bf0b711f2734185fb8646a6f170ade682d11` 经共享 lock/watchdog 完成 formal-v6 增量
+legacy/companion 构建及 legacy、companion、既有 bwrap、runtime prepare/verify。CLI/host/bwrap SHA-256 仍分别为
+`453858a5230d0b3a7015a9df8a364832293b07202f7691f708040f5b7f1621dd`、
+`d776884488196215bf391a447eb6a037d590f2ea5454b845ddafdfa9de1668a2`、
+`77360cb751ccedc5971391444ac86a8a33c15b04d6b4a6fe45f5d25496e62c4c`，runtime manifest SHA-256 为
+`6c1e0f92ef844e9098ced764ff1e8d6144fc322bd70463392e1ec8a546786d60`。companion 首次启动在 Cargo 前因开发
+sandbox 无权连接 systemd user bus 被 watchdog fail-closed；legacy 首次 publication 因旧 manifest 环境项转换不完整
+被 provenance 门拒绝。两次均为零 Docker/API、无 binary 混用，失败 proof 保留；全新 metrics identity 的宿主重跑
+通过。runtime 发布后项目容量到 `179772219392` bytes，按 exact commit cleanup 只删除已冻结、可重建且不再被
+campaign 读取的 `0706bf0` Cargo target（`13553963565` bytes），保留三个 binary bundle、manifest 与全部 proof，
+项目降至约 `166.18 GB`。
+
+`plan058-direction1-c2-formal-v6` 绑定 lock SHA-256
+`abef80b2f0098df9099779202a7c011bf363b3f26e2186714124b16d52d46c5d`、上述 runtime 与既定顺序；
+零 API preflight `10/10` 后，20 个正式逻辑槽均完成 agent、Harbor、verifier、投影、结算、source revalidation
+与发布。绝对槽 15 的第一次物理 attempt 为精确 pure transport，保留 6 次请求与费用后在相同冻结条件下同槽重试
+成功，正式分母仍为 `20`。最终 20 completed、8 pass/12 fail，225 upstream attempts，campaign
+`4.985650 USD`；Plan 058 累计 `20.379152 USD`、reserved `0`。raw exact-C2 为 7 次/4 slot/3 task、
+`9,693 ms`；逐项私有 trace 复核确认 7 次均有状态/结果变化、失败恢复或改码后复测依据，refined
+harmful/reasonable/insufficient 为 `0/7/0`，四项无害门通过。相对 Phase A harmful `1` 达到预冻 `0` 门且
+正确性总分保持 8/12，正式决策为保留默认关闭、显式 opt-in 的单一 guidance 变量。
+
+最终验收清单发现 public result 已报告 raw occurrence/耗时与 refined 指标，但漏了合同要求的影响 slot/task 数。
+发布函数已窄补为从冻结 records 统计 body-free `affected_slots/affected_tasks`，formal-v6 为 `4/3`；相关
+Python 回归仍为 `106/106`。用 finalized identity、20 条 record、冻结 classification 与预算纯内存重生成结果，
+与 tracked JSON 规范化 SHA-256 均为
+`40e894bb51caf70e1062717d2f0dce07e6de91a8bb70c909eeb72b59be864fcc`。该补全不改变 trace、判据、分母、费用、
+任务结果或 retain 决策，故不把有效正式 campaign 误作废，也不重发 API。
+
 ### 本任务剩余步骤
 
-1. Phase C/D 再冻结与正式运行：提交 diagnostic-v8 证据，从新 clean source 重建/复验 binary/manifest，再以全新
-   干净 identity 按 `8 → 18 → 1–7 → 9–17 → 19–20` 从执行位置 1/20 串行完成固定 10 题 × 2 round 的
-   20 个唯一正式逻辑结果，不复用旧 formal 或 diagnostic 结果。
-2. Phase E：比较 raw/refined C2、耗时、任务结果和正确性保护，作出保留/调整/撤销决定，完成文档、精确清理、
-   聚焦独立验收、整改和工作树提交。
+1. Phase E：同步方向 1 子 WBS、精炼日志和最终测试/资源事实。
+2. 由上下文干净的独立子智能体完成聚焦正确性/功能性验收；真实 finding 自主窄修并交回同一审查者复验。
+3. 只提交 Plan 058 本地 worktree 分支并确认干净，不合并、不推送、不归档。
 
 ### 阻塞项
 
@@ -531,8 +558,20 @@ insufficient 为 `0/3/0`，无害四门通过。累计 task budget `15.393502 US
   `0.900171 USD`；raw C2 `3` 次均分类为 reasonable，refined harmful `0`、无害四门通过。Docker/VHDX 增长
   `0`，Windows C: 最终余量 `202295300096` bytes；累计 task budget `13.399248 USD`、reserved `0`，局部
   commissioning 闭环。runtime publication 前两次无产品失败及 absolute canonical wrapper 修复证据已保留。
-- 未运行：可信正式 20-result、正式比较/决策、本地模型、训练、完整数据集、Codex 对照、validation、holdout、CI
-  或 PR。
+- formal-v5/diagnostic-v8：formal-v5 因连续 Guardian API turns 的 review grouping 本地缺口作废为 `0/20`；
+  77 attempts、`1.758825 USD`。修复后 diagnostic-v8 只复验绝对槽 4 并有效完成 `1/1`，12 attempts、
+  `0.235429 USD`，raw 3 次均为 reasonable；累计费用 `15.393502 USD`。targeted diagnostic range 同时收敛为
+  冻结分母内任意 `1..20` 闭区间，formal 分母不变。
+- formal-v6：runtime 与 lock 从 clean `0706bf0` 冻结，preflight `10/10`、正式 `20/20` completed、
+  8 pass/12 fail；225 attempts、1 次同槽 pure transport retry、campaign `4.985650 USD`，Plan 058 累计
+  `20.379152 USD`、reserved `0`。raw C2 `7` 次/`9,693 ms`，refined harmful/reasonable/insufficient
+  `0/7/0`，无害四门通过，决策 `retain`。Docker 与 VHDX 增长均 `0`，最终 Docker 11.5 GB 且
+  container/volume/cache 均为 `0`，Windows C: campaign final `196718600192` bytes、人工收尾复核
+  `196716306432` bytes；项目容量 `166231814144` bytes。
+- 最终定向 Python 回归 `106/106` 通过；Rust 产品代码自受监管 `4/4` 后未再修改，最终 runtime 已完成真实
+  20/20，故没有为重复证明重建已清理 target。
+- 未运行：本地模型、训练、完整数据集、Codex 对照、validation、holdout、额外题目/round、CI、PR、全 workspace
+  测试。
 
 ### 主工作区 ignored 资产
 
@@ -603,3 +642,5 @@ Plan 058 worktree，但执行阶段以下 I/O 会由 worktree 中的受控命令
 | 031 | formal-v5 因把 Guardian 中间 API turn 误当独立终态 review 而永久作废；raw 请求仍按 3 次计费/限额，证据只绑定每个连续 Guardian 组的末次请求，并只以新 diagnostic 复验绝对槽 4 | fix-git 的运行链实际 completed/reward 1；3 个 Guardian 请求组成 2 个 review 并产生 2 份终态证据。请求数与 review 数职责不同，强行一一对应会把有效结果误判为设施故障；按 021 不重复已打通的其他题目 | Guardian evidence、结果发布、diagnostic、正式重启 | 已采纳，硬合同 |
 | 032 | diagnostic range 从旧扫尾专用 `8..20` 扩展为冻结正式分母内任意有界闭区间 `1..20`；首次第 4 槽 initialize 失败保持零 API、无 identity | 决策 021 要求后续 formal 的局部修复只复验实际问题题目，旧常量错误地把初始 8–20 sweep 的历史范围固化成永久能力边界；formal 分母与顺序不变 | diagnostic identity、局部 commissioning | 已采纳，硬合同 |
 | 033 | diagnostic-v8 有效 1/1 后关闭 formal-v5 Guardian review binding 与 targeted range 两个局部设施缺口；3 次 raw repeat 均按预冻规则归为 reasonable | 三次分别是失败后确认、恢复重试和成功状态变化后的验证，均不是无进展机械重复；task pass、证据绑定、预算/资源和工具真值完整 | commissioning、refined classification、正式冻结 | 已采纳 |
+| 034 | 首个可信 formal-v6 达到 harmful `1 → 0` 且四项无害门通过，保留默认关闭、显式 opt-in 的 C2 tool-spec guidance | 20/20 与 Phase A 同为 8 pass/12 fail；7 次 raw repeat 均有状态/结果变化、失败恢复或改码后复测依据，不能为降低 raw 指标压制合理调用 | 产品变量、方向 1 结论、回滚边界 | 已采纳，正式决策 |
+| 035 | formal-v6 public result 离线补齐 body-free affected slot/task 聚合，不重跑正式 API | 字段可由同一冻结 records 确定性导出，完整结果重生成与 tracked JSON 一致；它只修复报告完整性，不改变评价口径或 campaign 有效性 | 结果发布、验收证据 | 已采纳 |

@@ -1526,7 +1526,13 @@ class C2BehaviorPublicationTests(unittest.TestCase):
             validate_refined_assessment(records, assessment)
 
     def test_complete_task_failures_remain_formal_results(self) -> None:
-        slots = tuple(SimpleNamespace(slot_id=f"slot-{index:02d}") for index in range(20))
+        slots = tuple(
+            SimpleNamespace(
+                slot_id=f"slot-{index:02d}",
+                task_id=f"task-{index % 10:02d}",
+            )
+            for index in range(20)
+        )
         identity = SimpleNamespace(
             campaign_id="plan058-direction1-c2-formal-test",
             campaign_mode="formal",
@@ -1538,17 +1544,27 @@ class C2BehaviorPublicationTests(unittest.TestCase):
             prior_settled_usd=Decimal(0),
             campaign_cap_usd=Decimal("50"),
         )
-        records = [
-            {
-                "slot": {"slot_id": slot.slot_id},
-                "terminal_bench": {
-                    "outcome": "completed",
-                    "task_outcome": "fail",
-                },
-                "observation": _observation(),
-            }
-            for slot in slots
-        ]
+        records = []
+        for index, slot in enumerate(slots):
+            observation = _observation()
+            if index < 2:
+                observation["tools"]["command"] = 1
+                observation["tools"]["total"] = 1
+                observation["tools"]["total_lifecycle_duration_ms"] = 7
+                observation["tools"]["repeated_exact_commands"] = 1
+                observation[
+                    "tools"
+                ]["repeated_exact_command_lifecycle_duration_ms"] = 7
+            records.append(
+                {
+                    "slot": {"slot_id": slot.slot_id, "task_id": slot.task_id},
+                    "terminal_bench": {
+                        "outcome": "completed",
+                        "task_outcome": "fail",
+                    },
+                    "observation": observation,
+                }
+            )
         refined = {
             "schema_version": 1,
             "kind": "plan058_c2_refined_classification",
@@ -1562,13 +1578,13 @@ class C2BehaviorPublicationTests(unittest.TestCase):
                 {
                     "slot_id": slot.slot_id,
                     "harmful": 0,
-                    "reasonable": 0,
+                    "reasonable": 1 if index < 2 else 0,
                     "insufficient": 0,
                     "harmful_duration_ms": 0,
-                    "reasonable_duration_ms": 0,
+                    "reasonable_duration_ms": 7 if index < 2 else 0,
                     "insufficient_duration_ms": 0,
                 }
-                for slot in slots
+                for index, slot in enumerate(slots)
             ],
         }
         state = {
@@ -1598,6 +1614,9 @@ class C2BehaviorPublicationTests(unittest.TestCase):
         self.assertEqual(result["status"], "valid")
         self.assertEqual(result["outcome"], "withdraw")
         self.assertEqual(result["terminal_bench"]["task_failures"], 20)
+        self.assertEqual(result["c2"]["raw_occurrences"], 2)
+        self.assertEqual(result["c2"]["affected_slots"], 2)
+        self.assertEqual(result["c2"]["affected_tasks"], 2)
 
     def test_complete_diagnostic_sweep_has_non_formal_public_outcome(self) -> None:
         tasks = tuple(_task(index) for index in range(1, 11))

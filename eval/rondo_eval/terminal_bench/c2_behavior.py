@@ -2420,12 +2420,21 @@ def public_result(
     passes = 0
     raw_occurrences = 0
     raw_duration = 0
+    affected_slots = 0
+    affected_tasks: set[str] = set()
     for record in values:
         outcome_counts[record["terminal_bench"]["outcome"]] += 1
         passes += record["terminal_bench"]["task_outcome"] == "pass"
         observation = validate_task_observation(record["observation"])
-        raw_occurrences += observation["tools"]["repeated_exact_commands"]
+        occurrences = observation["tools"]["repeated_exact_commands"]
+        raw_occurrences += occurrences
         raw_duration += observation["tools"]["repeated_exact_command_lifecycle_duration_ms"]
+        if occurrences:
+            affected_slots += 1
+            task_id = record["slot"].get("task_id")
+            if not isinstance(task_id, str) or not task_id:
+                raise C2BehaviorError("Plan 058 affected task identity is invalid")
+            affected_tasks.add(task_id)
     valid = complete
     if not valid:
         outcome = "campaign_invalid"
@@ -2474,6 +2483,8 @@ def public_result(
         "c2": {
             "raw_occurrences": raw_occurrences,
             "raw_duration_ms": raw_duration,
+            "affected_slots": affected_slots,
+            "affected_tasks": len(affected_tasks),
             "refined": refined,
             "baseline_harmful_occurrences": PLAN058_REFINED_BASELINE,
             "retain_at_most": PLAN058_REFINED_TARGET,
