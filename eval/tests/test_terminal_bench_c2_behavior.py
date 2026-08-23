@@ -4,25 +4,31 @@ import json
 import tempfile
 import unittest
 from decimal import Decimal
+from hashlib import sha256
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
-from rondo_eval.config import RepoPaths
 from rondo_eval.api_budget_proxy import (
     BudgetCapacityExhausted,
     PersistentBudgetLedger,
     Usage,
 )
+from rondo_eval.config import RepoPaths
+from rondo_eval.contracts import RunOutcome
 from rondo_eval.terminal_bench.c2_behavior import (
     C2BehaviorError,
+    C2BehaviorIdentity,
     C2BehaviorState,
     classify_provider_hard_stop,
     classify_pure_transport_retry,
+    freeze_diagnostic_slots,
     freeze_slots,
     _ensure_initialization_state_and_budget,
     _require_open_initialization_recovery,
     _initial_state,
     _reconcile_initialization_pointer,
+    _resume_identity_initialization,
     campaign_root,
     initialize_identity,
     plan058_request_reservation,
@@ -32,14 +38,18 @@ from rondo_eval.terminal_bench.c2_behavior import (
     validate_refined_assessment,
 )
 from rondo_eval.terminal_bench.c2_behavior_cli import (
+    _parser,
     _attempt_budget_projection,
     _formal_attempt_interrupted_without_projection,
+    _is_typed_guardian_limit_result,
     _logical_budget_summary,
     _make_request,
+    _read_agent_execution_receipt,
     _transition_preflight_worker_failure,
     status,
 )
 from rondo_eval.terminal_bench.tasksets import FrozenTask
+from rondo_eval.terminal_bench.results import ParsedHarborResult
 
 from .test_harness_observation import _observation
 from .test_api_budget_proxy import MAIN_PRICING
@@ -144,12 +154,96 @@ def _state_identity(*, campaign_mode: str = "formal") -> SimpleNamespace:
         campaign_mode=campaign_mode,
         lock_sha256="c" * 64,
         tasks=(task,),
+        preflight_tasks=(task,),
         slots=(slot,),
         prior_settled_usd=Decimal(0),
         slot=lambda slot_id: slot
         if slot_id == slot.slot_id
         else (_ for _ in ()).throw(KeyError(slot_id)),
     )
+
+
+class C2BehaviorDiagnosticIdentityTests(unittest.TestCase):
+    def test_cli_accepts_explicit_diagnostic_range(self) -> None:
+        args = _parser().parse_args(
+            [
+                "initialize",
+                "--campaign-mode",
+                "diagnostic",
+                "--diagnostic-slot-start",
+                "8",
+                "--diagnostic-slot-end",
+                "20",
+            ]
+        )
+        self.assertEqual(args.campaign_mode, "diagnostic")
+        self.assertEqual(args.diagnostic_slot_start, 8)
+        self.assertEqual(args.diagnostic_slot_end, 20)
+
+    def test_diagnostic_range_slices_the_full_v28_formal_order(self) -> None:
+        tasks = tuple(_task(index) for index in range(1, 11))
+        slots = freeze_diagnostic_slots(
+            tasks,
+            run_id_date="20260823",
+            run_id_sequence_base=580100001,
+            slot_start=8,
+            slot_end=20,
+        )
+
+        self.assertEqual(len(slots), 13)
+        self.assertEqual(
+            (slots[0].round, slots[0].task_index, slots[0].task_id),
+            (1, 8, tasks[7].task_id),
+        )
+        self.assertEqual(slots[0].logical_run_id, "20260823-580100001-tb-rondo-plan058")
+        self.assertEqual(
+            (slots[-1].round, slots[-1].task_index, slots[-1].task_id),
+            (2, 10, tasks[9].task_id),
+        )
+        self.assertEqual(slots[-1].logical_run_id, "20260823-580100013-tb-rondo-plan058")
+
+    def test_new_diagnostic_identity_can_restart_at_failed_absolute_slot(self) -> None:
+        tasks = tuple(_task(index) for index in range(1, 11))
+        slots = freeze_diagnostic_slots(
+            tasks,
+            run_id_date="20260823",
+            run_id_sequence_base=580200001,
+            slot_start=15,
+            slot_end=20,
+        )
+
+        self.assertEqual(len(slots), 6)
+        self.assertEqual(
+            (slots[0].round, slots[0].task_index, slots[0].task_id),
+            (2, 5, tasks[4].task_id),
+        )
+        self.assertEqual(
+            {slot.task_id for slot in slots},
+            {task.task_id for task in tasks[4:]},
+        )
+        identity = C2BehaviorIdentity(
+            path=Path("diagnostic-lock.json"),
+            lock_sha256="a" * 64,
+            value={},
+            reference=SimpleNamespace(),
+            tasks=tasks,
+            slots=slots,
+        )
+        self.assertEqual(identity.preflight_tasks, tasks[4:])
+
+    def test_diagnostic_range_rejects_outside_or_reversed_bounds(self) -> None:
+        tasks = tuple(_task(index) for index in range(1, 11))
+        for start, end in ((7, 20), (8, 21), (14, 13)):
+            with self.subTest(start=start, end=end), self.assertRaisesRegex(
+                C2BehaviorError, "diagnostic slot range"
+            ):
+                freeze_diagnostic_slots(
+                    tasks,
+                    run_id_date="20260823",
+                    run_id_sequence_base=580300001,
+                    slot_start=start,
+                    slot_end=end,
+                )
 
 
 class C2BehaviorStateTests(unittest.TestCase):
@@ -159,6 +253,7 @@ class C2BehaviorStateTests(unittest.TestCase):
         for campaign_mode, expected_status, expected_preflight in (
             ("formal", "invalid", "running"),
             ("commissioning", "running", "pending"),
+            ("diagnostic", "running", "pending"),
         ):
             with self.subTest(campaign_mode=campaign_mode), tempfile.TemporaryDirectory() as raw:
                 identity = _state_identity(campaign_mode=campaign_mode)
@@ -314,6 +409,14 @@ class C2BehaviorStateTests(unittest.TestCase):
             )
             self.assertTrue(
                 _formal_attempt_interrupted_without_projection(
+                    campaign_mode="diagnostic",
+                    attempt_was_running=True,
+                    work_root_existed=False,
+                    metadata_path=metadata,
+                )
+            )
+            self.assertTrue(
+                _formal_attempt_interrupted_without_projection(
                     campaign_mode="formal",
                     attempt_was_running=True,
                     work_root_existed=False,
@@ -378,6 +481,7 @@ class C2BehaviorStateTests(unittest.TestCase):
             campaign_id="plan058-direction1-c2-test",
             lock_sha256="c" * 64,
             tasks=(task,),
+            preflight_tasks=(task,),
             slots=(slot,),
             slot=lambda slot_id: slot if slot_id == slot.slot_id else None,
         )
@@ -607,6 +711,91 @@ class C2BehaviorStateTests(unittest.TestCase):
 
 
 class C2BehaviorInitializationTests(unittest.TestCase):
+    def test_diagnostic_resume_requires_the_exact_frozen_range_inputs(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            paths = RepoPaths(common_root=root, worktree_root=root)
+            lock_relpath = Path(
+                "eval/locks/plan058-direction1-c2-diagnostic-resume.json"
+            )
+            lock_path = root / lock_relpath
+            lock_path.parent.mkdir(parents=True)
+            lock_path.write_text("{}", encoding="utf-8")
+            manifest = root / "eval-data/bin/diagnostic-manifest.json"
+            manifest.parent.mkdir(parents=True)
+            manifest.write_bytes(b"frozen-manifest")
+            tasks = tuple(_task(index) for index in range(1, 11))
+            slots = freeze_diagnostic_slots(
+                tasks,
+                run_id_date="20260823",
+                run_id_sequence_base=580500001,
+                slot_start=8,
+                slot_end=20,
+            )
+            campaign_id = "plan058-direction1-c2-diagnostic-resume"
+            identity = SimpleNamespace(
+                campaign_id=campaign_id,
+                batch_id=campaign_id + "-batch",
+                campaign_mode="diagnostic",
+                result_namespace=campaign_id,
+                public_result_relative_path=(
+                    f"eval/results/observations/{campaign_id}.json"
+                ),
+                tasks=tasks,
+                slots=slots,
+                value={
+                    "rounds": 2,
+                    "diagnostic_slot_range": {"start": 8, "end": 20},
+                    "binary": {
+                        "manifest_path": manifest.relative_to(root).as_posix(),
+                        "manifest_sha256": sha256(b"frozen-manifest").hexdigest(),
+                    },
+                },
+            )
+            common = dict(
+                paths=paths,
+                lock_relpath=lock_relpath,
+                campaign_id=campaign_id,
+                batch_id=identity.batch_id,
+                campaign_mode="diagnostic",
+                result_namespace=campaign_id,
+                public_result_path=Path(identity.public_result_relative_path),
+                runtime_manifest=manifest,
+                run_id_date="20260823",
+                run_id_sequence_base=580500001,
+                commissioning_task_id=None,
+                diagnostic_slot_end=20,
+            )
+            patches = (
+                patch(
+                    "rondo_eval.terminal_bench.c2_behavior._load_identity_from_lock",
+                    return_value=identity,
+                ),
+                patch(
+                    "rondo_eval.terminal_bench.c2_behavior._git", return_value=""
+                ),
+                patch(
+                    "rondo_eval.terminal_bench.c2_behavior._require_open_initialization_recovery"
+                ),
+                patch(
+                    "rondo_eval.terminal_bench.c2_behavior._reconcile_initialization_pointer"
+                ),
+                patch(
+                    "rondo_eval.terminal_bench.c2_behavior._ensure_initialization_state_and_budget"
+                ),
+            )
+            with patches[0], patches[1], patches[2], patches[3], patches[4]:
+                self.assertIs(
+                    _resume_identity_initialization(
+                        **common, diagnostic_slot_start=8
+                    ),
+                    identity,
+                )
+                with self.assertRaisesRegex(C2BehaviorError, "recovery inputs"):
+                    _resume_identity_initialization(
+                        **common, diagnostic_slot_start=9
+                    )
+
     def test_result_namespace_and_filename_are_campaign_bound(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
@@ -798,10 +987,144 @@ class C2BehaviorPublicationTests(unittest.TestCase):
             )
 
         self.assertTrue(request.exec_command_repeat_guidance_enabled)
+        self.assertEqual(
+            request.plan058_agent_execution_id, "plan058-test-a001"
+        )
         self.assertEqual(request.max_retries, 0)
         self.assertEqual(request.pinned_model_id, "gpt-5.6-terra")
         self.assertEqual(request.pinned_main_effort, "medium")
         self.assertEqual(request.pinned_guardian_effort, "low")
+
+    def test_plan058_stub_does_not_mask_agent_exit(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            identity = SimpleNamespace(
+                batch_id="plan058-direction1-c2-test-batch",
+                value={
+                    "seccomp": {
+                        "source_sha256": "a" * 64,
+                        "effective_sha256": "b" * 64,
+                    },
+                    "provider": {
+                        "public_profile": {
+                            "main_model": "gpt-5.6-terra",
+                            "main_effort": "medium",
+                            "guardian_effort": "low",
+                        }
+                    },
+                },
+            )
+            request = _make_request(
+                paths=RepoPaths(common_root=root, worktree_root=root),
+                identity=identity,
+                task=_task(),
+                manifest=SimpleNamespace(product="rondo-local"),
+                work_root=root / "work",
+                docker_task_id="plan058-test-stub",
+                seccomp_profile=root / "seccomp.json",
+                stub=True,
+            )
+        self.assertIsNone(request.plan058_agent_execution_id)
+
+    def test_typed_guardian_limit_requires_exact_bound_evidence(self) -> None:
+        hashes = [character * 64 for character in "abcd"]
+        parsed = ParsedHarborResult(
+            outcome=RunOutcome.AGENT_FAILED,
+            task_outcome="pass",
+            reward=1.0,
+            duration_seconds=1.0,
+            input_tokens=1,
+            cached_tokens=0,
+            output_tokens=1,
+            job_result={},
+            trial_result={
+                "exception_info": {
+                    "exception_type": "NonZeroAgentExitCodeError"
+                },
+                "verifier_result": {"rewards": {"reward": 1.0}},
+            },
+        )
+        evidence = tuple(
+            SimpleNamespace(
+                canonical_request_sha256=digest,
+                decision=("denied" if index in {0, 3} else "approved"),
+                terminal_status=(
+                    "failed_closed" if index == 3 else (
+                        "denied" if index == 0 else "approved"
+                    )
+                ),
+                failure_reason="session_error" if index == 3 else None,
+            )
+            for index, digest in enumerate(hashes)
+        )
+        common = {
+            "budget_run": {
+                "stopped": True,
+                "stop_reason": "guardian_logical_request_limit_exceeded",
+            },
+            "receipt": {
+                "execution_id": "slot-a001",
+                "exit_code": 1,
+                "tee_exit_code": 0,
+            },
+            "api_metadata": {
+                "schema_version": 1,
+                "requests": [
+                    {"role": "guardian", "canonical_body_sha256": digest}
+                    for digest in hashes[:3]
+                ],
+            },
+            "evidence": evidence,
+            "max_guardian_logical_requests": 3,
+            "expected_execution_id": "slot-a001",
+            "metadata_ready": True,
+        }
+        self.assertTrue(
+            _is_typed_guardian_limit_result(parsed, **common)
+        )
+        bad_receipt = dict(common["receipt"])
+        bad_receipt["exit_code"] = 137
+        self.assertFalse(
+            _is_typed_guardian_limit_result(
+                parsed, **{**common, "receipt": bad_receipt}
+            )
+        )
+        bad_budget = dict(common["budget_run"])
+        bad_budget["stopped"] = False
+        self.assertFalse(
+            _is_typed_guardian_limit_result(
+                parsed, **{**common, "budget_run": bad_budget}
+            )
+        )
+        self.assertFalse(
+            _is_typed_guardian_limit_result(
+                parsed, **{**common, "evidence": evidence[:3]}
+            )
+        )
+
+    def test_agent_execution_receipt_is_small_and_exact(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            path = Path(raw) / "receipt.json"
+            path.write_text(
+                '{"agent_exit_code":1,"execution_id":"slot-a001",'
+                '"schema_version":1,"tee_exit_code":0}\n',
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                _read_agent_execution_receipt(path),
+                {
+                    "execution_id": "slot-a001",
+                    "exit_code": 1,
+                    "tee_exit_code": 0,
+                },
+            )
+            path.write_text(
+                '{"agent_exit_code":1,"execution_id":"slot-a001",'
+                '"schema_version":1,"tee_exit_code":0,"extra":true}\n',
+                encoding="utf-8",
+            )
+            with self.assertRaises(C2BehaviorError):
+                _read_agent_execution_receipt(path)
 
     def test_refined_assessment_must_reconcile_every_raw_occurrence(self) -> None:
         observation = _observation()
@@ -848,6 +1171,7 @@ class C2BehaviorPublicationTests(unittest.TestCase):
             campaign_mode="formal",
             lock_sha256="a" * 64,
             tasks=tuple(range(10)),
+            preflight_tasks=tuple(range(10)),
             slots=slots,
             value={"rounds": 2},
             prior_settled_usd=Decimal(0),
@@ -913,6 +1237,92 @@ class C2BehaviorPublicationTests(unittest.TestCase):
         self.assertEqual(result["status"], "valid")
         self.assertEqual(result["outcome"], "withdraw")
         self.assertEqual(result["terminal_bench"]["task_failures"], 20)
+
+    def test_complete_diagnostic_sweep_has_non_formal_public_outcome(self) -> None:
+        tasks = tuple(_task(index) for index in range(1, 11))
+        slots = freeze_diagnostic_slots(
+            tasks,
+            run_id_date="20260823",
+            run_id_sequence_base=580400001,
+            slot_start=8,
+            slot_end=20,
+        )
+        identity = SimpleNamespace(
+            campaign_id="plan058-direction1-c2-diagnostic-v1",
+            campaign_mode="diagnostic",
+            lock_sha256="a" * 64,
+            tasks=tasks,
+            preflight_tasks=tasks,
+            slots=slots,
+            value={
+                "rounds": 2,
+                "diagnostic_slot_range": {"start": 8, "end": 20},
+            },
+            prior_settled_usd=Decimal("2.938249"),
+            campaign_cap_usd=Decimal("47.061751"),
+        )
+        records = [
+            {
+                "slot": {"slot_id": slot.slot_id},
+                "terminal_bench": {
+                    "outcome": RunOutcome.COMPLETED.value,
+                    "task_outcome": "fail",
+                },
+                "observation": _observation(),
+            }
+            for slot in slots
+        ]
+        refined = {
+            "schema_version": 1,
+            "kind": "plan058_c2_refined_classification",
+            "no_harm": {
+                "reasonable_repeats_preserved": True,
+                "recovery_and_user_control_preserved": True,
+                "tools_remain_executable": True,
+                "no_material_task_harm": True,
+            },
+            "slots": [
+                {
+                    "slot_id": slot.slot_id,
+                    "harmful": 0,
+                    "reasonable": 0,
+                    "insufficient": 0,
+                    "harmful_duration_ms": 0,
+                    "reasonable_duration_ms": 0,
+                    "insufficient_duration_ms": 0,
+                }
+                for slot in slots
+            ],
+        }
+        result = public_result(
+            identity=identity,
+            state={
+                "status": "ready_to_finalize",
+                "slots": [
+                    {"status": "published", "transport_retries": []}
+                    for _slot in slots
+                ],
+                "final_storage": {},
+                "invalid_reason": None,
+            },
+            budget={
+                "spent_usd": "0.500000",
+                "reserved_usd": "0.000000",
+                "run_slots_used": 13,
+                "runs": {},
+            },
+            records=records,
+            refined_assessment=refined,
+            snapshot_date="2026-08-23",
+        )
+
+        self.assertEqual(result["status"], "valid")
+        self.assertEqual(result["outcome"], "diagnostic_complete")
+        self.assertEqual(result["campaign"]["logical_denominator"], 13)
+        self.assertEqual(
+            result["campaign"]["diagnostic_slot_range"],
+            {"start": 8, "end": 20},
+        )
 
     def test_status_is_zero_api_when_uninitialized(self) -> None:
         with tempfile.TemporaryDirectory() as raw:

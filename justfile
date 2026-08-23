@@ -510,8 +510,8 @@ eval-plan056 action="status" *args:
         uv run --directory eval --frozen --no-sync \
         python -B -m rondo_eval.terminal_bench.bounded_observation_cli "{{action}}" {{args}}
 
-# Plan 058 C2 commissioning/formal campaign. status is zero-API; preflight is
-# loopback-only Docker; run/resume require the task-bound paid literal.
+# Plan 058 C2 commissioning/diagnostic/formal campaign. status is zero-API;
+# preflight is loopback-only Docker; run/resume require the task-bound paid literal.
 eval-plan058 action="status" *args:
     #!/usr/bin/env bash
     set -euo pipefail

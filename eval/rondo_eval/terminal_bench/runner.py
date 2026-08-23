@@ -122,6 +122,11 @@ class TerminalBenchRequest:
     # Opt-in RONDO Local product variable for Plan 058. False keeps every
     # historical request and Harbor argv byte-identical.
     exec_command_repeat_guidance_enabled: bool = False
+    # Plan 058-only execution accounting. When present it must equal the exact
+    # Docker/attempt identity and is persisted with the true agent/tee exits.
+    # The adapter raises Harbor's native typed agent exception, so Harbor runs
+    # the verifier without rewriting the actual exit semantics.
+    plan058_agent_execution_id: str | None = None
 
 
 def enable_local_harness_observation(
@@ -562,6 +567,13 @@ def prepare_terminal_bench_run(
         raise TerminalBenchRunError(
             "exec_command repeat guidance is reserved for RONDO Local"
         )
+    if request.plan058_agent_execution_id is not None and (
+        not isinstance(request.plan058_agent_execution_id, str)
+        or request.plan058_agent_execution_id != request.docker_task_id
+        or request.side is not Side.RONDO
+        or product_for_manifest(request.side, request.binary) is not Product.RONDO_LOCAL
+    ):
+        raise TerminalBenchRunError("Plan 058 agent execution identity is invalid")
     _validate_frozen_model_catalog_request(config, request)
     if request.max_retries != 0:
         raise TerminalBenchRunError("Terminal-Bench P1 retries are disabled")
@@ -649,6 +661,7 @@ def prepare_terminal_bench_run(
         exec_command_repeat_guidance_enabled=(
             request.exec_command_repeat_guidance_enabled
         ),
+        plan058_agent_execution_id=request.plan058_agent_execution_id,
     )
     trial_name = _trial_name(materialized.task_label, spec.side)
     trials_dir = materialized.task_path.parent / "trials"

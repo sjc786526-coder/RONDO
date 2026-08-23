@@ -43,6 +43,10 @@
       关闭、取消、恢复、compact、steer 和任务结束后的状态边界清楚，状态不无界增长或错误跨任务复用。
 - [ ] 至少一个独立 commissioning identity 完整走通 initialize → run → observe/project → settle → publish；
       commissioning 不进入正式分母，但其 main/Guardian 请求和任何重试全部计入 Plan 058 总预算。
+- [ ] 修复 formal-v1 已暴露的 runner 缺陷后，必须以明确标记为 commissioning/diagnostic 的 sweep 逐槽覆盖旧
+      formal-v1 尚未证明运行链完整的第 `8..20` 槽（含首尾，共 `13` 槽）；这些槽全部完成 agent → Terminal-Bench
+      → verifier → observe/project → settle → diagnostic record 后，才允许统一冻结并启动下一次 formal。sweep 不
+      重复诊断旧 formal-v1 已完成链路的前 7 槽，也不得把旧 formal 或 diagnostic 数据拼入正式分母。
 - [ ] commissioning 完成后提交并冻结实际被测源码，重新构建和复验 RONDO Local binary/manifest，并为正式
       campaign 创建全新 campaign/batch/run/task-budget/pointer/result namespace；不复用 Plan 056 身份或账本。
 - [ ] 正式复测只使用 v28 lock SHA-256
@@ -154,6 +158,10 @@
    - 可识别的单纯 transport、网络或临时上游故障：保持源码、binary、配置、题目、模型、effort、输入和本地运行
      条件不变，重试同一逻辑 slot；不设机械次数上限，但所有 attempts 进入同一预算且最终只发布一个正式结果。
      鉴权、配额、模型不可用或配置错误不是暂态网络故障，必须修复或诚实停止。
+   formal-v1 已证明“单个普通任务闭环”不足以代表完整 commissioning。本次修复后新增硬性 diagnostic sweep，按旧
+   formal-v1 顺序只覆盖第 `8..20` 槽（共 `13` 槽）：有效任务失败/reward 0 保留并前进；本地设施故障保留证据和
+   费用、窄修并重跑当前诊断槽；纯网络暂态按同 logical slot 重试。13 槽全部完整后才统一冻结；之后只允许一个全新
+   formal identity 从 `1/20` 开始，任何旧 formal/diagnostic 结果都不得进入正式分母。
 9. **Plan 058 独立预算。** 新建从零开始的 task budget；不得复用或重开 Plan 056 已关闭账本。commissioning、
    invalid infra、诊断、网络重试、main/Guardian attempts 共用 `50.000000 USD` 硬上限。可靠 usage 按请求前冻结
    价格据实结算；机械确认未发送记 0；已发送或可能发送但 usage 不可靠按 `1.000000 USD/attempt`；发下一请求前
@@ -191,8 +199,9 @@
 - 主要 agent logic 改动按 `mydev/AGENTS.md` 包含 `mydev/codex-rs/core/tests/suite` 的 integration regression；
   必要的 classifier/state 纯逻辑可加窄 unit/fake。测试按真实接入点收敛，不为未改模块堆叠重复矩阵，不用长
   `sleep` 制造竞态。
-- commissioning 先选一个能穿过 C2/恢复边界的代表性 logical task，完整走通后再判断是否需要扩大；不因一次可修
-  runner 或 fixture 问题停工，也不默认再跑完整 10 题 rehearsal。
+- commissioning 的普通闭环可先由代表性 logical task 建立；一旦正式运行暴露此前未覆盖的设施分支，必须把该
+  campaign 作废，并在修复后以 commissioning/diagnostic sweep 覆盖尚未证明的剩余槽。本次冻结范围固定为旧
+  formal-v1 第 `8..20` 槽，不重复前 7 槽，也不扩大到额外题目、round、validation 或 holdout。
 - 修改 `mydev/` 后遵守就近 `AGENTS.md`：重型命令走根锁/看门狗，完成代码后 `just fmt`，对受影响 crate 运行
   相称 `just test -p ...`/`just fix -p ...` 和必要生成物检查；不为“更放心”扩大到全 workspace。
 - 独立验收聚焦分类证据、触发/豁免/恢复、零误抑制、关闭/回滚、20-result 分母、三类重跑、预算/资源和最终决策；
@@ -254,22 +263,35 @@
   paid run、原生 trace/schema-v2 投影、预算结算、私有 refined 分类与 body-free 发布。运行链有效且任务 reward `0`
   作为任务失败保留、不重跑；7 个可靠 main attempts、0 Guardian、费用 `0.102113 USD`，raw/refined harmful 均为
   `0`，无害门全通过。Plan 058 跨 identity 累计费用为 `1.188713 USD`。
+- `plan058-direction1-c2-formal-v1` 在冻结十题 preflight `10/10` 后完成前 7 个逻辑槽；第 8 槽
+  `sanitize-git-repo` 再次触发冻结的第 4 次 Guardian 请求上限，adapter 把 agent 非零退出转成 `AdapterError`，
+  Harbor 因而跳过 verifier。该 campaign 已以 `terminal_bench_infrastructure_failed` 作废并 body-free 发布：7/20
+  只保留为私有诊断历史，不进入正式分母；96 个可靠 upstream attempts、`1.749536 USD` 已结算，Plan 058 累计
+  费用为 `2.938249 USD`。
+- 对 formal-v1 的复盘确认 commissioning-v2 只覆盖 7 main/0 Guardian 的普通路径，把 `1/1` 称为“彻底打通”是
+  commissioning 验收判断错误；commissioning-v1 已暴露但未修复的 Guardian-limit 分支不应通过换题绕过。同时确认
+  runner 将 `CODEX_HOME` 放在 `/tmp`，触发当前 release RONDO 拒绝创建 `codex-linux-sandbox` arg0 helper，导致普通
+  workspace-write 调用在执行前失败。两项均按本地设施缺陷修复，不改 Guardian、审批或 sandbox 策略。
 - 本 ExecPlan 已按用户要求保留必要行为、实验、预算和资源边界，把具体检测信号、模块、反馈形式、状态所有者、
   runner 拆分和数值收益门留给执行者基于 Phase A 证据自主冻结。
 - 本计划未运行本地模型、训练、完整数据集、Codex 对照、validation、holdout、CI 或 PR。
 
 ### 当前工作
 
-Phase A、Phase B 与 Phase C 首个完整 commissioning 已完成。commissioning-v1 作为本地设施 invalid 关闭，v2 已
-形成可信 `1/1` 完整闭环；两者费用和工件隔离但共同计入 task budget。正在提交 v2 闭环并冻结实际正式被测源码，随后
-从该 clean commit 重新构建/复验 formal runtime，再创建与 commissioning 完全隔离的 10 题 × 2 round 正式 identity。
+formal-v1 已因本地 runner 缺陷作废并关闭；旧 formal 的 7 个完整槽只作诊断历史。Guardian-limit 后继续 verifier/
+真实 exit receipt 与非 `/tmp` CODEX_HOME 两项 runner 问题已窄修；独立 `diagnostic` mode 将绝对槽位范围、原 formal
+顺序、唯一 preflight task 集、失败槽新 identity 续扫和 `diagnostic_complete` 终态纳入既有 identity/state/预算/发布
+合同。Python 定向回归 `131/131`、`py_compile` 与 `git diff --check` 通过。下一步提交该修复批次，以全新 diagnostic
+identity 只扫剩余 13 槽；全部完整后统一提交、重建、冻结，再以全新 formal identity 从 1/20 开始一次干净正式运行。
 
 ### 本任务剩余步骤
 
-1. Phase C：打通构建、Docker 与至少一个完整真实 commissioning；修复范围内设施问题后提交并冻结正式
-   source/binary/config/evaluation identity。
-2. Phase D：以干净新 identity 串行完成固定 10 题 × 2 round 的 20 个正式逻辑结果，按三类规则处理失败与重试。
-3. Phase E：比较 raw/refined C2、耗时、任务结果和正确性保护，作出保留/调整/撤销决定，完成文档、精确清理、
+1. Phase C：完成 runner 窄修与定向回归；用 commissioning/diagnostic identity 串行扫旧 formal-v1 第 8–20 槽，
+   逐槽按三类规则处理，直到 13/13 运行链完整。
+2. Phase C 冻结：diagnostic sweep 完整后统一提交，从该 clean source 重新构建/复验 binary/manifest，冻结正式配置。
+3. Phase D：以全新干净 identity 从 1/20 串行完成固定 10 题 × 2 round 的 20 个正式逻辑结果；不得复用旧 formal
+   或 diagnostic 结果。
+4. Phase E：比较 raw/refined C2、耗时、任务结果和正确性保护，作出保留/调整/撤销决定，完成文档、精确清理、
    聚焦独立验收、整改和工作树提交。
 
 ### 阻塞项
@@ -297,6 +319,9 @@ Phase A、Phase B 与 Phase C 首个完整 commissioning 已完成。commissioni
 - commissioning-v2：preflight `1/1`，完整 logical result `1/1`，7 个可靠 upstream attempts、`0.102113 USD`；
   Terminal-Bench outcome `completed`、task fail/reward `0` 作为有效结果，raw/refined harmful `0`，无害门全通过，
   Docker/VHDX 增长 `0`。累计 task budget 已结算 `1.188713 USD`，reserved `0`。
+- formal-v1：preflight `10/10`，完成 7/20 后在第 8 槽发生本地设施故障，已作废并发布 body-free invalid；
+  96 upstream attempts、`1.749536 USD`，最终 Docker `11.5GB`、容器/卷 `0`、VHDX 增长 `0`，Windows C: 余量
+  `191108644864` bytes。累计 task budget `2.938249 USD`，reserved `0`。
 - 未运行：正式 20-result、正式比较/决策、本地模型、训练、完整数据集、Codex 对照、validation、holdout、CI 或 PR。
 
 ### 主工作区 ignored 资产
@@ -350,5 +375,6 @@ Plan 058 worktree，但执行阶段以下 I/O 会由 worktree 中的受控命令
 | 015 | Plan 058 在既有低层原语上新增专用 campaign state/CLI，冻结 7.554 USD 的可靠 usage 最坏请求 reservation；未知 usage 仍按 1 USD/上游 attempt 结算 | Plan 056 orchestration 的固定 identity 与重试合同不适合 058，但通用 runner/预算/投影均可直接复用；请求前按冻结价格与 usage envelope 预留才能保证 50 USD 硬上限 | eval、预算、恢复 | 已采纳 |
 | 016 | 初始化恢复先直接验证冻结 lock、manifest 与全部调用输入；仅未越过初始化窗口的 identity 可修复 pointer/state/budget | 防止错误恢复参数或已退役 campaign 在失败前重绑活动指针、重开预算 | identity、恢复 | 已采纳 |
 | 017 | `23567b6` 构建因与 Plan 054 模型生命周期重叠而失效；保留事件证据，确认 Plan 054 v2 终态后 exact cleanup 并从新提交完整重建 | 本侧虽使用 canonical lock/watchdog，但跨任务互斥事实已被破坏，不能把成功字节冒充合规资源证据；仅瞬时拿到锁不足以证明模型窗口已结束 | 构建、资源、commissioning | 已采纳 |
-| 018 | commissioning-v1 的 Guardian 上限终态按运行链不完整的 invalid 结算；不改 Guardian/审批，以 formal-v6 中 0 Guardian 且覆盖 C2 的 `openssl-selfsigned-cert` 新身份重做 commissioning | 第四次审批请求被正确硬拒绝后 verifier 未运行，不能伪装为有效 reward 0；换代表题可继续验证 runner 闭环而不扭曲安全语义或原地补位 | commissioning、预算、失败分类 | 已采纳 |
+| 018 | commissioning-v1 的 Guardian 上限终态按运行链不完整的 invalid 结算；不改 Guardian/审批，以 formal-v6 中 0 Guardian 且覆盖 C2 的 `openssl-selfsigned-cert` 新身份重做 commissioning | 第四次审批请求被正确硬拒绝后 verifier 未运行，不能伪装为有效 reward 0；但换题只证明普通链路，不能替代已暴露异常分支的修复和验收 | commissioning、预算、失败分类 | 部分撤销；由 020 取代冻结资格 |
 | 019 | commissioning-v2 的完整 reward 0 作为有效任务失败保留；以其闭环提交冻结正式源码并重新构建，不复用 commissioning runtime identity | 运行链、verifier、投影、结算和发布完整，符合“有效失败不重跑”；正式必须绑定 commissioning 后的新 clean source/binary/identity | commissioning、正式冻结 | 已采纳 |
+| 020 | formal-v1 永久作废；修复 runner 后用 commissioning/diagnostic sweep 只覆盖旧 formal 第 8–20 槽（13 槽），13/13 完整后统一冻结，再以全新 formal 从 1/20 只跑一次 | commissioning-v2 的 7 main/0 Guardian 只证明普通路径；commissioning-v1 已暴露的 Guardian-limit 分支被错误绕过，formal-v1 又确认 adapter 跳过 verifier 与 `/tmp` CODEX_HOME helper 两项本地设施缺陷。剩余槽先扫尾可尽早暴露问题且避免反复重跑前 7 题 | commissioning、runner、冻结、正式分母 | 用户确认，硬合同 |

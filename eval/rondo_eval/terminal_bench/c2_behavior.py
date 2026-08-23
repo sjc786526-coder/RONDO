@@ -1,4 +1,4 @@
-"""Plan 058 C2 commissioning/formal campaign contract.
+"""Plan 058 C2 commissioning/diagnostic/formal campaign contract.
 
 This module owns only Plan 058 identity, crash-safe logical-slot state, the
 typed whole-slot transport retry decision, and body-free publication.  Docker,
@@ -75,6 +75,8 @@ PLAN058_GUARDIAN_EFFORT = "low"
 PLAN058_FORMAL_TASKS = 10
 PLAN058_FORMAL_ROUNDS = 2
 PLAN058_FORMAL_SLOTS = 20
+PLAN058_DIAGNOSTIC_SLOT_MIN = 8
+PLAN058_DIAGNOSTIC_SLOT_MAX = 20
 PLAN058_OBSERVATION_SCHEMA_VERSION = 2
 PLAN058_PAID_ACTION = "plan-058-authorized-paid-run"
 PLAN058_REFINED_BASELINE = 1
@@ -210,6 +212,18 @@ class C2BehaviorIdentity:
         if len(matches) != 1:
             raise C2BehaviorError("Plan 058 task is not uniquely frozen")
         return matches[0]
+
+    @property
+    def preflight_tasks(self) -> tuple[FrozenTask, ...]:
+        scheduled = {slot.task_id for slot in self.slots}
+        return tuple(task for task in self.tasks if task.task_id in scheduled)
+
+    @property
+    def diagnostic_slot_range(self) -> tuple[int, int] | None:
+        value = self.value.get("diagnostic_slot_range")
+        if value is None:
+            return None
+        return int(value["start"]), int(value["end"])
 
     def slot(self, slot_id: str) -> C2BehaviorSlot:
         matches = tuple(slot for slot in self.slots if slot.slot_id == slot_id)
@@ -352,9 +366,9 @@ class C2BehaviorState:
         self._persist()
 
     def fail_preflight(self, task_id: str, *, reason: str) -> None:
-        """Retry commissioning setup faults; invalidate a frozen formal identity."""
+        """Retry setup faults outside formal; formal identity fails closed."""
 
-        if self.identity.campaign_mode == "commissioning":
+        if self.identity.campaign_mode in {"commissioning", "diagnostic"}:
             self.preflight_retry(task_id, reason=reason)
             return
         row = self._preflight_row(task_id)
@@ -642,6 +656,55 @@ def freeze_slots(
     return tuple(slots)
 
 
+def freeze_diagnostic_slots(
+    tasks: Iterable[FrozenTask],
+    *,
+    run_id_date: str,
+    run_id_sequence_base: int,
+    slot_start: int,
+    slot_end: int,
+) -> tuple[C2BehaviorSlot, ...]:
+    if (
+        isinstance(slot_start, bool)
+        or not isinstance(slot_start, int)
+        or isinstance(slot_end, bool)
+        or not isinstance(slot_end, int)
+        or not PLAN058_DIAGNOSTIC_SLOT_MIN
+        <= slot_start
+        <= slot_end
+        <= PLAN058_DIAGNOSTIC_SLOT_MAX
+    ):
+        raise C2BehaviorError("Plan 058 diagnostic slot range is invalid")
+    formal = freeze_slots(
+        tasks,
+        run_id_date=run_id_date,
+        run_id_sequence_base=run_id_sequence_base,
+        rounds=PLAN058_FORMAL_ROUNDS,
+    )
+    if len(formal) != PLAN058_FORMAL_SLOTS:
+        raise C2BehaviorError("Plan 058 diagnostic formal order drifted")
+    selected = formal[slot_start - 1 : slot_end]
+    slots = tuple(
+        C2BehaviorSlot(
+            slot_id=slot.slot_id,
+            logical_run_id=(
+                f"{run_id_date}-{run_id_sequence_base + offset:09d}-"
+                "tb-rondo-plan058"
+            ),
+            round=slot.round,
+            task_index=slot.task_index,
+            task_id=slot.task_id,
+        )
+        for offset, slot in enumerate(selected)
+    )
+    for slot in slots:
+        slot.validate(
+            task_count=PLAN058_FORMAL_TASKS,
+            rounds=PLAN058_FORMAL_ROUNDS,
+        )
+    return slots
+
+
 def _load_v28_reference(paths: RepoPaths) -> CampaignIdentity:
     raw = _read_regular(paths.worktree_root / PLAN058_V28_RELPATH)
     if hashlib.sha256(raw).hexdigest() != PLAN058_V28_SHA256:
@@ -667,6 +730,8 @@ def initialize_identity(
     run_id_date: str,
     run_id_sequence_base: int,
     commissioning_task_id: str | None = None,
+    diagnostic_slot_start: int | None = None,
+    diagnostic_slot_end: int | None = None,
 ) -> C2BehaviorIdentity:
     """Create or exactly resume one initialization under its campaign lease."""
 
@@ -696,6 +761,8 @@ def initialize_identity(
             run_id_date=run_id_date,
             run_id_sequence_base=run_id_sequence_base,
             commissioning_task_id=commissioning_task_id,
+            diagnostic_slot_start=diagnostic_slot_start,
+            diagnostic_slot_end=diagnostic_slot_end,
         )
 
 
@@ -711,6 +778,8 @@ def _initialize_identity_locked(
     run_id_date: str,
     run_id_sequence_base: int,
     commissioning_task_id: str | None = None,
+    diagnostic_slot_start: int | None = None,
+    diagnostic_slot_end: int | None = None,
 ) -> C2BehaviorIdentity:
     if (
         not campaign_id.startswith(_CAMPAIGN_PREFIX)
@@ -719,7 +788,7 @@ def _initialize_identity_locked(
         or not batch_id.startswith(campaign_id)
         or _SAFE_ID.fullmatch(result_namespace) is None
         or result_namespace != campaign_id
-        or campaign_mode not in {"commissioning", "formal"}
+        or campaign_mode not in {"commissioning", "diagnostic", "formal"}
     ):
         raise C2BehaviorError("Plan 058 initialization identity is invalid")
     if public_result_path.is_absolute() or ".." in public_result_path.parts:
@@ -746,6 +815,8 @@ def _initialize_identity_locked(
             run_id_date=run_id_date,
             run_id_sequence_base=run_id_sequence_base,
             commissioning_task_id=commissioning_task_id,
+            diagnostic_slot_start=diagnostic_slot_start,
+            diagnostic_slot_end=diagnostic_slot_end,
         )
     if pointer_path.exists() or pointer_path.is_symlink():
         pointer = _read_json(pointer_path)
@@ -761,11 +832,26 @@ def _initialize_identity_locked(
     if len(all_tasks) != PLAN058_FORMAL_TASKS:
         raise C2BehaviorError("Plan 058 v28 task denominator drifted")
     if campaign_mode == "formal":
+        if (
+            commissioning_task_id is not None
+            or diagnostic_slot_start is not None
+            or diagnostic_slot_end is not None
+        ):
+            raise C2BehaviorError("Plan 058 formal identity cannot select a subset")
+        tasks = all_tasks
+        rounds = PLAN058_FORMAL_ROUNDS
+    elif campaign_mode == "diagnostic":
         if commissioning_task_id is not None:
-            raise C2BehaviorError("Plan 058 formal identity cannot select one task")
+            raise C2BehaviorError("Plan 058 diagnostic identity cannot select one task")
+        if diagnostic_slot_start is None or diagnostic_slot_end is None:
+            raise C2BehaviorError("Plan 058 diagnostic slot range is required")
         tasks = all_tasks
         rounds = PLAN058_FORMAL_ROUNDS
     else:
+        if diagnostic_slot_start is not None or diagnostic_slot_end is not None:
+            raise C2BehaviorError(
+                "Plan 058 commissioning identity cannot select diagnostic slots"
+            )
         matches = tuple(task for task in all_tasks if task.task_id == commissioning_task_id)
         if len(matches) != 1:
             raise C2BehaviorError("Plan 058 commissioning task is not frozen in v28")
@@ -815,11 +901,21 @@ def _initialize_identity_locked(
     campaign_cap = PLAN058_TASK_CAP_USD - prior
     if campaign_cap < request_reservation:
         raise C2BehaviorError("Plan 058 budget cannot reserve one reliable request")
-    slots = freeze_slots(
-        tasks,
-        run_id_date=run_id_date,
-        run_id_sequence_base=run_id_sequence_base,
-        rounds=rounds,
+    slots = (
+        freeze_diagnostic_slots(
+            tasks,
+            run_id_date=run_id_date,
+            run_id_sequence_base=run_id_sequence_base,
+            slot_start=diagnostic_slot_start,
+            slot_end=diagnostic_slot_end,
+        )
+        if campaign_mode == "diagnostic"
+        else freeze_slots(
+            tasks,
+            run_id_date=run_id_date,
+            run_id_sequence_base=run_id_sequence_base,
+            rounds=rounds,
+        )
     )
     value: dict[str, Any] = {
         "schema_version": PLAN058_SCHEMA_VERSION,
@@ -898,6 +994,11 @@ def _initialize_identity_locked(
         "tasks": [asdict(task) for task in tasks],
         "slots": [asdict(slot) for slot in slots],
     }
+    if campaign_mode == "diagnostic":
+        value["diagnostic_slot_range"] = {
+            "start": diagnostic_slot_start,
+            "end": diagnostic_slot_end,
+        }
     _atomic_json(lock_path, value, mode=0o644)
     raw_lock = _read_regular(lock_path)
     digest = hashlib.sha256(raw_lock).hexdigest()
@@ -932,7 +1033,7 @@ def _initial_state(identity: C2BehaviorIdentity) -> dict[str, Any]:
                 "receipt_sha256": None,
                 "last_error": None,
             }
-            for task in identity.tasks
+            for task in identity.preflight_tasks
         ],
         "slots": [
             {
@@ -966,6 +1067,8 @@ def _resume_identity_initialization(
     run_id_date: str,
     run_id_sequence_base: int,
     commissioning_task_id: str | None,
+    diagnostic_slot_start: int | None,
+    diagnostic_slot_end: int | None,
 ) -> C2BehaviorIdentity:
     lock_path = paths.worktree_root / lock_relpath
     if lock_path.is_symlink() or not lock_path.is_file():
@@ -994,12 +1097,28 @@ def _resume_identity_initialization(
     except (OSError, ValueError) as exc:
         raise C2BehaviorError("Plan 058 recovery manifest is unavailable") from exc
     raw_manifest = _read_regular(runtime_manifest, max_bytes=2 * 1024 * 1024)
-    expected_slots = freeze_slots(
-        identity.tasks,
-        run_id_date=run_id_date,
-        run_id_sequence_base=run_id_sequence_base,
-        rounds=int(identity.value["rounds"]),
-    )
+    if identity.campaign_mode == "diagnostic":
+        if diagnostic_slot_start is None or diagnostic_slot_end is None:
+            raise C2BehaviorError("Plan 058 diagnostic recovery range is missing")
+        expected_slots = freeze_diagnostic_slots(
+            identity.tasks,
+            run_id_date=run_id_date,
+            run_id_sequence_base=run_id_sequence_base,
+            slot_start=diagnostic_slot_start,
+            slot_end=diagnostic_slot_end,
+        )
+        expected_diagnostic_range: Mapping[str, int] | None = {
+            "start": diagnostic_slot_start,
+            "end": diagnostic_slot_end,
+        }
+    else:
+        expected_slots = freeze_slots(
+            identity.tasks,
+            run_id_date=run_id_date,
+            run_id_sequence_base=run_id_sequence_base,
+            rounds=int(identity.value["rounds"]),
+        )
+        expected_diagnostic_range = None
     expected_commissioning_task = (
         identity.tasks[0].task_id if identity.campaign_mode == "commissioning" else None
     )
@@ -1015,6 +1134,12 @@ def _resume_identity_initialization(
         != identity.value["binary"]["manifest_sha256"]
         or expected_slots != identity.slots
         or commissioning_task_id != expected_commissioning_task
+        or identity.value.get("diagnostic_slot_range")
+        != expected_diagnostic_range
+        or (
+            identity.campaign_mode != "diagnostic"
+            and (diagnostic_slot_start is not None or diagnostic_slot_end is not None)
+        )
     ):
         raise C2BehaviorError("Plan 058 recovery inputs differ from frozen identity")
     _require_open_initialization_recovery(
@@ -1210,6 +1335,8 @@ def validate_identity(identity: C2BehaviorIdentity, *, paths: RepoPaths) -> None
         "source", "binary", "provider", "product_variable", "seccomp", "budget",
         "observation", "decision_contract", "tasks", "slots",
     }
+    if isinstance(value, Mapping) and value.get("campaign_mode") == "diagnostic":
+        required.add("diagnostic_slot_range")
     if not isinstance(value, Mapping) or set(value) != required:
         raise C2BehaviorError("Plan 058 identity schema is invalid")
     if (
@@ -1218,7 +1345,7 @@ def validate_identity(identity: C2BehaviorIdentity, *, paths: RepoPaths) -> None
         or not str(value["campaign_id"]).startswith(_CAMPAIGN_PREFIX)
         or _SAFE_ID.fullmatch(str(value["campaign_id"])) is None
         or _SAFE_ID.fullmatch(str(value["batch_id"])) is None
-        or value["campaign_mode"] not in {"commissioning", "formal"}
+        or value["campaign_mode"] not in {"commissioning", "diagnostic", "formal"}
         or _COMMIT.fullmatch(str(value["harness_commit"])) is None
         or value["result_namespace"] != value["campaign_id"]
         or value["public_result_path"]
@@ -1287,17 +1414,60 @@ def validate_identity(identity: C2BehaviorIdentity, *, paths: RepoPaths) -> None
         "valid_failures_are_results": True,
     }:
         raise C2BehaviorError("Plan 058 decision contract drifted")
-    formal = identity.campaign_mode == "formal"
-    expected_task_count = PLAN058_FORMAL_TASKS if formal else 1
-    expected_rounds = PLAN058_FORMAL_ROUNDS if formal else 1
-    if len(identity.tasks) != expected_task_count or len(identity.slots) != expected_task_count * expected_rounds or value["rounds"] != expected_rounds:
+    full_denominator = identity.campaign_mode in {"diagnostic", "formal"}
+    expected_task_count = PLAN058_FORMAL_TASKS if full_denominator else 1
+    expected_rounds = PLAN058_FORMAL_ROUNDS if full_denominator else 1
+    if identity.campaign_mode == "diagnostic":
+        diagnostic_range = value["diagnostic_slot_range"]
+        if (
+            not isinstance(diagnostic_range, Mapping)
+            or set(diagnostic_range) != {"start", "end"}
+            or isinstance(diagnostic_range["start"], bool)
+            or not isinstance(diagnostic_range["start"], int)
+            or isinstance(diagnostic_range["end"], bool)
+            or not isinstance(diagnostic_range["end"], int)
+            or not PLAN058_DIAGNOSTIC_SLOT_MIN
+            <= diagnostic_range["start"]
+            <= diagnostic_range["end"]
+            <= PLAN058_DIAGNOSTIC_SLOT_MAX
+        ):
+            raise C2BehaviorError("Plan 058 diagnostic slot range drifted")
+        expected_positions = range(
+            diagnostic_range["start"], diagnostic_range["end"] + 1
+        )
+        expected_slot_count = diagnostic_range["end"] - diagnostic_range["start"] + 1
+    else:
+        expected_positions = range(1, expected_task_count * expected_rounds + 1)
+        expected_slot_count = expected_task_count * expected_rounds
+    if (
+        len(identity.tasks) != expected_task_count
+        or len(identity.slots) != expected_slot_count
+        or value["rounds"] != expected_rounds
+    ):
         raise C2BehaviorError("Plan 058 campaign denominator drifted")
+    reference_tasks = tuple(identity.reference.catalog.tasks)
+    if (
+        full_denominator
+        and identity.tasks != reference_tasks
+        or not full_denominator
+        and identity.tasks[0] not in reference_tasks
+    ):
+        raise C2BehaviorError("Plan 058 campaign tasks drifted from v28")
     expected_order = [
-        (round_number, index, task.task_id)
-        for round_number in range(1, expected_rounds + 1)
-        for index, task in enumerate(identity.tasks, start=1)
+        (
+            f"r{(position - 1) // expected_task_count + 1:02d}-"
+            f"t{(position - 1) % expected_task_count + 1:02d}-"
+            f"{identity.tasks[(position - 1) % expected_task_count].slug}",
+            (position - 1) // expected_task_count + 1,
+            (position - 1) % expected_task_count + 1,
+            identity.tasks[(position - 1) % expected_task_count].task_id,
+        )
+        for position in expected_positions
     ]
-    if [(slot.round, slot.task_index, slot.task_id) for slot in identity.slots] != expected_order:
+    if [
+        (slot.slot_id, slot.round, slot.task_index, slot.task_id)
+        for slot in identity.slots
+    ] != expected_order:
         raise C2BehaviorError("Plan 058 slot order drifted")
     if len({slot.slot_id for slot in identity.slots}) != len(identity.slots) or len({slot.logical_run_id for slot in identity.slots}) != len(identity.slots):
         raise C2BehaviorError("Plan 058 slot identities are duplicated")
@@ -1572,11 +1742,11 @@ def validate_state(value: object, *, identity: C2BehaviorIdentity) -> None:
         or value["campaign_lock_sha256"] != identity.lock_sha256
         or value["status"] not in {"running", "ready_to_finalize", "invalid", "finalized"}
         or not isinstance(value["paid_boundary"], bool)
-        or len(value["preflight"]) != len(identity.tasks)
+        or len(value["preflight"]) != len(identity.preflight_tasks)
         or len(value["slots"]) != len(identity.slots)
     ):
         raise C2BehaviorError("Plan 058 state identity is invalid")
-    for expected, row in zip(identity.tasks, value["preflight"], strict=True):
+    for expected, row in zip(identity.preflight_tasks, value["preflight"], strict=True):
         if (
             not isinstance(row, dict)
             or set(row) != {"task_id", "status", "attempts", "receipt_sha256", "last_error"}
@@ -1664,7 +1834,8 @@ def validate_state(value: object, *, identity: C2BehaviorIdentity) -> None:
     if value["status"] == "invalid" and not value["invalid_reason"]:
         raise C2BehaviorError("Plan 058 invalid state lacks a reason")
     if value["status"] == "finalized" and value["outcome"] not in {
-        "commissioning_complete", "retain", "withdraw", "campaign_invalid"
+        "commissioning_complete", "diagnostic_complete", "retain", "withdraw",
+        "campaign_invalid",
     }:
         raise C2BehaviorError("Plan 058 final outcome is invalid")
     if (
@@ -1694,7 +1865,7 @@ def build_slot_record(
 ) -> dict[str, Any]:
     """Bind the one published physical attempt to one logical result."""
 
-    from .bounded_observation import _validate_budget_run, _validate_source_binding
+    from .bounded_observation import _validate_budget_run
 
     safe_observation = validate_task_observation(observation)
     try:
@@ -1706,7 +1877,7 @@ def build_slot_record(
     _validate_budget_run(budget_run, observation=safe_observation)
     if not isinstance(docker_receipt, Mapping) or docker_receipt.get("cleanup") != "verified_empty":
         raise C2BehaviorError("Plan 058 Docker receipt is incomplete")
-    safe_sources = _validate_source_binding(sources, slot=slot)  # type: ignore[arg-type]
+    safe_sources = _validate_c2_source_binding(sources, slot=slot)
     safe_logical_budget = validate_logical_budget_summary(
         logical_budget, logical_run_id=slot.logical_run_id
     )
@@ -1720,6 +1891,27 @@ def build_slot_record(
         )
     ):
         raise C2BehaviorError("Plan 058 published attempt sequence is invalid")
+    execution = safe_sources["agent_execution"]
+    agent_exit = execution["exit_code"]
+    guardian_limit_stop = budget_run.get("stop_reason") == (
+        "guardian_logical_request_limit_exceeded"
+    )
+    if agent_exit == 0:
+        if (
+            outcome is not RunOutcome.COMPLETED
+            or guardian_limit_stop
+            or execution["tee_exit_code"] != 0
+            or execution["execution_id"] != attempt_run_id
+        ):
+            raise C2BehaviorError("Plan 058 successful agent exit projection is invalid")
+    elif (
+        agent_exit != 1
+        or outcome is not RunOutcome.AGENT_FAILED
+        or not guardian_limit_stop
+        or execution["tee_exit_code"] != 0
+        or execution["execution_id"] != attempt_run_id
+    ):
+        raise C2BehaviorError("Plan 058 typed agent failure projection is invalid")
     return {
         "schema_version": 1,
         "kind": PLAN058_KIND + "_slot",
@@ -1754,7 +1946,7 @@ def validate_slot_record(
     identity: C2BehaviorIdentity,
     slot: C2BehaviorSlot,
 ) -> dict[str, Any]:
-    from .bounded_observation import _validate_budget_run, _validate_source_binding
+    from .bounded_observation import _validate_budget_run
 
     keys = {
         "schema_version", "kind", "campaign_id", "campaign_lock_sha256", "slot",
@@ -1806,8 +1998,128 @@ def validate_slot_record(
     )
     if not isinstance(value["docker"], dict) or value["docker"].get("cleanup") != "verified_empty":
         raise C2BehaviorError("Plan 058 Docker record is invalid")
-    _validate_source_binding(value["sources"], slot=slot)  # type: ignore[arg-type]
+    sources = _validate_c2_source_binding(value["sources"], slot=slot)
+    execution = sources["agent_execution"]
+    agent_exit = execution["exit_code"]
+    guardian_limit_stop = value["budget"].get("stop_reason") == (
+        "guardian_logical_request_limit_exceeded"
+    )
+    if agent_exit == 0:
+        if (
+            outcome is not RunOutcome.COMPLETED
+            or guardian_limit_stop
+            or execution["tee_exit_code"] != 0
+            or execution["execution_id"] != value["published_attempt_run_id"]
+        ):
+            raise C2BehaviorError("Plan 058 successful agent exit record is invalid")
+    elif (
+        agent_exit != 1
+        or outcome is not RunOutcome.AGENT_FAILED
+        or not guardian_limit_stop
+        or execution["tee_exit_code"] != 0
+        or execution["execution_id"] != value["published_attempt_run_id"]
+    ):
+        raise C2BehaviorError("Plan 058 typed agent failure record is invalid")
     return json.loads(json.dumps(value))
+
+
+def _validate_c2_source_binding(
+    value: object, *, slot: C2BehaviorSlot
+) -> dict[str, Any]:
+    """Extend the shared source binding with Plan 058's true agent exit."""
+
+    from .bounded_observation import _validate_source_binding
+
+    if not isinstance(value, Mapping) or set(value) != {
+        "terminal_bench",
+        "api_metadata",
+        "native_trace",
+        "agent_execution",
+        "guardian_evidence",
+    }:
+        raise C2BehaviorError("Plan 058 private source binding is invalid")
+    base = {
+        key: value[key]
+        for key in ("terminal_bench", "api_metadata", "native_trace")
+    }
+    safe_base = _validate_source_binding(base, slot=slot)  # type: ignore[arg-type]
+    execution = value["agent_execution"]
+    if not isinstance(execution, Mapping) or set(execution) != {
+        "path",
+        "sha256",
+        "execution_id",
+        "exit_code",
+        "tee_exit_code",
+    }:
+        raise C2BehaviorError("Plan 058 agent execution source is invalid")
+    path = execution["path"]
+    exit_code = execution["exit_code"]
+    tee_exit_code = execution["tee_exit_code"]
+    execution_id = execution["execution_id"]
+    terminal_path = Path(safe_base["terminal_bench"]["path"])
+    expected_receipt = (
+        terminal_path.parent / "agent" / "rondo-agent-execution.json"
+    ).as_posix()
+    if (
+        not isinstance(path, str)
+        or path != expected_receipt
+        or Path(path).is_absolute()
+        or ".." in Path(path).parts
+        or _SHA256.fullmatch(str(execution["sha256"])) is None
+        or not isinstance(execution_id, str)
+        or not execution_id
+        or isinstance(exit_code, bool)
+        or not isinstance(exit_code, int)
+        or not 0 <= exit_code <= 255
+        or isinstance(tee_exit_code, bool)
+        or not isinstance(tee_exit_code, int)
+        or not 0 <= tee_exit_code <= 255
+    ):
+        raise C2BehaviorError("Plan 058 agent execution source identity is invalid")
+    guardian_evidence = value["guardian_evidence"]
+    if not isinstance(guardian_evidence, list) or len(guardian_evidence) > 4:
+        raise C2BehaviorError("Plan 058 Guardian evidence source is invalid")
+    safe_guardian: list[dict[str, str]] = []
+    seen_paths: set[str] = set()
+    for binding in guardian_evidence:
+        if not isinstance(binding, Mapping) or set(binding) != {
+            "e_final_path",
+            "e_final_sha256",
+            "meta_path",
+            "meta_sha256",
+        }:
+            raise C2BehaviorError("Plan 058 Guardian evidence source is invalid")
+        e_final_path = binding["e_final_path"]
+        meta_path = binding["meta_path"]
+        if (
+            not isinstance(e_final_path, str)
+            or not isinstance(meta_path, str)
+            or Path(e_final_path).parent != Path(meta_path).parent
+            or Path(e_final_path).name != "E_final.json"
+            or Path(meta_path).name != "meta.json"
+            or Path(e_final_path).parent.parent.name != "guardian-evidence"
+            or not Path(e_final_path).is_relative_to(terminal_path.parent / "agent")
+            or Path(e_final_path).is_absolute()
+            or ".." in Path(e_final_path).parts
+            or ".." in Path(meta_path).parts
+            or _SHA256.fullmatch(str(binding["e_final_sha256"])) is None
+            or _SHA256.fullmatch(str(binding["meta_sha256"])) is None
+            or e_final_path in seen_paths
+        ):
+            raise C2BehaviorError("Plan 058 Guardian evidence source identity is invalid")
+        seen_paths.add(e_final_path)
+        safe_guardian.append({key: str(binding[key]) for key in binding})
+    return {
+        **safe_base,
+        "agent_execution": {
+            "path": path,
+            "sha256": str(execution["sha256"]),
+            "execution_id": execution_id,
+            "exit_code": exit_code,
+            "tee_exit_code": tee_exit_code,
+        },
+        "guardian_evidence": safe_guardian,
+    }
 
 
 def load_slot_records(
@@ -1969,6 +2281,8 @@ def public_result(
         outcome = "campaign_invalid"
     elif identity.campaign_mode == "commissioning":
         outcome = "commissioning_complete"
+    elif identity.campaign_mode == "diagnostic":
+        outcome = "diagnostic_complete"
     else:
         assert refined is not None
         outcome = (
@@ -1990,8 +2304,17 @@ def public_result(
             "model": PLAN058_MODEL,
             "main_effort": PLAN058_MAIN_EFFORT,
             "guardian_effort": PLAN058_GUARDIAN_EFFORT,
-            "tasks": len(identity.tasks),
+            "tasks": len(identity.preflight_tasks),
             "rounds": int(identity.value["rounds"]),
+            **(
+                {
+                    "diagnostic_slot_range": identity.value[
+                        "diagnostic_slot_range"
+                    ]
+                }
+                if identity.campaign_mode == "diagnostic"
+                else {}
+            ),
             "logical_denominator": len(identity.slots),
             "logical_results_published": len(values),
             "source_validated_slots": len(values),

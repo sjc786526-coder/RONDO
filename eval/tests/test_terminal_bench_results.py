@@ -507,6 +507,31 @@ class TerminalBenchResultTests(_ResultFixture, unittest.TestCase):
         parsed = parse_single_task_result(self.jobs, host_returncode=0)
         self.assertEqual((parsed.outcome, parsed.reward), (RunOutcome.AGENT_FAILED, 0.0))
 
+    def test_plan058_opt_in_preserves_agent_failure_verifier_reward(self) -> None:
+        self.job_result["stats"]["n_completed_trials"] = 0
+        self.job_result["stats"]["n_errored_trials"] = 1
+        self.trial_result["exception_info"] = {
+            "exception_type": "NonZeroAgentExitCodeError"
+        }
+        self.trial_result["verifier_result"] = {"rewards": {"reward": 1.0}}
+        self._write_results()
+
+        historical = parse_single_task_result(self.jobs, host_returncode=0)
+        plan058 = parse_single_task_result(
+            self.jobs,
+            host_returncode=0,
+            preserve_agent_failure_verifier_reward=True,
+        )
+
+        self.assertEqual(
+            (historical.outcome, historical.task_outcome, historical.reward),
+            (RunOutcome.AGENT_FAILED, "fail", 0.0),
+        )
+        self.assertEqual(
+            (plan058.outcome, plan058.task_outcome, plan058.reward),
+            (RunOutcome.AGENT_FAILED, "pass", 1.0),
+        )
+
     def test_early_agent_error_accepts_optional_harbor_fields(self) -> None:
         self.job_result["stats"]["n_completed_trials"] = 0
         self.job_result["stats"]["n_errored_trials"] = 1

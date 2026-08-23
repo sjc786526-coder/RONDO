@@ -34,6 +34,7 @@ from .baseline_cli import (
     _require_held_campaign_lease,
     _sample_storage,
 )
+from .adapters import AGENT_EXECUTION_RECEIPT_FILENAME
 from .bounded_observation import (
     BoundedObservationError,
     _atomic_json,
@@ -46,6 +47,7 @@ from .bounded_observation_cli import (
     _meaningful_request_ids,
     _revalidate_record_sources,
     _source_binding,
+    _source_file_sha256,
     _storage_projection,
     _validate_guardian_binding,
 )
@@ -76,7 +78,7 @@ from .c2_behavior import (
     validate_slot_record,
     verify_task_budget,
 )
-from .live import run_budgeted_terminal_bench_core
+from .live import load_guardian_evidence_bundle, run_budgeted_terminal_bench_core
 from .materialize import validate_frozen_task_source
 from .pair import (
     load_historical_pair_identity,
@@ -123,13 +125,17 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--campaign-id")
     parser.add_argument("--batch-id")
-    parser.add_argument("--campaign-mode", choices=("commissioning", "formal"))
+    parser.add_argument(
+        "--campaign-mode", choices=("commissioning", "diagnostic", "formal")
+    )
     parser.add_argument("--result-namespace")
     parser.add_argument("--public-result-path", type=Path)
     parser.add_argument("--runtime-manifest", type=Path)
     parser.add_argument("--run-id-date")
     parser.add_argument("--run-id-sequence-base", type=int)
     parser.add_argument("--commissioning-task-id")
+    parser.add_argument("--diagnostic-slot-start", type=int)
+    parser.add_argument("--diagnostic-slot-end", type=int)
     parser.add_argument("--docker-host-volume", type=Path)
     parser.add_argument("--metrics-dir", type=Path)
     parser.add_argument("--paid-action")
@@ -166,7 +172,7 @@ def status(paths: RepoPaths) -> dict[str, Any]:
         if budget is not None
         else 0
     )
-    return {
+    result = {
         "status": state["status"],
         "campaign_id": identity.campaign_id,
         "campaign_mode": identity.campaign_mode,
@@ -182,6 +188,9 @@ def status(paths: RepoPaths) -> dict[str, Any]:
         "invalid_reason": state["invalid_reason"],
         "paid_requests_sent": 0,
     }
+    if identity.campaign_mode == "diagnostic":
+        result["diagnostic_slot_range"] = identity.value["diagnostic_slot_range"]
+    return result
 
 
 def _load_budget_snapshot(paths: RepoPaths, identity: C2BehaviorIdentity) -> dict[str, Any]:
@@ -268,6 +277,7 @@ def _make_request(
         pinned_main_effort=identity.value["provider"]["public_profile"]["main_effort"],
         pinned_guardian_effort=identity.value["provider"]["public_profile"]["guardian_effort"],
         exec_command_repeat_guidance_enabled=True,
+        plan058_agent_execution_id=None if stub else docker_task_id,
     )
     return enable_local_harness_observation(request)
 
@@ -293,6 +303,10 @@ def _validate_prepared(
         or prepared.command.stub_verifier is not stub
         or prepared.command.delete_environment is stub
         or prepared.adapter._exec_command_repeat_guidance_enabled is not True
+        or prepared.adapter._plan058_agent_execution_id
+        != (None if stub else prepared.materialized_task.task_label.removeprefix(
+            "dev.rondo.eval.task="
+        ))
     ):
         raise C2BehaviorError("Plan 058 prepared run differs from its lock")
 
@@ -502,7 +516,26 @@ def _write_slot_record(
     attempt_budget = _attempt_budget_projection(run, request_ids=request_ids)
     if _meaningful_request_ids(attempt_budget) != request_ids:
         raise C2BehaviorError("Plan 058 budget and API request identities differ")
-    _validate_guardian_binding(live, parsed, metadata_path)
+    execution_receipt = _read_agent_execution_receipt(
+        live.harbor.trial_dir / "agent" / AGENT_EXECUTION_RECEIPT_FILENAME
+    )
+    if parsed.outcome is RunOutcome.AGENT_FAILED:
+        if not _is_typed_guardian_limit_result(
+            parsed,
+            budget_run=attempt_budget,
+            receipt=execution_receipt,
+            api_metadata={
+                "schema_version": 1,
+                "requests": _read_api_metadata(metadata_path),
+            },
+            evidence=live.evidence,
+            max_guardian_logical_requests=identity.max_guardian_logical_requests,
+            expected_execution_id=attempt_run_id,
+            metadata_ready=live.metadata_ready,
+        ):
+            raise C2BehaviorError("Plan 058 typed Guardian stop is invalid")
+    else:
+        _validate_guardian_binding(live, parsed, metadata_path)
     observation = project_task_observation(live.harbor.trial_dir / "agent" / "rollout-trace", metadata_path)
     if live.harbor.docker_evidence is None:
         raise C2BehaviorError("Plan 058 slot lacks Docker evidence")
@@ -517,13 +550,20 @@ def _write_slot_record(
         budget_run=attempt_budget,
         logical_budget=_logical_budget_summary(run, logical_run_id=slot.logical_run_id),
         docker_receipt=live.harbor.docker_evidence.receipt(),
-        sources=_source_binding(paths=paths, identity=identity, live=live, metadata_path=metadata_path),
+        sources=_plan058_source_binding(
+            paths=paths,
+            identity=identity,
+            live=live,
+            metadata_path=metadata_path,
+        ),
     )
     destination = slot_record_path(paths, identity, slot)
     _atomic_json(destination, record, mode=0o600)
     raw = _read_regular(destination)
     validate_slot_record(json.loads(raw), identity=identity, slot=slot)
-    _revalidate_record_sources(paths=paths, identity=identity, slot=slot, record=record)
+    _revalidate_plan058_record_sources(
+        paths=paths, identity=identity, slot=slot, record=record
+    )
     return hashlib.sha256(raw).hexdigest()
 
 
@@ -549,8 +589,294 @@ def _recover_record_if_complete(
         or record["published_attempt_run_id"] != attempt_run_id
     ):
         raise C2BehaviorError("Plan 058 recovered record differs from durable state")
-    _revalidate_record_sources(paths=paths, identity=identity, slot=slot, record=record)
+    _revalidate_plan058_record_sources(
+        paths=paths, identity=identity, slot=slot, record=record
+    )
     return hashlib.sha256(raw).hexdigest()
+
+
+def _read_agent_execution_receipt(path: Path) -> dict[str, Any]:
+    try:
+        value = json.loads(_read_regular(path, max_bytes=256))
+    except (BoundedObservationError, UnicodeError, json.JSONDecodeError) as exc:
+        raise C2BehaviorError("Plan 058 agent execution receipt is unavailable") from exc
+    if (
+        not isinstance(value, dict)
+        or set(value) != {
+            "schema_version",
+            "execution_id",
+            "agent_exit_code",
+            "tee_exit_code",
+        }
+        or value["schema_version"] != 1
+        or not isinstance(value["execution_id"], str)
+        or not value["execution_id"]
+        or any(
+            isinstance(value[name], bool)
+            or not isinstance(value[name], int)
+            or not 0 <= value[name] <= 255
+            for name in ("agent_exit_code", "tee_exit_code")
+        )
+    ):
+        raise C2BehaviorError("Plan 058 agent execution receipt is invalid")
+    return {
+        "execution_id": value["execution_id"],
+        "exit_code": value["agent_exit_code"],
+        "tee_exit_code": value["tee_exit_code"],
+    }
+
+
+def _guardian_source_bindings(
+    *, paths: RepoPaths, identity: C2BehaviorIdentity, live: Any
+) -> list[dict[str, str]]:
+    root = campaign_root(paths, identity)
+    values: list[dict[str, str]] = []
+    for evidence in live.evidence:
+        observation, e_final, meta = load_guardian_evidence_bundle(
+            live.harbor.trial_dir,
+            evidence.relative_path,
+            expected_model=identity.value["provider"]["public_profile"][
+                "guardian_model"
+            ],
+            expected_effort=identity.value["provider"]["public_profile"][
+                "guardian_effort"
+            ],
+        )
+        if observation != evidence:
+            raise C2BehaviorError("Plan 058 Guardian evidence changed during binding")
+        e_final_path = live.harbor.trial_dir / evidence.relative_path
+        meta_path = e_final_path.with_name("meta.json")
+        e_final_relative, e_final_sha256 = _source_file_sha256(root, e_final_path)
+        meta_relative, meta_sha256 = _source_file_sha256(root, meta_path)
+        if (
+            hashlib.sha256(e_final).hexdigest() != e_final_sha256
+            or hashlib.sha256(meta).hexdigest() != meta_sha256
+        ):
+            raise C2BehaviorError("Plan 058 Guardian source digest changed")
+        values.append(
+            {
+                "e_final_path": e_final_relative,
+                "e_final_sha256": e_final_sha256,
+                "meta_path": meta_relative,
+                "meta_sha256": meta_sha256,
+            }
+        )
+    return values
+
+
+def _plan058_source_binding(
+    *,
+    paths: RepoPaths,
+    identity: C2BehaviorIdentity,
+    live: Any,
+    metadata_path: Path,
+) -> dict[str, Any]:
+    sources = _source_binding(
+        paths=paths,
+        identity=identity,
+        live=live,
+        metadata_path=metadata_path,
+    )
+    root = campaign_root(paths, identity)
+    receipt_path = live.harbor.trial_dir / "agent" / AGENT_EXECUTION_RECEIPT_FILENAME
+    receipt = _read_agent_execution_receipt(receipt_path)
+    relative, digest = _source_file_sha256(root, receipt_path)
+    return {
+        **sources,
+        "agent_execution": {
+            "path": relative,
+            "sha256": digest,
+            "execution_id": receipt["execution_id"],
+            "exit_code": receipt["exit_code"],
+            "tee_exit_code": receipt["tee_exit_code"],
+        },
+        "guardian_evidence": _guardian_source_bindings(
+            paths=paths, identity=identity, live=live
+        ),
+    }
+
+
+def _revalidate_plan058_record_sources(
+    *,
+    paths: RepoPaths,
+    identity: C2BehaviorIdentity,
+    slot: C2BehaviorSlot,
+    record: Mapping[str, Any],
+) -> None:
+    sources = record["sources"]
+    execution = sources["agent_execution"]
+    root = campaign_root(paths, identity)
+    receipt_path = root / execution["path"]
+    relative, digest = _source_file_sha256(root, receipt_path)
+    receipt = _read_agent_execution_receipt(receipt_path)
+    if (
+        relative != execution["path"]
+        or digest != execution["sha256"]
+        or receipt["execution_id"] != execution["execution_id"]
+        or receipt["exit_code"] != execution["exit_code"]
+        or receipt["tee_exit_code"] != execution["tee_exit_code"]
+    ):
+        raise C2BehaviorError("Plan 058 agent execution source drifted")
+    terminal_result_path = root / sources["terminal_bench"]["path"]
+    trial_dir = terminal_result_path.parent
+    evidence = []
+    for binding in sources["guardian_evidence"]:
+        observation, e_final, meta = load_guardian_evidence_bundle(
+            trial_dir,
+            Path(binding["e_final_path"]).relative_to(
+                Path(sources["terminal_bench"]["path"]).parent
+            ).as_posix(),
+            expected_model=identity.value["provider"]["public_profile"][
+                "guardian_model"
+            ],
+            expected_effort=identity.value["provider"]["public_profile"][
+                "guardian_effort"
+            ],
+        )
+        if (
+            hashlib.sha256(e_final).hexdigest() != binding["e_final_sha256"]
+            or hashlib.sha256(meta).hexdigest() != binding["meta_sha256"]
+            or _source_file_sha256(root, root / binding["e_final_path"])[1]
+            != binding["e_final_sha256"]
+            or _source_file_sha256(root, root / binding["meta_path"])[1]
+            != binding["meta_sha256"]
+        ):
+            raise C2BehaviorError("Plan 058 Guardian evidence source drifted")
+        evidence.append(observation)
+    shared_record = json.loads(json.dumps(record))
+    shared_record["sources"] = {
+        key: sources[key]
+        for key in ("terminal_bench", "api_metadata", "native_trace")
+    }
+    _revalidate_record_sources(
+        paths=paths,
+        identity=identity,
+        slot=slot,
+        record=shared_record,
+        preserve_agent_failure_verifier_reward=True,
+    )
+    parsed = parse_single_task_result(
+        trial_dir,
+        host_returncode=sources["terminal_bench"]["host_returncode"],
+        expected_task_id=slot.task_id,
+        preserve_agent_failure_verifier_reward=True,
+    )
+    metadata_path = root / sources["api_metadata"]["path"]
+    if record["terminal_bench"]["outcome"] == RunOutcome.AGENT_FAILED.value:
+        if not _is_typed_guardian_limit_result(
+            parsed,
+            budget_run=record["budget"],
+            receipt=receipt,
+            api_metadata={
+                "schema_version": 1,
+                "requests": _read_api_metadata(metadata_path),
+            },
+            evidence=tuple(evidence),
+            max_guardian_logical_requests=identity.max_guardian_logical_requests,
+            expected_execution_id=slot.attempt_run_id(
+                record["published_attempt"]
+            ),
+            metadata_ready=True,
+        ):
+            raise C2BehaviorError("Plan 058 typed agent failure cannot be replayed")
+
+
+def _is_typed_guardian_limit_result(
+    parsed: Any,
+    *,
+    budget_run: Mapping[str, Any],
+    receipt: Mapping[str, Any],
+    api_metadata: Mapping[str, Any],
+    evidence: tuple[Any, ...],
+    max_guardian_logical_requests: int,
+    expected_execution_id: str,
+    metadata_ready: bool,
+) -> bool:
+    """Match only the frozen Guardian-limit shape that Harbor can score."""
+
+    trial = parsed.trial_result
+    exception = trial.get("exception_info") if isinstance(trial, Mapping) else None
+    verifier = trial.get("verifier_result") if isinstance(trial, Mapping) else None
+    requests = api_metadata.get("requests")
+    guardians = (
+        [row for row in requests if isinstance(row, Mapping) and row.get("role") == "guardian"]
+        if isinstance(requests, list)
+        else []
+    )
+    metadata_hashes = [row.get("canonical_body_sha256") for row in guardians]
+    terminal = [
+        item
+        for item in evidence
+        if (item.decision, item.terminal_status, item.failure_reason)
+        in {("approved", "approved", None), ("denied", "denied", None)}
+    ]
+    failed_closed = [
+        item
+        for item in evidence
+        if (item.decision, item.terminal_status, item.failure_reason)
+        == ("denied", "failed_closed", "session_error")
+    ]
+    evidence_hashes = [item.canonical_request_sha256 for item in evidence]
+    return (
+        metadata_ready
+        and parsed.outcome is RunOutcome.AGENT_FAILED
+        and isinstance(exception, Mapping)
+        and exception.get("exception_type") == "NonZeroAgentExitCodeError"
+        and isinstance(verifier, Mapping)
+        and receipt == {
+            "execution_id": expected_execution_id,
+            "exit_code": 1,
+            "tee_exit_code": 0,
+        }
+        and budget_run.get("stopped") is True
+        and budget_run.get("stop_reason")
+        == "guardian_logical_request_limit_exceeded"
+        and len(guardians) == max_guardian_logical_requests
+        and len(metadata_hashes) == len(set(metadata_hashes))
+        and all(isinstance(item, str) and len(item) == 64 for item in metadata_hashes)
+        and len(evidence) == max_guardian_logical_requests + 1
+        and len(evidence_hashes) == len(set(evidence_hashes))
+        and len(terminal) == max_guardian_logical_requests
+        and len(failed_closed) == 1
+        and {item.canonical_request_sha256 for item in terminal}
+        == set(metadata_hashes)
+        and failed_closed[0].canonical_request_sha256 not in set(metadata_hashes)
+    )
+
+
+def _classify_plan058_agent_execution(
+    live: Any,
+    parsed: Any,
+    *,
+    budget_run: Mapping[str, Any],
+    receipt: Mapping[str, Any],
+    metadata_path: Path,
+    identity: C2BehaviorIdentity,
+    expected_execution_id: str,
+) -> Any:
+    if receipt == {
+        "execution_id": expected_execution_id,
+        "exit_code": 0,
+        "tee_exit_code": 0,
+    }:
+        if budget_run.get("stop_reason") == "guardian_logical_request_limit_exceeded":
+            return replace(parsed, outcome=RunOutcome.INFRA_FAILED)
+        return classify_terminal_bench_result(live, parsed)
+    if _is_typed_guardian_limit_result(
+        parsed,
+        budget_run=budget_run,
+        receipt=receipt,
+        api_metadata={
+            "schema_version": 1,
+            "requests": _read_api_metadata(metadata_path),
+        },
+        evidence=live.evidence,
+        max_guardian_logical_requests=identity.max_guardian_logical_requests,
+        expected_execution_id=expected_execution_id,
+        metadata_ready=live.metadata_ready,
+    ):
+        return parsed
+    return replace(parsed, outcome=RunOutcome.INFRA_FAILED)
 
 
 def _json_sha256(value: Mapping[str, Any]) -> str:
@@ -630,7 +956,7 @@ def _formal_attempt_interrupted_without_projection(
     metadata_path: Path,
 ) -> bool:
     return (
-        campaign_mode == "formal"
+        campaign_mode in {"diagnostic", "formal"}
         and (attempt_was_running or work_root_existed)
         and not metadata_path.exists()
         and not metadata_path.is_symlink()
@@ -703,7 +1029,7 @@ def _store_final_storage(
 
 
 def _paid_worker(paths: RepoPaths, args: argparse.Namespace) -> int:
-    """Fail a formal identity closed on any unhandled local paid-path fault."""
+    """Fail a diagnostic/formal identity closed on local paid-path faults."""
 
     try:
         return _paid_worker_inner(paths, args)
@@ -976,6 +1302,13 @@ def _paid_worker_inner(paths: RepoPaths, args: argparse.Namespace) -> int:
                 _store_final_storage(paths=paths, identity=identity, counter=counter, baseline=baseline)
                 return 3
             run = live.budget_snapshot["runs"].get(slot.logical_run_id)
+            if not isinstance(run, Mapping):
+                raise C2BehaviorError("Plan 058 logical budget run is unavailable")
+            execution_receipt = _read_agent_execution_receipt(
+                live.harbor.trial_dir
+                / "agent"
+                / AGENT_EXECUTION_RECEIPT_FILENAME
+            )
             evidence = (
                 _attempt_transport_evidence(
                     attempt=attempt,
@@ -1010,8 +1343,17 @@ def _paid_worker_inner(paths: RepoPaths, args: argparse.Namespace) -> int:
                 live.harbor.trial_dir,
                 host_returncode=live.harbor.returncode,
                 expected_task_id=slot.task_id,
+                preserve_agent_failure_verifier_reward=True,
             )
-            parsed = classify_terminal_bench_result(live, parsed)
+            parsed = _classify_plan058_agent_execution(
+                live,
+                parsed,
+                budget_run=run,
+                receipt=execution_receipt,
+                metadata_path=metadata_path,
+                identity=identity,
+                expected_execution_id=attempt_run_id,
+            )
             if parsed.outcome in {
                 RunOutcome.INFRA_FAILED,
                 RunOutcome.BUDGET_STOPPED,
@@ -1256,8 +1598,10 @@ def main(argv: list[str] | None = None) -> int:
                 run_id_date=args.run_id_date,
                 run_id_sequence_base=args.run_id_sequence_base,
                 commissioning_task_id=args.commissioning_task_id,
+                diagnostic_slot_start=args.diagnostic_slot_start,
+                diagnostic_slot_end=args.diagnostic_slot_end,
             )
-            print(json.dumps({
+            initialized = {
                 "status": "initialized",
                 "campaign_id": identity.campaign_id,
                 "campaign_mode": identity.campaign_mode,
@@ -1265,7 +1609,12 @@ def main(argv: list[str] | None = None) -> int:
                 "logical_denominator": len(identity.slots),
                 "required_paid_action": PLAN058_PAID_ACTION,
                 "paid_requests_sent": 0,
-            }, sort_keys=True))
+            }
+            if identity.campaign_mode == "diagnostic":
+                initialized["diagnostic_slot_range"] = identity.value[
+                    "diagnostic_slot_range"
+                ]
+            print(json.dumps(initialized, sort_keys=True))
             return 0
         if args.action == "preflight":
             return _coordinator(paths, args, mode="preflight")

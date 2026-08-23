@@ -326,6 +326,7 @@ def parse_single_task_result(
     *,
     host_returncode: int,
     expected_task_id: str = FIX_GIT_TASK_ID,
+    preserve_agent_failure_verifier_reward: bool = False,
 ) -> ParsedHarborResult:
     """Parse Harbor 0.20's exact single-trial result; host rc alone is not success."""
 
@@ -360,7 +361,10 @@ def parse_single_task_result(
     verifier = trial.get("verifier_result")
     rewards = verifier.get("rewards") if isinstance(verifier, dict) else None
     reward = rewards.get("reward") if isinstance(rewards, dict) else None
-    if outcome is not RunOutcome.COMPLETED:
+    if outcome is not RunOutcome.COMPLETED and not (
+        preserve_agent_failure_verifier_reward
+        and outcome is RunOutcome.AGENT_FAILED
+    ):
         reward = 0.0
     if (
         isinstance(reward, bool)

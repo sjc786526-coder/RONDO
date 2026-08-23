@@ -669,6 +669,7 @@ def _revalidate_record_sources(
     identity: BoundedObservationIdentity,
     slot: BoundedObservationSlot,
     record: Mapping[str, Any],
+    preserve_agent_failure_verifier_reward: bool = False,
 ) -> None:
     root = campaign_root(paths, identity)
     sources = record["sources"]
@@ -693,6 +694,9 @@ def _revalidate_record_sources(
         result_path.parent,
         host_returncode=terminal["host_returncode"],
         expected_task_id=slot.task_id,
+        preserve_agent_failure_verifier_reward=(
+            preserve_agent_failure_verifier_reward
+        ),
     )
     terminal_record = record["terminal_bench"]
     if (
