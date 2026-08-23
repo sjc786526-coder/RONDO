@@ -16,7 +16,6 @@ EVAL_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = EVAL_ROOT.parent
 sys.path.insert(0, str(EVAL_ROOT))
 
-from rondo_eval.publication_critic.contract import load_fixed_input_contract  # noqa: E402
 from rondo_eval.publication_critic.identity import canonical_json_bytes, sha256_file  # noqa: E402
 from rondo_eval.publication_critic.render import build_messages  # noqa: E402
 from rondo_eval.publication_critic.runner import load_exact_tokenizer  # noqa: E402
@@ -47,28 +46,35 @@ from rondo_eval.publication_critic.training_data import (  # noqa: E402
     validate_train_only_smoke_bundle,
     verify_freeze_manifest,
 )
+from rondo_eval.publication_critic.training_data.input_identity import (  # noqa: E402
+    load_plan054_training_input,
+    verify_plan054_tokenizer_snapshot,
+)
 
 
 IGNORED_NAMESPACE = Path(
     "/home/sjc/desktop/RONDO/eval-data/publication-critic/plan059"
 ).resolve()
 DESIGN_LOCK_PATH = (
-    REPO_ROOT / "eval/templates/publication-critic/training-data-design-lock-v3.json"
+    REPO_ROOT / "eval/templates/publication-critic/training-data-design-lock-v6.json"
 )
 BASE_DESIGN_LOCK_PATH = (
     REPO_ROOT / "eval/templates/publication-critic/training-data-design-lock-v1.json"
 )
 SUPERSEDED_DESIGN_LOCK_PATH = (
-    REPO_ROOT / "eval/templates/publication-critic/training-data-design-lock-v2.json"
+    REPO_ROOT / "eval/templates/publication-critic/training-data-design-lock-v5.json"
 )
 SCHEMA_PATH = REPO_ROOT / "eval/templates/publication-critic/training-data-schema-v1.json"
 GENERATOR_PROMPT_PATH = (
-    REPO_ROOT / "eval/templates/publication-critic/training-data-generator-prompt-v3.md"
+    REPO_ROOT / "eval/templates/publication-critic/training-data-generator-prompt-v6.md"
 )
 REVIEWER_PROMPT_PATH = (
     REPO_ROOT / "eval/templates/publication-critic/training-data-reviewer-prompt-v1.md"
 )
 REFERENCE_PACKETS_PATH = REPO_ROOT / "eval/fixtures/publication-critic-v1/packets.jsonl"
+TEACHER_FREEZE_PATH = (
+    REPO_ROOT / "eval/manifests/publication-critic/training-data-teacher-freeze-v6.json"
+)
 
 
 def _load_json(path: Path, *, secure_ignored: bool = False) -> dict[str, Any]:
@@ -84,24 +90,24 @@ def _load_json(path: Path, *, secure_ignored: bool = False) -> dict[str, Any]:
 
 def _load_design_lock() -> dict[str, Any]:
     overlay = _load_json(DESIGN_LOCK_PATH)
-    if overlay.get("schema") != "rondo-publication-critic-training-data-design-lock-v3":
-        raise TrainingDataError("training-data design lock v3 identity drifted")
+    if overlay.get("schema") != "rondo-publication-critic-training-data-design-lock-v6":
+        raise TrainingDataError("training-data design lock v6 identity drifted")
     base_identity = overlay.get("base_lock")
     overrides = overlay.get("overrides")
     if not isinstance(base_identity, dict) or not isinstance(overrides, dict):
-        raise TrainingDataError("training-data design lock v3 overlay is invalid")
+        raise TrainingDataError("training-data design lock v6 overlay is invalid")
     expected_base = {
         "relative_path": BASE_DESIGN_LOCK_PATH.relative_to(REPO_ROOT).as_posix(),
         "sha256": sha256_file(BASE_DESIGN_LOCK_PATH),
     }
     if base_identity != expected_base:
-        raise TrainingDataError("training-data design lock v3 base identity drifted")
+        raise TrainingDataError("training-data design lock v6 base identity drifted")
     expected_superseded = {
         "relative_path": SUPERSEDED_DESIGN_LOCK_PATH.relative_to(REPO_ROOT).as_posix(),
         "sha256": sha256_file(SUPERSEDED_DESIGN_LOCK_PATH),
     }
     if overlay.get("supersedes") != expected_superseded:
-        raise TrainingDataError("training-data design lock v3 superseded identity drifted")
+        raise TrainingDataError("training-data design lock v6 superseded identity drifted")
     base = _load_json(BASE_DESIGN_LOCK_PATH)
     merged = copy.deepcopy(base)
     merged["schema"] = overlay["schema"]
@@ -113,8 +119,9 @@ def _load_design_lock() -> dict[str, Any]:
         "candidate_token_length_shortcut_contract"
     ]
     merged["template_group_rule"] = overrides["template_group_rule"]
+    merged["length_bucket_contract"] = overrides["length_bucket_contract"]
     if overrides["generator_prompt_relative_path"] != GENERATOR_PROMPT_PATH.relative_to(REPO_ROOT).as_posix():
-        raise TrainingDataError("training-data generator prompt v3 path drifted")
+        raise TrainingDataError("training-data generator prompt v6 path drifted")
     return merged
 
 
@@ -241,14 +248,22 @@ def _rehearsal_assignments(
     supervision_rows: list[dict[str, Any]],
 ) -> dict[str, str]:
     desired_by_scenario = {
-        "b-useful-01": "train",
+        "b-honest-04": "validation",
+        "b-consistency-03": "unseen_test",
+        "b-consistency-06": "train",
+        "b-continuity-01": "train",
+        "b-continuity-02": "validation",
+        "b-continuity-03": "unseen_test",
+        "b-continuity-04": "train",
+        "b-continuity-05": "unseen_test",
+        "b-continuity-06": "validation",
         "b-scope-01": "train",
         "b-scope-02": "validation",
-        "b-scope-04": "unseen_test",
-        "b-honest-01": "validation",
-        "mixed-01": "validation",
-        "b-continuity-01": "unseen_test",
-        "b-consistency-01": "unseen_test",
+        "b-scope-03": "unseen_test",
+        "b-scope-04": "train",
+        "b-scope-05": "validation",
+        "b-scope-06": "unseen_test",
+        "mixed-01": "unseen_test",
     }
     result = {
         row["candidate_id"]: desired_by_scenario[row["scenario_id"]]
@@ -324,7 +339,7 @@ def _statistics(
     }
 
 
-def _contract_hashes(teacher_freeze: Path | None) -> dict[str, str]:
+def _contract_paths(teacher_freeze: Path | None) -> list[Path]:
     paths = [
         DESIGN_LOCK_PATH,
         BASE_DESIGN_LOCK_PATH,
@@ -342,10 +357,195 @@ def _contract_hashes(teacher_freeze: Path | None) -> dict[str, str]:
     paths.extend(sorted((EVAL_ROOT / "rondo_eval/publication_critic/training_data").glob("*.py")))
     if teacher_freeze is not None:
         paths.append(teacher_freeze)
+    return sorted(paths)
+
+
+def _contract_hashes(teacher_freeze: Path | None) -> dict[str, str]:
     return {
         path.relative_to(REPO_ROOT).as_posix(): sha256_file(path)
-        for path in sorted(paths)
+        for path in _contract_paths(teacher_freeze)
     }
+
+
+def _raw_review_input_hashes(raw_dir: Path) -> dict[str, str]:
+    names = (
+        "generator-run.json",
+        "packets.jsonl",
+        "pairs.jsonl",
+        "scenarios.jsonl",
+        "source-projections.json",
+        "supervision.jsonl",
+    )
+    for name in names:
+        _validate_input_file(raw_dir / name, secure_ignored=True)
+    return {name: sha256_file(raw_dir / name) for name in names}
+
+
+def _expected_review_input_identity(
+    generation_commit: str,
+    generator_run: dict[str, Any],
+    teacher_freeze: Path,
+) -> dict[str, str]:
+    return {
+        "base_commit": generation_commit,
+        "generator_script_sha256": sha256_file(
+            REPO_ROOT / "eval/tools/generate_publication_critic_training_data.py"
+        ),
+        "finalizer_script_sha256": sha256_file(Path(__file__)),
+        "generator_run_id": str(generator_run.get("run_id")),
+        "design_lock_v1_sha256": sha256_file(BASE_DESIGN_LOCK_PATH),
+        "design_lock_v2_sha256": sha256_file(
+            REPO_ROOT / "eval/templates/publication-critic/training-data-design-lock-v2.json"
+        ),
+        "design_lock_v3_sha256": sha256_file(
+            REPO_ROOT / "eval/templates/publication-critic/training-data-design-lock-v3.json"
+        ),
+        "design_lock_v4_sha256": sha256_file(
+            REPO_ROOT / "eval/templates/publication-critic/training-data-design-lock-v4.json"
+        ),
+        "design_lock_v5_sha256": sha256_file(SUPERSEDED_DESIGN_LOCK_PATH),
+        "design_lock_v6_sha256": sha256_file(DESIGN_LOCK_PATH),
+        "generator_prompt_v6_sha256": sha256_file(GENERATOR_PROMPT_PATH),
+        "schema_sha256": sha256_file(SCHEMA_PATH),
+        "reviewer_prompt_sha256": sha256_file(REVIEWER_PROMPT_PATH),
+        "teacher_freeze_v6_sha256": sha256_file(teacher_freeze),
+    }
+
+
+def _verify_generator_run(
+    generator_run: dict[str, Any],
+    generator_identity: dict[str, Any],
+    *,
+    mode: str,
+) -> None:
+    if generator_run.get("mode") != mode:
+        raise TrainingDataError("generator mode differs from finalizer mode")
+    if any(
+        generator_run.get(key) is not False
+        for key in ("external_api_used", "local_model_used", "model_forward_used")
+    ):
+        raise TrainingDataError("generator run exceeds the authorized offline teacher boundary")
+    expected = {
+        "data_design_lock_sha256": sha256_file(DESIGN_LOCK_PATH),
+        "generator_prompt_sha256": sha256_file(GENERATOR_PROMPT_PATH),
+        "authoring_script_sha256": sha256_file(
+            REPO_ROOT / "eval/tools/generate_publication_critic_training_data.py"
+        ),
+    }
+    if any(generator_run.get(key) != value for key, value in expected.items()):
+        raise TrainingDataError("generator run implementation or prompt identity drifted")
+    if generator_identity.get("prompt_sha256") != expected["generator_prompt_sha256"]:
+        raise TrainingDataError("generator identity prompt hash drifted")
+
+
+def _verify_formal_teacher_freeze(
+    teacher_freeze_path: Path,
+    teacher_freeze: dict[str, Any],
+    design_lock: dict[str, Any],
+    generator_run: dict[str, Any],
+    reviewer_run: dict[str, Any],
+    raw_dir: Path,
+    generation_commit: str,
+) -> None:
+    if teacher_freeze_path != TEACHER_FREEZE_PATH or teacher_freeze_path.is_symlink():
+        raise TrainingDataError("formal finalization requires the exact tracked v6 teacher freeze")
+    required = {
+        "schema",
+        "plan",
+        "dataset_revision",
+        "supersedes",
+        "formal_generation_allowed",
+        "generator",
+        "reviewer",
+        "input_identity",
+        "contracts",
+        "rehearsal",
+        "revision_reason",
+        "formal_scale",
+        "resource_boundary",
+    }
+    if set(teacher_freeze) != required:
+        raise TrainingDataError("teacher freeze keys drifted")
+    if (
+        teacher_freeze.get("schema") != "rondo-publication-critic-plan059-teacher-freeze-v6"
+        or teacher_freeze.get("plan") != "059"
+        or teacher_freeze.get("dataset_revision") != "v6"
+        or teacher_freeze.get("formal_generation_allowed") is not True
+    ):
+        raise TrainingDataError("teacher freeze identity or authorization drifted")
+    expected_superseded = {
+        "relative_path": "eval/manifests/publication-critic/training-data-teacher-freeze-v5.json",
+        "sha256": sha256_file(
+            REPO_ROOT / "eval/manifests/publication-critic/training-data-teacher-freeze-v5.json"
+        ),
+    }
+    if teacher_freeze.get("supersedes") != expected_superseded:
+        raise TrainingDataError("teacher freeze lineage drifted")
+    if teacher_freeze.get("input_identity") != design_lock["input_identity"]:
+        raise TrainingDataError("teacher freeze Plan 054 input identity drifted")
+    if teacher_freeze.get("contracts") != _contract_hashes(None):
+        raise TrainingDataError("teacher freeze implementation contract drifted")
+    if teacher_freeze.get("generator") != generator_run.get("generator_identity"):
+        raise TrainingDataError("formal generator differs from the teacher freeze")
+    if teacher_freeze.get("reviewer") != reviewer_run.get("reviewer_identity"):
+        raise TrainingDataError("formal reviewer differs from the teacher freeze")
+    generator_identity = teacher_freeze["generator"]
+    reviewer_identity = teacher_freeze["reviewer"]
+    if (
+        generator_identity.get("model") != "gpt-5.6-sol"
+        or generator_identity.get("role") != "direct_plan059_generator"
+        or generator_identity.get("prompt_sha256") != sha256_file(GENERATOR_PROMPT_PATH)
+        or reviewer_identity.get("model") != "gpt-5.6-sol"
+        or reviewer_identity.get("reasoning_effort") != "xhigh"
+        or reviewer_identity.get("role") != "independent_teacher_reviewer"
+        or reviewer_identity.get("prompt_sha256") != sha256_file(REVIEWER_PROMPT_PATH)
+    ):
+        raise TrainingDataError("teacher model, role, effort, or prompt identity drifted")
+    rehearsal = teacher_freeze["rehearsal"]
+    if (
+        not isinstance(rehearsal, dict)
+        or rehearsal.get("remaining_findings") != []
+        or rehearsal.get("consumer_smoke") != "pass"
+        or rehearsal.get("candidate_decisions", {}).get("accept")
+        != rehearsal.get("candidate_count")
+        or rehearsal.get("pair_decisions", {}).get("accept")
+        != rehearsal.get("pair_count")
+    ):
+        raise TrainingDataError("teacher freeze rehearsal did not close every finding")
+    if reviewer_run.get("data_revision") != "v6":
+        raise TrainingDataError("reviewer run dataset revision drifted")
+    if reviewer_run.get("input_identity") != _expected_review_input_identity(
+        generation_commit,
+        generator_run,
+        teacher_freeze_path,
+    ):
+        raise TrainingDataError("reviewer run implementation/input identity drifted")
+    if reviewer_run.get("input_sha256") != _raw_review_input_hashes(raw_dir):
+        raise TrainingDataError("reviewer run raw input hashes drifted")
+
+
+def _validate_exact_length_buckets(
+    supervision_rows: list[dict[str, Any]],
+    census_rows: list[dict[str, Any]],
+    contract: dict[str, Any],
+) -> None:
+    census = _index(census_rows, "candidate_id", "token census")
+    long_minimum = int(contract["long_exact_input_min_tokens"])
+    non_long_maximum = int(contract["non_long_exact_input_max_tokens"])
+    for row in supervision_rows:
+        candidate_id = row["candidate_id"]
+        token_count = census[candidate_id].get("token_count")
+        if not isinstance(token_count, int) or isinstance(token_count, bool):
+            raise TrainingDataError(f"candidate {candidate_id} lacks exact token count")
+        if row["length_bucket"] == "long":
+            if token_count < long_minimum:
+                raise TrainingDataError(
+                    f"candidate {candidate_id} is long but has only {token_count} exact tokens"
+                )
+        elif token_count > non_long_maximum:
+            raise TrainingDataError(
+                f"candidate {candidate_id} is non-long but has {token_count} exact tokens"
+            )
 
 
 def _data_card(
@@ -383,25 +583,33 @@ This is the Plan 059 M3-B1a `{mode}` freeze. It contains PublicationPacket v1 mo
 
 Every frozen candidate and pair has a terminal accepting independent review. Raw generator/reviewer records remain in the ignored Plan 059 namespace and are not training inputs.
 
+The source composition is {reports['source_composition']['synthetic_scenarios']} synthetic product-shaped Scenarios and {reports['source_composition']['tracked_public_anchor_scenarios']} bounded tracked public-anchor Scenarios.
+
 ## Consumer boundary
 
-`membership.json` is cumulative: C1 is all train Binary supervision, C2 adds train Boundary pairs, and C3 adds train Within-PASS pairs. The default consumer denies validation and unseen-test access; explicit evaluation mode is required. `train-only-smoke-bundle.json` physically contains only train members.
+`membership.json` is cumulative: C1 is all train Binary supervision, C2 adds train Boundary pairs, and C3 adds train Within-PASS pairs. The default consumer physically retains only train packets, supervision, and pairs; explicit evaluation mode is required to construct a consumer containing validation or unseen-test rows. `train-only-smoke-bundle.json` physically contains only train members.
 
 ## Limits
+
+Binary labels, pair directions, and accepting review decisions are synthetic GPT-5.6-sol teacher references, not human-labelled ground truth. They may encode teacher errors and must not be represented as human truth or an unbiased estimate of production quality.
 
 This dataset has not been used for training and does not establish model quality or unlock M3-B1b. Plan 059 independent acceptance and user-approved integration remain separate decisions.
 """
 
 
 def finalize(args: argparse.Namespace) -> dict[str, Any]:
+    if args.raw_dir.is_symlink():
+        raise TrainingDataError("raw directory must not be a symlink")
     raw_dir = args.raw_dir.resolve()
-    if IGNORED_NAMESPACE not in raw_dir.parents or raw_dir.is_symlink() or not raw_dir.is_dir():
+    if IGNORED_NAMESPACE not in raw_dir.parents or not raw_dir.is_dir():
         raise TrainingDataError("raw directory must be a safe child of the Plan 059 ignored namespace")
     if stat.S_IMODE(raw_dir.stat().st_mode) != 0o700:
         raise TrainingDataError("raw directory must be mode 0700")
-    output_dir, ignored_output = _prepare_output(args.output_dir)
     design_lock = _load_design_lock()
     dataset_revision = str(design_lock["dataset_revision"])
+    verified_input = load_plan054_training_input(REPO_ROOT)
+    if dict(verified_input.input_identity) != design_lock["input_identity"]:
+        raise TrainingDataError("Plan 059 design lock differs from verified Plan 054 input identity")
     schema = _load_json(SCHEMA_PATH)
     if schema.get("schema") != "rondo-publication-critic-training-data-schema-v1":
         raise TrainingDataError("training-data schema identity drifted")
@@ -443,8 +651,24 @@ def finalize(args: argparse.Namespace) -> dict[str, Any]:
         raise TrainingDataError("generator run lacks generator_identity")
     if any(row["generator_identity"] != generator_identity for row in supervision):
         raise TrainingDataError("supervision rows do not share the generator run identity")
-    if generator_run.get("mode") != args.mode:
-        raise TrainingDataError("generator mode differs from finalizer mode")
+    _verify_generator_run(
+        generator_run,
+        generator_identity,
+        mode=args.mode,
+    )
+    if args.mode == "formal":
+        if args.teacher_freeze is None:
+            raise TrainingDataError("formal finalization requires the v6 teacher freeze")
+        teacher_freeze = _load_json(args.teacher_freeze)
+        _verify_formal_teacher_freeze(
+            args.teacher_freeze,
+            teacher_freeze,
+            design_lock,
+            generator_run,
+            reviewer_run,
+            raw_dir,
+            args.generation_commit,
+        )
 
     packet_hashes = reject_exact_duplicates(packets)
     dedup = design_lock["dedup_contract"]
@@ -479,16 +703,18 @@ def finalize(args: argparse.Namespace) -> dict[str, Any]:
     for row in supervision:
         row["proposed_split"] = assignments[row["candidate_id"]]
 
-    snapshot = args.tokenizer_snapshot.resolve()
-    expected_revision = design_lock["input_identity"]["tokenizer_revision"]
-    if snapshot.name != expected_revision or snapshot.is_symlink() or not snapshot.is_dir():
-        raise TrainingDataError("exact tokenizer snapshot identity is missing or drifted")
+    snapshot_identity = verify_plan054_tokenizer_snapshot(
+        args.tokenizer_snapshot,
+        repo_root=REPO_ROOT,
+    )
+    if snapshot_identity.input_identity != verified_input.input_identity:
+        raise TrainingDataError("exact tokenizer and Plan 054 input identity differ")
+    snapshot = args.tokenizer_snapshot.resolve(strict=True)
     tokenizer = load_exact_tokenizer(snapshot)
-    fixed = load_fixed_input_contract(REPO_ROOT)
     census_rows_tuple, token_summary = census_packets(
         packets,
         tokenizer,
-        fixed.rubric,
+        verified_input.rubric,
         repo_root=REPO_ROOT,
     )
     census_rows = list(census_rows_tuple)
@@ -507,6 +733,11 @@ def finalize(args: argparse.Namespace) -> dict[str, Any]:
         repo_root=REPO_ROOT,
         final=True,
         allowed_source_ids=allowed_sources,
+    )
+    _validate_exact_length_buckets(
+        supervision,
+        census_rows,
+        design_lock["length_bucket_contract"],
     )
 
     failures = ()
@@ -545,6 +776,7 @@ def finalize(args: argparse.Namespace) -> dict[str, Any]:
     c1 = consumer.stage("C1")
     c2 = consumer.stage("C2")
     c3 = consumer.stage("C3")
+    consumer.model_inputs("C3")
     if c1["pairs"] or any(pair["kind"] != "boundary" for pair in c2["pairs"]):
         raise TrainingDataError("C1/C2 cumulative membership is invalid")
     if len(c3["pairs"]) != len(c2["pairs"]) + sum(
@@ -571,7 +803,7 @@ def finalize(args: argparse.Namespace) -> dict[str, Any]:
     ):
         raise TrainingDataError("explicit evaluation consumer cannot reproduce unseen_test")
     for packet_row in packets:
-        messages = build_messages(packet_row["packet"], fixed.rubric)
+        messages = build_messages(packet_row["packet"], verified_input.rubric)
         if len(messages) != 2 or [row["role"] for row in messages] != ["user", "assistant"]:
             raise TrainingDataError(f"candidate does not materialize to two ordered messages: {packet_row['candidate_id']}")
 
@@ -607,6 +839,16 @@ def finalize(args: argparse.Namespace) -> dict[str, Any]:
         "model_visible_text_shortcuts": list(visible_shortcuts),
         "model_visible_candidate_length_shortcuts": list(length_shortcuts),
         "token_summary": token_summary,
+        "source_composition": {
+            "synthetic_scenarios": sum(
+                row["source_id"] == "plan059-synthetic-product-shaped-v1"
+                for row in scenarios
+            ),
+            "tracked_public_anchor_scenarios": sum(
+                row["source_id"] != "plan059-synthetic-product-shaped-v1"
+                for row in scenarios
+            ),
+        },
         "consumer": {
             "c1_binary": len(c1["binary"]),
             "c1_pairs": len(c1["pairs"]),
@@ -615,10 +857,17 @@ def finalize(args: argparse.Namespace) -> dict[str, Any]:
             "c3_binary": len(c3["binary"]),
             "c3_pairs": len(c3["pairs"]),
             "default_holdout_access": "denied",
+            "default_retained_packets": len(consumer.packets),
+            "default_retained_supervision": len(consumer.supervision),
+            "default_retained_pairs": len(consumer.pairs),
+            "evaluation_retained_packets": len(evaluation_consumer.packets),
+            "evaluation_retained_supervision": len(evaluation_consumer.supervision),
+            "evaluation_retained_pairs": len(evaluation_consumer.pairs),
             "model_message_roles": ["user", "assistant"],
         },
     }
     statistics = _statistics(supervision, pairs, token_summary)
+    output_dir, ignored_output = _prepare_output(args.output_dir)
 
     base_files = {
         "scenarios.jsonl": _jsonl_bytes(scenarios),
@@ -676,7 +925,6 @@ def finalize(args: argparse.Namespace) -> dict[str, Any]:
     )
     frozen_consumer = DatasetConsumer.from_frozen_directory(
         output_dir,
-        expected_input_identity=design_lock["input_identity"],
         repo_root=REPO_ROOT,
     )
     frozen_consumer.stage("C3")
@@ -711,6 +959,8 @@ def main() -> int:
     ):
         raise TrainingDataError("generation commit must be a full lowercase Git SHA")
     if args.teacher_freeze is not None:
+        if args.teacher_freeze.is_symlink():
+            raise TrainingDataError("teacher freeze must not be a symlink")
         args.teacher_freeze = args.teacher_freeze.resolve()
         if REPO_ROOT not in args.teacher_freeze.parents or not args.teacher_freeze.is_file():
             raise TrainingDataError("teacher freeze must be a tracked file in this repository")

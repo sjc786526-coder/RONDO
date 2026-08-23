@@ -374,6 +374,7 @@ def validate_dataset(
                 "completion_state",
                 "actor_role",
                 "style",
+                "length_bucket",
                 "unicode",
             ):
                 if row[field] != scenario[field]:

@@ -1,6 +1,6 @@
 # RONDO 长程规划（WBS）
 
-最后更新：2026-08-23（Plan 058 正在独立 worktree 推进 C2；Plan 054 / M3-A2 已主线整合，Plan 059 / M3-B1a revision v3 已在 059 worktree 正式冻结并通过独立预审）
+最后更新：2026-08-23（Plan 058 正在独立 worktree 推进 C2；Plan 054 / M3-A2 已主线整合，Plan 059 / M3-B1a revision v6 已在 059 worktree 完成正式冻结与自检）
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段指针、跨方向关系、
 稳定工程边界和授权门；已完成成果与验收见 `doc/WBS-COMPLETED.md`，单次任务合同见 `plan/`，执行细节见
@@ -20,7 +20,7 @@
 | 0：量化测评基准 | 既有设施与首次 schema v7 正式 canary 已完成，当前无 active campaign | 保留设施；历史结果见 COMPLETED，新 campaign 须重新立项与授权 |
 | 1：Harness 优化 | **Plan 058 正在独立 worktree 推进 C2** | 正式 campaign 的冻结身份、账本、资产与最终结论仍由 Plan 058 独立负责，尚未主线整合 |
 | 2：本地审批模型 | **已收口，今后不再开启** | 最终结论为“保留为实验”；不改生产默认，不再规划后续工作包 |
-| 3：RONDO Multi | 第一、二期及其收口案例、**三期 M3-A1、M3-A2、M3-B2a、M3-B2b 已完成** | Plan 059 / M3-B1a revision v3 已在 059 worktree 正式冻结且独立预审 PASS，执行者 provisional 数据 GO，待计划制定者验收与主线整合；M3-B1b 尚未解锁 |
+| 3：RONDO Multi | 第一、二期及其收口案例、**三期 M3-A1、M3-A2、M3-B2a、M3-B2b 已完成** | Plan 059 / M3-B1a revision v6 已在 059 worktree 正式冻结并完成执行者自检，待计划制定者最终验收与主线整合；M3-B1b 尚未解锁 |
 
 ### 方向命名口径
 
@@ -57,11 +57,12 @@ formal-v5，Plan 056 累计 483 attempts、`10.329028 USD`，reservation 0，随
 - M3-A1 产品合同、M3-B2a / Plan 055 本地 Critic 服务与 M3-B2b / Plan 057 发布流程接入均已完成并进入主线。三期分为
   `M3-A2 → M3-B1a → M3-B1b → M3-B1c` 数据/训练链与 `M3-B2a → M3-B2b` 产品链，两链在
   `M3-C1 → M3-C2` 汇合，最后由 M3-D 收口。
-- M3-A2 / Plan 054 已完成并进入主线。M3-B1a / Plan 059 的 v1 固定文本 shortcut 与 v2 scope Q- 长度 shortcut 均已诚实判定
-  数据 NO-GO。revision v3 在 059 worktree 冻结 72 candidate、30 Boundary 与 6 Within-PASS：三 split 为 42/16/14，39 PASS / 33
-  REWRITE，teacher 全量复核、group/dedup、文本与 exact-token 长度 shortcut、53,294-token census、manifest 和 consumer 门禁均通过。
-  最终干净上下文独立预审 PASS、remaining finding 为 0；执行者 provisional 数据 GO 仍需计划制定者验收和获批合入 main，M3-B1b 未解锁，
-  不能提前启动。
+- M3-A2 / Plan 054 已完成并进入主线。M3-B1a / Plan 059 的 v1/v2 shortcut、v3 独立验收 6 项 finding、v4 预审的 continuity/scope
+  finding 与 v5 正式文本 shortcut 均判定数据 NO-GO。revision v6 在 059 worktree 冻结 72 candidate、30 Boundary 与 6 Within-PASS：
+  三 split 为 42/16/14，39 PASS / 33 REWRITE；72/72 candidate 与 36/36 pair terminal review、group/dedup、文本与 exact-token 长度
+  shortcut、49,634-token census、manifest、默认物理 train-only consumer 与 smoke bundle 均通过。v19 独立 reviewer 已确认当前数据语义，
+  v6 只修复一个不改语义的表面短语并按用户临时豁免由执行者完成全量机械复验；未另行运行 v6 独立终审。计划制定者最终验收尚未完成，
+  M3-B1b 仍未解锁，不能提前启动。
 - Plan 059 的当前授权只覆盖其轻量数据工作，不授权训练、完整模型、项目真实 API、Docker 或启用真实 Critic；每个后续包仍须按自身范围取得授权。
 
 方向 1 与方向 3 的只读研究、轻量代码和数据工作可以并行；本地重型 Cargo、Docker、真实本地模型加载/推理继续

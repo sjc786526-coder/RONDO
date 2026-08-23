@@ -37,6 +37,9 @@ from rondo_eval.publication_critic.training_data import (  # noqa: E402
     variable_text_similarity,
     verify_freeze_manifest,
 )
+from rondo_eval.publication_critic.training_data.input_identity import (  # noqa: E402
+    load_plan054_training_input,
+)
 
 
 IDENTITY = {
@@ -304,7 +307,11 @@ class PublicationCriticTrainingDataTests(unittest.TestCase):
             verify_freeze_manifest(root, manifest, expected_input_identity={"revision": "exact"})
             (root / "packets.jsonl").write_text("{\"drift\":true}\n", encoding="utf-8")
             with self.assertRaisesRegex(TrainingDataError, "identity drifted"):
-                verify_freeze_manifest(root, manifest)
+                verify_freeze_manifest(
+                    root,
+                    manifest,
+                    expected_input_identity={"revision": "exact"},
+                )
 
     def test_consumer_memberships_bundle_and_default_holdout_denial(self) -> None:
         packets, supervision, pairs, _candidate_reviews, _pair_reviews = self._complete_rows()
@@ -347,7 +354,7 @@ class PublicationCriticTrainingDataTests(unittest.TestCase):
                 root,
                 ["packets.jsonl", "supervision.jsonl", "pairs.jsonl", "membership.json"],
                 dataset_revision="v1",
-                input_identity={"revision": "exact"},
+                input_identity=load_plan054_training_input(REPO_ROOT).input_identity,
                 design_lock_sha256="b" * 64,
                 generation_commit="c" * 40,
                 contracts={"rows": "v1"},
@@ -356,7 +363,6 @@ class PublicationCriticTrainingDataTests(unittest.TestCase):
             root.joinpath("manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
             consumer = DatasetConsumer.from_frozen_directory(
                 root,
-                expected_input_identity={"revision": "exact"},
             )
             self.assertEqual(len(consumer.stage("C3")["pairs"]), 2)
 

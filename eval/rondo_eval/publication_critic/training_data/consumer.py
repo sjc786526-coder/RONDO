@@ -1,7 +1,7 @@
 """Strict cumulative C1/C2/C3 consumer and train-only smoke bundle."""
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 from pathlib import Path
 from typing import Any
@@ -10,6 +10,7 @@ from ..contract import REPO_ROOT
 from ..render import build_messages
 from .contract import TrainingDataError, validate_dataset
 from .freeze import verify_freeze_manifest
+from .input_identity import Plan054TrainingInput, load_plan054_training_input
 
 
 def build_memberships(
@@ -79,6 +80,7 @@ class DatasetConsumer:
     supervision: Mapping[str, Mapping[str, Any]]
     pairs: Mapping[str, Mapping[str, Any]]
     membership: Mapping[str, Any]
+    _fixed_rubric: str = field(repr=False)
     allow_evaluation: bool = False
 
     @classmethod
@@ -92,6 +94,29 @@ class DatasetConsumer:
         repo_root: Path | str = REPO_ROOT,
         allow_evaluation: bool = False,
     ) -> "DatasetConsumer":
+        verified_input = load_plan054_training_input(repo_root)
+        return cls._from_rows_with_verified_input(
+            packet_rows,
+            supervision_rows,
+            pair_rows,
+            membership,
+            verified_input=verified_input,
+            repo_root=repo_root,
+            allow_evaluation=allow_evaluation,
+        )
+
+    @classmethod
+    def _from_rows_with_verified_input(
+        cls,
+        packet_rows: Sequence[Mapping[str, Any]],
+        supervision_rows: Sequence[Mapping[str, Any]],
+        pair_rows: Sequence[Mapping[str, Any]],
+        membership: Mapping[str, Any],
+        *,
+        verified_input: Plan054TrainingInput,
+        repo_root: Path | str,
+        allow_evaluation: bool,
+    ) -> "DatasetConsumer":
         validate_dataset(
             packet_rows,
             supervision_rows,
@@ -102,11 +127,33 @@ class DatasetConsumer:
             require_omission_census=False,
         )
         validate_memberships(membership, supervision_rows, pair_rows)
+        all_supervision = {
+            str(row["candidate_id"]): row for row in supervision_rows
+        }
+        visible_ids = {
+            candidate_id
+            for candidate_id, row in all_supervision.items()
+            if allow_evaluation or row["proposed_split"] == "train"
+        }
         return cls(
-            packets={str(row["candidate_id"]): row for row in packet_rows},
-            supervision={str(row["candidate_id"]): row for row in supervision_rows},
-            pairs={str(row["pair_id"]): row for row in pair_rows},
+            packets={
+                str(row["candidate_id"]): row
+                for row in packet_rows
+                if str(row["candidate_id"]) in visible_ids
+            },
+            supervision={
+                candidate_id: row
+                for candidate_id, row in all_supervision.items()
+                if candidate_id in visible_ids
+            },
+            pairs={
+                str(row["pair_id"]): row
+                for row in pair_rows
+                if str(row["preferred_candidate_id"]) in visible_ids
+                and str(row["dispreferred_candidate_id"]) in visible_ids
+            },
             membership=membership,
+            _fixed_rubric=verified_input.rubric,
             allow_evaluation=allow_evaluation,
         )
 
@@ -120,24 +167,25 @@ class DatasetConsumer:
         supervision_relative: str = "supervision.jsonl",
         pairs_relative: str = "pairs.jsonl",
         membership_relative: str = "membership.json",
-        expected_input_identity: Mapping[str, Any] | None = None,
         repo_root: Path | str = REPO_ROOT,
         allow_evaluation: bool = False,
     ) -> "DatasetConsumer":
+        verified_input = load_plan054_training_input(repo_root)
         manifest = _load_json_object(root, manifest_relative)
         verify_freeze_manifest(
             root,
             manifest,
-            expected_input_identity=expected_input_identity,
+            expected_input_identity=verified_input.input_identity,
         )
         required = {packets_relative, supervision_relative, pairs_relative, membership_relative}
         if not required <= set(manifest["files"]):
             raise TrainingDataError("freeze manifest does not bind every consumer input")
-        consumer = cls.from_rows(
+        consumer = cls._from_rows_with_verified_input(
             _load_jsonl(root, packets_relative),
             _load_jsonl(root, supervision_relative),
             _load_jsonl(root, pairs_relative),
             _load_json_object(root, membership_relative),
+            verified_input=verified_input,
             repo_root=repo_root,
             allow_evaluation=allow_evaluation,
         )
@@ -155,12 +203,15 @@ class DatasetConsumer:
             raise TrainingDataError("training stage reached a non-train candidate")
         return {"binary": candidates, "pairs": pairs}
 
-    def model_inputs(self, name: str, rubric: str) -> tuple[dict[str, Any], ...]:
+    def model_inputs(self, name: str) -> tuple[dict[str, Any], ...]:
         stage = self.stage(name)
         return tuple(
             {
                 "candidate_id": row["candidate_id"],
-                "messages": build_messages(self.packets[row["candidate_id"]]["packet"], rubric),
+                "messages": build_messages(
+                    self.packets[row["candidate_id"]]["packet"],
+                    self._fixed_rubric,
+                ),
             }
             for row in stage["binary"]
         )

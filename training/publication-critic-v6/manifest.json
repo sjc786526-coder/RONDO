@@ -1,13 +1,14 @@
 {
-  "content_sha256": "992e193c79cccfb1cc06e8c0c1ab9f98cb5a05e45d901d1cf34a7ebbb98c0582",
+  "content_sha256": "9c44fa1239e2190254ef983fb825a4bff6bbf20b8a18be7aaaf7b3fc848a6900",
   "contracts": {
-    "eval/manifests/publication-critic/training-data-teacher-freeze-v3.json": "183a1a16c6397eeba9137eb147a9a2b1627a0b11a5c735123274bb3d6bc13247",
+    "eval/manifests/publication-critic/training-data-teacher-freeze-v6.json": "921e9fc1d94867120887491b1a24fb51e80963fb613ea9cf12013da5d562ea4f",
     "eval/rondo_eval/publication_critic/training_data/__init__.py": "ee834503a2f7ea76ca056e0099b253ffd8a345b465b962fb0f94685e4acec8b2",
-    "eval/rondo_eval/publication_critic/training_data/consumer.py": "b5025c34a1aa94c52f585e6edd6a897692840d6eeb4d16181878bc76695cef23",
-    "eval/rondo_eval/publication_critic/training_data/contract.py": "4c117cc6dcb3a9dc8addaba811f54e3161a5704feaa816fbb711a56215e156c5",
+    "eval/rondo_eval/publication_critic/training_data/consumer.py": "bd56b703e85b9796928e803bddc38b7bb37a5bcd84f743b7c7b31d8de8c9a2a8",
+    "eval/rondo_eval/publication_critic/training_data/contract.py": "2050e408d6db3dfaee0eb834daf862769864049c5ec7844b3f9a14562189717a",
     "eval/rondo_eval/publication_critic/training_data/dedup.py": "b3b868dc7ca7e5a0416f1eadc2f00f03bde59c8f6fbc1f4a979baf9259b87e0d",
-    "eval/rondo_eval/publication_critic/training_data/freeze.py": "e46cb5f145f33ff04f5e52f36bc1d43d95a1d8fe325d08bbb025b3da87cced22",
+    "eval/rondo_eval/publication_critic/training_data/freeze.py": "a3d1d189c0288d2f750260a6bf7295c0592c22b03d41c7624a93d68ba601cacb",
     "eval/rondo_eval/publication_critic/training_data/grouping.py": "cd2fb37dedd52a4bf543235d2258687a8371fd1c1c173e5d88d77b13cb8bc69d",
+    "eval/rondo_eval/publication_critic/training_data/input_identity.py": "653b95c4e49cdfb32f89984f6e1568524d07018d10a80eb060fe404bb8344a81",
     "eval/rondo_eval/publication_critic/training_data/shortcuts.py": "647fd7d69835896b3230b8ce61d818cc68aa0713e6a8aae53de100c12adca955",
     "eval/rondo_eval/publication_critic/training_data/token_census.py": "2179a28beccab354847d6bb49718b1c2ebfd3a9161fdafc80dd1183705e64a82",
     "eval/templates/publication-critic/input-contract-v2.md": "bba923d37c4b533086d3753b3f47c3f45843f6ca729ee8cb275c6567772a2311",
@@ -15,64 +16,64 @@
     "eval/templates/publication-critic/qualification-rubric-v1.md": "cc15207b3c6e2482e56710f735d01893f8c8c020df35a18918e1a0a1be7f02e4",
     "eval/templates/publication-critic/render-contract-v3.json": "8bd5449956f20f26c6d68fe410f22fc2925540eb07d63050ddad70ef87cfef2c",
     "eval/templates/publication-critic/training-data-design-lock-v1.json": "cc56ba61778d84bddce468070333deaafce2f888507e2ea2f52fe1be1dd7843b",
-    "eval/templates/publication-critic/training-data-design-lock-v2.json": "6d9848c5b89c24398b58df3535caa3125450a28654de6ac64c76b7c826b92453",
-    "eval/templates/publication-critic/training-data-design-lock-v3.json": "b6136a30a2af70fbdb8a4199a536e87ecc8ce7f3c9ddc12e4504c1ac8295d87f",
-    "eval/templates/publication-critic/training-data-generator-prompt-v3.md": "0706c5be6d1e82ffebc4f54481dfb67f3a5ccbc46611bfcd978a769aeee5661a",
+    "eval/templates/publication-critic/training-data-design-lock-v5.json": "2318f805326c3fb653f3e7ebd01c48fdd521764a18fef74b53f22fba9cb3361c",
+    "eval/templates/publication-critic/training-data-design-lock-v6.json": "6b177962b202156990c3a63e14e928fc64550f73c78ac0fd2e3ace49e9f8047f",
+    "eval/templates/publication-critic/training-data-generator-prompt-v6.md": "c40aac8f9aca869dfdc05d5731fa29c42a498b99829314eb3554a8a289e0d1d9",
     "eval/templates/publication-critic/training-data-reviewer-prompt-v1.md": "38235f56bcb3a0a29ce39dd90b6ca1d32dda4e6c9866c430bf9f72db25878d2c",
     "eval/templates/publication-critic/training-data-schema-v1.json": "4cdd069d8e2ed7ee3ba9b008bb1fab567da113f387f6f7e222e6bb3359bc484c",
-    "eval/tools/finalize_publication_critic_training_data.py": "d76422b252162be34d5d01aa6a370812bd9cd0cb322f5b072fd11ef2b50337c7",
-    "eval/tools/generate_publication_critic_training_data.py": "5d0e1a9e3bebcf60376fa745a8487d2b7d5525d07bac4f0ad27844c49b6a1e1c"
+    "eval/tools/finalize_publication_critic_training_data.py": "28e86a51705638c1d58f69ce9433319a74c63401d13df68117bc833cc1b267a2",
+    "eval/tools/generate_publication_critic_training_data.py": "efbd1cb4e6823d875e91b5c8bd5b7571c1bc14d2c4a8b351139e1911dfba4ff4"
   },
   "dataset_name": "rondo-publication-critic-training",
-  "dataset_revision": "v3",
-  "design_lock_sha256": "b6136a30a2af70fbdb8a4199a536e87ecc8ce7f3c9ddc12e4504c1ac8295d87f",
+  "dataset_revision": "v6",
+  "design_lock_sha256": "6b177962b202156990c3a63e14e928fc64550f73c78ac0fd2e3ace49e9f8047f",
   "files": {
     "DATA_CARD.md": {
-      "bytes": 1858,
-      "sha256": "cc353f2666da0234e99d12634bbb25a262f2130c7ca516f53b4116b74801f9b2"
+      "bytes": 2321,
+      "sha256": "9b5c5b3d5b6263c864d3c2240c4d7b0ea54f0a50cadfff5659ee7e9546a8c5df"
     },
     "membership.json": {
       "bytes": 6517,
-      "sha256": "6ca2b17678399771521c5e798cd1dd6e47b31e681c9f2256af4e233e123a9f2d"
+      "sha256": "2fff00afd90586d55e9675714b765980ad974902a6ad9dcb4cf659e517b57993"
     },
     "packets.jsonl": {
-      "bytes": 94118,
-      "sha256": "5864780ab76247abbe5846bbda896708751d19b92a1d53f10f3eaddcb42cf5d2"
+      "bytes": 79020,
+      "sha256": "9bb5fd1381c604899461d05326c290526d6518ee9760e1b8e305570f715606da"
     },
     "pairs.jsonl": {
       "bytes": 11162,
       "sha256": "6efe20ad3cadccf63a5b0e1920ee62f3ef2f5c2aa5352503da81c3ac8cd38f86"
     },
     "reports.json": {
-      "bytes": 22424,
-      "sha256": "48424f1ceb46a0f21b7cb3be8412c7d75407e4b9da21e6cdbd402870a1ae7b49"
+      "bytes": 22908,
+      "sha256": "9202f8364ddc7c0f65fd157c107f84edaf0368a2854b47fffe89431d91c05c72"
     },
     "scenarios.jsonl": {
-      "bytes": 32300,
-      "sha256": "76f903c5fc671ef4c71b43c5037149ee5339de714a7d33475828da6770050e19"
+      "bytes": 32715,
+      "sha256": "b58d0021e37174827cc05503e3e6f7b001b586da922a42c4c414a3c2c4dd5b1a"
     },
     "split-index.json": {
       "bytes": 2668,
-      "sha256": "0e8dfe433513e7581b8342ef4373d44eaddc3184a3a982bf7e8ae3fc5066e947"
+      "sha256": "72b9241a720dc41925f7db947c0d8ccd2c5f05aff7b48b88e2ca321da983a4d8"
     },
     "supervision.jsonl": {
-      "bytes": 85394,
-      "sha256": "73574b883b488a5713fcdb2820655e5523ebaa738abd03da994192a4be9c586e"
+      "bytes": 85405,
+      "sha256": "6afb302fb8b3e7479134e75e9fa1d78e1f5e1ba24a8a9772cd3d12b48444bf16"
     },
     "teacher-identity.json": {
-      "bytes": 778,
-      "sha256": "6928bc4a0b776036bed8db7fae8bda8dda7ea50bb7f7b93654e0398b407605ec"
+      "bytes": 820,
+      "sha256": "c74224f7482fbd465a059d12278fa281428d033ac8f1ae7b5e3e7197147fff4e"
     },
     "token-census.jsonl": {
-      "bytes": 24805,
-      "sha256": "08d74b1ee701c582d10fb1b01896c7dcc26195034e31d73634f1390328261d8f"
+      "bytes": 24807,
+      "sha256": "af7d186109cd2373811efbd622065c797b7efc46f2ef8e111e02ff8f27b5a22c"
     },
     "train-only-smoke-bundle.json": {
       "bytes": 17966,
-      "sha256": "6fef1b2fee6f7c5c547b1beb99482efbfcb5ae4d6ad8c9bb8f4c99c51ae74c06"
+      "sha256": "1d3dc5e82defd825f2185a95ff3b7015fd8c206bcc45d203ad150425f72c5879"
     }
   },
-  "generation_commit": "1c73465d2e6b83186ae4db5f49afdca7dbe78acf",
+  "generation_commit": "fbe00cd6980f1e627554efb116b9d7e5de348a22",
   "input_identity": {
     "adopted_window_tokens": 16384,
     "candidate_truncation": "forbidden",
@@ -138,8 +139,8 @@
     },
     "token_census": {
       "bucket_totals": {
-        "candidate": 4174,
-        "continuity": 11968,
+        "candidate": 4767,
+        "continuity": 7715,
         "cross_segment_framing": 8064,
         "evidence_v1": 1296,
         "packet_framing": 4104,
@@ -149,9 +150,9 @@
       "candidate_count": 72,
       "dropped_oldest_publications_total": 0,
       "schema_version": 1,
-      "token_max": 2753,
+      "token_max": 1367,
       "token_min": 553,
-      "token_total": 53294
+      "token_total": 49634
     }
   }
 }

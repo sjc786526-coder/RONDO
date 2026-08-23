@@ -76,7 +76,7 @@ Within-PASS 软偏好对。任务同时交付轻量 consumer 与不含 validatio
 - [x] pure/focused tests 覆盖 schema、监督隔离、review 状态、pair 不变量、分组切分、重复/近重复、freeze/hash、C1/C2/C3 成员和 bundle 排除；
       exact-tokenizer-only 门禁覆盖全部正式 candidate。只运行受影响模块的必要测试，结果明确区分 pure、teacher reference、真实 tokenizer 和
       未运行的模型/训练证据。
-- [x] 完成一次与 generator/reviewer 均分离的聚焦独立验收，审查数据正确性、split 泄漏、输入隔离、token census、冻结身份和 consumer 合同。
+- [ ] 完成一次与 generator/reviewer 均分离的聚焦独立验收，审查数据正确性、split 泄漏、输入隔离、token census、冻结身份和 consumer 合同。
       普通 finding 在 059 范围内修复并重新冻结受影响完整集合；最终给出 M3-B1b 数据 GO/NO-GO，且没有剩余 correctness/functionality finding。
 - [x] 完成后只精炼更新顶层 WBS 的方向 3 指针、方向 3 子 WBS、本计划状态/决策和一份有实质内容的 Plan 059 `agent_log`。检查 diff、文件体积、敏感/ignored 边界、
       主工作区与所有 worktree 状态后，只提交 059 worktree 本地分支并保持 clean；不合并、不推送、不归档、不删除 worktree或重命名分支。
@@ -280,12 +280,12 @@ linked worktree 不共享主根的 ignored `eval-data/`，因此下列执行期�
 
 ### 当前工作
 
-- revision v3 正式数据、完整冻结门禁、最终干净上下文聚焦审查及 staged/敏感/体积/状态检查均已完成；本计划随 059 本地提交冻结，
-  等待用户与计划制定者验收。执行者 provisional 建议不升级为计划制定者最终数据 GO。
+- revision v6 已从冻结 teacher/输入/实现身份生成，正式机械冻结、focused tests、执行者自检、staged/敏感/体积/状态检查与 059 本地提交均已
+  收口。v6 只在 v19 已独立确认的语义上修复一个表面短语；用户临时取消本轮新的独立子智能体复审，因此不把执行者自检冒充独立终审。
 
 ### 本任务剩余步骤
 
-- 任务内无剩余实现步骤；计划制定者最终验收、获批主线整合与任何 M3-B1b 授权均在本任务外。
+- 执行者范围内无剩余实现步骤。计划制定者最终验收、获批主线整合与任何 M3-B1b 授权在本任务外。
 
 ### 阻塞项
 
@@ -299,15 +299,23 @@ linked worktree 不共享主根的 ignored `eval-data/`，因此下列执行期�
   该结论推翻 v1 provisional GO，失败冻结只保留为 ignored 修复证据，不提交训练正文。
 - revision v2 formal-v6 的 teacher、split、dedup、token 与 consumer 门禁虽通过，但最终干净审查复算出 `candidate_tokens >= 80`
   对 6 个 scope Q- 形成 6/6 REWRITE、0 false positive 的跨 split 捷径；v2 tracked 候选未提交，失败冻结保留为 ignored 修复证据。
-- revision v3 rehearsal-v9 已完成 17/17 candidate、9/9 pair 独立 accept，scope Q+/Q- 字符长度分别为 121/127 与 142/146，
-  scope-04 的 Boundary 与 Within-PASS 方向均成立；10,941-token census、text/length shortcut、manifest 和 consumer 门禁通过。
-- revision v3 `formal-v8` 已从 clean implementation freeze 生成，独立 GPT-5.6-sol reviewer 对 72/72 candidate 与 36/36 pair 全部
-  accept，remaining finding 为 0；正式冻结为 36 scenario group、42/16/14 split、39 PASS / 33 REWRITE、30 Boundary / 6 Within-PASS。
-- 11 条 near-duplicate edge 全部同 scenario，Plan 054 reference match、跨 split label-exclusive 文本 shortcut 与双向 exact-token 长度
-  threshold shortcut 均为 0；72 条 exact-token census 共 53,294 tokens，单条 553–2,753，continuity omission 为 0。
-- 严格 manifest/frozen consumer、C1/C2/C3（42 Binary / +18 Boundary / +3 Within-PASS）、默认 holdout 拒绝、train-only smoke bundle
-  和 44 项 focused Python tests 通过。最终干净上下文预审复算上述数据、语义、输入隔离、split/dedup/token/freeze/consumer 与文档事实后
-  PASS，remaining finding 为 0。执行者 provisional 数据 GO；计划制定者最终验收、主线整合与 M3-B1b 解锁均不在本任务内。
+- revision v3 经计划制定者独立验收确认 6 项真实 finding：默认 consumer 仍公开保留 holdout、rubric/Plan 054 input identity/teacher freeze
+  未锁死、continuity Q- 非单维、scope Q- 跨 split 模板、long bucket 与真实 token 长度矛盾且含机械填充、数据卡未声明 teacher reference
+  非人类真值。v3 因此判定数据 NO-GO，tracked release 被 revision v4 替代，ignored formal-v8 只保留为修复证据。
+- revision v4 `formal-v9` 关闭 v3 的六项 finding 后，干净上下文预审仍发现 continuity Q- 可行动和 scope Q- 共享 desktop/UI 模板两个真实
+  finding，v4 判定 NO-GO。rehearsal-v15 至 v18 逐批返修并停止扩大；rehearsal-v19 的独立 GPT-5.6-sol/xhigh reviewer 最终接受
+  33/33 candidate 与 17/17 pair，确认受影响语义收敛。
+- revision v5 `formal-v10` 的 72/72 candidate 与 36/36 pair 均有 terminal accept，但全量 normalized char-4 shortcut 门禁发现四个
+  REWRITE 跨 split 共用 `没有收口`，因此 v5 仍判定 NO-GO。revision v6 只修改其中一个 candidate 的不改语义表面短语，并按用户临时豁免
+  复用 v19 独立语义决定；执行者重新运行完整 review 终态、validation、grouped split、dedup、shortcut、exact-token census、freeze、consumer
+  与 bundle 门禁，未另行运行 v6 独立终审。
+- revision v6 `formal-v11` 以 mandatory teacher freeze 和从 Plan 054 v4 自行推导的固定 rubric/input/tokenizer identity 生成；正式冻结为
+  36 scenario group、42/16/14 split、39 PASS / 33 REWRITE、30 Boundary / 6 Within-PASS。12 条 near-duplicate edge 全部进入 group
+  closure，Plan 054 reference match、跨 split label-exclusive 文本 shortcut 与双向 exact-token 长度 threshold shortcut 均为 0；72 条
+  exact-token census 共 49,634 tokens，单条 553–1,367，三 split 各含两个真实 long endpoint，continuity omission 为 0。
+- 严格 manifest、C1/C2/C3（42 Binary / +18 Boundary / +3 Within-PASS）、默认 consumer 物理仅保留 42/42/21 个 train
+  packet/supervision/pair、显式 evaluation 72/72/36、train-only smoke bundle 和 60 项 focused Python test 均通过。计划制定者最终验收、
+  主线整合与 M3-B1b 解锁均不在本任务内。
 
 ### 交接边界
 
@@ -342,3 +350,10 @@ linked worktree 不共享主根的 ignored `eval-data/`，因此下列执行期�
 | 016 | v2 的 scope Q- 超长捷径判定数据 NO-GO；revision v3 使 scope Q+/Q- exact-token 长度相近且交错，并新增双向 exact-token threshold 门禁；scope-04 soft endpoint 保留相关重复以恢复可信软方向 | 长度不是 qualification，正式 split 不能让极端长度完美预测标签，Within-PASS 方向必须真实 | 数据 revision、token census、shortcut、pair | 已执行 |
 | 017 | revision v3 以 formal-v8 全量独立复核和同内容双物化作为正式冻结证据；失败 v1/v2 只保留 ignored 修复证据，不进入 tracked training release | 正式版本必须绑定已修复语义、clean generation identity、全量 teacher 终态与 exact-token/consumer 门禁 | review、freeze、training handoff | 已执行 |
 | 018 | 最终干净上下文预审独立复算 v2 finding closure 与 v3 全链路后 PASS，remaining finding 为 0；仍只给执行者 provisional 数据 GO | 提前关闭普通 correctness finding，同时保留计划制定者最终验收和 M3-B1b 解锁边界 | final review、handoff | 已执行 |
+| 019 | 计划制定者独立验收确认 v3 的 6 项 correctness finding，v3 判定数据 NO-GO；revision v4 同时修正 consumer 可达性、Plan 054/teacher 冻结、pair 原子性、scope 模板、真实 long 与数据卡限制 | v3 机械门禁通过不代表消费隔离和数据语义已经成立，语义修复必须升级 revision | 数据 revision、consumer、identity、pair、length、data card | 已执行 |
+| 020 | formal v4 只重新复核 23 个变化 candidate 与 15 个变化 pair；49/21 个未变化对象须先通过 model-visible/监督/pair 语义逐字节相等门禁才复用原 terminal review | 保留有效 teacher 进度，同时让任何语义漂移 fail closed 并触发重审 | teacher review、repair、freeze | 已执行 |
+| 021 | long 改为 Scenario 级真实 exact-token bucket，三 split 各选一个 scenario 的两个 endpoint，以四条不同且有用的历史 publication 达到 1,000-token 下界；非 long 上界为 999 | 长度覆盖必须反映最终模型输入，不能用字符代理或机械重复填充伪造 | Scenario、token census、shortcut | 已执行 |
+| 022 | 默认 consumer 构造时物理裁去 validation/unseen-test；模型消息只使用从 Plan 054 v4 冻结身份自行加载的固定 rubric，formal finalizer 还强制 exact teacher freeze 与 tokenizer-only snapshot identity | 默认训练对象不应持有 holdout，调用方也不能选择 rubric 或声明自己想要的 input identity | consumer、input isolation、freeze | 已执行 |
+| 023 | v4 独立预审发现 continuity Q- 仍可行动且 scope Q- 共享 desktop/UI 过程模板，继续判定 NO-GO；v5 以逐场景产品状态缺口与六类自然过程噪声完成 v19 独立语义复核 | 缺少可选 handoff 本身不是缺陷，Q- 必须真实破坏目标 qualification；跨 split 共享过程主题仍可成为标签捷径 | teacher review、pair、shortcut、revision | 已执行 |
+| 024 | v5 formal-v10 的 terminal review 全部接受后仍因跨 split REWRITE-only `没有收口` char-4 fragment 判定 NO-GO；v6 只做一个不改语义的表面短语替换并全量重新冻结 | 正式机械门禁优先于 teacher accept，表面修复也必须升级 revision 并重新计算全部内容身份 | shortcut、revision、freeze | 已执行 |
+| 025 | 用户临时取消本轮 v6 独立子智能体复审；复用 v19 的独立语义决定，由执行者对表面修复重新运行全量机械门禁并如实保留终审边界 | 避免对单个不改语义短语重复消耗审查，同时不伪造新的独立验收结论 | review identity、handoff、acceptance boundary | 已执行 |

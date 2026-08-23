@@ -29,9 +29,9 @@ from rondo_eval.publication_critic.training_data import (  # noqa: E402
 from rondo_eval.publication_critic.identity import sha256_file  # noqa: E402
 
 
-LOCK_PATH = REPO_ROOT / "eval/templates/publication-critic/training-data-design-lock-v3.json"
+LOCK_PATH = REPO_ROOT / "eval/templates/publication-critic/training-data-design-lock-v6.json"
 GENERATOR_PROMPT_PATH = (
-    REPO_ROOT / "eval/templates/publication-critic/training-data-generator-prompt-v3.md"
+    REPO_ROOT / "eval/templates/publication-critic/training-data-generator-prompt-v6.md"
 )
 
 QUALIFICATION = {
@@ -244,10 +244,10 @@ BOUNDARY_SPECS = (
         "existing_event",
         "incomplete",
         "root",
-        "C03 ELF 提取仍未通过 verifier",
-        "成员结果已回传，协作与影响链均被观察到；外部 verifier 仍失败，事项未完成。",
+        "C03 ELF 提取验证状态",
+        "成员结果已回传，协作与影响链均被观察到；失败的 ELF 样本类别与当前 verifier 入口已经保留，外部 verifier 仍失败，事项未完成。",
         "从 verifier 的失败条件继续定位，不重复验证成员回传链。",
-        "C03 已形成成员回传与 Team State 更新，但任务终态尚未成功。",
+        "C03 已形成成员回传与 Team State 更新，后续验证状态尚未公开。",
         "formal",
         continuity_variant="available_current",
         evidence_variant="present",
@@ -259,8 +259,8 @@ BOUNDARY_SPECS = (
         "new_event",
         "incomplete",
         "member",
-        "分页游标在空页后重复",
-        "空页之后会再次返回前一游标；普通非空分页保持正确，事项未完成。",
+        "分页游标边界稳定性",
+        "空页之后会再次返回前一游标；复现只涉及过滤后无结果的分页分支，普通非空分页与下一页起点保持正确，事项未完成。",
         "从空页分支的 next_cursor 赋值继续，保留非空分页对照。",
         "该事项首次公开。",
         "conversational",
@@ -271,10 +271,10 @@ BOUNDARY_SPECS = (
         "existing_event",
         "incomplete",
         "member",
-        "Windows 子进程取消仍有孤儿进程",
-        "父进程已响应取消，但孙进程仍存活；job object 继承尚未接入。",
+        "Windows 子进程取消状态",
+        "父进程已响应取消，直接子进程与普通退出对照均已回收，但孙进程仍存活；job object 继承尚未接入，事项未完成。",
         "先把孙进程加入同一 job object，再验证超时与显式取消。",
-        "当前只回收了直接子进程，孙进程未纳入同一生命周期。",
+        "早期取消路径存在资源残留，尚未缩小到具体对象或生命周期层级。",
         "formal",
         continuity_variant="available_stale",
         evidence_variant="present_omitted",
@@ -286,8 +286,8 @@ BOUNDARY_SPECS = (
         "new_event",
         "incomplete",
         "root",
-        "配置迁移缺少回滚覆盖",
-        "正向迁移已通过；重复索引场景的回滚仍失败，事项未完成。",
+        "配置迁移回滚覆盖状态",
+        "正向迁移和无重复索引的回滚对照已通过；失败只出现在目标中已有重复索引时，清理分支仍未覆盖，事项未完成。",
         "从回滚索引清理继续，无需重跑已通过的正向迁移。",
         "该事项首次公开。",
         "conversational",
@@ -299,10 +299,10 @@ BOUNDARY_SPECS = (
         "existing_event",
         "incomplete",
         "root",
-        "长任务恢复点未覆盖空输出",
-        "有输出的恢复点验证通过；空输出时 checkpoint 尚未落盘。",
-        "补空输出 checkpoint 用例，然后验证恢复不会重复执行已完成步骤。",
-        "恢复路径已覆盖正常输出，空输出仍没有样本。",
+        "长任务恢复点回归状态",
+        "空输出 checkpoint 已能落盘并通过崩溃恢复与不重复执行验证；空/非空混合批次的正式回归尚未固化，事项未完成。",
+        "固化空/非空混合批次回归，并验证 checkpoint 身份不会相互覆盖。",
+        "恢复路径已覆盖正常输出，边界恢复矩阵仍不完整。",
         "formal",
         continuity_variant="available_partial",
         evidence_variant="none",
@@ -313,8 +313,8 @@ BOUNDARY_SPECS = (
         "new_event",
         "incomplete",
         "member",
-        "多语言错误消息缺少西班牙语",
-        "英文与中文资源已加载；西班牙语仍回退到英文，资源键映射尚未补齐。",
+        "多语言错误消息覆盖状态",
+        "英文与中文资源已加载且缺失键回退对照稳定；西班牙语仍回退到英文，现有资源清单已核对，es-ES 键映射尚未补齐，事项未完成。",
         "补齐 es-ES 键映射并跑三语言回退用例。",
         "该事项首次公开。",
         "conversational",
@@ -331,7 +331,6 @@ BOUNDARY_SPECS = (
         None,
         "该事项首次公开。",
         "formal",
-        long_input=True,
     ),
     BoundarySpec(
         "b-scope-02",
@@ -437,6 +436,7 @@ BOUNDARY_SPECS = (
         "formal",
         continuity_variant="available_current",
         evidence_variant="present_omitted",
+        long_input=True,
     ),
     BoundarySpec(
         "b-consistency-04",
@@ -472,9 +472,9 @@ BOUNDARY_SPECS = (
         "existing_event",
         "incomplete",
         "member",
-        "批处理错误摘要遗漏首个失败项",
-        "失败计数已正确；摘要仍从第二个失败项开始，首项缺失，事项未完成。",
-        "检查首项初始化与后续追加的分支差异。",
+        "批处理错误摘要回归待落库",
+        "摘要首项遗漏已修并通过空、单、多失败与并行顺序边界矩阵；正式回归尚未落库，事项未完成。",
+        "固化错误摘要边界矩阵，并复核首项初始化与追加共用同一顺序逻辑。",
         "批处理能返回失败总数，但摘要内容不完整。",
         "conversational",
         continuity_variant="available_stale",
@@ -515,58 +515,34 @@ NEGATIVE_CANDIDATES: dict[str, tuple[str, str | None]] = {
         "已改为保留跨块 CR，分块矩阵通过；缓冲拼接错误被直接认定为旧遗漏来源，处理已经结束。",
         None,
     ),
-    "b-continuity-01": ("成员回传与影响链已经确认；verifier 后续没有留下可接手的进展说明。", None),
-    "b-continuity-02": ("普通非空分页保持正确；空页分支的处置情况没有写入这个公开状态。", None),
-    "b-continuity-03": ("父进程取消已经回收；孙进程部分没有说明当前处理落点。", None),
-    "b-continuity-04": ("正向迁移已通过；回滚覆盖仍待处理，但没有保留进展或继续起点。", None),
-    "b-continuity-05": ("有输出的恢复点验证通过；空输出分支没有留下当前进展。", None),
-    "b-continuity-06": ("英文与中文资源已加载；西班牙语支持没有交代做到哪一步。", None),
+    "b-continuity-01": ("成员结果已回传，协作与影响链均被观察到；任务尚未收口，但当前失败条件和后续验证位置没有形成公开状态。", None),
+    "b-continuity-02": ("普通非空分页与下一页起点对照保持正确；仍有工作待收口，余下异常的触发条件和处理起点没有记录。", None),
+    "b-continuity-03": ("父进程、直接子进程与普通退出对照均已回收；取消事项没有结束，剩余对象与生命周期接入点都未公开。", None),
+    "b-continuity-04": ("正向迁移和常规回滚对照已通过；回滚覆盖还不完整，剩余失败输入或处理阶段尚未说明。", None),
+    "b-continuity-05": ("空输出 checkpoint 已能落盘并通过崩溃恢复与不重复执行验证；恢复工作尚在进行，余下验证对象和断点没有记录。", None),
+    "b-continuity-06": ("英文、中文资源和缺失键回退对照保持稳定；多语言覆盖还有空白，余下 locale 与处理路径未被保留。", None),
     "b-scope-01": (
-        " ".join(
-            f"界面操作记录 {index}：调整面板宽度，翻看配色选项，记录滚动位置，再等待一次无关刷新。"
-            for index in range(1, 3)
-        )
-        + " 最终结论：导出器改为按 schema 字段顺序写入；三种输入顺序得到相同结果，事项已完成。",
+        "正向输入先比较 id/name/tags，临时数组依次变成 name,id,tags 和 id,name,tags；逆向输入又逐键跑一遍，随机输入依次换成种子 7、19、23、41。导出器此时已经按 schema 顺序写入，三种输入结果相同。随后空字段重复两轮，嵌套数组拆成三层逐层比较，café 与 café 的交换位置又各抄一次；每轮仍逐项列出比较器左右值、返回值和数组交换，最后再复述四个种子的相同 hash。",
         None,
     ),
     "b-scope-02": (
-        " ".join(
-            f"目录预算旁记 {index}：调换青色终端主题，观察提示符动画，保存字体缩放截图，逐项重排无关面板。"
-            for index in range(1, 3)
-        )
-        + " 普通目录预算稳定；符号链接环会重复计入目录，修复尚未验证。",
+        "从 root/a 进入 b/c 时累计 38 项，返回 a 后队列剩 5 个；沿 link-to-a 再走到 b/c，累计变成 76，第三圈到 114。符号链接环仍会重复计入同一目录，修复尚未验证。接着又逐层列出 a、b、c 的深度 1、2、3，各自重复抄写已访问数、剩余队列与预算余额；普通目录的 12、26、38 项对照也从头走了三遍，末尾再把每次进入和退出的计数相加核对。",
         "先按 inode 去重目录，再复跑环与普通目录用例。",
     ),
     "b-scope-03": (
-        " ".join(
-            f"轮换排查杂记 {index}：整理下载文件名，试验编辑器配色，重放无关帮助命令，抄录窗口坐标。"
-            for index in range(1, 3)
-        )
-        + " 只在轮换与写入同毫秒发生时丢首条记录，常规写入稳定。",
+        "09:41 用 4 KiB 缓冲写入 20 条，09:42 改成 8 KiB 又写 20 条，09:43 单独 flush 三次都保留首条；09:44 把轮换与写入压到同一毫秒时首条丢失。09:45 只改文件名没有复现，09:46 只换句柄也没有复现，09:47 同时换名和句柄再次丢首条。之后把七个时点的缓冲大小、flush 次数、旧新文件编号与首条序号全部重列一遍，又附上五次常规写入和三次单独轮换的相同结果。",
         "固定轮换边界时钟并检查文件句柄交换顺序。",
     ),
     "b-scope-04": (
-        " ".join(
-            f"状态面板过程 {index}：浏览图标候选，移动侧栏分隔线，刷新空白示例页，统计无关菜单项。"
-            for index in range(1, 3)
-        )
-        + " 活动谓词已统一使用双生命周期；关闭但仍待 Root 处理的事件只显示一次，回归通过。",
+        "第一次讨论把状态叫 active、closed、root-pending 和 visible，四个人依次复述各自定义；第二次把 root-pending 改成 awaiting-root，又逐个比较名称是否容易误解。关闭但仍待 Root 处理的事件此时已经只显示一次，回归通过。第三轮继续在 resolved、done、closed-final 三个词之间投票，随后逐人抄下对 producer closed、Root pending、Root resolved 的口头判断；最后两次会议又完整复述相同组合和命名票数。",
         None,
     ),
     "b-scope-05": (
-        " ".join(
-            f"帮助文本操作 {index}：更换键盘布局预览，折叠侧栏目录，调整光标闪烁，整理无关标签页。"
-            for index in range(1, 3)
-        )
-        + " 帮助文本已与配置默认值统一为 4317，快照测试通过。",
+        "先把帮助页第 3、8、14 段的 4316 改成 4317，再把示例一、示例二和示例三逐行重写；配置样例的 port、endpoint 与注释各检查一次，运行时默认值又单独核对两遍。CLI 帮助和配置默认值已经统一，快照测试通过。随后把未变化的 host、timeout、format、color 四项逐个列出，显式参数、环境变量和默认调用的输出也分别整页贴成对照，最后再次抄写六处 4317 与每个段落编号。",
         None,
     ),
     "b-scope-06": (
-        " ".join(
-            f"取消扫描日志 {index}：测量鼠标停留时间，变换窗口尺寸，排序桌面快捷方式，记下无关时钟读数。"
-            for index in range(1, 3)
-        )
-        + " 取消只在每个目录结束后检查；单个大目录可延迟数秒，尚未调整。",
+        "第 1 批进入 d1，处理 128 个文件用时 31 ms；第 2 批进入 d2，累计 256 个用时 67 ms；第 3、4、5 批分别累计到 384、512、640 个，每次都抄下进入时间、退出时间和取消标志。当前取消只在整个目录结束后检查，单个大目录会延迟数秒。其后又从第 6 批列到第 12 批，逐项重复文件数、累计耗时、标志读取值与队列长度；普通小目录的 24 次立即返回也逐次展开，尚未把检查移到每批条目后。",
         "把取消检查移到每批条目后，并测量一万文件目录。",
     ),
     "b-consistency-01": (
@@ -590,8 +566,8 @@ NEGATIVE_CANDIDATES: dict[str, tuple[str, str | None]] = {
         "该回归已经通过，不过同一事项尚未完成，还要继续调查。",
     ),
     "b-consistency-06": (
-        "失败计数已正确；摘要仍从第二个失败项开始，首项缺失，事项未完成。同一摘要问题同时也宣称已经收口。",
-        "检查首项初始化与后续追加的分支差异。",
+        "摘要首项遗漏已修并通过空、单、多失败与并行顺序边界矩阵；正式回归尚未落库，事项未完成。同一正式回归又被宣称已经收口。",
+        "固化错误摘要边界矩阵，并复核首项初始化与追加共用同一顺序逻辑。",
     ),
 }
 
@@ -610,11 +586,11 @@ SOFT_CANDIDATES: dict[str, tuple[str, str | None]] = {
         "加入析构阶段标记并复现一次完整关闭序列。",
     ),
     "b-continuity-03": (
-        "父进程已响应取消，但孙进程仍存活；job object 继承尚未接入。后续仍只处理孙进程继承和取消验证。",
+        "父进程已响应取消，直接子进程与普通退出对照均已回收，但孙进程仍存活；job object 继承尚未接入，事项未完成。接续范围仍只限孙进程的 job object 继承以及超时和显式取消验证。",
         "先把孙进程加入同一 job object，再验证超时与显式取消。",
     ),
     "b-scope-04": (
-        "活动谓词已统一按 producer 与 Root 双生命周期计算，面板不再拼接两份结果；关闭但 Root pending 的事件只显示一次，Root resolved 对照也通过。换句话说，producer closed 与 Root pending 的组合已经用同一谓词覆盖，普通活动和 resolved 组合也分别验证，事件身份保持不变；这些结果再次说明双生命周期计算和去重显示都已完成，事项已完成。",
+        "活动谓词已统一按 producer 与 Root 双生命周期计算，面板不再拼接两份结果；关闭但 Root pending 的事件只显示一次，Root resolved 对照也通过。换句话说，producer closed 与 Root pending 的组合已经用同一谓词覆盖，普通活动和 resolved 组合也分别验证，事件身份保持不变；producer open、producer closed、Root pending 与 Root resolved 四组输入仍使用同一事件身份，结果与前述对照一致。这些结果再次说明双生命周期计算和去重显示都已完成，事项已完成。",
         None,
     ),
     "b-consistency-05": (
@@ -725,13 +701,11 @@ MIXED_SPECS = (
 
 
 REHEARSAL_BOUNDARY_IDS = {
-    "b-useful-01",
-    "b-honest-01",
-    "b-continuity-01",
-    "b-scope-01",
-    "b-scope-02",
-    "b-scope-04",
-    "b-consistency-01",
+    "b-honest-04",
+    "b-consistency-03",
+    "b-consistency-06",
+    *(f"b-continuity-{index:02d}" for index in range(1, 7)),
+    *(f"b-scope-{index:02d}" for index in range(1, 7)),
 }
 
 
@@ -749,14 +723,62 @@ def _fact_references(variant: str) -> dict[str, Any]:
     raise ValueError(f"unknown evidence variant: {variant}")
 
 
-def _long_prior(seed: str, index: int) -> str:
-    clauses = [
-        f"{seed} 的公开检查点 {index} 保留了输入边界、已验证路径和仍未知条件",
-        "记录只描述本事项，不包含工具正文、Fact 标识或私有推理",
-        "重复执行保持同一公开状态，未把推测提升为事实",
-        "下一步仍以当前公开边界为起点",
-    ]
-    return "；".join(clauses * 7) + "。"
+LONG_PRIOR_PUBLICATIONS: dict[str, tuple[tuple[str, str | None], ...]] = {
+    "b-honest-04": (
+        (
+            "Unicode 标题排序的第一轮复现覆盖 NFC 与 NFD 混排。café、cafe 后接组合重音、全角拉丁字母和日文假名被放进同一批输入，连续运行时相邻两项偶尔交换。日志只保留了展示值、规范化后的排序键和比较结果，没有保留触发旧顺序的完整原始数组，因此只能确认漂移存在，不能归因到某一个比较器分支。ASCII-only 与全部预先转成 NFC 的对照始终稳定；大小写折叠未启用，展示文本也没有被改写。这个检查点留下已观察现象、稳定对照和缺失输入，避免把组合字符机制提前写成事实。",
+            "保存能触发交换的最小原始数组，并分别记录每个元素的码点序列。",
+        ),
+        (
+            "第二轮把内部排序键统一改为 NFKC 后的不可变副本，展示层仍读取原始标题。正序、逆序和固定种子随机序各运行十次，输出字节序列与 hash 均稳定；全角字符折叠后没有污染用户可见文本。只做 NFC 的对照在当前样本也稳定，但旧复现输入已经丢失，两种方式都不能证明历史根因。检查还覆盖空标题、单个组合标记、相同规范化键和不同原始标题落到同一键的情形；结果支持当前修复有效，只不支持对过去原因作确定陈述。",
+            "保留 NFKC 键实现，并为相同键加入确定性的原始码点 tie-break。",
+        ),
+        (
+            "随后专门比较 café 与 cafe 加组合重音的稳定 tie-break。兼容规范化键相等时，先比较规范化键，再比较原始码点序列，最后用稳定身份处理完全相等。包含重复标题、日文浊点、emoji variation selector 和空字符串的矩阵全部保持确定顺序；去掉最后一级身份后，完全相同标题会依赖输入顺序，但这不是先前观察到的不同标题交换。证据把风险缩到规范化键碰撞后的排序规则，却仍不足以说明旧实现究竟在哪一级失稳。",
+            "固化 tie-break 矩阵，并检查序列化前后使用同一稳定身份。",
+        ),
+        (
+            "回归收口时，标题排序在 Linux 与 Windows 的固定样本上得到同一序列，序列化前后 hash 一致，重复运行也没有再漂移。NFKC 只用于内部键，原始 Unicode 标题、大小写和组合形式继续按输入展示；稳定身份仅在规范化键与原始码点都相等时介入。当前实现和覆盖足以把事项标为完成，但历史样本缺少触发交换的原始数组，旧漂移由组合字符比较器、运行库排序稳定性还是上游身份变化造成，仍无法确认。最终状态必须同时表达已验证修复与未被证明的旧根因。",
+            None,
+        ),
+    ),
+    "b-consistency-03": (
+        (
+            "重放去重最初只使用 request ID。单团队内重复请求能够返回同一个 committed outcome，但两个团队实例恰好采用相同 request ID 时，后到实例会错误命中先到实例的结果。逐项检查确认请求正文、提交状态和 outcome 本身没有交叉写入，碰撞只发生在去重索引查找。现有公开记录保留了两个团队实例身份、相同 request ID、各自预期 outcome 与实际命中结果，没有复制工具输出或私有正文。普通同实例重放仍稳定，问题已缩到 key 缺少团队实例这一层。",
+            "把团队实例 ID 加入去重 key，并保留同实例重放对照。",
+        ),
+        (
+            "第二轮将 key 调整为团队实例 ID 与 request ID 的组合，并分别覆盖同实例同请求、跨实例同请求、同实例不同请求和跨实例不同请求。跨实例不再互相命中，同实例重放仍返回原 committed outcome；重放不会再次执行副作用。序列化后的 key 与内存 key 字段顺序一致，包含 Unicode 团队标签时也只使用稳定实例 ID。该轮证明局部实现有效，但尚未覆盖索引持久化后重启、旧格式 key 迁移和并发首次提交。",
+            "验证重启读取、旧 key 迁移和两个实例并发首次提交。",
+        ),
+        (
+            "持久化检查先写入新组合 key，再重启索引并重复四类矩阵。重启前后查找结果与 committed outcome hash 一致；旧 request-only key 被读取时不会冒充新实例命中，而是走明确迁移分支。两个实例并发提交相同 request ID 时，各自只产生一次本实例 outcome，没有共享锁条目。故障注入还覆盖迁移写失败与重启恢复，失败不会删除原条目。剩余工作只在历史数据兼容窗口和跨版本回滚，需要确认旧二进制不会把新 key 截断。",
+            "完成跨版本读写矩阵，并验证回滚不会把组合 key 降级。",
+        ),
+        (
+            "最终矩阵覆盖新旧版本读写、迁移成功与失败、重启、并发首次提交以及同实例重复重放。新版本始终以团队实例 ID 和 request ID 组成去重 key；跨实例相同 request ID 得到各自 outcome，同实例重放则稳定返回同一 outcome。旧版本只读窗口不会写回截断 key，回滚路径遇到新格式会明确拒绝而不是错误命中。所有定向样本连续重复后序列与 hash 相同，历史碰撞案例也不再复现。现有公开证据足以把事项标记为完成，且没有把未观察机制写成事实。",
+            None,
+        ),
+    ),
+    "b-consistency-06": (
+        (
+            "批处理错误摘要的第一轮检查确认失败总数始终正确：一个成功项和三个失败项返回计数三，逐项状态也保存三个失败。只有用户摘要从第二个失败项开始，首项既不在标题也不在明细。单失败输入得到空摘要，多失败输入得到后续项，这把差异缩到首项初始化，而不是执行器漏报失败。原始失败顺序、错误码和任务身份都保持正确；重试与并发关闭没有改变现象。当前事项未完成，下一步只检查首项初始化和追加分支。",
+            "对照单失败与多失败路径，定位首项初始化是否遗漏赋值。",
+        ),
+        (
+            "第二轮看到首个失败用于创建容器，但显示文本只在后续 append 分支写入。初始化同时加入首项后，单失败摘要出现一条，多失败摘要按输入顺序出现全部失败，计数与条目数一致。检查还覆盖首项为空消息、不同错误码、相同错误重复出现以及成功项夹在失败项之间；每个失败身份均保留，重复错误不会被去重。局部遗漏已经修正，但 Unicode 消息、并行收集顺序和旧快照兼容尚未验证，不能宣称收口。",
+            "补 Unicode、重复错误和并行完成顺序矩阵，确认展示顺序合同。",
+        ),
+        (
+            "第三轮加入中文、组合字符和 emoji 错误消息，并比较输入顺序、完成顺序与展示顺序。合同要求摘要遵循批次输入顺序，而不是 worker 完成顺序；实现先按原始索引归并，再生成首项和后续项。十组固定并发时序得到一致摘要，NFC 与 NFD 文本保持原样，重复错误码按任务身份分别显示。旧快照更新后多出此前遗漏的首项，预期差异逐项确认。尚需检查空批次、全成功批次和大量失败集合的截断提示。",
+            "验证空、全成功和大量失败输入，尤其核对截断提示与总数。",
+        ),
+        (
+            "收口前的边界矩阵显示空批次与全成功批次都返回零失败和空摘要；单失败、多失败、Unicode、重复码及并行乱序均按输入顺序列出。大量失败时摘要只展示合同允许的前若干项，同时明确完整失败总数和剩余省略数量，首项不会再丢失。计数、展示条目和省略提示算术一致，快照也按新合同更新。不过正式回归尚未落库，任务状态仍应保持未完成；如果摘要同时写成已经收口，就会与这个剩余动作冲突。",
+            "固化边界矩阵并复核首项初始化与追加共用同一顺序逻辑。",
+        ),
+    ),
+}
 
 
 def _continuity(
@@ -783,19 +805,22 @@ def _continuity(
         coverage = {"state": "partial", "omitted_count": 2}
     else:
         coverage = {"state": "complete"}
-    summaries = [prior_summary]
+    publications: tuple[tuple[str, str | None], ...] = ((prior_summary, None),)
     if long_input:
-        summaries = [_long_prior(scenario_id, index) for index in range(1, 5)]
+        try:
+            publications = LONG_PRIOR_PUBLICATIONS[scenario_id]
+        except KeyError as exc:
+            raise ValueError(f"missing authored long prior publications: {scenario_id}") from exc
     prior_publications = [
         {
             "summary": summary,
-            "handoff": None if index % 2 else "沿该公开检查点继续，不重查已经稳定的对照。",
+            "handoff": handoff,
             "evidence": {
                 "fact_references": _fact_references(evidence_variant),
                 "observation_availability": "unknown",
             },
         }
-        for index, summary in enumerate(summaries, start=1)
+        for summary, handoff in publications
     ]
     return {
         "state": "available",
@@ -955,14 +980,7 @@ def _boundary_records(
         candidate_id = f"pc059-{spec.scenario_id}-{suffix}"
         packet = _packet(spec, summary, handoff)
         slices = list(base_slices)
-        shared_long_context = (
-            spec.long_input
-            and spec.target_kind == "existing_event"
-            and spec.continuity_variant.startswith("available")
-        )
-        candidate_is_long = shared_long_context or (
-            spec.long_input and spec.hard_focus == "scope_and_signal" and suffix == "qminus"
-        )
+        candidate_is_long = spec.long_input
         if candidate_is_long:
             slices.append("long_input")
         if label == "REWRITE" and spec.hard_focus == "internal_consistency":
@@ -1028,7 +1046,7 @@ def _boundary_records(
         "completion_state": spec.completion_state,
         "actor_role": spec.actor_role,
         "style": spec.style,
-        "length_bucket": "medium",
+        "length_bucket": "long" if spec.long_input else "medium",
         "unicode": spec.unicode,
         "slices": scenario_slices,
         "blueprint": {

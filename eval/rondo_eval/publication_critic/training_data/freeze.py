@@ -60,7 +60,7 @@ def verify_freeze_manifest(
     root: Path,
     manifest: Mapping[str, Any],
     *,
-    expected_input_identity: Mapping[str, Any] | None = None,
+    expected_input_identity: Mapping[str, Any],
 ) -> None:
     if set(manifest) != _MANIFEST_KEYS:
         raise TrainingDataError("freeze manifest keys differ")
@@ -75,7 +75,7 @@ def verify_freeze_manifest(
     _git_sha(manifest["generation_commit"])
     if not isinstance(manifest["contracts"], Mapping) or not isinstance(manifest["statistics"], Mapping):
         raise TrainingDataError("freeze manifest contracts/statistics must be objects")
-    if expected_input_identity is not None and manifest["input_identity"] != expected_input_identity:
+    if manifest["input_identity"] != expected_input_identity:
         raise TrainingDataError("freeze manifest input identity drifted")
     expected_content = manifest["content_sha256"]
     core = {key: value for key, value in manifest.items() if key != "content_sha256"}
