@@ -32,7 +32,9 @@ from rondo_eval.publication_critic.training_data import (  # noqa: E402
     deterministic_grouped_stratified_split,
     find_near_duplicate_edges,
     find_reference_matches,
+    model_visible_text_shortcut_findings,
     reject_exact_duplicates,
+    reject_model_visible_text_shortcuts,
     reject_perfect_shortcuts,
     shortcut_contingencies,
     validate_candidate_review,
@@ -49,17 +51,19 @@ IGNORED_NAMESPACE = Path(
     "/home/sjc/desktop/RONDO/eval-data/publication-critic/plan059"
 ).resolve()
 DESIGN_LOCK_PATH = (
+    REPO_ROOT / "eval/templates/publication-critic/training-data-design-lock-v2.json"
+)
+BASE_DESIGN_LOCK_PATH = (
     REPO_ROOT / "eval/templates/publication-critic/training-data-design-lock-v1.json"
 )
 SCHEMA_PATH = REPO_ROOT / "eval/templates/publication-critic/training-data-schema-v1.json"
 GENERATOR_PROMPT_PATH = (
-    REPO_ROOT / "eval/templates/publication-critic/training-data-generator-prompt-v1.md"
+    REPO_ROOT / "eval/templates/publication-critic/training-data-generator-prompt-v2.md"
 )
 REVIEWER_PROMPT_PATH = (
     REPO_ROOT / "eval/templates/publication-critic/training-data-reviewer-prompt-v1.md"
 )
 REFERENCE_PACKETS_PATH = REPO_ROOT / "eval/fixtures/publication-critic-v1/packets.jsonl"
-DATASET_REVISION = "v1"
 
 
 def _load_json(path: Path, *, secure_ignored: bool = False) -> dict[str, Any]:
@@ -71,6 +75,33 @@ def _load_json(path: Path, *, secure_ignored: bool = False) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise TrainingDataError(f"JSON root must be an object: {path}")
     return value
+
+
+def _load_design_lock() -> dict[str, Any]:
+    overlay = _load_json(DESIGN_LOCK_PATH)
+    if overlay.get("schema") != "rondo-publication-critic-training-data-design-lock-v2":
+        raise TrainingDataError("training-data design lock v2 identity drifted")
+    base_identity = overlay.get("base_lock")
+    overrides = overlay.get("overrides")
+    if not isinstance(base_identity, dict) or not isinstance(overrides, dict):
+        raise TrainingDataError("training-data design lock v2 overlay is invalid")
+    expected_base = {
+        "relative_path": BASE_DESIGN_LOCK_PATH.relative_to(REPO_ROOT).as_posix(),
+        "sha256": sha256_file(BASE_DESIGN_LOCK_PATH),
+    }
+    if base_identity != expected_base:
+        raise TrainingDataError("training-data design lock v2 base identity drifted")
+    base = _load_json(BASE_DESIGN_LOCK_PATH)
+    merged = copy.deepcopy(base)
+    merged["schema"] = overlay["schema"]
+    merged["dataset_revision"] = overlay["dataset_revision"]
+    merged["purpose"] = overlay["purpose"]
+    merged["split_contract"]["seed"] = overrides["split_seed"]
+    merged["visible_text_shortcut_contract"] = overrides["visible_text_shortcut_contract"]
+    merged["template_group_rule"] = overrides["template_group_rule"]
+    if overrides["generator_prompt_relative_path"] != GENERATOR_PROMPT_PATH.relative_to(REPO_ROOT).as_posix():
+        raise TrainingDataError("training-data generator prompt v2 path drifted")
+    return merged
 
 
 def _load_jsonl(path: Path, *, secure_ignored: bool = False) -> list[dict[str, Any]]:
@@ -217,10 +248,13 @@ def _rehearsal_assignments(
     return result
 
 
-def _split_index(supervision_rows: list[dict[str, Any]]) -> dict[str, Any]:
+def _split_index(
+    supervision_rows: list[dict[str, Any]],
+    dataset_revision: str,
+) -> dict[str, Any]:
     return {
         "schema_version": 1,
-        "dataset_revision": DATASET_REVISION,
+        "dataset_revision": dataset_revision,
         "splits": {
             split: sorted(
                 row["candidate_id"]
@@ -277,6 +311,7 @@ def _statistics(
 def _contract_hashes(teacher_freeze: Path | None) -> dict[str, str]:
     paths = [
         DESIGN_LOCK_PATH,
+        BASE_DESIGN_LOCK_PATH,
         SCHEMA_PATH,
         GENERATOR_PROMPT_PATH,
         REVIEWER_PROMPT_PATH,
@@ -297,6 +332,7 @@ def _contract_hashes(teacher_freeze: Path | None) -> dict[str, str]:
 
 
 def _data_card(
+    dataset_revision: str,
     mode: str,
     statistics: dict[str, Any],
     teacher_identity: dict[str, Any],
@@ -306,7 +342,7 @@ def _data_card(
     pairs = statistics["pair_counts"]
     split_counts = statistics["split_counts"]
     tokens = statistics["token_census"]
-    return f"""# Publication Critic training data {DATASET_REVISION}
+    return f"""# Publication Critic training data {dataset_revision}
 
 This is the Plan 059 M3-B1a `{mode}` freeze. It contains PublicationPacket v1 model inputs plus separate Binary and pair supervision. Labels, splits, defects, source, pair direction, and teacher metadata are never included in model-visible messages.
 
@@ -318,6 +354,7 @@ This is the Plan 059 M3-B1a `{mode}` freeze. It contains PublicationPacket v1 mo
 - Exact-tokenizer census: {tokens['token_total']} total tokens, per-candidate range {tokens['token_min']}..{tokens['token_max']}, {tokens['dropped_oldest_publications_total']} total dropped oldest publications
 - Near-duplicate edges: {len(reports['near_duplicate_edges'])}; these edges participate in group closure
 - Plan 054 reference matches: {len(reports['plan054_reference_matches'])}
+- Cross-split label-exclusive repeated model-visible fragments: {len(reports['model_visible_text_shortcuts'])}
 
 ## Identity and review
 
@@ -345,7 +382,8 @@ def finalize(args: argparse.Namespace) -> dict[str, Any]:
     if stat.S_IMODE(raw_dir.stat().st_mode) != 0o700:
         raise TrainingDataError("raw directory must be mode 0700")
     output_dir, ignored_output = _prepare_output(args.output_dir)
-    design_lock = _load_json(DESIGN_LOCK_PATH)
+    design_lock = _load_design_lock()
+    dataset_revision = str(design_lock["dataset_revision"])
     schema = _load_json(SCHEMA_PATH)
     if schema.get("schema") != "rondo-publication-critic-training-data-schema-v1":
         raise TrainingDataError("training-data schema identity drifted")
@@ -461,8 +499,16 @@ def finalize(args: argparse.Namespace) -> dict[str, Any]:
     dimensions = design_lock["shortcut_checks"]["dimensions"]
     contingencies = shortcut_contingencies(supervision, dimensions)
     reject_perfect_shortcuts(contingencies, minimum_support=4)
+    visible_shortcut_contract = design_lock["visible_text_shortcut_contract"]
+    visible_shortcuts = model_visible_text_shortcut_findings(
+        packets,
+        supervision,
+        minimum_candidate_support=int(visible_shortcut_contract["minimum_candidate_support"]),
+        minimum_split_support=int(visible_shortcut_contract["minimum_split_support"]),
+    )
+    reject_model_visible_text_shortcuts(visible_shortcuts)
 
-    membership = build_memberships(supervision, pairs, dataset_revision=DATASET_REVISION)
+    membership = build_memberships(supervision, pairs, dataset_revision=dataset_revision)
     consumer = DatasetConsumer.from_rows(
         packets,
         supervision,
@@ -503,7 +549,7 @@ def finalize(args: argparse.Namespace) -> dict[str, Any]:
         if len(messages) != 2 or [row["role"] for row in messages] != ["user", "assistant"]:
             raise TrainingDataError(f"candidate does not materialize to two ordered messages: {packet_row['candidate_id']}")
 
-    split_index = _split_index(supervision)
+    split_index = _split_index(supervision, dataset_revision)
     teacher_identity = {
         "schema": "rondo-publication-critic-plan059-teacher-identity-v1",
         "generator": generator_identity,
@@ -532,6 +578,7 @@ def finalize(args: argparse.Namespace) -> dict[str, Any]:
         "group_components": dict(sorted(components.items())),
         "split_assignments": dict(sorted(assignments.items())),
         "shortcut_contingencies": contingencies,
+        "model_visible_text_shortcuts": list(visible_shortcuts),
         "token_summary": token_summary,
         "consumer": {
             "c1_binary": len(c1["binary"]),
@@ -567,7 +614,7 @@ def finalize(args: argparse.Namespace) -> dict[str, Any]:
         packets,
         supervision,
         pairs,
-        dataset_revision=DATASET_REVISION,
+        dataset_revision=dataset_revision,
         source_hashes=source_hashes,
     )
     validate_train_only_smoke_bundle(bundle, repo_root=REPO_ROOT)
@@ -578,7 +625,7 @@ def finalize(args: argparse.Namespace) -> dict[str, Any]:
     )
     _write(
         output_dir / "DATA_CARD.md",
-        _data_card(args.mode, statistics, teacher_identity, reports).encode("utf-8"),
+        _data_card(dataset_revision, args.mode, statistics, teacher_identity, reports).encode("utf-8"),
         ignored=ignored_output,
     )
 
@@ -587,7 +634,7 @@ def finalize(args: argparse.Namespace) -> dict[str, Any]:
     manifest = build_freeze_manifest(
         output_dir,
         relative_paths,
-        dataset_revision=DATASET_REVISION,
+        dataset_revision=dataset_revision,
         input_identity=design_lock["input_identity"],
         design_lock_sha256=sha256_file(DESIGN_LOCK_PATH),
         generation_commit=args.generation_commit,

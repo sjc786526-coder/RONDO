@@ -25,6 +25,7 @@ from rondo_eval.publication_critic.training_data import (  # noqa: E402
     census_packets,
     deterministic_grouped_stratified_split,
     find_near_duplicate_edges,
+    model_visible_text_shortcut_findings,
     shortcut_contingencies,
     validate_dataset,
     validate_group_closure,
@@ -217,6 +218,46 @@ class PublicationCriticTrainingDataTests(unittest.TestCase):
         self.assertEqual(report["continuity_state"]["available"], {"PASS": 1, "REWRITE": 1})
         self.assertEqual(report["evidence_appearance"]["present"], {"PASS": 1, "REWRITE": 1})
 
+    def test_model_visible_text_shortcut_requires_support_splits_and_one_label(self) -> None:
+        packets, supervision = self._text_shortcut_rows(
+            labels=["PASS", "PASS", "PASS", "PASS"],
+            splits=["train", "train", "validation", "unseen_test"],
+        )
+        findings = model_visible_text_shortcut_findings(packets, supervision)
+        marker = next(finding for finding in findings if finding["fragment"] == "mark")
+        self.assertEqual(
+            marker,
+            {
+                "fragment": "mark",
+                "support": 4,
+                "label": "PASS",
+                "splits": ["train", "unseen_test", "validation"],
+                "candidate_ids": ["shortcut-0", "shortcut-1", "shortcut-2", "shortcut-3"],
+            },
+        )
+
+        _packets, mixed_labels = self._text_shortcut_rows(
+            labels=["PASS", "PASS", "REWRITE", "REWRITE"],
+            splits=["train", "train", "validation", "unseen_test"],
+        )
+        self.assertNotIn(
+            "mark",
+            {finding["fragment"] for finding in model_visible_text_shortcut_findings(packets, mixed_labels)},
+        )
+
+        self.assertNotIn(
+            "mark",
+            {
+                finding["fragment"]
+                for finding in model_visible_text_shortcut_findings(packets[:3], supervision[:3])
+            },
+        )
+        one_split = [dict(row, proposed_split="train") for row in supervision]
+        self.assertNotIn(
+            "mark",
+            {finding["fragment"] for finding in model_visible_text_shortcut_findings(packets, one_split)},
+        )
+
     def test_freeze_hashes_fail_closed_after_file_drift(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -398,6 +439,35 @@ class PublicationCriticTrainingDataTests(unittest.TestCase):
             for pair in pairs
         ]
         return packets, supervision, pairs, candidate_reviews, pair_reviews
+
+    def _text_shortcut_rows(
+        self,
+        *,
+        labels: list[str],
+        splits: list[str],
+    ) -> tuple[list[dict], list[dict]]:
+        packets: list[dict] = []
+        supervision: list[dict] = []
+        spellings = ["FIXED   MARKER", "fixed marker", "ＦＩＸＥＤ marker", "Fixed Marker"]
+        for index, (label, split) in enumerate(zip(labels, splits, strict=True)):
+            candidate_id = f"shortcut-{index}"
+            packet = self._packet(
+                candidate_id,
+                f"Unique-{index} {spellings[index]} outcome-{index}.",
+            )
+            packet["packet"]["candidate"]["handoff"] = f"Unique next step {index}."
+            packets.append(packet)
+            supervision.append(
+                self._supervision(
+                    candidate_id,
+                    label,
+                    split=split,
+                    scenario=f"shortcut-scenario-{index}",
+                    source=f"shortcut-source-{index}",
+                    template=f"shortcut-template-{index}",
+                )
+            )
+        return packets, supervision
 
     @staticmethod
     def _small_design_lock() -> dict:

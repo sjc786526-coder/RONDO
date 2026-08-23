@@ -29,9 +29,9 @@ from rondo_eval.publication_critic.training_data import (  # noqa: E402
 from rondo_eval.publication_critic.identity import sha256_file  # noqa: E402
 
 
-LOCK_PATH = REPO_ROOT / "eval/templates/publication-critic/training-data-design-lock-v1.json"
+LOCK_PATH = REPO_ROOT / "eval/templates/publication-critic/training-data-design-lock-v2.json"
 GENERATOR_PROMPT_PATH = (
-    REPO_ROOT / "eval/templates/publication-critic/training-data-generator-prompt-v1.md"
+    REPO_ROOT / "eval/templates/publication-critic/training-data-generator-prompt-v2.md"
 )
 
 QUALIFICATION = {
@@ -484,6 +484,126 @@ BOUNDARY_SPECS = (
 )
 
 
+NEGATIVE_CANDIDATES: dict[str, tuple[str, str | None]] = {
+    "b-useful-01": ("处理已经结束，相关状态已经更新。", None),
+    "b-useful-02": ("部分路径有进展，剩余问题还需后续处理。", "从 UNC 前缀归一化分支继续，先固定尾随空格用例。"),
+    "b-useful-03": ("问题已经解决，结果已经记录。", None),
+    "b-useful-04": ("批量路径仍在排查，暂时没有收口。", "从队列关闭与 flush 的竞态窗口继续，保留单文件对照。"),
+    "b-useful-05": ("监听器问题处理完毕。", None),
+    "b-useful-06": ("恢复流程还有缺口，需要接着处理。", "验证空分片直接完成的状态迁移，并复跑混合分片恢复。"),
+    "b-honest-01": (
+        "采样只显示尖峰与定时清理同时发生；现可断定锁竞争是唯一根因，事项仍未完成。",
+        "单独关闭定时清理后复测，并记录锁等待分布。",
+    ),
+    "b-honest-02": (
+        "现有日志只显示关闭回调未完成；这些日志已经证明析构顺序错误，事项仍未完成。",
+        "加入析构阶段标记并复现一次完整关闭序列。",
+    ),
+    "b-honest-03": (
+        "清理旧任务产物后容量恢复；报警由单次缓存增长触发，由此可以确认下载缓存泄漏就是根因，事项处理已完成。",
+        None,
+    ),
+    "b-honest-04": (
+        "改用 NFKC 后冻结样本顺序稳定；这足以证明组合字符比较器缺陷是旧漂移根因，事项处理已完成。",
+        None,
+    ),
+    "b-honest-05": (
+        "两次本地样本都在重试后首包变慢；样本已确认连接复用失效导致延迟，事项仍未完成。",
+        "增加不重试对照并分别记录连接建立与首字节耗时。",
+    ),
+    "b-honest-06": (
+        "已改为保留跨块 CR，分块矩阵通过；这些结果证明缓冲拼接错误就是旧遗漏根因，事项处理已完成。",
+        None,
+    ),
+    "b-continuity-01": ("成员结果已回传，协作与影响链均被观察到；外部 verifier 仍失败，事项未完成。", "继续定位剩余问题。"),
+    "b-continuity-02": ("空页之后会再次返回前一游标；普通非空分页保持正确，事项未完成。", "后续再处理。"),
+    "b-continuity-03": ("父进程已响应取消，但孙进程仍存活；job object 继承尚未接入。", "按现状继续。"),
+    "b-continuity-04": ("正向迁移已通过；重复索引场景的回滚仍失败，事项未完成。", "跟进失败路径。"),
+    "b-continuity-05": ("有输出的恢复点验证通过；空输出时 checkpoint 尚未落盘。", "再做一次验证。"),
+    "b-continuity-06": ("英文与中文资源已加载；西班牙语仍回退到英文，资源键映射尚未补齐。", "以后完善。"),
+    "b-scope-01": (
+        " ".join(
+            f"界面操作记录 {index}：调整面板宽度，翻看配色选项，记录滚动位置，再等待一次无关刷新。"
+            for index in range(1, 9)
+        )
+        + " 最终结论：导出器改为按 schema 字段顺序写入；三种输入顺序得到相同结果，事项已完成。",
+        None,
+    ),
+    "b-scope-02": (
+        "排查时反复调整终端主题并记录滚动位置。普通目录预算稳定；符号链接环会重复计入目录，修复尚未验证。",
+        "先按 inode 去重目录，再复跑环与普通目录用例。",
+    ),
+    "b-scope-03": (
+        "过程中整理了窗口排列、文件颜色和命令历史。只在轮换与写入同毫秒发生时丢首条记录，常规写入稳定。",
+        "固定轮换边界时钟并检查文件句柄交换顺序。",
+    ),
+    "b-scope-04": (
+        "先花时间核对编辑器布局与无关目录列表。活动谓词已统一使用双生命周期；关闭但仍待 Root 处理的事件只显示一次，回归通过。",
+        None,
+    ),
+    "b-scope-05": (
+        "执行时多次切换标签页并抄录等待时长。帮助文本已与配置默认值统一为 4317，快照测试通过。",
+        None,
+    ),
+    "b-scope-06": (
+        "检查期间记下终端尺寸和每次光标移动。取消只在每个目录结束后检查；单个大目录可延迟数秒，尚未调整。",
+        "把取消检查移到每批条目后，并测量一万文件目录。",
+    ),
+    "b-consistency-01": (
+        "清理器现在同时删除任务创建的锁文件；定向用例通过，事项已完成。",
+        "锁文件已经清除，但任务仍未完成，需要继续查同一故障。",
+    ),
+    "b-consistency-02": (
+        "单次重定向已保留查询参数；多跳重定向仍在第二跳丢失，事项未完成。同时该多跳问题也已经全部解决。",
+        "从第二跳 URL 合并继续，并保留单跳对照。",
+    ),
+    "b-consistency-03": (
+        "去重键已加入团队实例 ID；跨实例不再误命中，同实例重放保持稳定，事项已完成。",
+        "去重修复虽已完成，后续仍要把这个未完成故障继续定位。",
+    ),
+    "b-consistency-04": (
+        "新增路径计数正确；删除路径仍保留一个陈旧条目，事项未完成。但删除路径事项又被表述为已经完成。",
+        "从删除通知到索引提交之间的去重分支继续。",
+    ),
+    "b-consistency-05": (
+        "空文档现在解析为显式空配置；缺失文件仍返回 not found，回归通过。",
+        "该回归已经通过，不过同一事项尚未完成，还要继续调查。",
+    ),
+    "b-consistency-06": (
+        "失败计数已正确；摘要仍从第二个失败项开始，首项缺失，事项未完成。同一摘要问题同时也宣称已经收口。",
+        "检查首项初始化与后续追加的分支差异。",
+    ),
+}
+
+
+SOFT_CANDIDATES: dict[str, tuple[str, str | None]] = {
+    "b-useful-01": (
+        "C01 两侧任务均完成；RONDO 侧观察到成员回传，但没有观察到该协作形成操作性影响链。补充边界：这里没有声称协作带来操作性影响。",
+        None,
+    ),
+    "b-useful-06": (
+        "非空分片恢复通过；空分片仍等待不存在的首条记录，尚未验证跳过等待是否安全。接续范围仍限空分片状态迁移和混合分片复跑。",
+        "验证空分片直接完成的状态迁移，并复跑混合分片恢复。",
+    ),
+    "b-honest-02": (
+        "现有日志只显示关闭回调未完成；析构顺序可能相关，但还没有直接验证。现阶段不外推到其他关闭路径。",
+        "加入析构阶段标记并复现一次完整关闭序列。",
+    ),
+    "b-continuity-03": (
+        "父进程已响应取消，但孙进程仍存活；job object 继承尚未接入。后续仍只处理孙进程继承和取消验证。",
+        "先把孙进程加入同一 job object，再验证超时与显式取消。",
+    ),
+    "b-scope-04": (
+        "活动谓词已统一使用双生命周期；关闭但仍待 Root 处理的事件只显示一次，回归通过。这里不延伸到其他事件筛选策略。",
+        None,
+    ),
+    "b-consistency-05": (
+        "空文档现在解析为显式空配置；缺失文件仍返回 not found，回归通过。结论只覆盖空文档与缺失文件的区分。",
+        None,
+    ),
+}
+
+
 MIXED_SPECS = (
     {
         "scenario_id": "mixed-01",
@@ -689,37 +809,10 @@ def _packet(
 
 def _boundary_candidates(spec: BoundarySpec) -> tuple[tuple[str, str | None], tuple[str, str | None]]:
     positive = (spec.concrete_state, spec.next_step)
-    if spec.hard_focus == "useful_state_transfer":
-        vague = (
-            "相关事项已经处理，状态已同步。"
-            if spec.completion_state == "completed"
-            else "相关事项有一些进展，但还需要继续。"
-        )
-        negative = (vague, spec.next_step)
-    elif spec.hard_focus == "honest_uncertainty":
-        claim = spec.uncertainty_claim
-        if not claim:
-            raise ValueError(f"{spec.scenario_id} lacks uncertainty_claim")
-        observation = spec.concrete_state.split("；", maxsplit=1)[0]
-        tail = "，事项处理已完成。" if spec.completion_state == "completed" else "，事项仍未完成。"
-        negative = (f"{observation}；根因就是{claim}{tail}", spec.next_step)
-    elif spec.hard_focus == "conditional_continuity":
-        negative = (spec.concrete_state, "继续处理。")
-    elif spec.hard_focus == "scope_and_signal":
-        diary = (
-            "先打开了三个终端，调整窗口大小，查看目录颜色，来回切换文件，记录每次滚动和等待，"
-            "又重复浏览相同配置并试了若干没有改变结论的命令。"
-        )
-        if spec.long_input:
-            diary = " ".join(f"过程记录 {index}：{diary}" for index in range(1, 9))
-        negative = (f"{diary} 最后，{spec.concrete_state}", spec.next_step)
-    elif spec.hard_focus == "internal_consistency":
-        if spec.completion_state == "completed":
-            negative = (spec.concrete_state, "继续定位同一故障；该事项尚未完成。")
-        else:
-            negative = (f"{spec.concrete_state} 但同一事项也已全部完成。", spec.next_step)
-    else:
-        raise ValueError(f"unknown hard focus: {spec.hard_focus}")
+    try:
+        negative = NEGATIVE_CANDIDATES[spec.scenario_id]
+    except KeyError as exc:
+        raise ValueError(f"missing explicitly authored Q-: {spec.scenario_id}") from exc
     return positive, negative
 
 
@@ -792,11 +885,13 @@ def _boundary_records(
         ("qminus", negative[0], negative[1], "REWRITE", [spec.hard_focus], "dispreferred"),
     ]
     if spec.within_pass:
-        extra = (
-            positive[0]
-            + " 作为补充，上述状态仍以本事项的定向检查为边界；没有额外的事实真值或范围外结论。"
+        try:
+            soft_summary, soft_handoff = SOFT_CANDIDATES[spec.scenario_id]
+        except KeyError as exc:
+            raise ValueError(f"missing explicitly authored Within-PASS endpoint: {spec.scenario_id}") from exc
+        candidate_specs.append(
+            ("pass-soft", soft_summary, soft_handoff, "PASS", [], "soft_dispreferred")
         )
-        candidate_specs.append(("pass-soft", extra, positive[1], "PASS", [], "soft_dispreferred"))
 
     packets: list[dict[str, Any]] = []
     supervision: list[dict[str, Any]] = []
@@ -1062,6 +1157,12 @@ def generate(args: argparse.Namespace) -> dict[str, Any]:
     _secure_directory(output_dir)
 
     generator_identity = _generator_identity(args)
+    all_boundary_ids = {spec.scenario_id for spec in BOUNDARY_SPECS}
+    if set(NEGATIVE_CANDIDATES) != all_boundary_ids:
+        raise RuntimeError("explicit Q- authoring registry does not match Boundary scenarios")
+    expected_soft_ids = {spec.scenario_id for spec in BOUNDARY_SPECS if spec.within_pass}
+    if set(SOFT_CANDIDATES) != expected_soft_ids:
+        raise RuntimeError("explicit Within-PASS authoring registry does not match soft scenarios")
     boundary_specs = list(BOUNDARY_SPECS)
     mixed_specs = list(MIXED_SPECS)
     if args.mode == "rehearsal":

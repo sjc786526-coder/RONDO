@@ -1,0 +1,25 @@
+{
+  "schema": "rondo-publication-critic-training-data-design-lock-v2",
+  "dataset_revision": "v2",
+  "purpose": "Plan 059 M3-B1a revision that preserves the v1 coverage and stop contract while closing model-visible repeated-template shortcuts",
+  "base_lock": {
+    "relative_path": "eval/templates/publication-critic/training-data-design-lock-v1.json",
+    "sha256": "cc56ba61778d84bddce468070333deaafce2f888507e2ea2f52fe1be1dd7843b"
+  },
+  "overrides": {
+    "split_seed": "plan059-publication-critic-split-v2",
+    "generator_prompt_relative_path": "eval/templates/publication-critic/training-data-generator-prompt-v2.md",
+    "visible_text_shortcut_contract": {
+      "fields": [
+        "candidate.summary",
+        "candidate.handoff"
+      ],
+      "normalization": "NFKC_casefold_whitespace_collapse",
+      "character_ngram_width": 4,
+      "minimum_candidate_support": 4,
+      "minimum_split_support": 2,
+      "reject_when": "the same model-visible fragment occurs in at least four candidates across at least two splits and all occurrences have one Binary label"
+    },
+    "template_group_rule": "scenario-local only after explicit authored Q-/Within-PASS text has no shared cross-scenario template; any future shared template must use one truthful group"
+  }
+}
