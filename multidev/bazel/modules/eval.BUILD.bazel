@@ -1,0 +1,8 @@
+exports_files(
+    [
+        "fixtures/publication-critic-v1/packets.jsonl",
+        "manifests/publication-critic/measurement-freeze-v4.json",
+        "templates/publication-critic/product-packet-limits-v1.json",
+    ],
+    visibility = ["//visibility:public"],
+)

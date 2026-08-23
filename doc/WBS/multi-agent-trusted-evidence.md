@@ -1,7 +1,7 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
 最后更新：2026-08-22 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
-状态：**第一期、第二期与三期 M3-A1 已完成；Plan 055 / M3-B2a 与 Plan 057 / M3-B2b 已主线整合；当前下一包为 M3-A2**
+状态：**第一期、第二期、M3-A1 与 M3-A2 已完成；Plan 055 / M3-B2a 与 Plan 057 / M3-B2b 已主线整合；当前下一包为 M3-B1a**
 
 ## 当前定位
 
@@ -78,15 +78,23 @@ API schema、训练超参数或部署格式。
 M3-B2a 服务协议、identity 和资源数值；M3-A2 的数据/评价细节和状态不由该任务改写，M3-A1 本身未实现这些设施或
 `team_publish` 接入。
 
-#### M3-A2：数据/评价设施与基座测评
+#### M3-A2：数据/评价设施与基座测评（已完成）
 
-**目标**：建立轻量、可复跑的数据与评价设施，在统一口径下得到 Skywork 1.7B 基座能力、主要错误类型和输入规模基线。
+**结果**：Plan 054 已冻结 Rust/Python PublicationPacket v1 机械约束 parity、control-token-safe render、exact tokenizer/scalar
+identity、24 条代表/边界样本、两条产品 cap census case 和专用评价/归档设施。exact Skywork 1.7B 在 CPU FP32 下通过全部
+scored-row single/repeat/左右 padding/替代 batch composition parity 与独立 16,384-token smoke；正式 16 样本 v4 基座结果为
+accuracy / balanced accuracy `0.6875`、ROC AUC `0.765625`、atomic pair `7/8`，`16/16` 有效、零 typed failure，10 个冻结
+error slice 均存在。tracked v4 同时保留 8 条 calibration 投影、context 与两阶段 watchdog 资源事实，并区分真实 batch wall time
+和 amortized compute。v1-v3 保留为 superseded 历史 attempt；正式身份、切片、资源和 go/no-go 见
+[`baseline v4`](../../eval/results/publication-critic/skywork-reward-v2-qwen3-1.7b-baseline-v4.md)。
 
 **边界**：只建设 Publication Critic 必要设施和小规模代表性样本；不冻结正式训练数据，不启动付费训练，不扩张为通用
 数据平台、审计系统或大型 benchmark。
 
-**宏观验收**：数据、离线评价、后续训练和 runtime 可以共享同一 publication 与判定语义；基座结果和主要错误切片可复跑，
-且足以指导 M3-B1a 冻结训练数据。
+**交接**：基座工程路径与 M3-B1a 数据建设 GO，未微调模型直接产品使用 NO-GO。M3-B1a 应复用 v4 输入/评价合同并建立独立
+train/validation/unseen-test split，优先补足 `internal_consistency` 精致 hard negative、new/completed useful-state 边界、
+threshold-near handoff 与 continuity/evidence omission 对照，并避免长度、角色和模板捷径。M3-A2 cohort 不得冒充未来 unseen test；
+M3-C1 继续等待 M3-B1c 提供至少一个训练候选。
 
 ### B 阶段：模型链与产品链并行
 
@@ -189,7 +197,7 @@ active cycle，每次阻断反馈轮换 continuation，Team State 专用 history
 
 ## 串并行与资源关系
 
-- M3-A1 已完成共同前置。数据/训练链按 `M3-A2 → M3-B1a → M3-B1b → M3-B1c` 串行；产品链的 M3-B2a、M3-B2b 均已完成。
+- M3-A1、M3-A2 已完成共同前置。数据/训练链当前按 `M3-B1a → M3-B1b → M3-B1c` 串行；产品链的 M3-B2a、M3-B2b 均已完成。
   两链彼此并行，产品链等待模型链完成后再进入 M3-C1。
 - M3-B1b 是独立付费资格门，M3-B1c 只有在 go 结论和新的正式训练授权后才能开始；no-go 不自动继续消费预算。
 - M3-C1 等待 M3-B1c 与 M3-B2b，M3-C2 等待 M3-C1，M3-D 最后串行收口。
@@ -274,8 +282,8 @@ active cycle，每次阻断反馈轮换 continuation，Team State 专用 history
 
 ## 外部授权与实施边界
 
-- M3-A1 产品合同已完成；M3-B2a 已按 Plan 055 完成实现、独立验收与主线整合；M3-B2b 已按 Plan 057 完成实现、审查整改、最终独立验收与主线整合；
-  M3-A2 状态不由产品链任务改写。其余后续工作包启动时仍须按 `plan/plan-example.md` 建立任务合同并取得授权。
+- M3-A1 产品合同与 Plan 054 / M3-A2 已完成；M3-B2a 已按 Plan 055 完成实现、独立验收与主线整合；M3-B2b 已按 Plan 057 完成实现、
+  审查整改、最终独立验收与主线整合。其余后续工作包启动时仍须按 `plan/plan-example.md` 建立任务合同并取得授权。
 - RunPod 创建或计费、模型与数据上传、云端训练、权重下载、真实本地模型加载/推理、Docker 和付费 API 均须在对应任务
   开始前取得明确授权；23 USD 是三期训练的总预算上限，不等于已经授权消费。
 - 训练数据、权重、逐样本输出与私有运行材料留在 `eval-data/` 或仓库外；`training/` 只保存体积合规的轻量合同与数据。

@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "name": "rondo-publication-critic-temporary-threshold",
+  "revision": "v1",
+  "scope": "m3a2_evaluation_only_not_production",
+  "input_role": "m3a2_calibration",
+  "measurement_labels_allowed": false,
+  "score_direction": "higher_is_better",
+  "pass_rule": "score_greater_than_or_equal_to_threshold",
+  "selection": "maximize_balanced_accuracy_then_minimize_false_pass_then_maximize_threshold_v1",
+  "metrics": [
+    "accuracy",
+    "balanced_accuracy",
+    "roc_auc",
+    "false_pass",
+    "false_rewrite",
+    "slice_metrics"
+  ]
+}

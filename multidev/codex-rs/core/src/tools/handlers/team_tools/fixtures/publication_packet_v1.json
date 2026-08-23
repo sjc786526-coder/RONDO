@@ -1,0 +1,108 @@
+{
+  "new_event": {
+    "qualification": {
+      "packet_schema": {
+        "name": "rondo-publication-packet",
+        "revision": "v1"
+      },
+      "rubric": {
+        "name": "rondo-publication-qualification",
+        "revision": "v1"
+      }
+    },
+    "actor_role": "member",
+    "target_kind": "new_event",
+    "local_scope": {
+      "title": "member scope"
+    },
+    "candidate": {
+      "summary": "member candidate",
+      "handoff": null
+    },
+    "continuity": {
+      "state": "not_applicable"
+    },
+    "evidence_v1": {
+      "semantic_entailment": "not_evaluated",
+      "candidate_window": "not_frozen_before_commit"
+    }
+  },
+  "existing_event": {
+    "qualification": {
+      "packet_schema": {
+        "name": "rondo-publication-packet",
+        "revision": "v1"
+      },
+      "rubric": {
+        "name": "rondo-publication-qualification",
+        "revision": "v1"
+      }
+    },
+    "actor_role": "root",
+    "target_kind": "existing_event",
+    "local_scope": {
+      "title": "packet scope"
+    },
+    "candidate": {
+      "summary": "candidate summary",
+      "handoff": "bounded handoff"
+    },
+    "continuity": {
+      "state": "available",
+      "source_team_revision": 6,
+      "freshness": "known_stale",
+      "coverage": {
+        "state": "partial",
+        "omitted_count": 2
+      },
+      "prior_publications": [
+        {
+          "summary": "version 3",
+          "handoff": null,
+          "evidence": {
+            "fact_references": {
+              "state": "none"
+            },
+            "observation_availability": "unknown"
+          }
+        },
+        {
+          "summary": "version 4",
+          "handoff": null,
+          "evidence": {
+            "fact_references": {
+              "state": "none"
+            },
+            "observation_availability": "unknown"
+          }
+        },
+        {
+          "summary": "version 5",
+          "handoff": null,
+          "evidence": {
+            "fact_references": {
+              "state": "none"
+            },
+            "observation_availability": "unknown"
+          }
+        },
+        {
+          "summary": "version 6",
+          "handoff": null,
+          "evidence": {
+            "fact_references": {
+              "state": "present",
+              "visible_count": 32,
+              "count_omitted": true
+            },
+            "observation_availability": "unknown"
+          }
+        }
+      ]
+    },
+    "evidence_v1": {
+      "semantic_entailment": "not_evaluated",
+      "candidate_window": "not_frozen_before_commit"
+    }
+  }
+}

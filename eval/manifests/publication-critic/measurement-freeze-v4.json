@@ -1,0 +1,172 @@
+{
+  "schema": "rondo-publication-critic-measurement-freeze-v4",
+  "purpose": "Plan 054 M3-A2 exact Skywork base-model measurement freeze v4",
+  "cohort_scope": "representative_and_boundary_examples_not_future_unseen_test",
+  "supersedes": "rondo-publication-critic-measurement-freeze-v3",
+  "asset_lock_sha256": "419facd8f97412b6e45e5eac35d638ed3d88a943e7c936fd6700911d0f0b441b",
+  "environment_lock_sha256": "4665d66a91955a801c12039985bc9b8c2f43d2bb459640aeeb7c78502ba6f8b4",
+  "input_manifest": {
+    "eval/environments/publication-critic-plan054/pyproject.toml": "a439538a593f98916ff994bfd7fe1cf983bf9f1e59ffb2d8a0eccbb5c9b8e9c1",
+    "eval/environments/publication-critic-plan054/uv.lock": "4665d66a91955a801c12039985bc9b8c2f43d2bb459640aeeb7c78502ba6f8b4",
+    "eval/fixtures/publication-critic-v1/packets.jsonl": "1d034a8f5046565d4af20dcd6c25772232fd84bf1ef7a75f7eb40a6fc1e0c598",
+    "eval/fixtures/publication-critic-v1/annotations.jsonl": "483d012b983c9bf7acfc2a03ccb9b898346f3be3d2bf1beedc19a1950d28348e",
+    "eval/templates/publication-critic/input-contract-v2.md": "bba923d37c4b533086d3753b3f47c3f45843f6ca729ee8cb275c6567772a2311",
+    "eval/templates/publication-critic/qualification-rubric-v1.md": "cc15207b3c6e2482e56710f735d01893f8c8c020df35a18918e1a0a1be7f02e4",
+    "eval/templates/publication-critic/product-packet-limits-v1.json": "eb2ec31c1dc4cb271fca8f291b53b75771fd42ede4a49a03fa0628ef147f9397",
+    "eval/templates/publication-critic/render-contract-v3.json": "8bd5449956f20f26c6d68fe410f22fc2925540eb07d63050ddad70ef87cfef2c",
+    "eval/templates/publication-critic/temporary-threshold-rule-v1.json": "7f32f5ffc9913197bb176322c8eb27d8835959d7107a8cc5ec7749590031b237"
+  },
+  "input_manifest_sha256": "1eb77e0d0589490f70d63d706114cc00e4d00399923332311604bdaaf54e67fd",
+  "implementation_manifest": {
+    "eval/rondo_eval/publication_critic/archive.py": "bbf0e94f118c9aa16b3158e284670d8286170ef14085a1d81f08ef5739ae7478",
+    "eval/rondo_eval/publication_critic/backend.py": "c13cb27a073b062fd92fbd5b5e2e7a15fc475163ac78ac79a6065232b349fe69",
+    "eval/rondo_eval/publication_critic/boundaries.py": "145666d803c52a02aa1102b8a474070196349131b30a019559716c3ae1f4af6b",
+    "eval/rondo_eval/publication_critic/contract.py": "4716f77392141e3518d02f10f4eb53cd9ed92c1e5e990de09585c194446cf700",
+    "eval/rondo_eval/publication_critic/evidence.py": "a54a57f833ca8b36cd3c950f24b79e0ae4e4ee51f58ab96cda8dc2d60e6ba367",
+    "eval/rondo_eval/publication_critic/identity.py": "bbe7b35da740127f41eed583559c44f2714ed7b1aed9473f1fbe2863b210e685",
+    "eval/rondo_eval/publication_critic/render.py": "3c56bdaecc8633d2486af9733621f7f8a414aae44d8372b0071281470be7df30",
+    "eval/rondo_eval/publication_critic/runner.py": "5264c9edf19d8602a88c724f461f21717d395b1bbfc326bb6f7160be3c8a4f3c",
+    "eval/rondo_eval/publication_critic/scoring.py": "42fa23537eda3f51f5b586ae2b63fbde012941c53d1a9a3c061577ad5d925ffa",
+    "eval/rondo_eval/publication_critic/tokenization.py": "619f907783b56b4642c56c13dd3b56c5b0b5efe44f7a4c3fdeebfc72c42b836a"
+  },
+  "implementation_manifest_sha256": "fd50a93b81e579e68355769836b472dd37e5fd06fd5cb5e0bc62b2552529f1b6",
+  "qualification_identity": {
+    "packet_schema": {
+      "name": "rondo-publication-packet",
+      "revision": "v1"
+    },
+    "rubric": {
+      "name": "rondo-publication-qualification",
+      "revision": "v1"
+    }
+  },
+  "model_identity": {
+    "model": {
+      "name": "skywork-reward-v2-qwen3-1.7b",
+      "revision": "e51ea3e08fb81326c3b812a7ff0cb9cee83e59cc"
+    },
+    "tokenizer": {
+      "name": "skywork-reward-v2-qwen3-1.7b-tokenizer",
+      "revision": "e51ea3e08fb81326c3b812a7ff0cb9cee83e59cc"
+    }
+  },
+  "input_template_binding": {
+    "schema": "rondo-publication-critic-input-template-binding-v1",
+    "render_contract_sha256": "8bd5449956f20f26c6d68fe410f22fc2925540eb07d63050ddad70ef87cfef2c",
+    "qualification_rubric_sha256": "cc15207b3c6e2482e56710f735d01893f8c8c020df35a18918e1a0a1be7f02e4",
+    "renderer_sha256": "3c56bdaecc8633d2486af9733621f7f8a414aae44d8372b0071281470be7df30",
+    "chat_template_sha256": "a55ee1b1660128b7098723e0abcd92caa0788061051c62d51cbe87d9cf1974d8",
+    "added_tokens_sha256": "c0284b582e14987fbd3d5a2cb2bd139084371ed9acbae488829a1c900833c680",
+    "add_generation_prompt": false,
+    "add_special_tokens_after_chat_template": false
+  },
+  "scoring_identity": {
+    "definition": {
+      "name": "skywork-reward-scalar-higher-better",
+      "revision": "e51ea3e08fb81326c3b812a7ff0cb9cee83e59cc-fp32-v1"
+    },
+    "input_template": {
+      "name": "rondo-publication-packet-render",
+      "revision": "v3-sha256-dc3209af0d284dfe4be57403873717ba5f2790e2257cd4a39a2376de5696044c"
+    },
+    "scalar_projection": {
+      "name": "stable-sigmoid-logits-index-0",
+      "revision": "v1"
+    },
+    "domain": {
+      "min": 0.0,
+      "max": 1.0
+    },
+    "threshold": 0.9350569011196121,
+    "pass_rule": "score_greater_than_or_equal_to_threshold"
+  },
+  "inference_contract": {
+    "backend_class": "Qwen3ForSequenceClassification",
+    "output_shape": [
+      "batch",
+      1
+    ],
+    "tensor_index": "logits[:,0]",
+    "pooling": "last_non_pad_token",
+    "raw_semantics": "unbounded_reward_logit_higher_is_better",
+    "device": "cpu",
+    "dtype": "float32",
+    "eval_mode": true,
+    "inference_mode": true,
+    "cpu_threads": 4,
+    "batch_size": 4,
+    "padding_side": "right",
+    "padding_counterfactual": "left",
+    "padding_id": 151654,
+    "attention_mask": "one_for_content_zero_for_padding",
+    "parity_absolute_tolerance": 0.0001,
+    "parity_coverage": "every_scored_row_single_repeat_standard_right_standard_left_alternate_right",
+    "chat_template": "immutable_tokenizer_chat_template",
+    "add_generation_prompt": false,
+    "add_special_tokens_after_chat_template": false,
+    "bos_token_id": null,
+    "eos_token_id": 151645
+  },
+  "adopted_window_tokens": 16384,
+  "window_facts": {
+    "model_card_training_and_recommended_inference_tokens": 16384,
+    "model_config_max_position_embeddings": 40960,
+    "tokenizer_model_max_length": 131072,
+    "verified_context_forward_tokens": 16384,
+    "overflow_policy": "drop_whole_oldest_prior_publications_then_explicitly_encode_additional_omission",
+    "required_content_overflow": "typed_input_failure",
+    "implicit_tokenizer_truncation": false
+  },
+  "sample_identity": {
+    "name": "rondo-publication-critic-m3a2-cohort",
+    "revision": "v2-sha256-7c215193d2ee3457a0f0df8218a9a4f887cb10af2d1c5153f34b8226dbcb2aa3",
+    "calibration_count": 8,
+    "measurement_count": 16,
+    "token_census_only_count": 2,
+    "class_counts": {
+      "new_event_completed": 6,
+      "new_event_incomplete": 6,
+      "existing_event_completed": 6,
+      "existing_event_incomplete": 6
+    },
+    "label_counts": {
+      "pass": 12,
+      "rewrite": 12
+    },
+    "future_m3_b1a_unseen_test": false
+  },
+  "temporary_threshold_source": {
+    "run_id": "plan054-20260823T062100Z-calibration-v4",
+    "calibration_code_commit": "ea5463cf28cc0389f73c3d5b4d1b7d81f12a8fe2",
+    "calibration_result_sha256": "14062beac6d8eee3d48665a76e9b9dcbf73182abbe999ef5aa08bc69412e58d1",
+    "calibration_watchdog_summary_sha256": "91dc2c6a37a9ad7e9ab347cb362d386bbf252dd0b174c444a044247cb1c0686b",
+    "rule": "maximize_balanced_accuracy_then_minimize_false_pass_then_maximize_threshold_v1",
+    "rule_sha256": "7f32f5ffc9913197bb176322c8eb27d8835959d7107a8cc5ec7749590031b237",
+    "measurement_labels_used": false
+  },
+  "measurement_metrics": [
+    "valid_and_failed_count",
+    "raw_and_projected_score_distribution",
+    "confusion_and_false_pass_false_rewrite",
+    "accuracy_and_balanced_accuracy",
+    "roc_auc",
+    "publication_class_metrics",
+    "declared_error_slices",
+    "atomic_boundary_pair_ranking",
+    "token_distribution",
+    "standard_batch_wall_and_amortized_compute_timing",
+    "wall_time_model_load_and_peak_memory"
+  ],
+  "declared_slices": [
+    "new_event",
+    "existing_event",
+    "completed",
+    "incomplete",
+    "continuity_available",
+    "continuity_unavailable",
+    "freshness_known_stale",
+    "evidence_count_omitted",
+    "handoff_empty",
+    "unicode"
+  ]
+}

@@ -374,6 +374,12 @@ new_local_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:local.
 include("//bazel/modules:wine.MODULE.bazel")
 
 new_local_repository(
+    name = "eval",
+    build_file = "//bazel/modules:eval.BUILD.bazel",
+    path = "../eval",
+)
+
+new_local_repository(
     name = "v8_targets",
     build_file = "//third_party/v8:BUILD.bazel",
     path = "third_party/v8",
