@@ -42,3 +42,21 @@ finalize 随后误用通用 Plan 056 source revalidator，而不是 record 写�
 修复只把 finalize 对每个 record 的验证切回既有 `_revalidate_plan058_record_sources`，不改变 agent-failure、Guardian、
 reward 或通用 Plan 056 语义；新增回归确保 finalize 不再调用通用入口。相关测试 `149/149` 通过，且 diagnostic-v3
 真实私有 record 可由专用入口只读重验证。v3 已永久作废，下一 identity 仍只复验槽 8。
+
+## diagnostic-v4 argument-validation projection fault
+
+`plan058-direction1-c2-diagnostic-v4` 同样只冻结槽 8，preflight `1/1`。付费 attempt 在 model 发出带 `justification`
+但未显式设置 `sandbox_permissions` 的 `exec_command` 时，由本地工具参数验证器在 native runtime 创建前返回固定错误；
+projector 尚未 allowlist 这一真实 failed lifecycle，故 record 发布前 fail-closed。v4 已按
+`local_execution_or_projection_failed` 作废并结算：14 个可靠 attempts（13 main、1 Guardian）、`0.491396 USD`，
+无 transport retry；Plan 058 累计 `8.397840 USD`、reserved `0`。Docker/VHDX 增长 `0`，Windows C: 最终实际
+余量 `202330550272` bytes。
+
+窄修只接受工具当前固定的完整参数验证错误字符串，并仍要求 `exec_command`、code-cell requester、tool/ended 均
+failed、严格 `{type,error}`、无 native runtime；invocation 还必须确有字符串 `justification` 且
+`sandbox_permissions` 缺失/null，防止错误文本与调用事实不一致。它保留调用 identity、failed、zero-output、无 exit
+code，且不获得 Guardian-limit inference 豁免；其他参数错误继续 fail-closed。修复后真实 v4 trace 可 body-free 投影为 14 responses
+（13 main、1 Guardian）、12 tools、11 command tools、1 次 exact repeat/after-failure、`46579` output bytes；该
+repeat 是模型收到参数错误后修正调用的合法恢复，不得分类为有害。相关回归 `152/152` 通过；只读独立诊断还确认
+同一 trace 的另一个无-runtime 调用是已覆盖的 Guardian rejection，加入本类别后未发现第三个投影阻塞。v4 永久
+作废，下一 identity 仍只复验槽 8。

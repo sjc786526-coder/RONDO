@@ -314,8 +314,18 @@ repeated-after-failure。相关 Python 定向回归 `368/368`、compile 与 diff
 revalidator，未保留 Plan 058 已冻结的 agent 非零但 verifier reward 有效合同，故同一 record 在终态复验被错误判为
 `Terminal-Bench projection drifted`。v3 已按本地发布设施故障作废并结算，累计费用 `7.906444 USD`、reserved `0`；
 修复仅使 finalize 复用写入/恢复路径已有的 Plan 058 专用 revalidator，不改变 Guardian、agent exit 或 reward 语义。
-真实 v3 record 只读重验证和相关回归 `149/149` 通过。当前将以新 diagnostic-v4 仍只复验槽 8；打通后提交、
-重建/复验新 runtime，再建立全新 formal identity 完整运行 20/20，不重跑 9–20 的脏版本，也不拼接任何旧数据。
+真实 v3 record 只读重验证和相关回归 `149/149` 通过。
+
+`plan058-direction1-c2-diagnostic-v4` 的 preflight `1/1`，付费 attempt 随后暴露第三个严格 projector 缺口：model 为
+`exec_command` 提供 `justification` 但未显式设置 `sandbox_permissions` 时，本地工具参数验证器在 native runtime
+创建前返回固定错误。projector 未识别该真实 failed lifecycle，v4 因 `local_execution_or_projection_failed` 作废；
+14 个可靠 attempts（13 main、1 Guardian）、`0.491396 USD` 已结算，累计费用 `8.397840 USD`、reserved `0`。
+窄修仅接受完整固定错误字符串，且绑定 invocation 确有字符串 `justification`、`sandbox_permissions` 缺失/null；
+投影保留 failed/zero-output/no-exit，不授予 Guardian-limit 豁免。真实 v4 trace 现可 body-free 投影为 14
+responses、12 tools、11 command tools、1 次参数修正后的合理 exact repeat/after-failure，相关回归 `152/152`；
+只读独立诊断确认未发现第三个投影阻塞。
+当前将以新 diagnostic-v5 仍只复验槽 8；打通后提交、重建/复验新 runtime，再建立全新 formal identity 完整运行
+20/20，不重跑 9–20 的脏版本，也不拼接任何旧数据。
 
 ### 本任务剩余步骤
 
@@ -370,6 +380,10 @@ revalidator，未保留 Plan 058 已冻结的 agent 非零但 verifier reward �
   Guardian）、`0.554663 USD` 已结算，Docker/VHDX 增长 `0`，Windows C: 最终余量 `202379096064` bytes；累计
   task budget `7.906444 USD`、reserved `0`。finalize 已切回既有 Plan 058 专用 source 合同，待 diagnostic-v4
   只复验槽 8。
+- diagnostic-v4：preflight `1/1`，槽 8 因 projector 未识别固定 `justification`/`sandbox_permissions` 参数验证失败
+  而在 record 前作废。14 个可靠 attempts（13 main/1 Guardian）、`0.491396 USD` 已结算，Docker/VHDX 增长 `0`，
+  Windows C: 最终余量 `202330550272` bytes；累计 task budget `8.397840 USD`、reserved `0`。严格 matcher 与真实
+  trace 投影已通过，待 diagnostic-v5 只复验槽 8。
 - 未运行：正式 20-result、正式比较/决策、本地模型、训练、完整数据集、Codex 对照、validation、holdout、CI 或 PR。
 
 ### 主工作区 ignored 资产
@@ -430,3 +444,4 @@ Plan 058 worktree，但执行阶段以下 I/O 会由 worktree 中的受控命令
 | 022 | 下一 formal 在 identity 创建前冻结执行顺序为 `8 → 18 → 1–7 → 9–17 → 19–20` | 绝对槽 8 是已知最高风险 canary，18 次之；二者在同一正式 campaign 内优先暴露问题。18 不在后续区间重复，仍是 20 个唯一结果、无额外试跑或旧结果拼接 | formal identity、执行顺序 | 用户建议，已采纳 |
 | 023 | formal-v2 因 typed missing-process `write_stdin` 的本地投影缺口永久作废；结算真实 20 attempts 后，窄修 projector 并只以新 diagnostic 复验槽 8，再重新冻结全新完整 formal | 首槽的 agent/verifier 有真实终态但 projector fail-closed，不能当有效 task 结果，也不能把错误载荷中的零逻辑发布误当零 API；局部 commissioning 与新 20/20 formal 分别遵守 021 的两层边界 | projector、预算、diagnostic、正式重启 | 已采纳，硬合同 |
 | 024 | diagnostic-v3 因 finalize 误用通用 source revalidator 永久作废；finalize 改为复用既有 Plan 058 专用入口，新 diagnostic 仍只复验槽 8 | Plan 058 明确允许 agent 非零但 verifier reward 有效的 typed Guardian stop，写入/恢复已按专用合同验证；终态不得换用通用解析语义，也不得复活已作废 identity | source revalidation、发布、diagnostic | 已采纳 |
+| 025 | diagnostic-v4 因固定工具参数验证错误未被 projector 识别而永久作废；只 allowlist 该完整 pre-runtime 终态，新 diagnostic 仍只复验槽 8 | 参数验证发生在 native runtime 前但是真实 failed tool result；应诚实保留而非补造执行。泛化接受任意参数错误会削弱 fail-closed，因此只冻结当前产品合同 | projector、工具真值、diagnostic | 已采纳 |

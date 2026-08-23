@@ -35,6 +35,11 @@ GUARDIAN_REJECTION_ERROR = (
     'Otherwise, stop and request user input.\\")" }'
 )
 UNKNOWN_PROCESS_ERROR = "write_stdin failed: Unknown process id 9"
+JUSTIFICATION_ERROR = (
+    '`justification` requires an explicit `sandbox_permissions`; use '
+    '`sandbox_permissions: "require_escalated"` for unsandboxed execution, '
+    'or omit `justification`.'
+)
 
 
 def _observation() -> dict[str, object]:
@@ -510,6 +515,36 @@ def _make_pre_runtime_guardian_limit(
     )
 
 
+def _update_exec_invocation_arguments(
+    bundle: Path,
+    *,
+    tool_index: int = 1,
+    updates: dict[str, object] | None = None,
+    removals: tuple[str, ...] = (),
+) -> None:
+    tool_id = f"tool-{tool_index}"
+    events = [
+        json.loads(line)
+        for line in (bundle / "trace.jsonl").read_text("utf-8").splitlines()
+    ]
+    started = next(
+        event
+        for event in events
+        if event["payload"]["type"] == "tool_call_started"
+        and event["payload"]["tool_call_id"] == tool_id
+    )
+    invocation_path = bundle / started["payload"]["invocation_payload"]["path"]
+    invocation = json.loads(invocation_path.read_text("utf-8"))
+    arguments = json.loads(invocation["payload"]["arguments"])
+    for name in removals:
+        arguments.pop(name, None)
+    arguments.update(updates or {})
+    invocation["payload"]["arguments"] = json.dumps(
+        arguments, separators=(",", ":")
+    )
+    invocation_path.write_text(json.dumps(invocation), encoding="utf-8")
+
+
 def _make_pre_runtime_unknown_write_stdin(
     bundle: Path,
     *,
@@ -938,6 +973,97 @@ class HarnessObservationTests(unittest.TestCase):
             )
             _make_pre_runtime_guardian_limit(
                 bundle, error=GUARDIAN_REJECTION_ERROR
+            )
+            _append_linked_local_inference_failure(bundle)
+            metadata = root / "api-metadata.json"
+            _write_metadata(metadata, "main")
+
+            with self.assertRaisesRegex(
+                HarnessObservationError, "populations disagree"
+            ):
+                project_task_observation(trace_root, metadata)
+
+    def test_pre_runtime_justification_error_is_a_failed_command(self) -> None:
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            trace_root = root / "trace-root"
+            trace_root.mkdir()
+            bundle = _write_bundle(
+                trace_root / "exec",
+                commands=((COMMAND_BODY, 128, RAW_PATH_BODY),),
+                pre_runtime_denied_command_index=1,
+            )
+            _make_pre_runtime_guardian_limit(bundle, error=JUSTIFICATION_ERROR)
+            _update_exec_invocation_arguments(
+                bundle,
+                updates={"justification": ""},
+                removals=("sandbox_permissions",),
+            )
+            metadata = root / "api-metadata.json"
+            _write_metadata(metadata, "main")
+
+            observation = project_task_observation(trace_root, metadata)
+
+        encoded = json.dumps(observation, sort_keys=True)
+        self.assertEqual(observation["tools"]["command"], 1)
+        self.assertEqual(observation["tools"]["command_output_bytes"], 0)
+        self.assertEqual(observation["tools"]["max_command_output_bytes"], 0)
+        self.assertNotIn("sandbox_permissions", encoded)
+
+    def test_pre_runtime_justification_error_is_bound_to_its_arguments(self) -> None:
+        cases = (
+            ({}, ("justification", "sandbox_permissions")),
+            ({"justification": None}, ("sandbox_permissions",)),
+            (
+                {
+                    "justification": "review this action",
+                    "sandbox_permissions": "require_escalated",
+                },
+                (),
+            ),
+        )
+        for updates, removals in cases:
+            with self.subTest(updates=updates, removals=removals):
+                with TemporaryDirectory() as raw:
+                    root = Path(raw)
+                    trace_root = root / "trace-root"
+                    trace_root.mkdir()
+                    bundle = _write_bundle(
+                        trace_root / "exec",
+                        commands=((COMMAND_BODY, 128, RAW_PATH_BODY),),
+                        pre_runtime_denied_command_index=1,
+                    )
+                    _make_pre_runtime_guardian_limit(
+                        bundle, error=JUSTIFICATION_ERROR
+                    )
+                    _update_exec_invocation_arguments(
+                        bundle,
+                        updates=updates,
+                        removals=removals,
+                    )
+                    metadata = root / "api-metadata.json"
+                    _write_metadata(metadata, "main")
+
+                    with self.assertRaisesRegex(
+                        HarnessObservationError, "typed pre-runtime rejection"
+                    ):
+                        project_task_observation(trace_root, metadata)
+
+    def test_pre_runtime_justification_error_is_not_a_guardian_limit(self) -> None:
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            trace_root = root / "trace-root"
+            trace_root.mkdir()
+            bundle = _write_bundle(
+                trace_root / "exec",
+                commands=((COMMAND_BODY, 128, RAW_PATH_BODY),),
+                pre_runtime_denied_command_index=1,
+            )
+            _make_pre_runtime_guardian_limit(bundle, error=JUSTIFICATION_ERROR)
+            _update_exec_invocation_arguments(
+                bundle,
+                updates={"justification": "review this action"},
+                removals=("sandbox_permissions",),
             )
             _append_linked_local_inference_failure(bundle)
             metadata = root / "api-metadata.json"

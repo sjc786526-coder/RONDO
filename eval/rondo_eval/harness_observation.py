@@ -58,6 +58,11 @@ _PRE_RUNTIME_EXEC_REJECTION_ERROR = re.compile(
 _PRE_RUNTIME_WRITE_STDIN_UNKNOWN_PROCESS_ERROR = re.compile(
     r"^write_stdin failed: Unknown process id (-?[0-9]+)$"
 )
+_PRE_RUNTIME_EXEC_ARGUMENT_ERROR = (
+    '`justification` requires an explicit `sandbox_permissions`; use '
+    '`sandbox_permissions: "require_escalated"` for unsandboxed execution, '
+    'or omit `justification`.'
+)
 
 
 class HarnessObservationError(ValueError):
@@ -1137,11 +1142,12 @@ def _command_runtime_aggregates(
 ]:
     """Return complete runtimes plus exact typed pre-runtime command failures.
 
-    ``exec_command`` can fail during sandbox or Guardian admission, and
-    ``write_stdin`` can target a session that has already disappeared.  These
-    failures happen before a native command runtime exists but still have exact
-    terminal tool results.  Accept only those narrow shapes; every other missing
-    or one-sided runtime lifecycle remains invalid.
+    ``exec_command`` can fail during argument validation, sandbox setup, or
+    Guardian admission, and ``write_stdin`` can target a session that has
+    already disappeared.  These failures happen before a native command
+    runtime exists but still have exact terminal tool results.  Accept only
+    those narrow shapes; every other missing or one-sided runtime lifecycle
+    remains invalid.
     """
 
     command_tools = {
@@ -1228,6 +1234,25 @@ def _exec_command_invocation_identity(
     reader: NativeBundleReader,
     runtime: Mapping[str, Any] | None,
 ) -> tuple[str, str]:
+    arguments = _exec_command_invocation_arguments(started, reader)
+    command = arguments.get("cmd")
+    cwd = arguments.get("workdir")
+    if cwd is None and runtime is not None:
+        cwd = runtime.get("cwd")
+    if (
+        not isinstance(command, str)
+        or not command
+        or not isinstance(cwd, str)
+        or not cwd
+    ):
+        raise HarnessObservationError("exec command invocation is incomplete")
+    return command, cwd
+
+
+def _exec_command_invocation_arguments(
+    started: Mapping[str, Any] | None,
+    reader: NativeBundleReader,
+) -> dict[str, Any]:
     if started is None:
         raise HarnessObservationError("exec command invocation is missing")
     invocation = reader.load_ref(started.get("invocation_payload"))
@@ -1245,18 +1270,7 @@ def _exec_command_invocation_identity(
         raise HarnessObservationError("exec command invocation is invalid") from exc
     if not isinstance(arguments, dict):
         raise HarnessObservationError("exec command invocation is invalid")
-    command = arguments.get("cmd")
-    cwd = arguments.get("workdir")
-    if cwd is None and runtime is not None:
-        cwd = runtime.get("cwd")
-    if (
-        not isinstance(command, str)
-        or not command
-        or not isinstance(cwd, str)
-        or not cwd
-    ):
-        raise HarnessObservationError("exec command invocation is incomplete")
-    return command, cwd
+    return arguments
 
 
 def _write_stdin_invocation_process_id(
@@ -1359,6 +1373,7 @@ def _pre_runtime_command_aggregate(
         )
 
     identity = _exec_command_invocation_identity(started, reader, None)
+    invocation_arguments = _exec_command_invocation_arguments(started, reader)
 
     result = reader.load_ref(ended.get("result_payload"))
     if tool.get("status") == "failed" and ended.get("status") == "failed":
@@ -1367,6 +1382,10 @@ def _pre_runtime_command_aggregate(
             and isinstance(result.get("error"), str)
             and _PRE_RUNTIME_GUARDIAN_LIMIT_ERROR.search(result["error"])
             is not None
+        )
+        argument_error = (
+            isinstance(result, dict)
+            and result.get("error") == _PRE_RUNTIME_EXEC_ARGUMENT_ERROR
         )
         if (
             not isinstance(result, dict)
@@ -1377,6 +1396,14 @@ def _pre_runtime_command_aggregate(
                 _PRE_RUNTIME_GUARDIAN_LIMIT_ERROR.search(result["error"]) is None
                 and _PRE_RUNTIME_EXEC_REJECTION_ERROR.fullmatch(result["error"])
                 is None
+                and not argument_error
+            )
+            or (
+                argument_error
+                and (
+                    not isinstance(invocation_arguments.get("justification"), str)
+                    or invocation_arguments.get("sandbox_permissions") is not None
+                )
             )
         ):
             raise HarnessObservationError(
@@ -1384,8 +1411,8 @@ def _pre_runtime_command_aggregate(
             )
         return (
             {
-                # Guardian failed closed before command runtime creation.  Keep
-                # that true failure without inventing argv, output, or an exit.
+                # A typed local admission failure occurred before command
+                # runtime creation. Keep it without inventing output or exit.
                 "command": [identity[0]],
                 "cwd": identity[1],
                 "aggregated_output": "",
