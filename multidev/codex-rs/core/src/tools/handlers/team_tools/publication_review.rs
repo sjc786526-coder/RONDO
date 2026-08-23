@@ -906,9 +906,9 @@ mod tests {
     }
 
     #[test]
-    fn measurement_freeze_v3_matches_typed_publication_critic_identities() {
+    fn measurement_freeze_v4_matches_typed_publication_critic_identities() {
         let freeze_path = codex_utils_cargo_bin::find_resource!(
-            "../../../eval/manifests/publication-critic/measurement-freeze-v3.json"
+            "../../../eval/manifests/publication-critic/measurement-freeze-v4.json"
         )
         .expect("measurement freeze path must resolve");
         let freeze: Value =
@@ -1237,8 +1237,10 @@ mod tests {
 
     #[test]
     fn plan054_sample_packets_deserialize_as_the_product_packet() {
-        let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../eval/fixtures/publication-critic-v1/packets.jsonl");
+        let fixture = codex_utils_cargo_bin::find_resource!(
+            "../../../eval/fixtures/publication-critic-v1/packets.jsonl"
+        )
+        .expect("Plan 054 packet fixture path must resolve");
         let body = std::fs::read_to_string(&fixture).unwrap_or_else(|error| {
             panic!(
                 "cannot read Plan 054 packet fixture {}: {error}",
@@ -1269,8 +1271,10 @@ mod tests {
 
     #[test]
     fn plan054_limit_document_matches_the_product_constants() {
-        let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../eval/templates/publication-critic/product-packet-limits-v1.json");
+        let fixture = codex_utils_cargo_bin::find_resource!(
+            "../../../eval/templates/publication-critic/product-packet-limits-v1.json"
+        )
+        .expect("Plan 054 limit fixture path must resolve");
         let body = std::fs::read_to_string(&fixture).unwrap_or_else(|error| {
             panic!(
                 "cannot read Plan 054 limit fixture {}: {error}",

@@ -137,10 +137,10 @@ def summarize_measurement(rows: Iterable[Mapping[str, Any]], threshold: float) -
         by_pair[str(row["pair_id"])].append(row)
     scores = sorted(float(row["score"]) for row in measurement)
     raw_logits = sorted(float(row["raw_logit"]) for row in measurement)
-    latencies = sorted(float(row["latency_ms"]) for row in measurement)
-    for value in (*scores, *raw_logits, *latencies):
+    for value in (*scores, *raw_logits):
         if not math.isfinite(value):
             raise ScoringError("measurement contains a non-finite result")
+    forward_timing = _summarize_forward_timing(measurement)
     pair_wins = 0
     pair_ties = 0
     pair_rows: list[dict[str, Any]] = []
@@ -203,7 +203,63 @@ def summarize_measurement(rows: Iterable[Mapping[str, Any]], threshold: float) -
             "max": scores[-1] if scores else None,
             "median": statistics.median(scores) if scores else None,
         },
-        "latency_ms": _distribution(latencies),
+        "forward_timing": forward_timing,
+    }
+
+
+def _summarize_forward_timing(
+    rows: list[Mapping[str, Any]],
+) -> dict[str, Any]:
+    grouped: dict[int, list[Mapping[str, Any]]] = defaultdict(list)
+    for row in rows:
+        batch_index = row.get("standard_batch_index")
+        if type(batch_index) is not int or batch_index < 0:
+            raise ScoringError("measurement standard batch index is invalid")
+        grouped[batch_index].append(row)
+    if sorted(grouped) != list(range(len(grouped))):
+        raise ScoringError("measurement standard batch sequence is invalid")
+
+    batches: list[dict[str, Any]] = []
+    amortized: list[float] = []
+    total_elapsed_ms = 0.0
+    total_samples = 0
+    for batch_index, batch_rows in sorted(grouped.items()):
+        declared_sizes = {row.get("standard_batch_size") for row in batch_rows}
+        elapsed_values = {
+            float(row["standard_batch_elapsed_ms"])
+            for row in batch_rows
+            if isinstance(row.get("standard_batch_elapsed_ms"), (int, float))
+            and not isinstance(row.get("standard_batch_elapsed_ms"), bool)
+        }
+        if declared_sizes != {len(batch_rows)} or len(elapsed_values) != 1:
+            raise ScoringError("measurement standard batch timing is inconsistent")
+        elapsed_ms = next(iter(elapsed_values))
+        if not math.isfinite(elapsed_ms) or elapsed_ms < 0:
+            raise ScoringError("measurement standard batch timing is invalid")
+        amortized_ms = elapsed_ms / len(batch_rows)
+        batches.append(
+            {
+                "batch_index": batch_index,
+                "batch_size": len(batch_rows),
+                "batch_elapsed_ms": elapsed_ms,
+                "amortized_compute_ms_per_sample": amortized_ms,
+                "sample_ids": [str(row["sample_id"]) for row in batch_rows],
+            }
+        )
+        amortized.extend([amortized_ms] * len(batch_rows))
+        total_elapsed_ms += elapsed_ms
+        total_samples += len(batch_rows)
+
+    elapsed = sorted(float(batch["batch_elapsed_ms"]) for batch in batches)
+    throughput = (
+        total_samples / (total_elapsed_ms / 1000.0) if total_elapsed_ms > 0 else None
+    )
+    return {
+        "basis": "standard_right_batch_wall_clock",
+        "batches": batches,
+        "batch_elapsed_ms": _distribution(elapsed),
+        "amortized_compute_ms_per_sample": _distribution(sorted(amortized)),
+        "aggregate_throughput_samples_per_second": throughput,
     }
 
 

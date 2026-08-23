@@ -16,6 +16,9 @@ class TokenizationError(ValueError):
     """Raised when the exact tokenizer violates the frozen input contract."""
 
 
+EXPECTED_CHAT_ADDED_TOKEN_IDS = (151644, 151645, 151644, 151667, 151668, 151645)
+
+
 @dataclass(frozen=True)
 class TokenizedInput:
     plan: RenderPlan
@@ -88,6 +91,16 @@ class ExactTokenizer:
             raise TokenizationError("input ids and attention mask differ")
         if any(value != 1 for value in encoded["attention_mask"]):
             raise TokenizationError("unpadded input has an invalid attention mask")
+        added_token_ids = set(self.tokenizer.get_added_vocab().values())
+        observed_added_ids = tuple(
+            int(value)
+            for value in encoded["input_ids"]
+            if value in added_token_ids
+        )
+        if observed_added_ids != EXPECTED_CHAT_ADDED_TOKEN_IDS:
+            raise TokenizationError(
+                "model-visible input contains an unexpected registered control token"
+            )
         return encoded
 
     def _buckets(

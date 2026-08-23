@@ -1,1 +1,4 @@
-exports_files(["wine.MODULE.bazel"])
+exports_files([
+    "eval.BUILD.bazel",
+    "wine.MODULE.bazel",
+])

@@ -1,0 +1,116 @@
+{
+  "schema_version": 1,
+  "name": "rondo-publication-critic-render",
+  "revision": "v3",
+  "messages": {
+    "system": "absent",
+    "count": 2,
+    "user": {
+      "order": [
+        "qualification_rubric",
+        "public_context"
+      ],
+      "components": {
+        "packet": {
+          "fields": [
+            "qualification",
+            "actor_role",
+            "target_kind",
+            "local_scope.title"
+          ]
+        },
+        "continuity": {
+          "fields": [
+            "continuity"
+          ]
+        },
+        "evidence_v1": {
+          "fields": [
+            "evidence_v1"
+          ]
+        }
+      },
+      "excluded_fields": [
+        "candidate",
+        "supervision"
+      ]
+    },
+    "assistant": {
+      "component": "candidate",
+      "fields": [
+        "candidate.summary",
+        "candidate.handoff"
+      ]
+    }
+  },
+  "token_accounting": {
+    "candidate_semantic_fields": [
+      "local_scope.title",
+      "candidate.summary",
+      "candidate.handoff"
+    ],
+    "canonical_title": {
+      "source": "local_scope.title",
+      "message_role": "user",
+      "render_component": "packet",
+      "token_bucket": "candidate"
+    }
+  },
+  "dynamic_text_encoding": {
+    "format": "json_utf8_control_token_safe",
+    "less_than_escape": "\\u003c",
+    "round_trip": "json_decode",
+    "scope": [
+      "local_scope.title",
+      "candidate.summary",
+      "candidate.handoff",
+      "continuity.prior_publications.summary",
+      "continuity.prior_publications.handoff"
+    ],
+    "tokenizer_invariant": "registered_added_ids_exactly_151644_151645_151644_151667_151668_151645"
+  },
+  "render_compatibility": {
+    "prior_revision": "rondo-publication-critic-render@v2",
+    "model_visible_bytes": "changed_only_when_dynamic_json_contains_less_than",
+    "message_roles": [
+      "user",
+      "assistant"
+    ]
+  },
+  "identity_binding": {
+    "algorithm": "sha256_canonical_json",
+    "components": [
+      "render-contract-v3.json",
+      "qualification-rubric-v1.md",
+      "render.py",
+      "chat_template.jinja",
+      "added_tokens.json"
+    ]
+  },
+  "chat_template": {
+    "source": "frozen_tokenizer",
+    "add_generation_prompt": false
+  },
+  "context": {
+    "adopted_window_tokens": 16384,
+    "mandatory": [
+      "qualification_rubric",
+      "local_scope.title",
+      "candidate.summary",
+      "candidate.handoff"
+    ],
+    "candidate_truncation": "forbidden",
+    "overflow": {
+      "strategy": "drop_oldest_continuity_item",
+      "unit": "whole_prior_publication",
+      "rerender_and_retokenize_after_each_drop": true,
+      "render_only_omission_field": "model_window_additional_oldest_omitted",
+      "render_only_omission_is_additional_to_packet_coverage": true,
+      "mandatory_content_overflow": "typed_input_failure"
+    }
+  },
+  "padding": {
+    "binding": "scoring_identity",
+    "semantic_parity_required": true
+  }
+}

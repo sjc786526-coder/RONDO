@@ -241,15 +241,22 @@ Hugging Face/Python 配置，不得把模型复制进 worktree 或用 symlink �
 - 正式 run `plan054-20260823T051600Z-measurement-v3` 从 clean commit `3206c953bcab506f6bff61297862fd274c5f6a3b`
   一次完成：16/16 valid、零 typed failure，全部 10 个 declared slice 存在，all-row parity 最大 delta `4.523673587608634e-06`，
   accuracy / balanced accuracy `0.6875`、ROC AUC `0.765625`、atomic pair `7/8`。基座工程路径与 M3-B1a 数据建设 GO，
-  未微调 direct-product NO-GO。
+  未微调 direct-product NO-GO；后续独立验收确认这些历史观测有效，但因输入控制 token、identity、Python 产品约束、校准证据与 Bazel
+  runfiles 缺口将 v3 降级为 superseded attempt。
+- v4 已采用可逆 JSON `\u003c` 编码和 exact registered-token 序列守卫，input-template identity 绑定 renderer/rubric/chat template/
+  added-token 实际文件 SHA；Python loader 补齐 PublicationPacket 文本、整数、history 与 evidence count 机械约束，未改变 scalar definition。
+- calibration v3/result v4 路径已分离重型 raw run 与轻量 watchdog finalizer，严格绑定 FP32 runtime、implementation/scoring、逐行 raw/projected
+  scalar、全 cohort parity、16k context、真实 batch wall timing 和 body-free 资源投影；31 个 focused Python tests 与五字段 exact-tokenizer
+  control-token 回归通过，Bazel/Cargo test resource 已统一为精确 runfiles。
 
 ### 当前工作
 
-- Plan 054 已完成；同一干净上下文独立审查者最终结论为 `FINAL PASS`，当前只待最终本地提交与 clean 交付。
+- 正在把 v4 实现固定为 clean calibration commit，随后按同一冻结模型和样本完整重跑 calibration、freeze、measurement 与 finalizer。
 
 ### 本任务剩余步骤
 
-- 无任务内实现、测量、审查或清理步骤剩余。
+- 从新 clean commit 完成一次 watchdog calibration，生成并提交 v4 freeze；再从该 clean freeze 完成 watchdog measurement 和轻量 finalizer。
+- 跑受影响 Rust typed resource/identity tests，归档 v4 结果、方向 3 WBS 与精炼日志，完成同一独立审查者复验后本地提交并保持 clean。
 
 ### 阻塞项
 
@@ -257,7 +264,7 @@ Hugging Face/Python 配置，不得把模型复制进 worktree 或用 symlink �
 
 ### 当前验收状态
 
-- v3 实现、freeze、正式 measurement、tracked/raw 归档、10 个 declared-slice 双重覆盖、focused 自检与同一独立审查者最终复验均通过。
+- 前次独立验收不通过；五项 finding 已落实为 v4 实现和 focused 回归，但新的正式模型证据、结果归档及独立复验尚未完成。
 
 ### 交接边界
 
@@ -290,3 +297,7 @@ Hugging Face/Python 配置，不得把模型复制进 worktree 或用 symlink �
 | 014 | v1 正式 run 因 identity/parity/render 合同不一致降级为 superseded attempt；升级 v2 后完整重跑 | 已产生 scalar 不等于满足冻结合同，不能用文档修饰替代重新测量 | identity、runner、结果 | 已采纳 |
 | 015 | parity 覆盖全部 calibration/measurement scored row；两条 `token_census_only` cap 只做 exact census，另以独立 16k forward 验证 context | census cap 不参与 threshold/quality，强塞入 batch parity 会扭曲 `every_scored_row` 语义并放大无关计算 | parity、census、资源 | 已采纳 |
 | 016 | v2 因 declared slices 与真实结果键不一致降级为 superseded attempt；v3 对齐真实键、加 cohort/result 覆盖校验并完整重跑 measurement | 冻结声明必须对应实际可计算指标，主分数正确不能替代缺失的 declared-slice 结果 | freeze、指标、结果 | 已采纳 |
+| 017 | v3 因产品合法文本可触发 tokenizer 控制 token、Python 产品约束与证据绑定不完整降级为 superseded；v4 从新 clean calibration 起点重跑 | 训练、评价与 runtime 必须消费同一产品合法输入，历史有效分数不能代替最终冻结合同 | render、packet、identity、结果 | 已采纳 |
+| 018 | 动态产品文本统一用可逆 JSON `\u003c` 编码，并以 exact registered-token 序列 fail-closed；input-template 绑定实际 renderer/rubric/tokenizer 资产，未变化 scalar 保持 FP32 v1 身份 | 覆盖所有以 `<` 开头的冻结 added token，避免只修单个字面量或随结果 schema 错升 scalar 身份 | render、tokenizer、scoring | 已采纳 |
+| 019 | 正式模型进程只写 ignored raw artifact，成功 watchdog summary 产生后由轻量 finalizer 校验并生成 tracked 结果 | watchdog summary 在模型子进程退出后才完整，分阶段可同时保持真实资源证据和 write-once 归档 | runner、资源、结果 | 已采纳 |
+| 020 | `eval/` 三份 Rust test resource 通过 Bazel local repository 精确进入 runfiles，Cargo 与 Bazel 都用 `find_resource!` | `eval/` 位于 `multidev` Bazel workspace 外，不能靠 `CARGO_MANIFEST_DIR` 或未声明相对路径 | Rust test、Bazel | 已采纳 |

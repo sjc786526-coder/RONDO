@@ -43,6 +43,13 @@ _SUPERVISION_KEYS = frozenset(
         "reviewer_identity",
     }
 )
+_U32_MAX = 2**32 - 1
+_U64_MAX = 2**64 - 1
+_RUST_WHITESPACE = frozenset(
+    "\u0009\u000a\u000b\u000c\u000d\u0020\u0085\u00a0\u1680"
+    "\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a"
+    "\u2028\u2029\u202f\u205f\u3000"
+)
 
 
 class PublicationCriticContractError(ValueError):
@@ -77,13 +84,13 @@ def load_fixed_input_contract(
     repo_root: Path | str = REPO_ROOT,
 ) -> PublicationCriticFixedInput:
     root = Path(repo_root)
-    input_contract = _read_text(root / _TEMPLATE_DIR / "input-contract-v1.md")
+    input_contract = _read_text(root / _TEMPLATE_DIR / "input-contract-v2.md")
     if not input_contract.strip():
         _fail("model input contract must not be empty")
     rubric = _read_text(root / _TEMPLATE_DIR / "qualification-rubric-v1.md")
     if not rubric.strip():
         _fail("qualification rubric must not be empty")
-    render = _load_json(root / _TEMPLATE_DIR / "render-contract-v2.json")
+    render = _load_json(root / _TEMPLATE_DIR / "render-contract-v3.json")
     _validate_render_contract(render)
     limits = _load_json(root / _TEMPLATE_DIR / "product-packet-limits-v1.json")
     _validate_product_limits(limits)
@@ -125,6 +132,8 @@ def _validate_product_limits(value: Any) -> None:
 
 def load_sample_corpus(repo_root: Path | str = REPO_ROOT) -> PublicationCriticCorpus:
     root = Path(repo_root)
+    limits = _load_json(root / _TEMPLATE_DIR / "product-packet-limits-v1.json")
+    _validate_product_limits(limits)
     packet_rows = _load_jsonl(root / _FIXTURE_DIR / "packets.jsonl")
     annotation_rows = _load_jsonl(root / _FIXTURE_DIR / "annotations.jsonl")
 
@@ -138,7 +147,7 @@ def load_sample_corpus(repo_root: Path | str = REPO_ROOT) -> PublicationCriticCo
             _fail(f"duplicate packet sample_id: {sample_id}")
         packet = _require_object(row["packet"], f"{where}.packet")
         _validate_no_supervision(packet, f"{where}.packet")
-        _validate_packet(packet, f"{where}.packet")
+        _validate_packet(packet, f"{where}.packet", limits)
         packets[sample_id] = packet
 
     annotations: dict[str, dict[str, Any]] = {}
@@ -182,7 +191,9 @@ def _validate_render_contract(value: Any) -> None:
             "revision",
             "messages",
             "token_accounting",
+            "dynamic_text_encoding",
             "render_compatibility",
+            "identity_binding",
             "chat_template",
             "context",
             "padding",
@@ -191,7 +202,7 @@ def _validate_render_contract(value: Any) -> None:
     )
     _require_literal(contract["schema_version"], 1, "render contract.schema_version")
     _require_literal(contract["name"], "rondo-publication-critic-render", "render contract.name")
-    _require_literal(contract["revision"], "v2", "render contract.revision")
+    _require_literal(contract["revision"], "v3", "render contract.revision")
 
     messages = _require_object(contract["messages"], "render contract.messages")
     _require_exact_keys(messages, {"system", "count", "user", "assistant"}, "render contract.messages")
@@ -283,24 +294,89 @@ def _validate_render_contract(value: Any) -> None:
         "render contract.token_accounting.canonical_title.token_bucket",
     )
 
+    text_encoding = _require_object(
+        contract["dynamic_text_encoding"],
+        "render contract.dynamic_text_encoding",
+    )
+    _require_exact_keys(
+        text_encoding,
+        {"format", "less_than_escape", "round_trip", "scope", "tokenizer_invariant"},
+        "render contract.dynamic_text_encoding",
+    )
+    _require_literal(
+        text_encoding["format"],
+        "json_utf8_control_token_safe",
+        "render contract.dynamic_text_encoding.format",
+    )
+    _require_literal(
+        text_encoding["less_than_escape"],
+        "\\u003c",
+        "render contract.dynamic_text_encoding.less_than_escape",
+    )
+    _require_literal(
+        text_encoding["round_trip"],
+        "json_decode",
+        "render contract.dynamic_text_encoding.round_trip",
+    )
+    _require_sequence_literal(
+        text_encoding["scope"],
+        [
+            "local_scope.title",
+            "candidate.summary",
+            "candidate.handoff",
+            "continuity.prior_publications.summary",
+            "continuity.prior_publications.handoff",
+        ],
+        "render contract.dynamic_text_encoding.scope",
+    )
+    _require_literal(
+        text_encoding["tokenizer_invariant"],
+        "registered_added_ids_exactly_151644_151645_151644_151667_151668_151645",
+        "render contract.dynamic_text_encoding.tokenizer_invariant",
+    )
+
     compatibility = _require_object(
         contract["render_compatibility"],
         "render contract.render_compatibility",
     )
     _require_exact_keys(
         compatibility,
-        {"model_visible_bytes", "message_roles"},
+        {"prior_revision", "model_visible_bytes", "message_roles"},
         "render contract.render_compatibility",
     )
     _require_literal(
+        compatibility["prior_revision"],
+        "rondo-publication-critic-render@v2",
+        "render contract.render_compatibility.prior_revision",
+    )
+    _require_literal(
         compatibility["model_visible_bytes"],
-        "identical_to_rondo-publication-critic-render@v1",
+        "changed_only_when_dynamic_json_contains_less_than",
         "render contract.render_compatibility.model_visible_bytes",
     )
     _require_sequence_literal(
         compatibility["message_roles"],
         ["user", "assistant"],
         "render contract.render_compatibility.message_roles",
+    )
+
+    identity = _require_object(contract["identity_binding"], "render contract.identity_binding")
+    _require_exact_keys(identity, {"algorithm", "components"}, "render contract.identity_binding")
+    _require_literal(
+        identity["algorithm"],
+        "sha256_canonical_json",
+        "render contract.identity_binding.algorithm",
+    )
+    _require_sequence_literal(
+        identity["components"],
+        [
+            "render-contract-v3.json",
+            "qualification-rubric-v1.md",
+            "render.py",
+            "chat_template.jinja",
+            "added_tokens.json",
+        ],
+        "render contract.identity_binding.components",
     )
 
     chat_template = _require_object(contract["chat_template"], "render contract.chat_template")
@@ -344,7 +420,11 @@ def _validate_render_contract(value: Any) -> None:
     _require_literal(padding["semantic_parity_required"], True, "render contract.padding.semantic_parity_required")
 
 
-def _validate_packet(packet: Mapping[str, Any], where: str) -> None:
+def _validate_packet(
+    packet: Mapping[str, Any],
+    where: str,
+    limits: Mapping[str, Any],
+) -> None:
     _require_exact_keys(
         packet,
         {"qualification", "actor_role", "target_kind", "local_scope", "candidate", "continuity", "evidence_v1"},
@@ -360,22 +440,44 @@ def _validate_packet(packet: Mapping[str, Any], where: str) -> None:
 
     local_scope = _require_object(packet["local_scope"], f"{where}.local_scope")
     _require_exact_keys(local_scope, {"title"}, f"{where}.local_scope")
-    _require_string(local_scope["title"], f"{where}.local_scope.title")
+    _validate_product_text(
+        local_scope["title"],
+        limits["title"],
+        required=True,
+        where=f"{where}.local_scope.title",
+    )
 
     candidate = _require_object(packet["candidate"], f"{where}.candidate")
     _require_exact_keys(candidate, {"summary", "handoff"}, f"{where}.candidate")
-    _require_string(candidate["summary"], f"{where}.candidate.summary")
-    _require_optional_string(candidate["handoff"], f"{where}.candidate.handoff")
+    _validate_product_text(
+        candidate["summary"],
+        limits["summary"],
+        required=True,
+        where=f"{where}.candidate.summary",
+    )
+    _validate_optional_product_text(
+        candidate["handoff"],
+        limits["handoff"],
+        where=f"{where}.candidate.handoff",
+    )
 
     continuity = _require_object(packet["continuity"], f"{where}.continuity")
     state = continuity.get("state")
     if state == "not_applicable":
         _require_exact_keys(continuity, {"state"}, f"{where}.continuity")
     elif state == "available":
-        _validate_available_continuity(continuity, f"{where}.continuity")
+        _validate_available_continuity(
+            continuity,
+            f"{where}.continuity",
+            limits,
+        )
     elif state == "unavailable":
         _require_exact_keys(continuity, {"state", "last_known_revision", "freshness"}, f"{where}.continuity")
-        _require_optional_nonnegative_int(continuity["last_known_revision"], f"{where}.continuity.last_known_revision")
+        _require_optional_uint(
+            continuity["last_known_revision"],
+            _U64_MAX,
+            f"{where}.continuity.last_known_revision",
+        )
         _require_enum(continuity["freshness"], {"known_stale", "unknown"}, f"{where}.continuity.freshness")
     else:
         _fail(f"{where}.continuity.state must be not_applicable, available, or unavailable")
@@ -391,13 +493,21 @@ def _validate_packet(packet: Mapping[str, Any], where: str) -> None:
     _require_literal(evidence["candidate_window"], "not_frozen_before_commit", f"{where}.evidence_v1.candidate_window")
 
 
-def _validate_available_continuity(continuity: Mapping[str, Any], where: str) -> None:
+def _validate_available_continuity(
+    continuity: Mapping[str, Any],
+    where: str,
+    limits: Mapping[str, Any],
+) -> None:
     _require_exact_keys(
         continuity,
         {"state", "source_team_revision", "freshness", "coverage", "prior_publications"},
         where,
     )
-    _require_nonnegative_int(continuity["source_team_revision"], f"{where}.source_team_revision")
+    _require_uint(
+        continuity["source_team_revision"],
+        _U64_MAX,
+        f"{where}.source_team_revision",
+    )
     _require_enum(continuity["freshness"], {"current", "known_stale", "unknown"}, f"{where}.freshness")
     coverage = _require_object(continuity["coverage"], f"{where}.coverage")
     coverage_state = coverage.get("state")
@@ -405,17 +515,35 @@ def _validate_available_continuity(continuity: Mapping[str, Any], where: str) ->
         _require_exact_keys(coverage, {"state"}, f"{where}.coverage")
     elif coverage_state == "partial":
         _require_exact_keys(coverage, {"state", "omitted_count"}, f"{where}.coverage")
-        _require_optional_nonnegative_int(coverage["omitted_count"], f"{where}.coverage.omitted_count")
+        omitted_count = coverage["omitted_count"]
+        _require_optional_uint(
+            omitted_count,
+            _U32_MAX,
+            f"{where}.coverage.omitted_count",
+        )
+        if omitted_count == 0:
+            _fail(f"{where}.coverage.omitted_count must be positive when present")
     else:
         _fail(f"{where}.coverage.state must be complete or partial")
 
     prior_publications = _require_list(continuity["prior_publications"], f"{where}.prior_publications")
+    if len(prior_publications) > limits["max_prior_publications"]:
+        _fail(f"{where}.prior_publications exceeds the product limit")
     for index, prior in enumerate(prior_publications):
         prior_where = f"{where}.prior_publications[{index}]"
         prior_object = _require_object(prior, prior_where)
         _require_exact_keys(prior_object, {"summary", "handoff", "evidence"}, prior_where)
-        _require_string(prior_object["summary"], f"{prior_where}.summary")
-        _require_optional_string(prior_object["handoff"], f"{prior_where}.handoff")
+        _validate_product_text(
+            prior_object["summary"],
+            limits["summary"],
+            required=True,
+            where=f"{prior_where}.summary",
+        )
+        _validate_optional_product_text(
+            prior_object["handoff"],
+            limits["handoff"],
+            where=f"{prior_where}.handoff",
+        )
         evidence = _require_object(prior_object["evidence"], f"{prior_where}.evidence")
         _require_exact_keys(evidence, {"fact_references", "observation_availability"}, f"{prior_where}.evidence")
         _require_literal(evidence["observation_availability"], "unknown", f"{prior_where}.evidence.observation_availability")
@@ -429,7 +557,15 @@ def _validate_available_continuity(continuity: Mapping[str, Any], where: str) ->
                 {"state", "visible_count", "count_omitted"},
                 f"{prior_where}.evidence.fact_references",
             )
-            _require_nonnegative_int(fact_references["visible_count"], f"{prior_where}.evidence.fact_references.visible_count")
+            visible_count = _require_nonnegative_int(
+                fact_references["visible_count"],
+                f"{prior_where}.evidence.fact_references.visible_count",
+            )
+            if not 1 <= visible_count <= limits["max_visible_fact_references"]:
+                _fail(
+                    f"{prior_where}.evidence.fact_references.visible_count "
+                    "is outside the product limit"
+                )
             _require_bool(fact_references["count_omitted"], f"{prior_where}.evidence.fact_references.count_omitted")
         else:
             _fail(f"{prior_where}.evidence.fact_references.state must be none or present")
@@ -588,20 +724,51 @@ def _require_nonempty_string(value: Any, where: str) -> str:
     return value
 
 
-def _require_optional_string(value: Any, where: str) -> None:
-    if value is not None:
-        _require_string(value, where)
-
-
 def _require_nonnegative_int(value: Any, where: str) -> int:
     if type(value) is not int or value < 0:
         _fail(f"{where} must be a non-negative integer")
     return value
 
 
-def _require_optional_nonnegative_int(value: Any, where: str) -> None:
+def _require_uint(value: Any, maximum: int, where: str) -> int:
+    value = _require_nonnegative_int(value, where)
+    if value > maximum:
+        _fail(f"{where} exceeds the product integer range")
+    return value
+
+
+def _require_optional_uint(value: Any, maximum: int, where: str) -> None:
     if value is not None:
-        _require_nonnegative_int(value, where)
+        _require_uint(value, maximum, where)
+
+
+def _validate_product_text(
+    value: Any,
+    limit: Mapping[str, Any],
+    *,
+    required: bool,
+    where: str,
+) -> str:
+    text = _require_string(value, where)
+    try:
+        encoded = text.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise PublicationCriticContractError(f"{where} is not valid UTF-8 text") from exc
+    if required and all(character in _RUST_WHITESPACE for character in text):
+        _fail(f"{where} must not be empty or whitespace")
+    if len(text) > limit["max_scalars"] or len(encoded) > limit["max_bytes"]:
+        _fail(f"{where} exceeds the product text limit")
+    return text
+
+
+def _validate_optional_product_text(
+    value: Any,
+    limit: Mapping[str, Any],
+    *,
+    where: str,
+) -> None:
+    if value is not None:
+        _validate_product_text(value, limit, required=False, where=where)
 
 
 def _require_bool(value: Any, where: str) -> bool:

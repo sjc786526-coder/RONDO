@@ -31,6 +31,9 @@ codex_rust_crate(
         "CARGO_MANIFEST_DIR": "codex-rs/core",
     },
     test_data_extra = [
+        "@eval//:fixtures/publication-critic-v1/packets.jsonl",
+        "@eval//:manifests/publication-critic/measurement-freeze-v4.json",
+        "@eval//:templates/publication-critic/product-packet-limits-v1.json",
         "config.schema.json",
     ] + glob([
         "src/**/snapshots/**",

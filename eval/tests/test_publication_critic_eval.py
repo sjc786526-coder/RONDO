@@ -16,6 +16,7 @@ sys.path.insert(0, str(EVAL_ROOT))
 from rondo_eval.publication_critic.archive import ArchiveError, RunArchive  # noqa: E402
 from rondo_eval.publication_critic.boundaries import build_token_boundary_packets  # noqa: E402
 from rondo_eval.publication_critic.contract import load_fixed_input_contract, load_sample_corpus  # noqa: E402
+from rondo_eval.publication_critic.evidence import EvidenceError  # noqa: E402
 from rondo_eval.publication_critic.render import (  # noqa: E402
     InputOverflowError,
     build_messages,
@@ -28,15 +29,21 @@ from rondo_eval.publication_critic.runner import (  # noqa: E402
     DECLARED_SLICES,
     FREEZE_SCHEMA,
     MEASUREMENT_METRICS,
-    MODEL_REVISION,
     RunnerError,
     _IMPLEMENTATION_FILES,
     _INPUT_FILES,
-    _require_committed_freeze,
     _frozen_runtime_identity,
+    _input_template_binding,
+    _model_identity,
+    _qualification_identity,
+    _require_committed_freeze,
+    _sample_identity,
+    _scoring_identity,
     _validate_declared_measurement_slices,
     _validate_declared_quality_slices,
+    _verify_calibration_result,
     _verify_scalar_parity,
+    _window_facts,
     body_free_runner_exception,
     build_parser,
     combined_manifest_sha256,
@@ -49,17 +56,31 @@ from rondo_eval.publication_critic.scoring import (  # noqa: E402
     project_logit,
     summarize_measurement,
 )
-from rondo_eval.publication_critic.tokenization import ExactTokenizer  # noqa: E402
+from rondo_eval.publication_critic.tokenization import (  # noqa: E402
+    EXPECTED_CHAT_ADDED_TOKEN_IDS,
+    ExactTokenizer,
+    TokenizationError,
+)
 
 
 class _CharacterOffsetTokenizer:
-    """Tiny tokenizer double with exact one-character offsets plus one special token."""
+    """Character offsets plus the exact frozen chat-template control sequence."""
 
     pad_token_id = 151654
     bos_token_id = None
     eos_token_id = 151645
-    all_special_ids = (151645, 151654)
+    all_special_ids = (151644, 151645, 151654)
     padding_side = "left"
+
+    @staticmethod
+    def get_added_vocab() -> dict[str, int]:
+        return {
+            "<|im_start|>": 151644,
+            "<|im_end|>": 151645,
+            "<|assistant|>": 151667,
+            "<|analysis|>": 151668,
+            "<|pad|>": 151654,
+        }
 
     @staticmethod
     def apply_chat_template(
@@ -71,7 +92,7 @@ class _CharacterOffsetTokenizer:
         if tokenize or add_generation_prompt:
             raise AssertionError("test tokenizer received the wrong chat-template options")
         return "".join(
-            f"<|{message['role']}|>\n{message['content']}\n"
+            f"ROLE_{message['role']}\n{message['content']}\n"
             for message in messages
         )
 
@@ -86,10 +107,23 @@ class _CharacterOffsetTokenizer:
     ) -> dict[str, list]:
         if add_special_tokens or truncation or not return_attention_mask or not return_offsets_mapping:
             raise AssertionError("test tokenizer received the wrong encoding options")
+        injected = [
+            token_id
+            for literal, token_id in _CharacterOffsetTokenizer.get_added_vocab().items()
+            if literal != "<|pad|>" and literal in rendered
+        ]
+        special = [*EXPECTED_CHAT_ADDED_TOKEN_IDS, *injected]
+        special_offsets = [
+            (0, 1) if token_id in {151667, 151668} else (0, 0)
+            for token_id in EXPECTED_CHAT_ADDED_TOKEN_IDS
+        ] + [(0, 0) for _ in injected]
         return {
-            "input_ids": [151645, *range(200_000, 200_000 + len(rendered))],
-            "attention_mask": [1] * (len(rendered) + 1),
-            "offset_mapping": [(0, 0), *((index, index + 1) for index in range(len(rendered)))],
+            "input_ids": [*special, *range(200_000, 200_000 + len(rendered))],
+            "attention_mask": [1] * (len(special) + len(rendered)),
+            "offset_mapping": [
+                *special_offsets,
+                *((index, index + 1) for index in range(len(rendered))),
+            ],
         }
 
 
@@ -103,7 +137,8 @@ class _StableScalarBackend:
             SimpleNamespace(
                 score=item.score + drift,
                 raw_logit=item.score,
-                latency_ms=1.0,
+                batch_elapsed_ms=float(len(inputs) * 10),
+                batch_size=len(inputs),
             )
             for item in inputs
         ]
@@ -115,26 +150,179 @@ class PublicationCriticEvalTests(unittest.TestCase):
         cls.fixed = load_fixed_input_contract(REPO_ROOT)
         cls.corpus = load_sample_corpus(REPO_ROOT)
 
-    def _valid_freeze(self) -> tuple[dict, Path]:
-        asset_lock = (
+    @staticmethod
+    def _asset_lock_path() -> Path:
+        return (
             REPO_ROOT
             / "eval/model-locks/publication-critic/skywork-reward-v2-qwen3-1.7b-e51ea3e0.json"
         )
+
+    def _identity_material(self) -> tuple[dict, dict, dict, dict]:
         inputs = file_manifest(REPO_ROOT, _INPUT_FILES)
         implementation = file_manifest(REPO_ROOT, _IMPLEMENTATION_FILES)
-        sample_files = {
-            relative: inputs[relative]
-            for relative in (
-                "eval/fixtures/publication-critic-v1/packets.jsonl",
-                "eval/fixtures/publication-critic-v1/annotations.jsonl",
+        asset_lock = json.loads(self._asset_lock_path().read_text(encoding="utf-8"))
+        binding = _input_template_binding(inputs, implementation, asset_lock)
+        return inputs, implementation, asset_lock, binding
+
+    def _valid_calibration(self) -> dict:
+        inputs, implementation, _asset_lock, binding = self._identity_material()
+        rows = []
+        calibration_samples = [
+            sample
+            for sample in self.corpus.samples
+            if sample.annotation["data_role"] == "m3a2_calibration"
+        ]
+        for index, sample in enumerate(calibration_samples):
+            raw_logit = float(index - 3)
+            annotation = sample.annotation
+            rows.append(
+                {
+                    "sample_id": sample.sample_id,
+                    "data_role": "calibration",
+                    "expected_label": annotation["expected_verdict"],
+                    "publication_class": annotation["publication_class"],
+                    "pair_id": annotation["pair_id"],
+                    "pair_direction": annotation["pair_direction"],
+                    "slices": list(annotation["slices"]),
+                    "raw_logit": raw_logit,
+                    "score": project_logit(raw_logit),
+                    "standard_batch_index": index // 4,
+                    "standard_batch_size": 4,
+                    "standard_batch_elapsed_ms": 40.0 + 40.0 * (index // 4),
+                    "token_count": 500 + index,
+                    "dropped_oldest_publications": 0,
+                }
             )
+        threshold = derive_temporary_threshold(rows)
+        standard_order = [row["sample_id"] for row in rows]
+        parity_rows = [
+            {
+                "sample_id": row["sample_id"],
+                "single_score": row["score"],
+                "repeat_score": row["score"],
+                "standard_right_batch_score": row["score"],
+                "standard_left_batch_score": row["score"],
+                "alternate_right_batch_score": row["score"],
+                "max_absolute_projected_delta": 0.0,
+            }
+            for row in rows
+        ]
+        parity = {
+            "schema": "rondo-publication-critic-scalar-parity-v2",
+            "row_count": 8,
+            "batch_size": 4,
+            "standard_order": standard_order,
+            "alternate_order": standard_order[::2] + standard_order[1::2],
+            "absolute_tolerance": 1e-4,
+            "max_absolute_projected_delta": 0.0,
+            "coverage": [
+                "single",
+                "repeat_single",
+                "standard_right_batch",
+                "standard_left_batch",
+                "alternate_right_batch",
+            ],
+            "rows": parity_rows,
         }
+        return {
+            "schema": CALIBRATION_SCHEMA,
+            "run_id": "plan054-20260823T030000Z-calibration-v3",
+            "completed_at": "2026-08-23T03:30:00Z",
+            "code_commit": "a" * 40,
+            "model_identity": _model_identity(),
+            "qualification_identity": _qualification_identity(),
+            "input_template_binding": binding,
+            "scoring_identity": _scoring_identity(threshold["threshold"], binding),
+            "inference_contract": _frozen_runtime_identity(),
+            "input_manifest": inputs,
+            "input_manifest_sha256": combined_manifest_sha256(inputs),
+            "implementation_manifest": implementation,
+            "implementation_manifest_sha256": combined_manifest_sha256(
+                implementation
+            ),
+            "census": {},
+            "scalar_smoke": {
+                "model_output_shape": ["batch", 1],
+                "tensor_index": "logits[:,0]",
+                "pooling": "Qwen3ForSequenceClassification_last_non_pad_token",
+                "raw_semantics": "unbounded_reward_logit_higher_is_better",
+                "projection": "stable_sigmoid_v1",
+                "projected_domain": [0.0, 1.0],
+                "parity_absolute_tolerance": 1e-4,
+                "parity_schema": "rondo-publication-critic-scalar-parity-v2",
+                "parity_row_count": 8,
+                "parity_max_absolute_projected_delta": 0.0,
+                "context_forward": {
+                    "kind": "synthetic_token_context_mechanical_smoke",
+                    "token_count": 16_384,
+                    "latency_ms": 100.0,
+                    "output_shape": [1, 1],
+                    "finite": True,
+                },
+            },
+            "scalar_parity": parity,
+            "temporary_threshold": threshold,
+            "environment": {
+                "device": "cpu",
+                "dtype": "float32",
+                "cpu_threads": 4,
+                "batch_size": 4,
+                "model_load_seconds": 1.0,
+            },
+            "resources": {
+                "process_rss_bytes": 1_000,
+                "process_peak_rss_bytes": 2_000,
+                "cuda": None,
+            },
+            "calibration_rows": rows,
+        }
+
+    @staticmethod
+    def _write_watchdog_summary(path: Path, *, stop_reason: str = "none") -> None:
+        path.write_text(
+            "\n".join(
+                (
+                    "unit=rondo-build-1000-20260823203000-12345.scope",
+                    "command_name=python",
+                    "wrapper_status=complete",
+                    "run_rc=0",
+                    "final_rc=0",
+                    f"stop_reason={stop_reason}",
+                    "cleanup_reason=none",
+                    "memory_peak_sampled_bytes=1000",
+                    "memory_nonreclaimable_peak_sampled_bytes=900",
+                    "swap_peak_sampled_bytes=10",
+                    "cgroup_psi_full_avg10_peak_bp=20",
+                    "host_psi_full_avg10_peak_bp=30",
+                    "project_before_bytes=10000",
+                    "project_after_bytes=10010",
+                    "project_peak_sampled_bytes=10020",
+                    "target_after_bytes=0",
+                    "target_peak_sampled_bytes=0",
+                    "windows_c_used_before_bytes=20000",
+                    "windows_c_used_after_bytes=20010",
+                    "windows_c_available_before_bytes=30000",
+                    "windows_c_available_after_bytes=29990",
+                    "memory_high=19G",
+                    "memory_max=21G",
+                    "swap_max=5G",
+                    "project_stop_bytes=195000000000",
+                    "project_max_bytes=200000000000",
+                )
+            )
+            + "\n",
+            encoding="ascii",
+        )
+
+    def _valid_freeze(self, *, threshold: float = 0.5) -> tuple[dict, Path]:
+        inputs, implementation, _asset_lock, binding = self._identity_material()
+        asset_lock_path = self._asset_lock_path()
         freeze = {
             "schema": FREEZE_SCHEMA,
-            "purpose": "Plan 054 M3-A2 exact Skywork base-model measurement freeze v3",
+            "purpose": "Plan 054 M3-A2 exact Skywork base-model measurement freeze v4",
             "cohort_scope": "representative_and_boundary_examples_not_future_unseen_test",
-            "supersedes": "rondo-publication-critic-measurement-freeze-v2",
-            "asset_lock_sha256": sha256_file(asset_lock),
+            "supersedes": "rondo-publication-critic-measurement-freeze-v3",
+            "asset_lock_sha256": sha256_file(asset_lock_path),
             "environment_lock_sha256": inputs[
                 "eval/environments/publication-critic-plan054/uv.lock"
             ],
@@ -142,72 +330,19 @@ class PublicationCriticEvalTests(unittest.TestCase):
             "input_manifest_sha256": combined_manifest_sha256(inputs),
             "implementation_manifest": implementation,
             "implementation_manifest_sha256": combined_manifest_sha256(implementation),
-            "qualification_identity": {
-                "packet_schema": {"name": "rondo-publication-packet", "revision": "v1"},
-                "rubric": {
-                    "name": "rondo-publication-qualification",
-                    "revision": "v1",
-                },
-            },
-            "model_identity": {
-                "model": {
-                    "name": "skywork-reward-v2-qwen3-1.7b",
-                    "revision": MODEL_REVISION,
-                },
-                "tokenizer": {
-                    "name": "skywork-reward-v2-qwen3-1.7b-tokenizer",
-                    "revision": MODEL_REVISION,
-                },
-            },
-            "scoring_identity": {
-                "definition": {
-                    "name": "skywork-reward-scalar-higher-better",
-                    "revision": f"{MODEL_REVISION}-fp32-v3",
-                },
-                "input_template": {
-                    "name": "rondo-publication-packet-render",
-                    "revision": "v2-sha256-"
-                    + inputs[
-                        "eval/templates/publication-critic/render-contract-v2.json"
-                    ],
-                },
-                "scalar_projection": {
-                    "name": "stable-sigmoid-logits-index-0",
-                    "revision": "v1",
-                },
-                "domain": {"min": 0.0, "max": 1.0},
-                "threshold": 0.5,
-                "pass_rule": "score_greater_than_or_equal_to_threshold",
-            },
+            "qualification_identity": _qualification_identity(),
+            "model_identity": _model_identity(),
+            "input_template_binding": binding,
+            "scoring_identity": _scoring_identity(threshold, binding),
             "inference_contract": _frozen_runtime_identity(),
             "adopted_window_tokens": 16_384,
-            "window_facts": {
-                "model_card_training_and_recommended_inference_tokens": 16384,
-                "model_config_max_position_embeddings": 40960,
-                "tokenizer_model_max_length": 131072,
-                "verified_context_forward_tokens": 16384,
-                "overflow_policy": "drop_whole_oldest_prior_publications_then_explicitly_encode_additional_omission",
-                "required_content_overflow": "typed_input_failure",
-                "implicit_tokenizer_truncation": False,
-            },
-            "sample_identity": {
-                "name": "rondo-publication-critic-m3a2-cohort",
-                "revision": "v2-sha256-" + combined_manifest_sha256(sample_files),
-                "calibration_count": 8,
-                "measurement_count": 16,
-                "token_census_only_count": 2,
-                "class_counts": {
-                    "new_event_completed": 6,
-                    "new_event_incomplete": 6,
-                    "existing_event_completed": 6,
-                    "existing_event_incomplete": 6,
-                },
-                "label_counts": {"pass": 12, "rewrite": 12},
-                "future_m3_b1a_unseen_test": False,
-            },
+            "window_facts": _window_facts(),
+            "sample_identity": _sample_identity(inputs),
             "temporary_threshold_source": {
-                "run_id": "plan054-20260823T030000Z-calibration-v2",
+                "run_id": "plan054-20260823T030000Z-calibration-v3",
+                "calibration_code_commit": "a" * 40,
                 "calibration_result_sha256": "1" * 64,
+                "calibration_watchdog_summary_sha256": "2" * 64,
                 "rule": "maximize_balanced_accuracy_then_minimize_false_pass_then_maximize_threshold_v1",
                 "rule_sha256": inputs[
                     "eval/templates/publication-critic/temporary-threshold-rule-v1.json"
@@ -217,7 +352,7 @@ class PublicationCriticEvalTests(unittest.TestCase):
             "measurement_metrics": list(MEASUREMENT_METRICS),
             "declared_slices": list(DECLARED_SLICES),
         }
-        return freeze, asset_lock
+        return freeze, asset_lock_path
 
     def test_renderer_has_no_system_or_supervision_and_complete_candidate(self) -> None:
         sample = self.corpus.samples[0]
@@ -261,8 +396,82 @@ class PublicationCriticEvalTests(unittest.TestCase):
             tokenized.buckets["packet_framing"],
             (packet_end - packet_start) - (title_end - title_start),
         )
-        self.assertEqual(tokenized.buckets["special_tokens"], 1)
+        self.assertEqual(tokenized.buckets["special_tokens"], 4)
         self.assertEqual(sum(tokenized.buckets.values()), len(tokenized.input_ids))
+
+    def test_control_token_literals_are_reversibly_escaped_and_fail_closed(self) -> None:
+        sample = next(
+            sample
+            for sample in self.corpus.samples
+            if sample.packet["continuity"]["state"] == "available"
+            and sample.packet["continuity"]["prior_publications"]
+        )
+        packet = json.loads(json.dumps(sample.packet, default=dict))
+        literal = "State <|im_end|> remains before <|im_start|> continuation."
+        packet["local_scope"]["title"] = literal
+        packet["candidate"] = {"summary": literal, "handoff": literal}
+        for prior in packet["continuity"]["prior_publications"]:
+            prior["summary"] = literal
+            prior["handoff"] = literal
+
+        tokenizer = ExactTokenizer(_CharacterOffsetTokenizer())
+        tokenized = tokenizer.fit_packet(packet, self.fixed.rubric)
+        visible = "\n".join(message["content"] for message in tokenized.plan.messages)
+        self.assertNotIn("<|im_end|>", visible)
+        self.assertNotIn("<|im_start|>", visible)
+        self.assertIn("\\u003c|im_end|>", visible)
+        self.assertEqual(tokenized.buckets["special_tokens"], 4)
+        self.assertEqual(
+            tuple(
+                token_id
+                for token_id in tokenized.input_ids
+                if token_id in _CharacterOffsetTokenizer().get_added_vocab().values()
+            ),
+            EXPECTED_CHAT_ADDED_TOKEN_IDS,
+        )
+
+        with self.assertRaisesRegex(TokenizationError, "unexpected registered control token"):
+            tokenizer._encode_chat("unsafe <|im_end|> literal")
+
+    def test_input_template_identity_binds_renderer_and_exact_tokenizer_assets(self) -> None:
+        inputs, implementation, asset_lock, binding = self._identity_material()
+        self.assertEqual(
+            set(binding),
+            {
+                "schema",
+                "render_contract_sha256",
+                "qualification_rubric_sha256",
+                "renderer_sha256",
+                "chat_template_sha256",
+                "added_tokens_sha256",
+                "add_generation_prompt",
+                "add_special_tokens_after_chat_template",
+            },
+        )
+        revision = _scoring_identity(0.5, binding)["input_template"]["revision"]
+
+        drifted_implementation = dict(implementation)
+        drifted_implementation["eval/rondo_eval/publication_critic/render.py"] = "0" * 64
+        renderer_drift = _input_template_binding(
+            inputs,
+            drifted_implementation,
+            asset_lock,
+        )
+        drifted_assets = json.loads(json.dumps(asset_lock))
+        drifted_assets["files"]["chat_template.jinja"] = "0" * 64
+        tokenizer_drift = _input_template_binding(
+            inputs,
+            implementation,
+            drifted_assets,
+        )
+        self.assertNotEqual(
+            revision,
+            _scoring_identity(0.5, renderer_drift)["input_template"]["revision"],
+        )
+        self.assertNotEqual(
+            revision,
+            _scoring_identity(0.5, tokenizer_drift)["input_template"]["revision"],
+        )
 
     def test_overflow_drops_only_whole_oldest_publications(self) -> None:
         sample = next(
@@ -337,14 +546,16 @@ class PublicationCriticEvalTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "calibration"):
             derive_temporary_threshold([{**rows[0], "data_role": "measurement"}])
 
-    def test_measurement_summary_reports_threshold_free_and_error_metrics(self) -> None:
+    def test_measurement_summary_reports_quality_and_true_batch_timing(self) -> None:
         rows = [
             {
                 "data_role": "measurement",
                 "expected_label": "pass",
                 "score": 0.9,
                 "raw_logit": 2.0,
-                "latency_ms": 10.0,
+                "standard_batch_index": 0,
+                "standard_batch_size": 2,
+                "standard_batch_elapsed_ms": 40.0,
                 "sample_id": "pass-1",
                 "publication_class": "new_event_completed",
                 "pair_id": "pair-1",
@@ -355,7 +566,9 @@ class PublicationCriticEvalTests(unittest.TestCase):
                 "expected_label": "rewrite",
                 "score": 0.8,
                 "raw_logit": 1.0,
-                "latency_ms": 20.0,
+                "standard_batch_index": 0,
+                "standard_batch_size": 2,
+                "standard_batch_elapsed_ms": 40.0,
                 "sample_id": "rewrite-1",
                 "publication_class": "new_event_completed",
                 "pair_id": "pair-1",
@@ -366,7 +579,9 @@ class PublicationCriticEvalTests(unittest.TestCase):
                 "expected_label": "pass",
                 "score": 0.85,
                 "raw_logit": 0.5,
-                "latency_ms": 30.0,
+                "standard_batch_index": 1,
+                "standard_batch_size": 2,
+                "standard_batch_elapsed_ms": 80.0,
                 "sample_id": "pass-2",
                 "publication_class": "existing_event_incomplete",
                 "pair_id": "pair-2",
@@ -377,7 +592,9 @@ class PublicationCriticEvalTests(unittest.TestCase):
                 "expected_label": "rewrite",
                 "score": 0.2,
                 "raw_logit": -1.0,
-                "latency_ms": 40.0,
+                "standard_batch_index": 1,
+                "standard_batch_size": 2,
+                "standard_batch_elapsed_ms": 80.0,
                 "sample_id": "rewrite-2",
                 "publication_class": "existing_event_incomplete",
                 "pair_id": "pair-2",
@@ -389,7 +606,15 @@ class PublicationCriticEvalTests(unittest.TestCase):
         self.assertEqual(summary["overall"]["roc_auc"], 1.0)
         self.assertEqual(set(summary["by_slice"]), {"existing", "new"})
         self.assertEqual(summary["boundary_pairs"]["strict_wins"], 2)
-        self.assertEqual(summary["latency_ms"]["p95"], 40.0)
+        timing = summary["forward_timing"]
+        self.assertEqual(timing["basis"], "standard_right_batch_wall_clock")
+        self.assertEqual(timing["batch_elapsed_ms"]["p50"], 60.0)
+        self.assertEqual(timing["batch_elapsed_ms"]["p95"], 80.0)
+        self.assertEqual(timing["amortized_compute_ms_per_sample"]["p50"], 30.0)
+        self.assertTrue(
+            math.isclose(timing["aggregate_throughput_samples_per_second"], 100 / 3)
+        )
+        self.assertNotIn("latency_ms", summary)
 
     def test_archive_is_write_once(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -486,6 +711,12 @@ class PublicationCriticEvalTests(unittest.TestCase):
                 verify_measurement_freeze(path, REPO_ROOT, asset_lock, runtime)
 
             freeze, _ = self._valid_freeze()
+            freeze["input_template_binding"]["renderer_sha256"] = "0" * 64
+            path.write_text(json.dumps(freeze), encoding="utf-8")
+            with self.assertRaisesRegex(RunnerError, "input template binding drifted"):
+                verify_measurement_freeze(path, REPO_ROOT, asset_lock, runtime)
+
+            freeze, _ = self._valid_freeze()
             freeze["inference_contract"]["output_shape"] = [1]
             path.write_text(json.dumps(freeze), encoding="utf-8")
             with self.assertRaisesRegex(RunnerError, "inference identity drifted"):
@@ -502,19 +733,125 @@ class PublicationCriticEvalTests(unittest.TestCase):
                     drifted_runtime,
                 )
 
-    def test_measurement_freeze_binds_actual_calibration_result(self) -> None:
-        freeze, asset_lock = self._valid_freeze()
-        calibration = {
-            "schema": CALIBRATION_SCHEMA,
-            "run_id": freeze["temporary_threshold_source"]["run_id"],
-            "model_revision": MODEL_REVISION,
-            "input_manifest_sha256": freeze["input_manifest_sha256"],
-            "temporary_threshold": {
-                "rule": freeze["temporary_threshold_source"]["rule"],
-                "threshold": freeze["scoring_identity"]["threshold"],
-                "calibration_count": 8,
-            },
-        }
+    def test_strict_calibration_and_watchdog_evidence_reject_semantic_drift(self) -> None:
+        calibration = self._valid_calibration()
+        _inputs, _implementation, asset_lock, _binding = self._identity_material()
+        mutations = (
+            (
+                "environment",
+                lambda value: value["environment"].__setitem__("dtype", "bfloat16"),
+                "calibration environment drifted",
+            ),
+            (
+                "implementation",
+                lambda value: value.__setitem__(
+                    "implementation_manifest_sha256", "0" * 64
+                ),
+                "calibration result identity drifted",
+            ),
+            (
+                "scoring",
+                lambda value: value["scoring_identity"][
+                    "scalar_projection"
+                ].__setitem__("revision", "wrong"),
+                "calibration scoring identity drifted",
+            ),
+            (
+                "row_projection",
+                lambda value: value["calibration_rows"][0].__setitem__(
+                    "score", 0.25
+                ),
+                "calibration rows drifted",
+            ),
+            (
+                "threshold_derivation",
+                lambda value: value["temporary_threshold"].__setitem__(
+                    "threshold", 0.25
+                ),
+                "calibration threshold derivation drifted",
+            ),
+            (
+                "parity",
+                lambda value: value["scalar_parity"]["rows"][0].__setitem__(
+                    "standard_right_batch_score", 0.25
+                ),
+                "calibration scalar parity drifted",
+            ),
+            (
+                "context",
+                lambda value: value["scalar_smoke"]["context_forward"].__setitem__(
+                    "finite", False
+                ),
+                "calibration scalar smoke drifted",
+            ),
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            calibration_path = root / "calibration-result.json"
+            watchdog_path = root / "summary.env"
+            calibration_path.write_text(json.dumps(calibration), encoding="utf-8")
+            self._write_watchdog_summary(watchdog_path)
+            _validated, projection = _verify_calibration_result(
+                calibration_path,
+                watchdog_path,
+                REPO_ROOT,
+                asset_lock,
+            )
+            self.assertEqual(
+                projection["environment"],
+                {**calibration["environment"]},
+            )
+            self.assertEqual(len(projection["calibration_rows"]), 8)
+            self.assertEqual(projection["context_forward"]["token_count"], 16_384)
+            self.assertEqual(
+                projection["watchdog"]["watchdog_samples"][
+                    "memory_peak_sampled_bytes"
+                ],
+                1_000,
+            )
+
+            minimal = {
+                "schema": CALIBRATION_SCHEMA,
+                "run_id": calibration["run_id"],
+                "temporary_threshold": calibration["temporary_threshold"],
+            }
+            calibration_path.write_text(json.dumps(minimal), encoding="utf-8")
+            with self.assertRaisesRegex(RunnerError, "calibration result keys drifted"):
+                _verify_calibration_result(
+                    calibration_path,
+                    watchdog_path,
+                    REPO_ROOT,
+                    asset_lock,
+                )
+
+            for name, mutate, expected in mutations:
+                drifted = json.loads(json.dumps(calibration))
+                mutate(drifted)
+                calibration_path.write_text(json.dumps(drifted), encoding="utf-8")
+                with self.subTest(name=name), self.assertRaisesRegex(
+                    RunnerError, expected
+                ):
+                    _verify_calibration_result(
+                        calibration_path,
+                        watchdog_path,
+                        REPO_ROOT,
+                        asset_lock,
+                    )
+
+            calibration_path.write_text(json.dumps(calibration), encoding="utf-8")
+            self._write_watchdog_summary(watchdog_path, stop_reason="memory_limit")
+            with self.assertRaisesRegex(EvidenceError, "successful bounded run"):
+                _verify_calibration_result(
+                    calibration_path,
+                    watchdog_path,
+                    REPO_ROOT,
+                    asset_lock,
+                )
+
+    def test_measurement_freeze_binds_calibration_and_watchdog_artifacts(self) -> None:
+        calibration = self._valid_calibration()
+        threshold = calibration["temporary_threshold"]["threshold"]
+        freeze, asset_lock = self._valid_freeze(threshold=threshold)
         runtime = {
             "device": "cpu",
             "dtype": "float32",
@@ -525,10 +862,12 @@ class PublicationCriticEvalTests(unittest.TestCase):
             root = Path(temporary)
             freeze_path = root / "freeze.json"
             calibration_path = root / "calibration-result.json"
+            watchdog_path = root / "summary.env"
             calibration_path.write_text(json.dumps(calibration), encoding="utf-8")
-            freeze["temporary_threshold_source"]["calibration_result_sha256"] = (
-                sha256_file(calibration_path)
-            )
+            self._write_watchdog_summary(watchdog_path)
+            source = freeze["temporary_threshold_source"]
+            source["calibration_result_sha256"] = sha256_file(calibration_path)
+            source["calibration_watchdog_summary_sha256"] = sha256_file(watchdog_path)
             freeze_path.write_text(json.dumps(freeze), encoding="utf-8")
             self.assertEqual(
                 verify_measurement_freeze(
@@ -537,16 +876,18 @@ class PublicationCriticEvalTests(unittest.TestCase):
                     asset_lock,
                     runtime,
                     calibration_path,
+                    watchdog_path,
                 )["schema"],
                 FREEZE_SCHEMA,
             )
 
-            calibration["temporary_threshold"]["threshold"] = 0.75
-            calibration_path.write_text(json.dumps(calibration), encoding="utf-8")
-            freeze["temporary_threshold_source"]["calibration_result_sha256"] = (
-                sha256_file(calibration_path)
+            watchdog_path.write_text(
+                watchdog_path.read_text(encoding="ascii").replace(
+                    "memory_peak_sampled_bytes=1000",
+                    "memory_peak_sampled_bytes=1001",
+                ),
+                encoding="ascii",
             )
-            freeze_path.write_text(json.dumps(freeze), encoding="utf-8")
             with self.assertRaisesRegex(RunnerError, "calibration result identity drifted"):
                 verify_measurement_freeze(
                     freeze_path,
@@ -554,9 +895,10 @@ class PublicationCriticEvalTests(unittest.TestCase):
                     asset_lock,
                     runtime,
                     calibration_path,
+                    watchdog_path,
                 )
 
-    def test_v2_cli_defaults_match_frozen_runtime(self) -> None:
+    def test_v4_cli_separates_calibration_freeze_measurement_and_finalization(self) -> None:
         common = [
             "--snapshot",
             "/tmp/model",
@@ -568,6 +910,21 @@ class PublicationCriticEvalTests(unittest.TestCase):
             "plan054-test",
         ]
         calibration = build_parser().parse_args(["calibrate", *common])
+        freeze = build_parser().parse_args(
+            [
+                "freeze",
+                "--snapshot",
+                "/tmp/model",
+                "--asset-lock",
+                "/tmp/lock.json",
+                "--calibration-result",
+                "/tmp/calibration.json",
+                "--calibration-watchdog-summary",
+                "/tmp/calibration-summary.env",
+                "--output",
+                "/tmp/freeze.json",
+            ]
+        )
         measurement = build_parser().parse_args(
             [
                 "measure",
@@ -576,6 +933,27 @@ class PublicationCriticEvalTests(unittest.TestCase):
                 "/tmp/freeze.json",
                 "--calibration-result",
                 "/tmp/calibration.json",
+                "--calibration-watchdog-summary",
+                "/tmp/calibration-summary.env",
+            ]
+        )
+        finalize = build_parser().parse_args(
+            [
+                "finalize",
+                "--freeze",
+                "/tmp/freeze.json",
+                "--asset-lock",
+                "/tmp/lock.json",
+                "--calibration-result",
+                "/tmp/calibration.json",
+                "--calibration-watchdog-summary",
+                "/tmp/calibration-summary.env",
+                "--raw-result",
+                "/tmp/raw.json",
+                "--measurement-completion",
+                "/tmp/completion.json",
+                "--measurement-watchdog-summary",
+                "/tmp/measurement-summary.env",
                 "--tracked-result",
                 "/tmp/result.json",
             ]
@@ -585,10 +963,15 @@ class PublicationCriticEvalTests(unittest.TestCase):
             self.assertEqual(parsed.dtype, "float32")
             self.assertEqual(parsed.cpu_threads, 4)
             self.assertEqual(parsed.batch_size, 4)
+        self.assertEqual(freeze.function.__name__, "create_measurement_freeze")
+        self.assertEqual(measurement.function.__name__, "run_measurement")
+        self.assertFalse(hasattr(measurement, "tracked_result"))
+        self.assertEqual(finalize.function.__name__, "finalize_measurement")
+        self.assertEqual(finalize.tracked_result, Path("/tmp/result.json"))
 
     def test_measurement_rejects_noncanonical_freeze_path(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
-            external = Path(temporary) / "measurement-freeze-v3.json"
+            external = Path(temporary) / "measurement-freeze-v4.json"
             external.write_text("{}", encoding="utf-8")
             with self.assertRaisesRegex(RunnerError, "canonical tracked path"):
                 _require_committed_freeze(REPO_ROOT, external)

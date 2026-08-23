@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
+import copy
 import json
 import shutil
 import sys
@@ -41,7 +42,7 @@ class PublicationCriticContractTests(unittest.TestCase):
         self.assertIn("transcript, reasoning, private context", fixed.input_contract)
         self.assertIn("Useful state transfer", fixed.rubric)
         self.assertIn("Do not claim to verify factual truth", fixed.rubric)
-        self.assertEqual(fixed.render_contract["revision"], "v2")
+        self.assertEqual(fixed.render_contract["revision"], "v3")
         self.assertEqual(fixed.render_contract["messages"]["system"], "absent")
         self.assertEqual(fixed.render_contract["messages"]["count"], 2)
         self.assertEqual(
@@ -72,6 +73,10 @@ class PublicationCriticContractTests(unittest.TestCase):
             "whole_prior_publication",
         )
         self.assertEqual(fixed.render_contract["padding"]["binding"], "scoring_identity")
+        self.assertEqual(
+            fixed.render_contract["dynamic_text_encoding"]["less_than_escape"],
+            "\\u003c",
+        )
         self.assertEqual(fixed.product_limits["title"]["max_scalars"], 213)
         self.assertEqual(fixed.product_limits["summary"]["max_bytes"], 8_015)
         self.assertEqual(fixed.product_limits["max_prior_publications"], 4)
@@ -211,9 +216,92 @@ class PublicationCriticContractTests(unittest.TestCase):
             with self.assertRaisesRegex(PublicationCriticContractError, "non-negative integer"):
                 load_sample_corpus(root)
 
+    def test_rejects_packets_outside_product_text_and_history_limits(self) -> None:
+        mutations = {
+            "blank title": lambda packet: packet["local_scope"].__setitem__("title", " \u3000"),
+            "summary scalar cap": lambda packet: packet["candidate"].__setitem__(
+                "summary", "x" * 2014
+            ),
+            "summary byte cap": lambda packet: packet["candidate"].__setitem__(
+                "summary", "🦀" * 2004
+            ),
+            "five prior publications": lambda packet: packet["continuity"].__setitem__(
+                "prior_publications",
+                [copy.deepcopy(packet["continuity"]["prior_publications"][0])] * 5,
+            ),
+        }
+        for label, mutate in mutations.items():
+            with self.subTest(label=label), self._copied_repo() as root:
+                path = root / "eval/fixtures/publication-critic-v1/packets.jsonl"
+                rows = self._read_jsonl(path)
+                row = next(
+                    row
+                    for row in rows
+                    if row["packet"]["continuity"]["state"] == "available"
+                    and row["packet"]["continuity"]["prior_publications"]
+                )
+                mutate(row["packet"])
+                self._write_jsonl(path, rows)
+                with self.assertRaises(PublicationCriticContractError):
+                    load_sample_corpus(root)
+
+    def test_rejects_product_count_and_integer_wire_invariants(self) -> None:
+        def fact_count(packet: dict, value: int) -> None:
+            prior = packet["continuity"]["prior_publications"][0]
+            prior["evidence"]["fact_references"] = {
+                "state": "present",
+                "visible_count": value,
+                "count_omitted": False,
+            }
+
+        mutations = {
+            "zero visible facts": lambda packet: fact_count(packet, 0),
+            "too many visible facts": lambda packet: fact_count(packet, 33),
+            "zero omitted count": lambda packet: packet["continuity"].__setitem__(
+                "coverage", {"state": "partial", "omitted_count": 0}
+            ),
+            "u32 omitted overflow": lambda packet: packet["continuity"].__setitem__(
+                "coverage", {"state": "partial", "omitted_count": 2**32}
+            ),
+            "u64 revision overflow": lambda packet: packet["continuity"].__setitem__(
+                "source_team_revision", 2**64
+            ),
+        }
+        for label, mutate in mutations.items():
+            with self.subTest(label=label), self._copied_repo() as root:
+                path = root / "eval/fixtures/publication-critic-v1/packets.jsonl"
+                rows = self._read_jsonl(path)
+                row = next(
+                    row
+                    for row in rows
+                    if row["packet"]["continuity"]["state"] == "available"
+                    and row["packet"]["continuity"]["prior_publications"]
+                )
+                mutate(row["packet"])
+                self._write_jsonl(path, rows)
+                with self.assertRaises(PublicationCriticContractError):
+                    load_sample_corpus(root)
+
+    def test_accepts_empty_handoff_and_nullable_partial_omission(self) -> None:
+        with self._copied_repo() as root:
+            path = root / "eval/fixtures/publication-critic-v1/packets.jsonl"
+            rows = self._read_jsonl(path)
+            row = next(
+                row
+                for row in rows
+                if row["packet"]["continuity"]["state"] == "available"
+            )
+            row["packet"]["candidate"]["handoff"] = ""
+            row["packet"]["continuity"]["coverage"] = {
+                "state": "partial",
+                "omitted_count": None,
+            }
+            self._write_jsonl(path, rows)
+            self.assertEqual(len(load_sample_corpus(root).samples), 24)
+
     def test_rejects_render_contract_drift(self) -> None:
         with self._copied_repo() as root:
-            path = root / "eval/templates/publication-critic/render-contract-v2.json"
+            path = root / "eval/templates/publication-critic/render-contract-v3.json"
             render = json.loads(path.read_text(encoding="utf-8"))
             render["context"]["adopted_window_tokens"] = 8192
             path.write_text(json.dumps(render), encoding="utf-8")

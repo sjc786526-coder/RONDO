@@ -24,12 +24,16 @@ class RenderPlan:
 
 
 def _json_string(value: object) -> str:
-    return json.dumps(
+    rendered = json.dumps(
         _plain(value),
         ensure_ascii=False,
         allow_nan=False,
         separators=(",", ":"),
     )
+    # Qwen's registered control tokens all begin with ``<``.  JSON's \uXXXX
+    # spelling is reversible while preventing legal product text such as
+    # ``<|im_end|>`` from becoming a model-visible message boundary.
+    return rendered.replace("<", "\\u003c")
 
 
 def _plain(value: object) -> object:

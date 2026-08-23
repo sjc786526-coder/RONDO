@@ -21,7 +21,12 @@ class BackendError(RuntimeError):
 class ScoreOutput:
     raw_logit: float
     score: float
-    latency_ms: float
+    batch_elapsed_ms: float
+    batch_size: int
+
+    @property
+    def amortized_batch_compute_ms(self) -> float:
+        return self.batch_elapsed_ms / self.batch_size
 
 
 class SkyworkBackend:
@@ -137,13 +142,13 @@ class SkyworkBackend:
         raw = [float(value) for value in logits[:, 0].float().cpu().tolist()]
         if any(not math.isfinite(value) for value in raw):
             raise BackendError("exact model returned a non-finite scalar")
-        per_sample_ms = elapsed_ms / len(inputs)
         self._require_lease()
         return [
             ScoreOutput(
                 raw_logit=value,
                 score=project_logit(value),
-                latency_ms=per_sample_ms,
+                batch_elapsed_ms=elapsed_ms,
+                batch_size=len(inputs),
             )
             for value in raw
         ]
