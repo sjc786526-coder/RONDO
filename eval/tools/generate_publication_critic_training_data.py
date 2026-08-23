@@ -201,7 +201,7 @@ BOUNDARY_SPECS = (
         "completed",
         "member",
         "Unicode 标题排序漂移",
-        "改用 NFKC 后冻结样本顺序稳定；旧漂移可能来自组合字符，但未保存足以确认根因的输入。",
+        "改用 NFKC 后冻结样本顺序稳定；旧漂移可能来自组合字符比较器缺陷，但未保存足以确认根因的输入。",
         None,
         "排序在 café 与 cafe\u0301 混合输入时不稳定，尚未归因。",
         "conversational",
