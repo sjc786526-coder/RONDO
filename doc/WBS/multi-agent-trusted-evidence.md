@@ -80,17 +80,18 @@ M3-B2a 服务协议、identity 和资源数值；M3-A2 的数据/评价细节和
 
 #### M3-A2：数据/评价设施与基座测评（已完成）
 
-**结果**：Plan 054 已冻结 PublicationPacket v1 parity、输入/render/tokenizer/scalar identity、24 条代表/边界样本、两条产品 cap
-census case 和专用评价/归档设施。exact Skywork 1.7B 在 CPU FP32 下通过全部 scored-row single/repeat/左右 padding/替代 batch
-composition parity 与独立 16,384-token smoke；正式 16 样本 v3 基座结果为 accuracy / balanced accuracy `0.6875`、ROC AUC
-`0.765625`、atomic pair `7/8`，`16/16` 有效、零 typed failure，10 个冻结 error slice 均存在于正式结果。v1/v2 保留为
-superseded 历史 attempt；正式身份、切片、资源和 go/no-go 见
-[`baseline v3`](../../eval/results/publication-critic/skywork-reward-v2-qwen3-1.7b-baseline-v3.md)。
+**结果**：Plan 054 已冻结 Rust/Python PublicationPacket v1 机械约束 parity、control-token-safe render、exact tokenizer/scalar
+identity、24 条代表/边界样本、两条产品 cap census case 和专用评价/归档设施。exact Skywork 1.7B 在 CPU FP32 下通过全部
+scored-row single/repeat/左右 padding/替代 batch composition parity 与独立 16,384-token smoke；正式 16 样本 v4 基座结果为
+accuracy / balanced accuracy `0.6875`、ROC AUC `0.765625`、atomic pair `7/8`，`16/16` 有效、零 typed failure，10 个冻结
+error slice 均存在。tracked v4 同时保留 8 条 calibration 投影、context 与两阶段 watchdog 资源事实，并区分真实 batch wall time
+和 amortized compute。v1-v3 保留为 superseded 历史 attempt；正式身份、切片、资源和 go/no-go 见
+[`baseline v4`](../../eval/results/publication-critic/skywork-reward-v2-qwen3-1.7b-baseline-v4.md)。
 
 **边界**：只建设 Publication Critic 必要设施和小规模代表性样本；不冻结正式训练数据，不启动付费训练，不扩张为通用
 数据平台、审计系统或大型 benchmark。
 
-**交接**：基座工程路径与 M3-B1a 数据建设 GO，未微调模型直接产品使用 NO-GO。M3-B1a 应建立独立
+**交接**：基座工程路径与 M3-B1a 数据建设 GO，未微调模型直接产品使用 NO-GO。M3-B1a 应复用 v4 输入/评价合同并建立独立
 train/validation/unseen-test split，优先补足 `internal_consistency` 精致 hard negative、new/completed useful-state 边界、
 threshold-near handoff 与 continuity/evidence omission 对照，并避免长度、角色和模板捷径。M3-A2 cohort 不得冒充未来 unseen test；
 M3-C1 继续等待 M3-B1c 提供至少一个训练候选。

@@ -248,15 +248,25 @@ Hugging Face/Python 配置，不得把模型复制进 worktree 或用 symlink �
 - calibration v3/result v4 路径已分离重型 raw run 与轻量 watchdog finalizer，严格绑定 FP32 runtime、implementation/scoring、逐行 raw/projected
   scalar、全 cohort parity、16k context、真实 batch wall timing 和 body-free 资源投影；31 个 focused Python tests 与五字段 exact-tokenizer
   control-token 回归通过，Bazel/Cargo test resource 已统一为精确 runfiles。
+- calibration run `plan054-20260823T062100Z-calibration-v4` 从 clean commit `ea5463cf28cc0389f73c3d5b4d1b7d81f12a8fe2`
+  一次完成：8-row parity 最大 delta `1.5709748450998262e-06`，16,384-token context forward finite，冻结 threshold
+  `0.9350569011196121`；watchdog peak memory `10550005760` bytes、swap 0、stop/cleanup none。
+- freeze v4 已提交于 `667a69d9c9d2bc109341ee34834d3f3ad717be84`，SHA-256
+  `2a8081d3700f4209f5ac3cd7dabb7f6d31d0cb0b0ea0e9e8c639c8f10dbebfeb`。正式 run
+  `plan054-20260823T064300Z-measurement-v4` 一次完成：16/16 valid、零 typed failure、parity 最大 delta
+  `4.523673587608634e-06`、accuracy/balanced accuracy `0.6875`、ROC AUC `0.765625`、atomic pair `7/8`；tracked
+  result 已绑定 raw SHA、calibration/context 与两份成功 watchdog 投影。
+- 受影响 Rust identity/packet/limits 三项定向测试通过（3 tests、0 failures）；未运行 Bazel，因为现场未安装该工具，精确
+  `test_data_extra`/external runfiles 已完成静态闭合。未运行全 workspace、GPU、Docker、CI、真实 API 或训练。
 
 ### 当前工作
 
-- 正在把 v4 实现固定为 clean calibration commit，随后按同一冻结模型和样本完整重跑 calibration、freeze、measurement 与 finalizer。
+- Plan 054 v4 实现、freeze、真实 calibration/measurement、tracked/raw 归档、方向 3 交接与 focused 自检均已完成；最终本地提交将通过
+  Codex 跨会话队列交还同一独立审查者复验。
 
 ### 本任务剩余步骤
 
-- 从新 clean commit 完成一次 watchdog calibration，生成并提交 v4 freeze；再从该 clean freeze 完成 watchdog measurement 和轻量 finalizer。
-- 跑受影响 Rust typed resource/identity tests，归档 v4 结果、方向 3 WBS 与精炼日志，完成同一独立审查者复验后本地提交并保持 clean。
+- 无剩余实现、模型运行、测试或文档步骤。独立审查者若回报普通 finding，仍在本 worktree 窄修并再次交还；通过则保持提交与 clean 状态。
 
 ### 阻塞项
 
@@ -264,7 +274,7 @@ Hugging Face/Python 配置，不得把模型复制进 worktree 或用 symlink �
 
 ### 当前验收状态
 
-- 前次独立验收不通过；五项 finding 已落实为 v4 实现和 focused 回归，但新的正式模型证据、结果归档及独立复验尚未完成。
+- 前次五项 finding 均已由 v4 实现、focused tests 与新正式模型证据关闭；执行者自检通过，同一独立审查者复验待回执。
 
 ### 交接边界
 
