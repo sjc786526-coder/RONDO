@@ -24,6 +24,19 @@ projector 窄修后只接受 `exec_command`、`code_cell` requester、tool/ended
 通过，body-free 统计为 40 次 command、6 次 exact repeat、1 次 repeated-after-failure。修改后再次核验槽 8–17
 十条已发布记录的绑定、投影与终态，全部通过且未改写私有工件。
 
+## diagnostic-v2 complete
+
+`plan058-direction1-c2-diagnostic-v2` 绑定 harness commit `0213ea3`，只冻结绝对槽 18–20；零 API preflight `3/3`
+一次通过。三槽 paid run 均在 attempt 1 完成 agent、Terminal-Bench、verifier、schema-v2 投影、Docker cleanup、预算
+与 record 发布，任务均 pass，raw/refined C2 都为 `0`，无害四项全通过，source validation `3/3`。槽 18 本次是
+0 Guardian 的普通成功路径；typed Guardian-limit 异常路径由 v1 保留的真实 trace 在修复后完成只读 projector 验收，
+未把 v1 结果拼入 v2。
+
+v2 共 24 个可靠 upstream attempts、0 transport retry，费用 `0.484984 USD`；Plan 058 累计 `6.533427 USD`、
+reserved `0`。Docker 前后均 `11.5GB`，容器/卷/build cache 为 0，VHDX 增长 `0`，Windows C: 最终实际余量
+`190665900032` bytes。结合 v1 已完整且重新核验的绝对槽 8–17，commissioning sweep 的 8–20 共 13 个槽已全部
+打通；下一步提交本批次、实现 formal 唯一顺序，再从 clean source 重建正式 runtime。
+
 ## 后续局部 commissioning 合同
 
 首轮 8–20 全部完成后，若新 formal 再暴露本地设施故障，修复版 commissioning/diagnostic 只复验受影响或未打通

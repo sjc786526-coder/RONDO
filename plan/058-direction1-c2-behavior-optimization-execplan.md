@@ -41,9 +41,9 @@
       原始结果、exit/error、审批、sandbox、Guardian、安全策略或用户控制语义，也不产生硬停止或不可恢复终态。
 - [ ] 定向测试证明有害无进展场景得到预期的有界纠偏，同时上述合理/恢复/副作用/不同身份场景不被误阻断；
       关闭、取消、恢复、compact、steer 和任务结束后的状态边界清楚，状态不无界增长或错误跨任务复用。
-- [ ] 至少一个独立 commissioning identity 完整走通 initialize → run → observe/project → settle → publish；
+- [x] 至少一个独立 commissioning identity 完整走通 initialize → run → observe/project → settle → publish；
       commissioning 不进入正式分母，但其 main/Guardian 请求和任何重试全部计入 Plan 058 总预算。
-- [ ] 修复 formal-v1 已暴露的 runner 缺陷后，必须以明确标记为 commissioning/diagnostic 的 sweep 逐槽覆盖旧
+- [x] 修复 formal-v1 已暴露的 runner 缺陷后，必须以明确标记为 commissioning/diagnostic 的 sweep 逐槽覆盖旧
       formal-v1 尚未证明运行链完整的第 `8..20` 槽（含首尾，共 `13` 槽）；这些槽全部完成 agent → Terminal-Bench
       → verifier → observe/project → settle → diagnostic record 后，才允许统一冻结并启动下一次 formal。sweep 不
       重复诊断旧 formal-v1 已完成链路的前 7 槽，也不得把旧 formal 或 diagnostic 数据拼入正式分母。
@@ -286,24 +286,21 @@
 
 ### 当前工作
 
-formal-v1 已因本地 runner 缺陷作废并关闭；旧 formal 的 7 个完整槽只作诊断历史。Guardian-limit 后继续 verifier/
-真实 exit receipt 与非 `/tmp` CODEX_HOME 两项 runner 问题已窄修；独立 `diagnostic` mode 已纳入既有设施。diagnostic-v1
-完成绝对槽 8–17 的 10 条完整链路；槽 18 自然复现 3 次 Guardian 后第 4 次本地上限，修复后的 adapter 如实保留 agent
-exit `1` 并让 Harbor 完成 verifier/reward `0`，但 schema-v2 projector 未识别该类型化、未执行命令的 failed tool call，
-campaign 以 `local_execution_or_projection_failed` 作废。该 identity 132 个可靠 attempts、`3.110194 USD`，Plan 058
-累计 `6.048443 USD`。projector 已窄修为只接受精确的 typed Guardian-limit pre-runtime failure，不伪造进程 exit、
-命令输出或已执行事实；相关 Python 回归 `171/171`、真实槽 18 私有 trace 投影和槽 8–17 十条既有记录 source
-revalidation 均通过。下一 diagnostic identity 只复验未打通的绝对槽 18–20，不重复 8–17。
+formal-v1 已因本地 runner 缺陷作废并关闭；旧 formal 的 7 个完整槽只作诊断历史。Guardian-limit 后继续 verifier、
+真实 exit receipt、非 `/tmp` CODEX_HOME 与 typed pre-runtime failure 投影已全部窄修。diagnostic-v1 完成绝对槽 8–17
+的 10 条完整链路，并在槽 18 暴露 projector 故障后作废；修改后的真实槽 18 私有 trace 投影与槽 8–17 十条 source
+revalidation 通过。全新 diagnostic-v2 只跑 18–20，零 API preflight `3/3`、完整 source-validated result `3/3`、
+task pass `3/3`、raw/refined C2 `0/0`，结算 24 个可靠 attempts、`0.484984 USD`；Docker/VHDX 增长 `0`。由此
+8–20 共 13 个 commissioning 槽已逐项打通，Plan 058 累计费用 `6.533427 USD`、reserved `0`。当前进入正式顺序
+实现、clean source 提交、重建和冻结阶段。
 
 ### 本任务剩余步骤
 
-1. Phase C：用已通过 typed Guardian-limit 实迹验收的全新 diagnostic identity 只扫未打通的绝对槽 18–20。与
-   diagnostic-v1 已完整的 8–17 合并为 commissioning 覆盖证据，直到 13/13 运行链完整；
-   不把任何 diagnostic 数据放入正式分母。
-2. Phase C 冻结：diagnostic sweep 完整后统一提交，从该 clean source 重新构建/复验 binary/manifest，冻结正式配置。
-3. Phase D：以全新干净 identity 按 `8 → 18 → 1–7 → 9–17 → 19–20` 从执行位置 1/20 串行完成固定 10 题 ×
+1. Phase C 冻结：实现并测试 formal 的 20 槽唯一执行顺序，从随后 clean source 重新构建/复验 binary/manifest，
+   冻结正式配置；不把任何 diagnostic 数据放入正式分母。
+2. Phase D：以全新干净 identity 按 `8 → 18 → 1–7 → 9–17 → 19–20` 从执行位置 1/20 串行完成固定 10 题 ×
    2 round 的 20 个唯一正式逻辑结果；不得复用旧 formal 或 diagnostic 结果。
-4. Phase E：比较 raw/refined C2、耗时、任务结果和正确性保护，作出保留/调整/撤销决定，完成文档、精确清理、
+3. Phase E：比较 raw/refined C2、耗时、任务结果和正确性保护，作出保留/调整/撤销决定，完成文档、精确清理、
    聚焦独立验收、整改和工作树提交。
 
 ### 阻塞项
@@ -334,6 +331,10 @@ revalidation 均通过。下一 diagnostic identity 只复验未打通的绝对�
 - formal-v1：preflight `10/10`，完成 7/20 后在第 8 槽发生本地设施故障，已作废并发布 body-free invalid；
   96 upstream attempts、`1.749536 USD`，最终 Docker `11.5GB`、容器/卷 `0`、VHDX 增长 `0`，Windows C: 余量
   `191108644864` bytes。累计 task budget `2.938249 USD`，reserved `0`。
+- diagnostic sweep：v1 的绝对槽 8–17 共 10 条运行链均完整且 source revalidation 通过（5 pass/5 fail），槽 18
+  暴露 projector 故障后 v1 作废；projector 修复后 diagnostic-v2 只复验 18–20，preflight/result/source validation
+  均 `3/3`、3 pass/0 fail、raw/refined C2 `0/0`。v2 24 个可靠 attempts、`0.484984 USD`，Docker/VHDX 增长 `0`，
+  Windows C: 最终余量 `190665900032` bytes；累计 task budget `6.533427 USD`、reserved `0`。
 - 未运行：正式 20-result、正式比较/决策、本地模型、训练、完整数据集、Codex 对照、validation、holdout、CI 或 PR。
 
 ### 主工作区 ignored 资产
