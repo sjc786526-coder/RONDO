@@ -333,11 +333,35 @@ transport retry。Plan 058 累计费用 `8.776824 USD`、reserved `0`，Docker/V
 槽 8 局部 commissioning 至此完整打通。当前进入 clean source 提交与正式 runtime 重建；diagnostic-v5 不进入正式
 分母，9–20 不作脏版本重跑。
 
+已从 clean `ad0d81ad68c16c7d8a90d94d744b9b3eb1bdad4c` 通过共享 lock/watchdog 增量重建并复验
+legacy、companion、bwrap 与 runtime bundle；CLI/host/bwrap SHA-256 分别为
+`ff6273bb34ea8749747d0499abc173bb0686dee4553dd10def684795998455fa`、
+`b642f82b0346f19c4d19b1b27ddb440f153c6ff70ea24a1c6de5bfc9c3484f97`、
+`77360cb751ccedc5971391444ac86a8a33c15b04d6b4a6fe45f5d25496e62c4c`，runtime manifest SHA-256 为
+`4f771ea2902d2efde3d70639b3ca3d8f9b9f3053fac26e6814c79c78d7779134`。恢复时一次 sandbox 内 systemd bus
+拒绝、一次 attached-source companion 拒绝，以及把失败/成功 summary 放在同一 metrics parent 后被 proof
+唯一性门拒绝，均发生在 Docker/API 前；旧证据保留，最终只使用全新 metrics identity 的单一成功 proof。
+
+`plan058-direction1-c2-formal-v3` 按冻结顺序完成零 API preflight `10/10`，但首个付费槽 8 在前 6 次正常 main
+响应后收到类型化 `HTTP 200 / response.failed / status=failed / code=upstream_error`；该次无可靠 usage，按
+`1 USD/attempt` 结算。agent 非零退出，verifier 仍真实运行并得 reward `0`。现有 transport classifier 只覆盖
+open/read/EOF/瞬态 HTTP，未覆盖该明确上游终态，因而 runner 把整槽归为 Terminal-Bench infrastructure failure；
+formal-v3 已永久作废并 body-free 发布，正式结果 `0/20`。本 identity 共 7 个 main attempts、`1.074850 USD`，
+累计 `9.851674 USD`、reserved `0`、剩余 `40.148326 USD`；Docker/VHDX 增长 `0`，Windows C: 最终余量
+`201641660416` bytes。
+
+transport classifier 已窄修为只额外接受精确 `200 + terminal + response.failed + failed + upstream_error` 组合，
+并产生 body-free `upstream_terminal_failed` 重试证据；`model_failed`、context、鉴权、配额、配置和未知错误继续
+fail-closed。相关 `33/33` 回归通过，formal-v3 真实 metadata/预算只读重投影为 7 attempts、`1.074850 USD` 的
+typed pure transport。下一步只用全新 diagnostic identity 复验受影响槽 8；成功后重新冻结并以全新 formal 完整
+运行 20/20，绝不复活或拼接 v3。
+
 ### 本任务剩余步骤
 
-1. 局部 commissioning：以全新 diagnostic identity 只复验 formal-v2 暴露设施缺口的绝对槽 8；有效 task
-   pass/fail 都作为打通，若再有本地设施故障只窄修并重跑该槽。
-2. Phase C 再冻结：提交 projector 修复与 diagnostic 证据，从该 clean source 重新构建/复验 binary/manifest，冻结
+1. 局部 commissioning：以全新 diagnostic-v6 identity 只复验 formal-v3 暴露 transport 分类缺口的绝对槽 8；
+   有效 task pass/fail 都作为打通，若再遇同类明确上游暂态则在同一 logical slot 直接重试；本地设施故障只窄修并
+   重跑该槽。
+2. Phase C 再冻结：提交 transport 修复与 diagnostic 证据，从该 clean source 重新构建/复验 binary/manifest，冻结
    正式配置；不把任何 diagnostic 或旧 formal 数据放入正式分母。
 3. Phase D：以全新干净 identity 按 `8 → 18 → 1–7 → 9–17 → 19–20` 从执行位置 1/20 串行完成固定 10 题 ×
    2 round 的 20 个唯一正式逻辑结果；不得复用旧 formal 或 diagnostic 结果。
@@ -394,7 +418,12 @@ transport retry。Plan 058 累计费用 `8.776824 USD`、reserved `0`，Docker/V
   `0/0`、无害四门通过；14 个可靠 attempts（12 main/2 Guardian）、`0.378984 USD`，Docker/VHDX 增长 `0`，
   Windows C: 最终余量 `202189389824` bytes。累计 task budget `8.776824 USD`、reserved `0`；局部
   commissioning 已闭环，待提交后重建正式 runtime。
-- 未运行：正式 20-result、正式比较/决策、本地模型、训练、完整数据集、Codex 对照、validation、holdout、CI 或 PR。
+- formal-v3：新 runtime 与 preflight `10/10` 均通过；首槽第 7 个 main 请求收到类型化上游
+  `response.failed/upstream_error`，因本地 transport classifier 缺口作废为 `0/20`，7 attempts、
+  `1.074850 USD`。Docker/VHDX 增长 `0`，Windows C: 最终余量 `201641660416` bytes；累计 task budget
+  `9.851674 USD`、reserved `0`。真实 metadata/预算现可窄分类为 pure transport，待 diagnostic-v6 只复验槽 8。
+- 未运行：可信正式 20-result、正式比较/决策、本地模型、训练、完整数据集、Codex 对照、validation、holdout、CI
+  或 PR。
 
 ### 主工作区 ignored 资产
 
@@ -455,3 +484,4 @@ Plan 058 worktree，但执行阶段以下 I/O 会由 worktree 中的受控命令
 | 023 | formal-v2 因 typed missing-process `write_stdin` 的本地投影缺口永久作废；结算真实 20 attempts 后，窄修 projector 并只以新 diagnostic 复验槽 8，再重新冻结全新完整 formal | 首槽的 agent/verifier 有真实终态但 projector fail-closed，不能当有效 task 结果，也不能把错误载荷中的零逻辑发布误当零 API；局部 commissioning 与新 20/20 formal 分别遵守 021 的两层边界 | projector、预算、diagnostic、正式重启 | 已采纳，硬合同 |
 | 024 | diagnostic-v3 因 finalize 误用通用 source revalidator 永久作废；finalize 改为复用既有 Plan 058 专用入口，新 diagnostic 仍只复验槽 8 | Plan 058 明确允许 agent 非零但 verifier reward 有效的 typed Guardian stop，写入/恢复已按专用合同验证；终态不得换用通用解析语义，也不得复活已作废 identity | source revalidation、发布、diagnostic | 已采纳 |
 | 025 | diagnostic-v4 因固定工具参数验证错误未被 projector 识别而永久作废；只 allowlist 该完整 pre-runtime 终态，新 diagnostic 仍只复验槽 8 | 参数验证发生在 native runtime 前但是真实 failed tool result；应诚实保留而非补造执行。泛化接受任意参数错误会削弱 fail-closed，因此只冻结当前产品合同 | projector、工具真值、diagnostic | 已采纳 |
+| 026 | formal-v3 因未识别类型化 `response.failed/upstream_error` 上游暂态而永久作废；只把精确终态加入 pure-transport 分类，新 diagnostic 仍只复验槽 8 | 该终态不是鉴权、配额、模型/配置错误，前 6 请求正常且第 7 次无 usage；应按同一逻辑槽直接重试。泛化所有 `response.failed` 会把 `model_failed` 等有效硬错伪装成暂态，故保持精确 allowlist | transport retry、预算、diagnostic、正式重启 | 已采纳，硬合同 |

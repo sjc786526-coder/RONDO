@@ -119,6 +119,7 @@ _TERMINAL_STATUSES = frozenset({"ready_to_finalize", "invalid", "finalized"})
 _SLOT_STATUSES = frozenset({"pending", "running", "retry_pending", "published"})
 _TRANSIENT_HTTP_STATUSES = frozenset({408, 425, 500, 502, 503, 504})
 _TRANSIENT_STREAM_ENDS = frozenset({"open_error", "read_error", "clean_eof"})
+_TRANSIENT_TERMINAL_ERROR_CODES = frozenset({"upstream_error"})
 _NON_TRANSIENT_CODE_FRAGMENTS = (
     "auth",
     "billing",
@@ -1647,7 +1648,13 @@ def validate_transport_retry_evidence(value: object) -> dict[str, Any]:
         or value["attempt"] < 1
         or _SAFE_ID.fullmatch(str(value["attempt_run_id"])) is None
         or value["classification"] != "typed_pure_transport"
-        or value["reason_code"] not in {"upstream_open_error", "upstream_read_error", "upstream_transient_http", "upstream_clean_eof"}
+        or value["reason_code"] not in {
+            "upstream_open_error",
+            "upstream_read_error",
+            "upstream_transient_http",
+            "upstream_clean_eof",
+            "upstream_terminal_failed",
+        }
         or _SHA256.fullmatch(str(value["api_metadata_sha256"])) is None
         or _SHA256.fullmatch(str(value["budget_run_sha256"])) is None
         or (
@@ -1740,6 +1747,14 @@ def classify_pure_transport_retry(
             reason_codes.add("upstream_clean_eof")
         elif status in _TRANSIENT_HTTP_STATUSES:
             reason_codes.add("upstream_transient_http")
+        elif (
+            status == 200
+            and end == "terminal"
+            and event == "response.failed"
+            and terminal_status == "failed"
+            and code in _TRANSIENT_TERMINAL_ERROR_CODES
+        ):
+            reason_codes.add("upstream_terminal_failed")
         else:
             return None
     if not reason_codes:
@@ -1804,7 +1819,11 @@ def classify_pure_transport_retry(
     reason = next(
         candidate
         for candidate in (
-            "upstream_open_error", "upstream_read_error", "upstream_transient_http", "upstream_clean_eof"
+            "upstream_open_error",
+            "upstream_read_error",
+            "upstream_transient_http",
+            "upstream_clean_eof",
+            "upstream_terminal_failed",
         )
         if candidate in reason_codes
     )

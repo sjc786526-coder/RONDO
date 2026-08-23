@@ -736,6 +736,46 @@ class C2BehaviorStateTests(unittest.TestCase):
         self.assertEqual(evidence["charged_usd"], "1.000000")
         self.assertNotIn("request_id", evidence)
 
+    def test_typed_terminal_upstream_error_is_retryable_but_model_failure_is_not(
+        self,
+    ) -> None:
+        metadata = _transport_metadata(
+            status=200,
+            end="terminal",
+            code="upstream_error",
+        )
+        request = metadata["requests"][0]
+        request["terminal_event_type"] = "response.failed"
+        request["terminal_response_status"] = "failed"
+        budget = _budget_run()
+        budget["stop_reason"] = "upstream_terminal_failed"
+        budget["infra_taint"] = {
+            "count": 1,
+            "first_reason": "upstream_terminal_failed",
+        }
+
+        evidence = classify_pure_transport_retry(
+            attempt=1,
+            attempt_run_id="logical-a001",
+            api_metadata=metadata,
+            budget_run=budget,
+        )
+
+        assert evidence is not None
+        self.assertEqual(evidence["reason_code"], "upstream_terminal_failed")
+        self.assertEqual(evidence["ledger_stop_reason"], "upstream_terminal_failed")
+        self.assertEqual(evidence["charged_usd"], "1.000000")
+
+        request["terminal_error_code"] = "model_failed"
+        self.assertIsNone(
+            classify_pure_transport_retry(
+                attempt=1,
+                attempt_run_id="logical-a001",
+                api_metadata=metadata,
+                budget_run=budget,
+            )
+        )
+
     def test_prior_success_does_not_hide_a_terminal_transport_failure(self) -> None:
         metadata = _transport_metadata()
         metadata["requests"].insert(

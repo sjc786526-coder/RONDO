@@ -1,6 +1,6 @@
 {
-  "active_lock": "eval/locks/plan058-direction1-c2-formal-v3.json",
-  "active_lock_sha256": "15c1899796bae1ef84defc836a9e5dddee22a92f6ccf6a65d909c7a4bdbb4be9",
+  "active_lock": null,
+  "active_lock_sha256": null,
   "kind": "rondo_direction1_c2_behavior",
   "last_lock": "eval/locks/plan058-direction1-c2-formal-v3.json",
   "last_lock_sha256": "15c1899796bae1ef84defc836a9e5dddee22a92f6ccf6a65d909c7a4bdbb4be9",
