@@ -50,6 +50,7 @@ from .metrics import RunMetricsError, metrics_from_dict
 from .pair import (
     CampaignPublicationContext,
     RunPublicationContext,
+    guardian_review_count,
     has_complete_guardian_approval_sequence,
 )
 
@@ -828,10 +829,12 @@ def _safe_summary(
         else 0.0
     )
     guardian_requests = request_roles.count("guardian")
+    guardian_reviews = guardian_review_count(request_roles)
     if side is Side.RONDO and (
         parsed.outcome is RunOutcome.COMPLETED
         and guardian_requests >= 1
-        and len(evidence) == guardian_requests
+        and guardian_reviews is not None
+        and len(evidence) == guardian_reviews
         and all(
             (item["decision"], item["terminal_status"], item["failure_reason"])
             in {("approved", "approved", None), ("denied", "denied", None)}
@@ -1082,8 +1085,10 @@ def _validate_publication_evidence(
                 "completed run lacks the verified main-Guardian-main sequence"
             )
         if live_result.prepared.spec.side is Side.RONDO:
+            review_count = guardian_review_count(roles)
             if (
-                len(live_result.evidence) != roles.count("guardian")
+                review_count is None
+                or len(live_result.evidence) != review_count
                 or any(
                     (
                         item.decision,
@@ -1098,9 +1103,9 @@ def _validate_publication_evidence(
                 )
             ):
                 raise HarborResultError(
-                    "RONDO completed run requires one semantic evidence per Guardian request"
+                    "RONDO completed run requires one semantic evidence per Guardian review"
                 )
-            request_digests = _guardian_request_digests(metadata_path)
+            request_digests = _guardian_review_request_digests(metadata_path)
             evidence_digests = tuple(
                 item.canonical_request_sha256 for item in live_result.evidence
             )
@@ -1365,6 +1370,7 @@ def _validate_terminal_bench_record(record: Mapping[str, Any]) -> None:
     if outcome is RunOutcome.COMPLETED:
         evidence = summary.get("evidence")
         binding = summary.get("s2_request_evidence_binding")
+        guardian_reviews = guardian_review_count(sequence)
         if record.get("side") == Side.RONDO.value:
             if roles["guardian"] == 0:
                 if evidence != [] or binding != "not_triggered":
@@ -1373,7 +1379,8 @@ def _validate_terminal_bench_record(record: Mapping[str, Any]) -> None:
                     )
             elif (
                 not isinstance(evidence, list)
-                or len(evidence) != roles["guardian"]
+                or guardian_reviews is None
+                or len(evidence) != guardian_reviews
                 or any(
                     not isinstance(item, dict)
                     or (
@@ -1603,13 +1610,15 @@ def _verified_request_ids(metadata_path: Path) -> tuple[str, ...]:
     return request_ids
 
 
-def _guardian_request_digests(metadata_path: Path) -> tuple[str, ...]:
+def _guardian_review_request_digests(metadata_path: Path) -> tuple[str, ...]:
     metadata = _read_json_object(metadata_path)
     roles = _request_roles(metadata)
     requests = metadata["requests"]
     digests: list[str] = []
-    for role, request in zip(roles, requests, strict=True):
-        if role != "guardian":
+    for index, (role, request) in enumerate(zip(roles, requests, strict=True)):
+        if role != "guardian" or (
+            index + 1 < len(roles) and roles[index + 1] == "guardian"
+        ):
             continue
         digest = request.get("canonical_body_sha256")
         if (

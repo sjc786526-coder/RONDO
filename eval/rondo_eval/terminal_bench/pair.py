@@ -1431,22 +1431,33 @@ def _read_budget_ledger(path: Path) -> Mapping[str, Any]:
     return value
 
 
+def guardian_review_count(sequence: object) -> int | None:
+    """Count contiguous Guardian request groups without changing request accounting."""
+
+    if not isinstance(sequence, (list, tuple)) or any(
+        role not in {"main", "guardian"} for role in sequence
+    ):
+        return None
+    return sum(
+        role == "guardian" and (index == 0 or sequence[index - 1] != "guardian")
+        for index, role in enumerate(sequence)
+    )
+
+
 def has_complete_guardian_approval_sequence(sequence: object) -> bool:
-    """Accept bounded approvals separated and bracketed by ordinary model turns."""
+    """Accept bounded Guardian requests grouped into bracketed logical reviews."""
 
     if not isinstance(sequence, (list, tuple)) or len(sequence) < 3:
         return False
-    if any(role not in {"main", "guardian"} for role in sequence):
+    review_count = guardian_review_count(sequence)
+    if review_count is None:
         return False
     guardian_count = sequence.count("guardian")
     if not 1 <= guardian_count <= 3:
         return False
     if sequence[0] == "guardian" or sequence[-1] == "guardian":
         return False
-    return all(
-        current != "guardian" or previous == "main"
-        for previous, current in zip(sequence, sequence[1:], strict=False)
-    )
+    return review_count >= 1
 
 
 def terminal_record_sha256(record: Mapping[str, Any]) -> str:

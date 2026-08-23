@@ -55,6 +55,10 @@ from rondo_eval.terminal_bench.c2_behavior_cli import (
     finalize,
     status,
 )
+from rondo_eval.terminal_bench.bounded_observation import BoundedObservationError
+from rondo_eval.terminal_bench.bounded_observation_cli import (
+    _validate_guardian_binding,
+)
 from rondo_eval.terminal_bench.tasksets import FrozenTask
 from rondo_eval.terminal_bench.results import ParsedHarborResult
 
@@ -103,6 +107,58 @@ def _transport_metadata(
             }
         ],
     }
+
+
+class GuardianBindingRegressionTests(unittest.TestCase):
+    def test_completed_review_binds_last_request_of_each_guardian_group(self) -> None:
+        roles = ("main", "guardian", "guardian", "main", "guardian", "main")
+        requests = [
+            {
+                "request_id": f"request-{index}",
+                "role": role,
+                "canonical_body_sha256": f"{index + 1:064x}",
+            }
+            for index, role in enumerate(roles)
+        ]
+        terminal_digests = (requests[2]["canonical_body_sha256"], requests[4]["canonical_body_sha256"])
+        evidence = tuple(
+            SimpleNamespace(
+                canonical_request_sha256=digest,
+                decision="approved",
+                terminal_status="approved",
+                failure_reason=None,
+            )
+            for digest in terminal_digests
+        )
+        with tempfile.TemporaryDirectory() as raw:
+            metadata_path = Path(raw) / "metadata.json"
+            metadata_path.write_text(
+                json.dumps({"schema_version": 1, "requests": requests}),
+                encoding="utf-8",
+            )
+            _validate_guardian_binding(
+                SimpleNamespace(evidence=evidence),
+                SimpleNamespace(outcome=RunOutcome.COMPLETED),
+                metadata_path,
+            )
+            with self.assertRaises(BoundedObservationError):
+                _validate_guardian_binding(
+                    SimpleNamespace(
+                        evidence=(
+                            SimpleNamespace(
+                                canonical_request_sha256=requests[1][
+                                    "canonical_body_sha256"
+                                ],
+                                decision="approved",
+                                terminal_status="approved",
+                                failure_reason=None,
+                            ),
+                            evidence[1],
+                        )
+                    ),
+                    SimpleNamespace(outcome=RunOutcome.COMPLETED),
+                    metadata_path,
+                )
 
 
 def _budget_run() -> dict[str, object]:

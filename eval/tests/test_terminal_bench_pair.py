@@ -30,6 +30,7 @@ from rondo_eval.terminal_bench.pair import (  # noqa: E402
     PairSequenceLedger,
     PairIdentityError,
     assess_m1,
+    guardian_review_count,
     has_complete_guardian_approval_sequence,
     load_active_pair_identity,
     load_historical_pair_identity,
@@ -694,7 +695,7 @@ class PairIdentityTests(unittest.TestCase):
             self.assertEqual(duplicate["m1"], "incomplete")
             self.assertIn("exactly_two", duplicate["reasons"][0])
 
-    def test_approval_sequence_requires_one_bracketed_guardian(self) -> None:
+    def test_approval_sequence_groups_bracketed_guardian_turns(self) -> None:
         self.assertTrue(
             has_complete_guardian_approval_sequence(
                 ["main", "main", "guardian", "main", "main"]
@@ -705,10 +706,21 @@ class PairIdentityTests(unittest.TestCase):
                 ["main", "guardian", "main", "guardian", "main"]
             )
         )
+        self.assertTrue(
+            has_complete_guardian_approval_sequence(
+                ["main", "guardian", "guardian", "main"]
+            )
+        )
+        self.assertEqual(
+            guardian_review_count(
+                ["main", "guardian", "guardian", "main", "guardian", "main"]
+            ),
+            2,
+        )
         for sequence in (
             ["guardian", "main"],
             ["main", "guardian"],
-            ["main", "guardian", "guardian", "main"],
+            ["main", "guardian", "guardian", "guardian", "guardian", "main"],
             ["main", "main", "main"],
         ):
             self.assertFalse(has_complete_guardian_approval_sequence(sequence))

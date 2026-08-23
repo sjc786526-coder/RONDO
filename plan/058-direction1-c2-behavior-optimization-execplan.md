@@ -403,11 +403,33 @@ insufficient 为 `0/3/0`，无害四门通过。累计 task budget `13.399248 US
 `36.600752 USD`；Docker/VHDX 增长 `0`，Windows C: 最终余量 `202295300096` bytes。槽 8 局部
 commissioning 再次闭环，下一步从新 clean source 冻结全新 formal-v5 并完整运行 20/20。
 
+已从 clean detached source `62387ad1f3e8cdde1eb17fdc95b37ccdd7c36070` 经共享 lock/watchdog 重建并复验
+legacy、companion、bwrap 与 runtime bundle；CLI/host/bwrap SHA-256 分别为
+`d88a225b82fcd0bb00e990cea02b55b78417aac371aed5c39bbbaba31e4f3437`、
+`75d684e6c568cc224af74f7075deffef13765ec8ef07f264e21c8d124b63224d`、
+`77360cb751ccedc5971391444ac86a8a33c15b04d6b4a6fe45f5d25496e62c4c`，runtime manifest SHA-256 为
+`39dfc87701a36b1275819bc89bf20432ce5fa15f1f0245ecb75a871d90d56c8e`。首次 companion publication 误用
+attached source，被 BinaryFreeze 正确拒绝；第一次 legacy 成功构建也因 source gate root 与后续 detached companion
+proof 不同而不用于正式 runtime，随后从同一 detached root 重新构建。两次均无 Docker/API，失败/弃用 proof 保留，
+未混入最终 runtime。
+
+`plan058-direction1-c2-formal-v5` 冻结既定顺序并完成零 API preflight `10/10`。前 5 个付费执行位置均已完整发布；
+第 6 个执行位置（绝对槽 4，`fix-git`）实际 agent exit `0`、verifier reward `1`，但本地 Guardian evidence validator
+把连续 Guardian API turns 错当作多个独立终态 review：真实 3 个 Guardian 请求形成 2 个 logical review，仅后两组
+末次请求各有一份终态证据。该本地投影故障使 formal-v5 永久作废，公共正式结果 `0/20`；共 77 个可靠 attempts、
+0 transport retry、`1.758825 USD`，累计 task budget `15.158073 USD`、reserved `0`、剩余
+`34.841927 USD`。Docker/VHDX 增长 `0`，Windows C: 最终余量 `201226924032` bytes。
+
+validator 与结果发布已窄修为：预算/Guardian 上限继续按原始 API 请求数计算，只把连续 Guardian 请求组成一个
+logical review，并把终态证据绑定到每组末次请求；不改变 Guardian、审批、sandbox、安全策略或历史身份。相关
+Python 回归 `105/105` 通过，formal-v5 第 4 槽真实私有工件离线重验证为 `completed`/reward `1`、3 requests、
+2 reviews、2 evidence、binding valid。按硬合同不复活 v5；下一步仅以新 diagnostic identity 复验绝对槽 4。
+
 ### 本任务剩余步骤
 
-1. Phase C/D 再冻结与正式运行：提交 diagnostic-v7 证据，从该新 clean source 重建/复验 binary/manifest；以全新干净
-   identity 按 `8 → 18 → 1–7 → 9–17 → 19–20` 从执行位置 1/20 串行完成固定 10 题 × 2 round 的 20 个唯一
-   正式逻辑结果，不复用旧 formal 或 diagnostic 结果。
+1. Phase C/D 局部复验与再冻结：只为 formal-v5 受影响的绝对槽 4 建立 diagnostic identity；打通后提交并从新 clean
+   source 重建/复验 binary/manifest，再以全新干净 identity 按 `8 → 18 → 1–7 → 9–17 → 19–20` 从执行位置
+   1/20 串行完成固定 10 题 × 2 round 的 20 个唯一正式逻辑结果，不复用旧 formal 或 diagnostic 结果。
 2. Phase E：比较 raw/refined C2、耗时、任务结果和正确性保护，作出保留/调整/撤销决定，完成文档、精确清理、
    聚焦独立验收、整改和工作树提交。
 
@@ -549,3 +571,4 @@ Plan 058 worktree，但执行阶段以下 I/O 会由 worktree 中的受控命令
 | 028 | diagnostic-v7 有效 1/1 后关闭 formal-v4 局部设施缺口；raw 3 次 repeat 均按预冻规则归为 reasonable，不能为追求 raw 下降误记为 harmful | 三次分别发生在改动后复查、清理后复测和只读 Git 失败后的恢复，均有明确状态或结果依据；verifier reward 1 且工具/恢复/用户控制保持 | refined classification、commissioning、正式冻结 | 已采纳 |
 | 029 | runtime publication 必须以绝对路径调用 canonical build wrapper，并让 JSON/manifest 参数在调用前完成绑定；失败 proof 与成功 proof 使用不同 metrics identity | 相对 wrapper 不满足 live parent-chain proof；同行临时赋值不能供同一简单命令的参数展开。两次 fail-closed 均应显式保留，不能静默吞掉或混入成功证明 | BinaryManifest、build proof、日志 | 已采纳 |
 | 030 | 若项目容量达到限制，只允许在 exact ownership 核对后清理 Plan 058 工作树独占 target/二进制 | 为长时运行提供受控容量恢复，同时保护 Plan 056、共享缓存和其他并行工作树 | 资源、精确清理 | 用户授权，硬边界 |
+| 031 | formal-v5 因把 Guardian 中间 API turn 误当独立终态 review 而永久作废；raw 请求仍按 3 次计费/限额，证据只绑定每个连续 Guardian 组的末次请求，并只以新 diagnostic 复验绝对槽 4 | fix-git 的运行链实际 completed/reward 1；3 个 Guardian 请求组成 2 个 review 并产生 2 份终态证据。请求数与 review 数职责不同，强行一一对应会把有效结果误判为设施故障；按 021 不重复已打通的其他题目 | Guardian evidence、结果发布、diagnostic、正式重启 | 已采纳，硬合同 |
