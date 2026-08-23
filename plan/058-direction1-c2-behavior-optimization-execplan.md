@@ -239,17 +239,27 @@
   Plan 054 模型校准报告在其生命周期内检测到外部 Cargo 并 fail-closed 终止。时间高度重合，按本次构建高概率触发
   处理；Plan 058 不接受该 build chain 为合规 commissioning 证据，未初始化 campaign、Docker 或 API。事件、判断
   与整改记录在 `agent_log/2026-08-22-plan058-shared-resource-collision.md`。
+- 已从 clean detached source `c13ae981e3779305453621584e3259b5cb669d67` 完整重建有效 commissioning
+  legacy/companion，分别用时 `22m59s`、`19m33s`，watchdog 均为 `status=0`、`stop=none`。runtime bundle 已用
+  BinaryManifest 组装并复验，RONDO binary、code-mode host 与 bwrap SHA-256 分别为
+  `859248187fd5b647bd380249a3c61ca0a46e50359da7f3464dd4a2fb288ea337`、
+  `ad618afad71b6e0351f16d0bf009e8c9c82aeda92e4a8be23a318169f3aae098`、
+  `77360cb751ccedc5971391444ac86a8a33c15b04d6b4a6fe45f5d25496e62c4c`。
+- `plan058-direction1-c2-commissioning-v1` 已完成 Docker/Harbor 零 API 预检，随后真实运行在第 4 次需审批调用处收到
+  冻结 Guardian 上限的 `guardian_logical_request_limit_exceeded`；agent 非零退出使 verifier 未运行，故运行链不完整，
+  按本地设施类保留并发布为 invalid，不作为任务失败或模型结果。该 identity 共结算 28 个可靠 upstream attempts、
+  `1.086600 USD`；不是 transport retry，未修改 Guardian、审批或安全策略。body-free 公共结果与详细 ignored 工件均
+  保留，记录见 `agent_log/2026-08-22-plan058-commissioning.md`。
 - 本 ExecPlan 已按用户要求保留必要行为、实验、预算和资源边界，把具体检测信号、模块、反馈形式、状态所有者、
   runner 拆分和数值收益门留给执行者基于 Phase A 证据自主冻结。
-- 规划阶段没有运行 Docker、Cargo、真实 API、本地模型、训练或测评，没有创建/修改 ignored campaign、budget、
-  run、bundle、本机配置或宿主资源。
+- 本计划未运行本地模型、训练、完整数据集、Codex 对照、validation、holdout、CI 或 PR。
 
 ### 当前工作
 
-Phase A、Phase B 已完成；Phase C 首次 `23567b6` build chain 因与 Plan 054 真实模型生命周期发生共享资源重叠而
-不予接受。已确认 Plan 054 正式 measurement 终态并等待 canonical 槽释放，随后精确清理本次 target、detached
-measurement worktree 与 legacy artifact；build summaries 保留。正在从记录该事件与清理事实的新干净提交完整重建
-commissioning runtime，再进入 Docker/Harbor 零 API 预检。尚未初始化 Plan 058 campaign 或发出真实 API 请求。
+Phase A、Phase B 已完成；Phase C 有效 `c13ae98` runtime 已冻结。commissioning-v1 的零 API 预检通过，但真实运行
+触发 v28 Guardian 三次逻辑审批上限，因 agent 非零退出且 verifier 未运行而按本地设施类 invalid，费用已结算且身份已
+关闭。只读对照显示 `openssl-selfsigned-cert` 在 formal-v6 两轮均完整运行、分别为 4/5 个 main 与 0 个 Guardian
+请求，同时第二轮覆盖 C2 恢复边界；下一步以该冻结任务创建全新 commissioning-v2，从零 API 预检重新闭环。
 
 ### 本任务剩余步骤
 
@@ -276,8 +286,12 @@ commissioning runtime，再进入 Docker/Harbor 零 API 预检。尚未初始化
 - 失效构建：`23567b6` legacy/companion 本侧均构建成功，但因已确认的跨任务互斥事实不作为 commissioning 验收；
   exact target、detached measurement worktree 与 `1,260,206,189` bytes legacy artifact 已清理，build metrics 保留。
   该事件没有 Plan 058 campaign、Docker 或 API 成本。
-- 未运行：Docker、Harbor preflight、真实 API、Terminal-Bench、本地模型、训练、完整数据集、
-  CI 或 PR。
+- 有效构建：`c13ae98` legacy/companion 与 runtime manifest 已通过 prepare/verify；冻结前本地启动参数的 sandbox bus、
+  metrics 变量与 HOME/PATH 三次 fail-closed 均未发送 API，也未改变构建字节，成功证明单独保留。
+- commissioning-v1：preflight `1/1`；正式 logical result `0/1`，campaign invalid；28 个可靠 upstream attempts、
+  `1.086600 USD` 已关闭进总账。Docker 前后均为 `11.5GB`、容器/卷为 `0`，VHDX 增长 `0`，Windows C: 余量约
+  `191.9GB`，未触发容量门。
+- 未运行：正式 20-result、正式比较/决策、本地模型、训练、完整数据集、Codex 对照、validation、holdout、CI 或 PR。
 
 ### 主工作区 ignored 资产
 
@@ -330,3 +344,4 @@ Plan 058 worktree，但执行阶段以下 I/O 会由 worktree 中的受控命令
 | 015 | Plan 058 在既有低层原语上新增专用 campaign state/CLI，冻结 7.554 USD 的可靠 usage 最坏请求 reservation；未知 usage 仍按 1 USD/上游 attempt 结算 | Plan 056 orchestration 的固定 identity 与重试合同不适合 058，但通用 runner/预算/投影均可直接复用；请求前按冻结价格与 usage envelope 预留才能保证 50 USD 硬上限 | eval、预算、恢复 | 已采纳 |
 | 016 | 初始化恢复先直接验证冻结 lock、manifest 与全部调用输入；仅未越过初始化窗口的 identity 可修复 pointer/state/budget | 防止错误恢复参数或已退役 campaign 在失败前重绑活动指针、重开预算 | identity、恢复 | 已采纳 |
 | 017 | `23567b6` 构建因与 Plan 054 模型生命周期重叠而失效；保留事件证据，确认 Plan 054 v2 终态后 exact cleanup 并从新提交完整重建 | 本侧虽使用 canonical lock/watchdog，但跨任务互斥事实已被破坏，不能把成功字节冒充合规资源证据；仅瞬时拿到锁不足以证明模型窗口已结束 | 构建、资源、commissioning | 已采纳 |
+| 018 | commissioning-v1 的 Guardian 上限终态按运行链不完整的 invalid 结算；不改 Guardian/审批，以 formal-v6 中 0 Guardian 且覆盖 C2 的 `openssl-selfsigned-cert` 新身份重做 commissioning | 第四次审批请求被正确硬拒绝后 verifier 未运行，不能伪装为有效 reward 0；换代表题可继续验证 runner 闭环而不扭曲安全语义或原地补位 | commissioning、预算、失败分类 | 已采纳 |
