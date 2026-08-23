@@ -46,6 +46,18 @@ _PRE_RUNTIME_GUARDIAN_LIMIT_ERROR = re.compile(
     r"\bstatus:?\s+409\b.{0,256}\bcode\b[^A-Za-z0-9]{1,12}"
     r"guardian_logical_request_limit_exceeded\b"
 )
+_PRE_RUNTIME_EXEC_REJECTION_ERROR = re.compile(
+    r'^exec_command failed for `[\s\S]+`: CreateProcess \{ message: '
+    r'"Rejected\(\\"This action was rejected due to unacceptable risk\.'
+    r'\\\\nReason: [\s\S]+\\\\nThe agent must not attempt to achieve the same '
+    r'outcome via workaround, indirect execution, or policy circumvention\. '
+    r'Proceed only with a materially safer alternative, or if the user explicitly '
+    r'approves the action after being informed of the risk\. Otherwise, stop and '
+    r'request user input\.\\"\)" \}$'
+)
+_PRE_RUNTIME_WRITE_STDIN_UNKNOWN_PROCESS_ERROR = re.compile(
+    r"^write_stdin failed: Unknown process id (-?[0-9]+)$"
+)
 
 
 class HarnessObservationError(ValueError):
@@ -518,14 +530,14 @@ def _read_complete_bundle(path: Path) -> tuple[str, dict[str, Any], NativeBundle
     ):
         if view["availability"][capability_name]["status"] != "available":
             raise HarnessObservationError("rollout trace lifecycle is incomplete")
-    _, pre_runtime_execs, _, _ = _command_runtime_aggregates(view, reader)
+    _, pre_runtime_commands, _, _, _ = _command_runtime_aggregates(view, reader)
     terminal_capability = view["availability"]["terminal"]
     expected_terminal_capability = (
         {
             "status": "partial",
             "reason_codes": ["terminal_runtime_metadata_missing"],
         }
-        if pre_runtime_execs
+        if pre_runtime_commands
         else {"status": "available", "reason_codes": []}
     )
     if terminal_capability != expected_terminal_capability:
@@ -857,13 +869,13 @@ def _local_guardian_limit_inference_ids(
 def _pre_runtime_guardian_limit_turns(
     view: dict[str, Any], reader: NativeBundleReader
 ) -> set[str]:
-    runtimes, pre_runtime, _identities, _source_bytes = (
+    runtimes, _pre_runtime, _identities, _source_bytes, guardian_limits = (
         _command_runtime_aggregates(view, reader)
     )
     return {
         str(tool["turn_id"])
         for tool in view["tools"]
-        if tool["tool_id"] in pre_runtime
+        if tool["tool_id"] in guardian_limits
         and runtimes[tool["tool_id"]].get("exit_code") is None
         and runtimes[tool["tool_id"]].get("status") == "failed"
     }
@@ -1010,7 +1022,13 @@ def _tool_stats(view: dict[str, Any], reader: NativeBundleReader) -> dict[str, i
         for tool in tools
         if tool["kind"] in {"exec_command", "write_stdin"}
     }
-    runtime_ends, pre_runtime_execs, exec_identities, pre_runtime_source_bytes = (
+    (
+        runtime_ends,
+        pre_runtime_commands,
+        exec_identities,
+        pre_runtime_source_bytes,
+        _guardian_limits,
+    ) = (
         _command_runtime_aggregates(view, reader)
     )
 
@@ -1038,22 +1056,32 @@ def _tool_stats(view: dict[str, Any], reader: NativeBundleReader) -> dict[str, i
         output = runtime.get("aggregated_output")
         exit_code = runtime.get("exit_code")
         pre_runtime_failed = (
-            tool_id in pre_runtime_execs
+            tool_id in pre_runtime_commands
             and exit_code is None
             and runtime.get("status") == "failed"
         )
         if (
-            not isinstance(command, list)
-            or not command
-            or not all(isinstance(part, str) for part in command)
-            or not isinstance(cwd, str)
-            or not cwd
-            or not isinstance(output, str)
+            not isinstance(output, str)
             or (
                 not pre_runtime_failed
                 and (
                     isinstance(exit_code, bool)
                     or not isinstance(exit_code, int)
+                )
+            )
+            or (
+                tool["kind"] == "write_stdin"
+                and pre_runtime_failed
+                and (command is not None or cwd is not None)
+            )
+            or (
+                not (tool["kind"] == "write_stdin" and pre_runtime_failed)
+                and (
+                    not isinstance(command, list)
+                    or not command
+                    or not all(isinstance(part, str) for part in command)
+                    or not isinstance(cwd, str)
+                    or not cwd
                 )
             )
         ):
@@ -1105,14 +1133,15 @@ def _command_runtime_aggregates(
     set[str],
     dict[str, tuple[str, str]],
     dict[str, int],
+    set[str],
 ]:
-    """Return complete runtimes plus exact typed pre-runtime exec failures.
+    """Return complete runtimes plus exact typed pre-runtime command failures.
 
-    ``exec_command`` can fail while opening its sandbox, before the native
-    runtime begin event exists.  Code mode still receives a terminal structured
-    result in that case.  Accept only the narrow sandbox-denial and typed local
-    Guardian-limit shapes; every other missing or one-sided runtime lifecycle
-    remains invalid.
+    ``exec_command`` can fail during sandbox or Guardian admission, and
+    ``write_stdin`` can target a session that has already disappeared.  These
+    failures happen before a native command runtime exists but still have exact
+    terminal tool results.  Accept only those narrow shapes; every other missing
+    or one-sided runtime lifecycle remains invalid.
     """
 
     command_tools = {
@@ -1149,9 +1178,10 @@ def _command_runtime_aggregates(
                 raise HarnessObservationError("command runtime payload is invalid")
             runtime_ends[tool_id] = runtime
 
-    pre_runtime_execs: set[str] = set()
+    pre_runtime_commands: set[str] = set()
     exec_identities: dict[str, tuple[str, str]] = {}
     pre_runtime_source_bytes: dict[str, int] = {}
+    guardian_limit_execs: set[str] = set()
     for tool_id, tool in command_tools.items():
         has_start = tool_id in runtime_starts
         has_end = tool_id in runtime_ends
@@ -1169,20 +1199,27 @@ def _command_runtime_aggregates(
         end = ended_events.get(tool_id)
         if start is None or end is None:
             raise HarnessObservationError("command tool lifecycle is incomplete")
-        (
-            runtime_ends[tool_id],
-            exec_identities[tool_id],
-            pre_runtime_source_bytes[tool_id],
-        ) = _pre_runtime_exec_aggregate(tool, start, end, reader)
-        pre_runtime_execs.add(tool_id)
+        runtime, identity, source_bytes, guardian_limit = _pre_runtime_command_aggregate(
+            tool, start, end, reader
+        )
+        runtime_ends[tool_id] = runtime
+        pre_runtime_source_bytes[tool_id] = source_bytes
+        if identity is not None:
+            exec_identities[tool_id] = identity
+        elif tool["kind"] == "exec_command":
+            raise HarnessObservationError("exec command invocation is missing")
+        if guardian_limit:
+            guardian_limit_execs.add(tool_id)
+        pre_runtime_commands.add(tool_id)
 
     if set(runtime_ends) != set(command_tools):
         raise HarnessObservationError("command runtime terminal is incomplete")
     return (
         runtime_ends,
-        pre_runtime_execs,
+        pre_runtime_commands,
         exec_identities,
         pre_runtime_source_bytes,
+        guardian_limit_execs,
     )
 
 
@@ -1222,31 +1259,128 @@ def _exec_command_invocation_identity(
     return command, cwd
 
 
-def _pre_runtime_exec_aggregate(
+def _write_stdin_invocation_process_id(
+    started: Mapping[str, Any], reader: NativeBundleReader
+) -> int:
+    invocation = reader.load_ref(started.get("invocation_payload"))
+    if (
+        not isinstance(invocation, dict)
+        or invocation.get("tool_name") != "write_stdin"
+        or not isinstance(invocation.get("payload"), dict)
+        or invocation["payload"].get("type") != "function"
+        or not isinstance(invocation["payload"].get("arguments"), str)
+    ):
+        raise HarnessObservationError("write_stdin invocation is invalid")
+    try:
+        arguments = json.loads(invocation["payload"]["arguments"])
+    except json.JSONDecodeError as exc:
+        raise HarnessObservationError("write_stdin invocation is invalid") from exc
+    allowed = {"session_id", "chars", "yield_time_ms", "max_output_tokens"}
+    process_id = arguments.get("session_id") if isinstance(arguments, dict) else None
+    if (
+        not isinstance(arguments, dict)
+        or set(arguments) - allowed
+        or isinstance(process_id, bool)
+        or not isinstance(process_id, int)
+        or not -(2**31) <= process_id < 2**31
+        or (
+            "chars" in arguments
+            and not isinstance(arguments["chars"], str)
+        )
+        or (
+            "yield_time_ms" in arguments
+            and (
+                isinstance(arguments["yield_time_ms"], bool)
+                or not isinstance(arguments["yield_time_ms"], int)
+                or arguments["yield_time_ms"] < 0
+            )
+        )
+        or (
+            "max_output_tokens" in arguments
+            and arguments["max_output_tokens"] is not None
+            and (
+                isinstance(arguments["max_output_tokens"], bool)
+                or not isinstance(arguments["max_output_tokens"], int)
+                or arguments["max_output_tokens"] <= 0
+            )
+        )
+    ):
+        raise HarnessObservationError("write_stdin invocation is invalid")
+    return process_id
+
+
+def _pre_runtime_command_aggregate(
     tool: Mapping[str, Any],
     started: Mapping[str, Any],
     ended: Mapping[str, Any],
     reader: NativeBundleReader,
-) -> tuple[dict[str, Any], tuple[str, str], int]:
+) -> tuple[dict[str, Any], tuple[str, str] | None, int, bool]:
     if (
-        tool.get("kind") != "exec_command"
+        tool.get("kind") not in {"exec_command", "write_stdin"}
         or tool.get("requester") != "code_cell"
     ):
         raise HarnessObservationError("missing command runtime is not a pre-runtime denial")
+
+    if tool.get("kind") == "write_stdin":
+        process_id = _write_stdin_invocation_process_id(started, reader)
+        result = reader.load_ref(ended.get("result_payload"))
+        match = (
+            _PRE_RUNTIME_WRITE_STDIN_UNKNOWN_PROCESS_ERROR.fullmatch(
+                result.get("error", "")
+            )
+            if isinstance(result, dict)
+            else None
+        )
+        if (
+            tool.get("status") != "failed"
+            or ended.get("status") != "failed"
+            or not isinstance(result, dict)
+            or set(result) != {"type", "error"}
+            or result.get("type") != "error"
+            or match is None
+            or int(match.group(1)) != process_id
+        ):
+            raise HarnessObservationError(
+                "missing write_stdin runtime is not a typed missing-process result"
+            )
+        return (
+            {
+                # A failed lookup never reaches an existing process, so there
+                # is no command runtime, output, cwd, or exit code to invent.
+                "command": None,
+                "cwd": None,
+                "aggregated_output": "",
+                "exit_code": None,
+                "status": "failed",
+            },
+            None,
+            0,
+            False,
+        )
 
     identity = _exec_command_invocation_identity(started, reader, None)
 
     result = reader.load_ref(ended.get("result_payload"))
     if tool.get("status") == "failed" and ended.get("status") == "failed":
+        guardian_limit = (
+            isinstance(result, dict)
+            and isinstance(result.get("error"), str)
+            and _PRE_RUNTIME_GUARDIAN_LIMIT_ERROR.search(result["error"])
+            is not None
+        )
         if (
             not isinstance(result, dict)
             or set(result) != {"type", "error"}
             or result.get("type") != "error"
             or not isinstance(result.get("error"), str)
-            or _PRE_RUNTIME_GUARDIAN_LIMIT_ERROR.search(result["error"]) is None
+            or (
+                _PRE_RUNTIME_GUARDIAN_LIMIT_ERROR.search(result["error"]) is None
+                and _PRE_RUNTIME_EXEC_REJECTION_ERROR.fullmatch(result["error"])
+                is None
+            )
         ):
             raise HarnessObservationError(
-                "missing command runtime is not a typed Guardian limit"
+                "missing command runtime is not a typed pre-runtime rejection"
             )
         return (
             {
@@ -1260,6 +1394,7 @@ def _pre_runtime_exec_aggregate(
             },
             identity,
             0,
+            guardian_limit,
         )
     if tool.get("status") != "completed" or ended.get("status") != "completed":
         raise HarnessObservationError("missing command runtime is not a pre-runtime denial")
@@ -1312,6 +1447,7 @@ def _pre_runtime_exec_aggregate(
         },
         identity,
         render["source_text_bytes"],
+        False,
     )
 
 

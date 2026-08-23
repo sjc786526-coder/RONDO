@@ -25,6 +25,16 @@ GUARDIAN_LIMIT_ERROR = (
     "exec_command failed with status 409; error code "
     "guardian_logical_request_limit_exceeded"
 )
+GUARDIAN_REJECTION_ERROR = (
+    "exec_command failed for `/usr/bin/bash -lc 'dangerous command'`: "
+    'CreateProcess { message: "Rejected(\\"This action was rejected due to '
+    'unacceptable risk.\\\\nReason: synthetic rejection.\\\\nThe agent must not '
+    "attempt to achieve the same outcome via workaround, indirect execution, or "
+    "policy circumvention. Proceed only with a materially safer alternative, or if "
+    "the user explicitly approves the action after being informed of the risk. "
+    'Otherwise, stop and request user input.\\")" }'
+)
+UNKNOWN_PROCESS_ERROR = "write_stdin failed: Unknown process id 9"
 
 
 def _observation() -> dict[str, object]:
@@ -500,6 +510,57 @@ def _make_pre_runtime_guardian_limit(
     )
 
 
+def _make_pre_runtime_unknown_write_stdin(
+    bundle: Path,
+    *,
+    tool_index: int = 1,
+    process_id: int = 9,
+    error: str = UNKNOWN_PROCESS_ERROR,
+) -> None:
+    """Convert one missing exec runtime to an exact failed session lookup."""
+
+    _make_pre_runtime_guardian_limit(bundle, tool_index=tool_index)
+    tool_id = f"tool-{tool_index}"
+    events = [
+        json.loads(line)
+        for line in (bundle / "trace.jsonl").read_text("utf-8").splitlines()
+    ]
+    started = next(
+        event
+        for event in events
+        if event["payload"]["type"] == "tool_call_started"
+        and event["payload"]["tool_call_id"] == tool_id
+    )
+    started["payload"]["kind"] = {"type": "write_stdin"}
+    invocation_path = bundle / started["payload"]["invocation_payload"]["path"]
+    invocation = json.loads(invocation_path.read_text("utf-8"))
+    invocation["tool_name"] = "write_stdin"
+    invocation["payload"]["arguments"] = json.dumps(
+        {
+            "session_id": process_id,
+            "chars": "",
+            "yield_time_ms": 30_000,
+            "max_output_tokens": 20_000,
+        },
+        separators=(",", ":"),
+    )
+    invocation_path.write_text(json.dumps(invocation), encoding="utf-8")
+    ended = next(
+        event
+        for event in events
+        if event["payload"]["type"] == "tool_call_ended"
+        and event["payload"]["tool_call_id"] == tool_id
+    )
+    result_path = bundle / ended["payload"]["result_payload"]["path"]
+    result_path.write_text(
+        json.dumps({"type": "error", "error": error}), encoding="utf-8"
+    )
+    (bundle / "trace.jsonl").write_text(
+        "".join(json.dumps(event) + "\n" for event in events),
+        encoding="utf-8",
+    )
+
+
 def _make_local_guardian_limit_inference(
     bundle: Path,
     *,
@@ -840,6 +901,101 @@ class HarnessObservationTests(unittest.TestCase):
         self.assertEqual(observation["tools"]["command_output_bytes"], 0)
         self.assertEqual(observation["tools"]["max_command_output_bytes"], 0)
         self.assertNotIn(GUARDIAN_LIMIT_ERROR, encoded)
+
+    def test_pre_runtime_guardian_rejection_is_a_zero_output_failed_command(self) -> None:
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            trace_root = root / "trace-root"
+            trace_root.mkdir()
+            bundle = _write_bundle(
+                trace_root / "exec",
+                commands=((COMMAND_BODY, 128, RAW_PATH_BODY),),
+                pre_runtime_denied_command_index=1,
+            )
+            _make_pre_runtime_guardian_limit(
+                bundle, error=GUARDIAN_REJECTION_ERROR
+            )
+            metadata = root / "api-metadata.json"
+            _write_metadata(metadata, "main")
+
+            observation = project_task_observation(trace_root, metadata)
+
+        encoded = json.dumps(observation, sort_keys=True)
+        self.assertEqual(observation["tools"]["command"], 1)
+        self.assertEqual(observation["tools"]["command_output_bytes"], 0)
+        self.assertEqual(observation["tools"]["max_command_output_bytes"], 0)
+        self.assertNotIn("synthetic rejection", encoded)
+
+    def test_pre_runtime_guardian_rejection_is_not_a_guardian_limit(self) -> None:
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            trace_root = root / "trace-root"
+            trace_root.mkdir()
+            bundle = _write_bundle(
+                trace_root / "exec",
+                commands=((COMMAND_BODY, 128, RAW_PATH_BODY),),
+                pre_runtime_denied_command_index=1,
+            )
+            _make_pre_runtime_guardian_limit(
+                bundle, error=GUARDIAN_REJECTION_ERROR
+            )
+            _append_linked_local_inference_failure(bundle)
+            metadata = root / "api-metadata.json"
+            _write_metadata(metadata, "main")
+
+            with self.assertRaisesRegex(
+                HarnessObservationError, "populations disagree"
+            ):
+                project_task_observation(trace_root, metadata)
+
+    def test_pre_runtime_unknown_write_stdin_is_a_zero_output_failed_poll(self) -> None:
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            trace_root = root / "trace-root"
+            trace_root.mkdir()
+            bundle = _write_bundle(
+                trace_root / "exec",
+                commands=((COMMAND_BODY, 128, RAW_PATH_BODY),),
+                pre_runtime_denied_command_index=1,
+            )
+            _make_pre_runtime_unknown_write_stdin(bundle)
+            metadata = root / "api-metadata.json"
+            _write_metadata(metadata, "main")
+
+            observation = project_task_observation(trace_root, metadata)
+
+        encoded = json.dumps(observation, sort_keys=True)
+        self.assertEqual(observation["tools"]["command"], 1)
+        self.assertEqual(observation["tools"]["command_output_bytes"], 0)
+        self.assertEqual(observation["tools"]["max_command_output_bytes"], 0)
+        self.assertEqual(observation["tools"]["repeated_exact_commands"], 0)
+        self.assertNotIn(UNKNOWN_PROCESS_ERROR, encoded)
+
+    def test_pre_runtime_unknown_write_stdin_binds_the_requested_process(self) -> None:
+        cases = (
+            (10, UNKNOWN_PROCESS_ERROR),
+            (9, "write_stdin failed: stdin is closed"),
+        )
+        for process_id, error in cases:
+            with self.subTest(process_id=process_id, error=error), TemporaryDirectory() as raw:
+                root = Path(raw)
+                trace_root = root / "trace-root"
+                trace_root.mkdir()
+                bundle = _write_bundle(
+                    trace_root / "exec",
+                    commands=((COMMAND_BODY, 128, RAW_PATH_BODY),),
+                    pre_runtime_denied_command_index=1,
+                )
+                _make_pre_runtime_unknown_write_stdin(
+                    bundle, process_id=process_id, error=error
+                )
+                metadata = root / "api-metadata.json"
+                _write_metadata(metadata, "main")
+
+                with self.assertRaisesRegex(
+                    HarnessObservationError, "typed missing-process"
+                ):
+                    project_task_observation(trace_root, metadata)
 
     def test_pre_runtime_guardian_limit_participates_in_failure_repeat(self) -> None:
         with TemporaryDirectory() as raw:

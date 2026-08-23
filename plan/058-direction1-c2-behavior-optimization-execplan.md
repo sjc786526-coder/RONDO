@@ -286,31 +286,39 @@
 
 ### 当前工作
 
-用户于 2026-08-23 要求保存可恢复现场并安全中断。正式冻结源码已提交为 clean commit
-`9bdf51f516df46eb613810ef86e5a4cfb5683875`；legacy musl 重建在最终链接阶段收到人工 `SIGINT`，共享 watchdog
-已停止整个 scope 并记录 `wrapper_status=signal_INT`、`final_rc=130`，没有残留 Cargo/rustc/lock 进程。约
-`7.18GB` 的 Plan 058 独占增量 target 保留；尚未 prepare/publish 新 binary/runtime，也未创建下一 formal identity
-或发送新的 API 请求。该 target 精确绑定 `9bdf51f`，随后新增的只有本中断交接 plan/log；正式 identity 仍要求 binary
-source commit 与初始化 HEAD 精确相同。因此恢复时以届时最终 HEAD 新建 target 和 metrics root 后重建最稳妥；旧 target
-与旧 metrics 只保留为中断现场，不得冒充成功 build proof。
+中断后已把仅含相同 tracked source 的增量 target 迁移到 clean commit
+`c89013bb0119d658ac01c485acfcf3af1b1b5610`，并经共享 lock/watchdog 完成 legacy 重建；随后在 detached source 下
+prepare/verify legacy、companion、既有 bwrap 与 runtime manifest，全部通过。legacy/companion/bwrap SHA-256 分别为
+`11e8687fc7eee77610e42b046d928dc2004ef06edec347ee4473e070037b6bad`、
+`b642f82b0346f19c4d19b1b27ddb440f153c6ff70ea24a1c6de5bfc9c3484f97`、
+`77360cb751ccedc5971391444ac86a8a33c15b04d6b4a6fe45f5d25496e62c4c`；runtime manifest SHA-256 为
+`ebe7e255df5992500fe4694cd926913c89f49d72f24f5ced77b0e495f99e0a86`。一次在 attached source 上 prepare 被正确
+拒绝为 `RONDO measurement source must be detached`，没有 Docker/API，证据保留后按合同从 detached source 重做。
 
-formal-v1 已因本地 runner 缺陷作废并关闭；旧 formal 的 7 个完整槽只作诊断历史。Guardian-limit 后继续 verifier、
-真实 exit receipt、非 `/tmp` CODEX_HOME 与 typed pre-runtime failure 投影已全部窄修。diagnostic-v1 完成绝对槽 8–17
-的 10 条完整链路，并在槽 18 暴露 projector 故障后作废；修改后的真实槽 18 私有 trace 投影与槽 8–17 十条 source
-revalidation 通过。全新 diagnostic-v2 只跑 18–20，零 API preflight `3/3`、完整 source-validated result `3/3`、
-task pass `3/3`、raw/refined C2 `0/0`，结算 24 个可靠 attempts、`0.484984 USD`；Docker/VHDX 增长 `0`。由此
-8–20 共 13 个 commissioning 槽已逐项打通，Plan 058 累计费用 `6.533427 USD`、reserved `0`。新 formal identity
-已在既有 Plan 058 identity 层显式冻结 `8,18,1..7,9..17,19,20`，20 个 slot 唯一且 logical run ID 按实际执行
-次序连续；旧 formal-v1 仅以其 campaign ID + lock SHA 保留 canonical 顺序只读兼容。相关 Python 回归 `174/174`
-通过。当前进入 clean source 提交、重建和正式冻结阶段。
+`plan058-direction1-c2-formal-v2` 冻结顺序 `8,18,1..7,9..17,19,20` 后，十题零 API preflight `10/10` 通过。
+首个付费 canary（绝对槽 8）完整执行 agent、Harbor、verifier、预算和清理，reward `1`；但 projector 未识别进程已
+结束后的类型化 `write_stdin failed: Unknown process id 9`，并在同一 trace 中暴露第二个潜在缺口：固定 Guardian
+安全拒绝发生在 `exec_command` native runtime 创建前。两者均为真实工具失败终态，不是 transport、上游或有效任务
+失败。formal-v2 已按本地设施故障永久作废并 body-free 发布，正式逻辑结果 `0/20`；实际结算 20 个可靠 attempts
+（18 main、2 Guardian）、`0.818354 USD`，不得把错误载荷中的 `paid_requests_sent=0` 误读为零 API。Plan 058
+累计费用为 `7.351781 USD`、reserved `0`，剩余 `42.648219 USD`。
+
+projector 已窄修并通过真实 formal-v2 私有 trace 重投影：missing-process `write_stdin` 不补造 command/cwd/exit，固定
+Guardian 拒绝保留 failed/zero-output 且不冒充本地 409 logical-limit；其他 missing-runtime 继续 fail-closed。body-free
+投影为 20 responses（18 main、2 Guardian）、17 tools、13 command tools、1 次 exact repeat、1 次
+repeated-after-failure。相关 Python 定向回归 `368/368`、compile 与 diff check 通过。当前按局部 commissioning 硬合同，
+只为受影响的绝对槽 8 建立全新 diagnostic identity；打通后提交、重建/复验新 runtime，再建立全新 formal identity
+完整运行 20/20，不重跑 9–20 的脏版本，也不拼接 formal-v2 数据。
 
 ### 本任务剩余步骤
 
-1. Phase C 冻结：提交已测试的 formal 20 槽唯一执行顺序，从该 clean source 重新构建/复验 binary/manifest，冻结
-   正式配置；不把任何 diagnostic 数据放入正式分母。
-2. Phase D：以全新干净 identity 按 `8 → 18 → 1–7 → 9–17 → 19–20` 从执行位置 1/20 串行完成固定 10 题 ×
+1. 局部 commissioning：以全新 diagnostic identity 只复验 formal-v2 暴露设施缺口的绝对槽 8；有效 task
+   pass/fail 都作为打通，若再有本地设施故障只窄修并重跑该槽。
+2. Phase C 再冻结：提交 projector 修复与 diagnostic 证据，从该 clean source 重新构建/复验 binary/manifest，冻结
+   正式配置；不把任何 diagnostic 或旧 formal 数据放入正式分母。
+3. Phase D：以全新干净 identity 按 `8 → 18 → 1–7 → 9–17 → 19–20` 从执行位置 1/20 串行完成固定 10 题 ×
    2 round 的 20 个唯一正式逻辑结果；不得复用旧 formal 或 diagnostic 结果。
-3. Phase E：比较 raw/refined C2、耗时、任务结果和正确性保护，作出保留/调整/撤销决定，完成文档、精确清理、
+4. Phase E：比较 raw/refined C2、耗时、任务结果和正确性保护，作出保留/调整/撤销决定，完成文档、精确清理、
    聚焦独立验收、整改和工作树提交。
 
 ### 阻塞项
@@ -345,6 +353,11 @@ task pass `3/3`、raw/refined C2 `0/0`，结算 24 个可靠 attempts、`0.48498
   暴露 projector 故障后 v1 作废；projector 修复后 diagnostic-v2 只复验 18–20，preflight/result/source validation
   均 `3/3`、3 pass/0 fail、raw/refined C2 `0/0`。v2 24 个可靠 attempts、`0.484984 USD`，Docker/VHDX 增长 `0`，
   Windows C: 最终余量 `190665900032` bytes；累计 task budget `6.533427 USD`、reserved `0`。
+- formal-v2：preflight `10/10`；绝对槽 8 的完整真实执行因 projector 不识别 typed missing-process `write_stdin`
+  而使 campaign 作废，正式结果 `0/20`。20 个可靠 attempts（18 main/2 Guardian）、`0.818354 USD` 已结算，
+  Docker/VHDX 增长 `0`，Windows C: 最终余量 `201807400960` bytes；累计 task budget `7.351781 USD`、reserved
+  `0`。同一 trace 的 missing-process 与固定 Guardian 拒绝现均可诚实投影，定向回归 `368/368` 通过；待新
+  diagnostic 只复验槽 8。
 - 未运行：正式 20-result、正式比较/决策、本地模型、训练、完整数据集、Codex 对照、validation、holdout、CI 或 PR。
 
 ### 主工作区 ignored 资产
@@ -403,3 +416,4 @@ Plan 058 worktree，但执行阶段以下 I/O 会由 worktree 中的受控命令
 | 020 | formal-v1 永久作废；修复 runner 后用 commissioning/diagnostic sweep 只覆盖旧 formal 第 8–20 槽（13 槽），13/13 完整后统一冻结，再以全新 formal 从 1/20 只跑一次 | commissioning-v2 的 7 main/0 Guardian 只证明普通路径；commissioning-v1 已暴露的 Guardian-limit 分支被错误绕过，formal-v1 又确认 adapter 跳过 verifier 与 `/tmp` CODEX_HOME helper 两项本地设施缺陷。剩余槽先扫尾可尽早暴露问题且避免反复重跑前 7 题 | commissioning、runner、冻结、正式分母 | 用户确认，硬合同 |
 | 021 | 首轮剩余槽覆盖完成后，若新 formal 暴露本地设施故障，修复后的 commissioning/diagnostic 只复验受影响或未打通题目；重新冻结后的 formal 仍从 1/20 完整重跑 | “局部重跑”描述的是脏版本/修复版重新打通，不是缩短正式分母；已有完整且未受修复影响的题目不做无意义重复，正式结果仍保持同一冻结版本和全新 identity | commissioning、修复、正式重启 | 用户确认，硬合同 |
 | 022 | 下一 formal 在 identity 创建前冻结执行顺序为 `8 → 18 → 1–7 → 9–17 → 19–20` | 绝对槽 8 是已知最高风险 canary，18 次之；二者在同一正式 campaign 内优先暴露问题。18 不在后续区间重复，仍是 20 个唯一结果、无额外试跑或旧结果拼接 | formal identity、执行顺序 | 用户建议，已采纳 |
+| 023 | formal-v2 因 typed missing-process `write_stdin` 的本地投影缺口永久作废；结算真实 20 attempts 后，窄修 projector 并只以新 diagnostic 复验槽 8，再重新冻结全新完整 formal | 首槽的 agent/verifier 有真实终态但 projector fail-closed，不能当有效 task 结果，也不能把错误载荷中的零逻辑发布误当零 API；局部 commissioning 与新 20/20 formal 分别遵守 021 的两层边界 | projector、预算、diagnostic、正式重启 | 已采纳，硬合同 |
