@@ -327,6 +327,12 @@ responses、12 tools、11 command tools、1 次参数修正后的合理 exact re
 当前将以新 diagnostic-v5 仍只复验槽 8；打通后提交、重建/复验新 runtime，再建立全新 formal identity 完整运行
 20/20，不重跑 9–20 的脏版本，也不拼接任何旧数据。
 
+`plan058-direction1-c2-diagnostic-v5` 已完成 preflight/result/source revalidation/finalize `1/1`：task pass/reward
+`1`，raw/refined C2 `0/0`，无害四门全通过；14 个可靠 attempts（12 main、2 Guardian）、`0.378984 USD`，无
+transport retry。Plan 058 累计费用 `8.776824 USD`、reserved `0`，Docker/VHDX 增长 `0`。受 formal-v2 影响的
+槽 8 局部 commissioning 至此完整打通。当前进入 clean source 提交与正式 runtime 重建；diagnostic-v5 不进入正式
+分母，9–20 不作脏版本重跑。
+
 ### 本任务剩余步骤
 
 1. 局部 commissioning：以全新 diagnostic identity 只复验 formal-v2 暴露设施缺口的绝对槽 8；有效 task
@@ -384,6 +390,10 @@ responses、12 tools、11 command tools、1 次参数修正后的合理 exact re
   而在 record 前作废。14 个可靠 attempts（13 main/1 Guardian）、`0.491396 USD` 已结算，Docker/VHDX 增长 `0`，
   Windows C: 最终余量 `202330550272` bytes；累计 task budget `8.397840 USD`、reserved `0`。严格 matcher 与真实
   trace 投影已通过，待 diagnostic-v5 只复验槽 8。
+- diagnostic-v5：preflight/result/source validation/finalize 均 `1/1`，task pass/reward `1`、raw/refined C2
+  `0/0`、无害四门通过；14 个可靠 attempts（12 main/2 Guardian）、`0.378984 USD`，Docker/VHDX 增长 `0`，
+  Windows C: 最终余量 `202189389824` bytes。累计 task budget `8.776824 USD`、reserved `0`；局部
+  commissioning 已闭环，待提交后重建正式 runtime。
 - 未运行：正式 20-result、正式比较/决策、本地模型、训练、完整数据集、Codex 对照、validation、holdout、CI 或 PR。
 
 ### 主工作区 ignored 资产
