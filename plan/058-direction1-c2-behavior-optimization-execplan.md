@@ -235,6 +235,10 @@
 - 已完成实现侧定向门禁：Rust 4 个相关 tool-spec/feature 测试通过；Python 相关 budget、Terminal-Bench 与 Plan 058
   orchestration 共 `126` 项通过；`just fix -p codex-core -p codex-features`、格式检查、Python compile、diff check 和
   零 API `eval-plan058 status` 均通过。恢复审查另补了退役 identity 不可重激活、冻结输入先验证后改指针的回归。
+- 发生一次跨任务共享资源互斥事件：`23567b6` 的两段 Cargo 构建均经 canonical build lock/watchdog 成功，但并行
+  Plan 054 模型校准报告在其生命周期内检测到外部 Cargo 并 fail-closed 终止。时间高度重合，按本次构建高概率触发
+  处理；Plan 058 不接受该 build chain 为合规 commissioning 证据，未初始化 campaign、Docker 或 API。事件、判断
+  与整改记录在 `agent_log/2026-08-22-plan058-shared-resource-collision.md`。
 - 本 ExecPlan 已按用户要求保留必要行为、实验、预算和资源边界，把具体检测信号、模块、反馈形式、状态所有者、
   runner 拆分和数值收益门留给执行者基于 Phase A 证据自主冻结。
 - 规划阶段没有运行 Docker、Cargo、真实 API、本地模型、训练或测评，没有创建/修改 ignored campaign、budget、
@@ -242,8 +246,10 @@
 
 ### 当前工作
 
-Phase A、Phase B 已完成；正在 Phase C 提交实现快照、从干净 detached source 构建并冻结 commissioning runtime，
-然后执行 Docker/Harbor 零 API 预检与一个完整真实 commissioning。尚未发出 Plan 058 真实 API 请求。
+Phase A、Phase B 已完成；Phase C 首次 `23567b6` build chain 因与 Plan 054 真实模型生命周期发生共享资源重叠而
+不予接受。当前等待 Plan 054 v2 校准终态与资源槽真正释放；随后精确清理本次可再生成 target/artifact，从新的干净
+detached source 完整重建 commissioning runtime，再进入 Docker/Harbor 零 API 预检。尚未初始化 Plan 058 campaign
+或发出真实 API 请求。
 
 ### 本任务剩余步骤
 
@@ -265,7 +271,11 @@ Phase A、Phase B 已完成；正在 Phase C 提交实现快照、从干净 deta
 - 实现门禁：Rust 定向 `4/4`、Python 定向 `126/126` 通过；共享看门狗记录 Rust 测试 peak memory
   `6,999,011,328` bytes、swap `0`、Windows C 可用空间前后 `192,379,305,984` bytes，资源硬门未触发。测试产生的
   Plan 058 worktree 独占 Cargo target 已精确删除，未动共享 cache/其他任务资产。
-- Git：Plan 058 worktree 从 clean current `main` 创建；Phase A 与实现尚未提交、合并、推送或归档。
+- Git：Plan 058 worktree 从 clean current `main` 创建；Phase A、实现快照与本事件记录只提交在 Plan 058 本地分支，
+  未合并、推送或归档。
+- 失效构建：`23567b6` legacy/companion 本侧均构建成功，但因已确认的跨任务互斥事实不作为 commissioning 验收；
+  build metrics 和 legacy artifact 暂留，待 Plan 054 终态后 exact cleanup。该事件没有 Plan 058 campaign、Docker
+  或 API 成本。
 - 未运行：Docker、Harbor preflight、真实 API、Terminal-Bench、本地模型、训练、完整数据集、
   CI 或 PR。
 
@@ -319,3 +329,4 @@ Plan 058 worktree，但执行阶段以下 I/O 会由 worktree 中的受控命令
 | 014 | 单一变量采用默认关闭、无状态的 `exec_command` tool-spec guidance，不增加 runtime suppression 或跨调用状态 | 模型在作出第三次调用前已拥有历史与状态语义；post-execution nudge 无法减少当前孤立有害 occurrence，复杂 runtime detector 反而会扩大误判与生命周期面 | 产品、配置、回归 | 已采纳 |
 | 015 | Plan 058 在既有低层原语上新增专用 campaign state/CLI，冻结 7.554 USD 的可靠 usage 最坏请求 reservation；未知 usage 仍按 1 USD/上游 attempt 结算 | Plan 056 orchestration 的固定 identity 与重试合同不适合 058，但通用 runner/预算/投影均可直接复用；请求前按冻结价格与 usage envelope 预留才能保证 50 USD 硬上限 | eval、预算、恢复 | 已采纳 |
 | 016 | 初始化恢复先直接验证冻结 lock、manifest 与全部调用输入；仅未越过初始化窗口的 identity 可修复 pointer/state/budget | 防止错误恢复参数或已退役 campaign 在失败前重绑活动指针、重开预算 | identity、恢复 | 已采纳 |
+| 017 | `23567b6` 构建因与 Plan 054 模型生命周期重叠而失效；保留事件证据，确认 Plan 054 v2 终态后 exact cleanup 并从新提交完整重建 | 本侧虽使用 canonical lock/watchdog，但跨任务互斥事实已被破坏，不能把成功字节冒充合规资源证据；仅瞬时拿到锁不足以证明模型窗口已结束 | 构建、资源、commissioning | 已采纳 |
