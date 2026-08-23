@@ -26,59 +26,59 @@ Within-PASS 软偏好对。任务同时交付轻量 consumer 与不含 validatio
 
 ### 完成/验收标准
 
-- [ ] 在任何数据合成前先形成版本化 coverage/stop lock，冻结来源 allowlist、最低覆盖矩阵、目标量/硬上限/停止条件、split 目标、teacher 角色、
+- [x] 在任何数据合成前先形成版本化 coverage/stop lock，冻结来源 allowlist、最低覆盖矩阵、目标量/硬上限/停止条件、split 目标、teacher 角色、
       分歧处理、dedup/near-duplicate/group 规则以及 C1/C2/C3 数据成员关系。具体数量由执行者依据 live 合同和合理工作量确定，但不得先看
       完整生成结果再反推最低门槛；exact prompt/实现/配置身份在小批 rehearsal 打通后、扩大生成前再冻结。
-- [ ] Scenario、Candidate、Pair 与监督 metadata 的职责清楚：Scenario 表达可合成或可恢复的公共场景蓝图；Candidate 复用并通过
+- [x] Scenario、Candidate、Pair 与监督 metadata 的职责清楚：Scenario 表达可合成或可恢复的公共场景蓝图；Candidate 复用并通过
       `PublicationPacket v1` 验证；Pair 只引用正式 candidate；label、split、defect、pair direction、generator/reviewer/source 等监督和
       生成信息物理隔离，不进入现有 renderer。
-- [ ] 冻结 train、validation、unseen-test 三个非空 split；每个正式 candidate 恰有一个 Binary `PASS/REWRITE`，三个 split 均有两类标签及
+- [x] 冻结 train、validation、unseen-test 三个非空 split；每个正式 candidate 恰有一个 Binary `PASS/REWRITE`，三个 split 均有两类标签及
       data-design lock 声明的最低覆盖。Plan 054 calibration/measurement cohort 只作历史基线、语义锚点或去重参照，不改名、复制为或冒充
       Plan 059 unseen test。
-- [ ] 覆盖矩阵以稀疏而有意义的组合覆盖 new/existing Event × completed/incomplete、五项 hard qualification、明显 PASS/REWRITE、
+- [x] 覆盖矩阵以稀疏而有意义的组合覆盖 new/existing Event × completed/incomplete、五项 hard qualification、明显 PASS/REWRITE、
       near-boundary 与自然 mixed case，并重点补足 `internal_consistency` 精致 hard negative、new/completed 的 useful-state/process-dump/
       scope 边界、threshold-near handoff、continuity 与 Evidence V1 的可用/缺失/陈旧/明确省略对照。
-- [ ] 数据在长度、Root/普通成员角色、正式/口语文风、Unicode 和模板表达上有受控变化；这些变化不改写产品 qualification。完成按 split/label/
+- [x] 数据在长度、Root/普通成员角色、正式/口语文风、Unicode 和模板表达上有受控变化；这些变化不改写产品 qualification。完成按 split/label/
       slice 的轻量聚合检查，没有已知的明显标签、长度、角色、模板或 Evidence 外观捷径；不要求建立因果审计或通用数据质量平台。
-- [ ] Boundary/Q± 的每对端点都先有独立 Binary 判定，`Q+` 为 `PASS`、`Q-` 为 `REWRITE`，只改变一个有声明且经 reviewer 确认的 hard
+- [x] Boundary/Q± 的每对端点都先有独立 Binary 判定，`Q+` 为 `PASS`、`Q-` 为 `REWRITE`，只改变一个有声明且经 reviewer 确认的 hard
       qualification 目标维度；两端最终 continuity omission 和非目标 model-visible context 保持相同。无法可信保持单维差异的候选可保留为
       普通 Binary/mixed case，但不能强行进入原子 pair。
-- [ ] Within-PASS 的两端都先独立满足全部适用 hard qualification，pair 只表达核心语义等价时的克制软偏好及明确方向；不产生
+- [x] Within-PASS 的两端都先独立满足全部适用 hard qualification，pair 只表达核心语义等价时的克制软偏好及明确方向；不产生
       `REWRITE > REWRITE` 排序，两端最终 continuity omission 和非 candidate 公共 context 保持相同，也不让 Within-PASS 数量或训练成员关系
       压过 Binary/Boundary 主体。
-- [ ] 少量真实锚点只取自已完成任务中可可靠恢复的公共场景/公共状态；不把无关完整 transcript、隐藏/private reasoning、raw trace、Fact
+- [x] 少量真实锚点只取自已完成任务中可可靠恢复的公共场景/公共状态；不把无关完整 transcript、隐藏/private reasoning、raw trace、Fact
       observation 正文或私有工具正文直接放入 Scenario、Candidate 或 teacher prompt。所有从同一真实来源派生的变体共享 source group。
-- [ ] teacher generator 与 independent teacher reviewer 保持角色和上下文分离，实际模型/effort/角色和可用的 session/run identity 被记录；
+- [x] teacher generator 与 independent teacher reviewer 保持角色和上下文分离，实际模型/effort/角色和可用的 session/run identity 被记录；
       generator 是直接执行本任务的 GPT-5.6-sol 主会话，reviewer 是未继承其隐藏生成对话的独立 GPT-5.6-sol 子会话。分歧按
       预先冻结规则接受、返修、重生成、降级为 Binary/mixed 或排除，不通过反复询问 reviewer 强行制造一致。
-- [ ] 在大批量合成前，以覆盖主要 schema、pair 和长输入边界的小批次打通 generation → review → finalize/split → exact-tokenizer census →
+- [x] 在大批量合成前，以覆盖主要 schema、pair 和长输入边界的小批次打通 generation → review → finalize/split → exact-tokenizer census →
       consumer/bundle 全链路，并在后续批次间做有代表性的抽样复核。发现系统性 prompt/schema/pair 问题时先停该批次、修复并复验，不等全部合成
       结束后整版报废。
-- [ ] 全链路 rehearsal 打通后才冻结正式实现、prompt 与配置；随后从 clean 状态对全部拟入选 raw candidate 完整运行一次 finalizer、review
+- [x] 全链路 rehearsal 打通后才冻结正式实现、prompt 与配置；随后从 clean 状态对全部拟入选 raw candidate 完整运行一次 finalizer、review
       终态检查、group/split、dedup、token census、freeze 和 consumer，并以该轮作为正式冻结证据。早期有效合成可在最终合同下重校验后保留，
       只有受语义/prompt 变化影响的部分才重生成，不为形式上的“从头跑”浪费已验证教师产物。
-- [ ] grouped + stratified split 在 candidate 接受后按冻结规则完成；同一 scenario/source group、任一 pair、声明的模板近改写和检测出的
+- [x] grouped + stratified split 在 candidate 接受后按冻结规则完成；同一 scenario/source group、任一 pair、声明的模板近改写和检测出的
       near-duplicate component 全部落在同一 split。split 算法、seed/identity、分组输入与结果可复算，train/validation/unseen-test 的 candidate
       和 pair 引用均无交集、无悬空引用。
-- [ ] exact duplicate 和版本化 near-duplicate 检查覆盖三个正式 split、真实 anchor 变体、模板近改写以及 Plan 054 cohort；规则与阈值由
+- [x] exact duplicate 和版本化 near-duplicate 检查覆盖三个正式 split、真实 anchor 变体、模板近改写以及 Plan 054 cohort；规则与阈值由
       data-design lock 冻结并报告聚合结果。自动相似度只作候选筛查，明显语义重复或可疑跨 split 关系仍须处理，不冒充严格语义证明。
-- [ ] 每个正式 packet 通过 Plan 054 v4 的产品机械约束、model-visible allowlist、control-token guard、两条 message render 和 exact tokenizer；
+- [x] 每个正式 packet 通过 Plan 054 v4 的产品机械约束、model-visible allowlist、control-token guard、两条 message render 和 exact tokenizer；
       全量 token census 使用冻结 tokenizer/template/special-token identity，逐行记录最终 `input_ids` 数量与整条 continuity omission，bucket 与
       总数严格对账。candidate 不静默截断，无法在仅整条省略 continuity 后完整落入 16,384 token 的 candidate 不得进入正式数据。
-- [ ] 冻结资产含版本化 schema/contract、三 split 数据、pair 数据、manifest、数据卡、设计锁、prompt/identity 摘要、完整文件 hash、覆盖/
+- [x] 冻结资产含版本化 schema/contract、三 split 数据、pair 数据、manifest、数据卡、设计锁、prompt/identity 摘要、完整文件 hash、覆盖/
       review/split/dedup/token 聚合和必要的可复算命令；最终正文满足 `training/` 的总量与单文件门限。原始生成/复核/返修明细留在任务专用
       ignored 区，不把权重、模型运行产物或私有上下文提交到 Git。
-- [ ] 轻量 consumer 能严格读取 Candidate/Binary/Pair 与 frozen input identity，拒绝 schema/identity/hash/引用/split 漂移，并验证：C1 只消费
+- [x] 轻量 consumer 能严格读取 Candidate/Binary/Pair 与 frozen input identity，拒绝 schema/identity/hash/引用/split 漂移，并验证：C1 只消费
       train Binary；C2 在完整保留 C1 成员的基础上增加 train Boundary/Q±；C3 在完整保留 C2 的基础上增加 train Within-PASS。这里仅定义
       数据成员关系，不定义 loss、batch、optimizer 或训练 recipe。
-- [ ] 生成确定性的 train-only smoke bundle；bundle 只来自 train split，包含足以机械覆盖 C1/C2/C3 输入类型的成员与来源 hash，不包含
+- [x] 生成确定性的 train-only smoke bundle；bundle 只来自 train split，包含足以机械覆盖 C1/C2/C3 输入类型的成员与来源 hash，不包含
       validation 或 unseen-test candidate/packet/pair/label/metadata。轻量消费 smoke 能从 bundle 物化现有两-message 模型输入，但不加载完整模型。
-- [ ] pure/focused tests 覆盖 schema、监督隔离、review 状态、pair 不变量、分组切分、重复/近重复、freeze/hash、C1/C2/C3 成员和 bundle 排除；
+- [x] pure/focused tests 覆盖 schema、监督隔离、review 状态、pair 不变量、分组切分、重复/近重复、freeze/hash、C1/C2/C3 成员和 bundle 排除；
       exact-tokenizer-only 门禁覆盖全部正式 candidate。只运行受影响模块的必要测试，结果明确区分 pure、teacher reference、真实 tokenizer 和
       未运行的模型/训练证据。
-- [ ] 完成一次与 generator/reviewer 均分离的聚焦独立验收，审查数据正确性、split 泄漏、输入隔离、token census、冻结身份和 consumer 合同。
+- [x] 完成一次与 generator/reviewer 均分离的聚焦独立验收，审查数据正确性、split 泄漏、输入隔离、token census、冻结身份和 consumer 合同。
       普通 finding 在 059 范围内修复并重新冻结受影响完整集合；最终给出 M3-B1b 数据 GO/NO-GO，且没有剩余 correctness/functionality finding。
-- [ ] 完成后只精炼更新顶层 WBS 的方向 3 指针、方向 3 子 WBS、本计划状态/决策和一份有实质内容的 Plan 059 `agent_log`。检查 diff、文件体积、敏感/ignored 边界、
+- [x] 完成后只精炼更新顶层 WBS 的方向 3 指针、方向 3 子 WBS、本计划状态/决策和一份有实质内容的 Plan 059 `agent_log`。检查 diff、文件体积、敏感/ignored 边界、
       主工作区与所有 worktree 状态后，只提交 059 worktree 本地分支并保持 clean；不合并、不推送、不归档、不删除 worktree或重命名分支。
 
 ## 2. 范围
@@ -280,14 +280,12 @@ linked worktree 不共享主根的 ignored `eval-data/`，因此下列执行期�
 
 ### 当前工作
 
-- 最终干净上下文审查发现 v2 的 6 个 scope Q- 是唯一的超长 candidate，执行者确认形成跨 split 完美 REWRITE 长度捷径并判定
-  v2 数据 NO-GO。revision v3 的相近/交错 scope pair 长度、exact-token threshold 门禁和 rehearsal-v9 全链路已完成，正在从 clean
-  implementation freeze 执行正式生成、复核和冻结。
+- revision v3 正式数据、完整冻结门禁、最终干净上下文聚焦审查及 staged/敏感/体积/状态检查均已完成；本计划随 059 本地提交冻结，
+  等待用户与计划制定者验收。执行者 provisional 建议不升级为计划制定者最终数据 GO。
 
 ### 本任务剩余步骤
 
-- 完成干净上下文聚焦审查；普通 finding 修复后重新冻结受影响集合并复验。
-- 检查 staged diff、tracked/ignored 资产与 main/059 状态，完成 059 本地分支提交并交回计划制定者。
+- 任务内无剩余实现步骤；计划制定者最终验收、获批主线整合与任何 M3-B1b 授权均在本任务外。
 
 ### 阻塞项
 
@@ -303,7 +301,13 @@ linked worktree 不共享主根的 ignored `eval-data/`，因此下列执行期�
   对 6 个 scope Q- 形成 6/6 REWRITE、0 false positive 的跨 split 捷径；v2 tracked 候选未提交，失败冻结保留为 ignored 修复证据。
 - revision v3 rehearsal-v9 已完成 17/17 candidate、9/9 pair 独立 accept，scope Q+/Q- 字符长度分别为 121/127 与 142/146，
   scope-04 的 Boundary 与 Within-PASS 方向均成立；10,941-token census、text/length shortcut、manifest 和 consumer 门禁通过。
-- 当前数据建议为 NO-GO；revision v3 正式冻结与再次干净上下文审查仍待完成，M3-B1b 尚未解锁。
+- revision v3 `formal-v8` 已从 clean implementation freeze 生成，独立 GPT-5.6-sol reviewer 对 72/72 candidate 与 36/36 pair 全部
+  accept，remaining finding 为 0；正式冻结为 36 scenario group、42/16/14 split、39 PASS / 33 REWRITE、30 Boundary / 6 Within-PASS。
+- 11 条 near-duplicate edge 全部同 scenario，Plan 054 reference match、跨 split label-exclusive 文本 shortcut 与双向 exact-token 长度
+  threshold shortcut 均为 0；72 条 exact-token census 共 53,294 tokens，单条 553–2,753，continuity omission 为 0。
+- 严格 manifest/frozen consumer、C1/C2/C3（42 Binary / +18 Boundary / +3 Within-PASS）、默认 holdout 拒绝、train-only smoke bundle
+  和 44 项 focused Python tests 通过。最终干净上下文预审复算上述数据、语义、输入隔离、split/dedup/token/freeze/consumer 与文档事实后
+  PASS，remaining finding 为 0。执行者 provisional 数据 GO；计划制定者最终验收、主线整合与 M3-B1b 解锁均不在本任务内。
 
 ### 交接边界
 
@@ -336,3 +340,5 @@ linked worktree 不共享主根的 ignored `eval-data/`，因此下列执行期�
 | 014 | v1 的固定 Q-/Within-PASS 文本 shortcut 判定数据 NO-GO；revision v2 用逐场景显式文本和跨 split label-exclusive char-4-gram 门禁替代 | 防止未来 validation/unseen 指标只复现标签模板 | 数据 revision、shortcut、split | 已执行 |
 | 015 | formal-v5 teacher finding 的 6 个 continuity 与 5 个 scope Q- 只做局部语义返修；rehearsal-v6 验证目标维度后，formal-v6 对 72/36 全量重审 | 保持 hard negative 与 pair 原子性，不把软质量差异冒充 qualification failure | teacher review、pair、freeze | 已执行 |
 | 016 | v2 的 scope Q- 超长捷径判定数据 NO-GO；revision v3 使 scope Q+/Q- exact-token 长度相近且交错，并新增双向 exact-token threshold 门禁；scope-04 soft endpoint 保留相关重复以恢复可信软方向 | 长度不是 qualification，正式 split 不能让极端长度完美预测标签，Within-PASS 方向必须真实 | 数据 revision、token census、shortcut、pair | 已执行 |
+| 017 | revision v3 以 formal-v8 全量独立复核和同内容双物化作为正式冻结证据；失败 v1/v2 只保留 ignored 修复证据，不进入 tracked training release | 正式版本必须绑定已修复语义、clean generation identity、全量 teacher 终态与 exact-token/consumer 门禁 | review、freeze、training handoff | 已执行 |
+| 018 | 最终干净上下文预审独立复算 v2 finding closure 与 v3 全链路后 PASS，remaining finding 为 0；仍只给执行者 provisional 数据 GO | 提前关闭普通 correctness finding，同时保留计划制定者最终验收和 M3-B1b 解锁边界 | final review、handoff | 已执行 |

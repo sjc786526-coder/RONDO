@@ -1,7 +1,7 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
 最后更新：2026-08-23 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
-状态：**第一期、第二期、M3-A1 与 M3-A2 已完成；Plan 055 / M3-B2a 与 Plan 057 / M3-B2b 已主线整合；Plan 059 / M3-B1a 正在执行数据 revision v3**
+状态：**第一期、第二期、M3-A1 与 M3-A2 已完成；Plan 055 / M3-B2a 与 Plan 057 / M3-B2b 已主线整合；Plan 059 / M3-B1a revision v3 已在 059 worktree 正式冻结并通过独立预审**
 
 ## 当前定位
 
@@ -107,12 +107,13 @@ M3-C1 继续等待 M3-B1c 提供至少一个训练候选。
 **宏观验收**：数据覆盖核心质量边界，没有明显模板、标签或近重复捷径；训练输入规模、split 和各阶段监督范围明确，能够独立
 交给 M3-B1b，而不需要在付费 smoke 中继续改数据合同。
 
-**当前状态**：Plan 059 的 v1 因跨 split 固定 Q-/Within-PASS 文本可完美预测 Binary label 而判定数据 NO-GO。revision v2 关闭文本
-shortcut 后，最终干净审查又发现 6 个 scope Q- 是唯一超过 80 candidate tokens 的样本，形成跨三个 split 的完美 REWRITE 长度捷径，
-故 v2 同样判定数据 NO-GO。revision v3 已让 scope Q+/Q- 使用相近且交错的 exact-token candidate 长度，只以相关公共状态与无关过程淹没
-区分，并新增支持数至少 6、跨至少两个 split 的 exact-token at-most/at-least threshold fail-closed 门禁；rehearsal-v9 已完成 17/17
-candidate、9/9 pair 独立 accept，含 scope-04 Boundary/Within-PASS 局部返修和全链路 finalization。正式生成、复核与冻结仍待执行，
-M3-B1b 未解锁。
+**当前状态**：Plan 059 的 v1 固定文本 shortcut 与 v2 scope Q- 长度 shortcut 均判定数据 NO-GO。revision v3 已在 059 worktree 正式冻结：
+36 scenario group、72 candidate（train / validation / unseen-test 为 42/16/14，39 PASS / 33 REWRITE）、30 Boundary 与 6 Within-PASS；
+C1/C2/C3 的 train 成员分别为 42 Binary、再加 18 Boundary、再加 3 Within-PASS。独立 teacher 对 72/72 candidate 与 36/36 pair 全部
+accept，scope-04 两种 pair 方向成立；11 条 near-duplicate edge 全部留在同 scenario，Plan 054 reference match、跨 split 文本 shortcut 与
+exact-token 长度 threshold shortcut 均为 0。全量 exact-tokenizer census 为 53,294 tokens，单条 553–2,753，continuity omission 为 0；
+manifest、严格 frozen consumer、默认 holdout 拒绝与 train-only smoke bundle 均通过。最终干净上下文独立预审 PASS、remaining finding
+为 0；执行者 provisional 数据 GO 尚待计划制定者验收与获批合入 main。这不是训练或模型质量证据，M3-B1b 仍未解锁。
 
 #### M3-B1b：H100 训练资格 smoke（独立 go/no-go 门）
 
