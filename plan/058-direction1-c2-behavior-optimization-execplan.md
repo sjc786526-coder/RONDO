@@ -425,6 +425,21 @@ logical review，并把终态证据绑定到每组末次请求；不改变 Guard
 Python 回归 `105/105` 通过，formal-v5 第 4 槽真实私有工件离线重验证为 `completed`/reward `1`、3 requests、
 2 reviews、2 evidence、binding valid。按硬合同不复活 v5；下一步仅以新 diagnostic identity 复验绝对槽 4。
 
+从 clean `199849b7ea0e6746e7ae8be0c4530a8c19b9a996` 完整重建 diagnostic-v8 legacy/companion，Cargo 分别
+`19m53s`/`16m52s`，watchdog 均 `status=0`、`stop=none`、swap peak `0`；项目 peak
+`170099150848` bytes，未达到 180 GB 告警，无外部 Cargo。prepare/verify legacy、companion、bwrap、runtime
+全部通过，CLI/host/bwrap SHA-256 分别为
+`453858a5230d0b3a7015a9df8a364832293b07202f7691f708040f5b7f1621dd`、
+`d776884488196215bf391a447eb6a037d590f2ea5454b845ddafdfa9de1668a2`、
+`77360cb751ccedc5971391444ac86a8a33c15b04d6b4a6fe45f5d25496e62c4c`；runtime manifest SHA-256 为
+`09fabd2a656c6286faa5d6299249f9b94b471680cc37b643baa6120a9d3218bd`。
+
+随后 diagnostic-v8 的首次 initialize 在 Docker/API/campaign identity 前被本地 range contract 拒绝：设施仍把
+diagnostic 绝对槽硬编码为初始扫尾范围 `8..20`，未落实决策 021 对后续 formal 故障“只复验实际问题题目”的要求。
+确认活动指针仍为空、费用仍为 `15.158073 USD` 后，已窄修为允许同一冻结 20 槽中的任意有界闭区间 `1..20`；
+formal 仍必须完整 20/20，初始 sweep 历史不变。第 4 槽与越界/倒序回归补齐，相关 Python 回归 `106/106` 通过。
+本次为零 API 本地设施失败，不创建或复活 identity；从新 clean commit 重冻 runtime 后再初始化 diagnostic-v8。
+
 ### 本任务剩余步骤
 
 1. Phase C/D 局部复验与再冻结：只为 formal-v5 受影响的绝对槽 4 建立 diagnostic identity；打通后提交并从新 clean
@@ -572,3 +587,4 @@ Plan 058 worktree，但执行阶段以下 I/O 会由 worktree 中的受控命令
 | 029 | runtime publication 必须以绝对路径调用 canonical build wrapper，并让 JSON/manifest 参数在调用前完成绑定；失败 proof 与成功 proof 使用不同 metrics identity | 相对 wrapper 不满足 live parent-chain proof；同行临时赋值不能供同一简单命令的参数展开。两次 fail-closed 均应显式保留，不能静默吞掉或混入成功证明 | BinaryManifest、build proof、日志 | 已采纳 |
 | 030 | 若项目容量达到限制，只允许在 exact ownership 核对后清理 Plan 058 工作树独占 target/二进制 | 为长时运行提供受控容量恢复，同时保护 Plan 056、共享缓存和其他并行工作树 | 资源、精确清理 | 用户授权，硬边界 |
 | 031 | formal-v5 因把 Guardian 中间 API turn 误当独立终态 review 而永久作废；raw 请求仍按 3 次计费/限额，证据只绑定每个连续 Guardian 组的末次请求，并只以新 diagnostic 复验绝对槽 4 | fix-git 的运行链实际 completed/reward 1；3 个 Guardian 请求组成 2 个 review 并产生 2 份终态证据。请求数与 review 数职责不同，强行一一对应会把有效结果误判为设施故障；按 021 不重复已打通的其他题目 | Guardian evidence、结果发布、diagnostic、正式重启 | 已采纳，硬合同 |
+| 032 | diagnostic range 从旧扫尾专用 `8..20` 扩展为冻结正式分母内任意有界闭区间 `1..20`；首次第 4 槽 initialize 失败保持零 API、无 identity | 决策 021 要求后续 formal 的局部修复只复验实际问题题目，旧常量错误地把初始 8–20 sweep 的历史范围固化成永久能力边界；formal 分母与顺序不变 | diagnostic identity、局部 commissioning | 已采纳，硬合同 |

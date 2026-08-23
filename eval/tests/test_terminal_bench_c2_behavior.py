@@ -294,9 +294,29 @@ class C2BehaviorDiagnosticIdentityTests(unittest.TestCase):
         )
         self.assertEqual(identity.preflight_tasks, tasks[4:])
 
+    def test_diagnostic_can_target_a_problem_before_the_initial_sweep_range(self) -> None:
+        tasks = tuple(_task(index) for index in range(1, 11))
+        slots = freeze_diagnostic_slots(
+            tasks,
+            run_id_date="20260823",
+            run_id_sequence_base=580250001,
+            slot_start=4,
+            slot_end=4,
+        )
+
+        self.assertEqual(len(slots), 1)
+        self.assertEqual(
+            (slots[0].round, slots[0].task_index, slots[0].task_id),
+            (1, 4, tasks[3].task_id),
+        )
+        self.assertEqual(
+            slots[0].logical_run_id,
+            "20260823-580250001-tb-rondo-plan058",
+        )
+
     def test_diagnostic_range_rejects_outside_or_reversed_bounds(self) -> None:
         tasks = tuple(_task(index) for index in range(1, 11))
-        for start, end in ((7, 20), (8, 21), (14, 13)):
+        for start, end in ((0, 20), (1, 21), (14, 13)):
             with self.subTest(start=start, end=end), self.assertRaisesRegex(
                 C2BehaviorError, "diagnostic slot range"
             ):
