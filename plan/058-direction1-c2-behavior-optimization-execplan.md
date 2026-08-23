@@ -356,16 +356,20 @@ fail-closed。相关 `33/33` 回归通过，formal-v3 真实 metadata/预算只�
 typed pure transport。下一步只用全新 diagnostic identity 复验受影响槽 8；成功后重新冻结并以全新 formal 完整
 运行 20/20，绝不复活或拼接 v3。
 
+`plan058-direction1-c2-diagnostic-v6` 已完成 preflight/result/source revalidation/finalize `1/1`：槽 8 在第 4 次
+Guardian 本地上限处 agent 非零，但 verifier 完整运行，reward `0`/task fail 作为有效结果保留；raw/refined C2
+`0/0`，无害四门全通过。23 个可靠 attempts（20 main、3 Guardian）、0 transport retry、`0.723168 USD`；累计
+task budget `10.574842 USD`、reserved `0`、剩余 `39.425158 USD`。Docker/VHDX 增长 `0`，Windows C: 最终余量
+`202302005248` bytes。formal-v3 暴露的局部设施缺口至此闭环；下一步从包含 v6 证据的新 clean source 重建并冻结
+全新完整 formal，不复用 diagnostic 结果。
+
 ### 本任务剩余步骤
 
-1. 局部 commissioning：以全新 diagnostic-v6 identity 只复验 formal-v3 暴露 transport 分类缺口的绝对槽 8；
-   有效 task pass/fail 都作为打通，若再遇同类明确上游暂态则在同一 logical slot 直接重试；本地设施故障只窄修并
-   重跑该槽。
-2. Phase C 再冻结：提交 transport 修复与 diagnostic 证据，从该 clean source 重新构建/复验 binary/manifest，冻结
+1. Phase C 再冻结：提交 diagnostic-v6 证据，从该 clean source 重新构建/复验 binary/manifest，冻结
    正式配置；不把任何 diagnostic 或旧 formal 数据放入正式分母。
-3. Phase D：以全新干净 identity 按 `8 → 18 → 1–7 → 9–17 → 19–20` 从执行位置 1/20 串行完成固定 10 题 ×
+2. Phase D：以全新干净 identity 按 `8 → 18 → 1–7 → 9–17 → 19–20` 从执行位置 1/20 串行完成固定 10 题 ×
    2 round 的 20 个唯一正式逻辑结果；不得复用旧 formal 或 diagnostic 结果。
-4. Phase E：比较 raw/refined C2、耗时、任务结果和正确性保护，作出保留/调整/撤销决定，完成文档、精确清理、
+3. Phase E：比较 raw/refined C2、耗时、任务结果和正确性保护，作出保留/调整/撤销决定，完成文档、精确清理、
    聚焦独立验收、整改和工作树提交。
 
 ### 阻塞项
@@ -421,7 +425,11 @@ typed pure transport。下一步只用全新 diagnostic identity 复验受影响
 - formal-v3：新 runtime 与 preflight `10/10` 均通过；首槽第 7 个 main 请求收到类型化上游
   `response.failed/upstream_error`，因本地 transport classifier 缺口作废为 `0/20`，7 attempts、
   `1.074850 USD`。Docker/VHDX 增长 `0`，Windows C: 最终余量 `201641660416` bytes；累计 task budget
-  `9.851674 USD`、reserved `0`。真实 metadata/预算现可窄分类为 pure transport，待 diagnostic-v6 只复验槽 8。
+  `9.851674 USD`、reserved `0`。真实 metadata/预算现可窄分类为 pure transport。
+- diagnostic-v6：preflight/result/source validation/finalize 均 `1/1`；agent 在冻结 Guardian 上限处非零，verifier
+  reward `0`/task fail 作为有效结果，raw/refined C2 `0/0`、无害四门通过。23 attempts（20 main/3 Guardian）、
+  `0.723168 USD`，Docker/VHDX 增长 `0`，Windows C: 最终余量 `202302005248` bytes；累计 task budget
+  `10.574842 USD`、reserved `0`。transport 局部 commissioning 已闭环，待重建正式 runtime。
 - 未运行：可信正式 20-result、正式比较/决策、本地模型、训练、完整数据集、Codex 对照、validation、holdout、CI
   或 PR。
 

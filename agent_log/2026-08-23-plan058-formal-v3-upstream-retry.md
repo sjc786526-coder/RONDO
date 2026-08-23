@@ -21,3 +21,15 @@ Windows C: 最终余量 `201641660416` bytes。
 配额、配置和未知错误仍拒绝重试。相关 unittest `33/33`、compile 与 diff check 通过；formal-v3 的真实 body-free
 metadata/账本可只读重投影为 7 attempts、`1.074850 USD` 的 typed pure transport。下一步只以新 diagnostic-v6
 复验槽 8，再从新 clean source 重建 runtime 与全新 20/20 formal；不复活或拼接 v3。
+
+## diagnostic-v6 complete
+
+`plan058-direction1-c2-diagnostic-v6` 只冻结绝对槽 8，preflight `1/1`；paid attempt 1 完成 agent、Harbor、
+verifier、projector、预算、record、专用 source revalidation、refined 分类和 finalize。agent 在第 4 次 Guardian
+本地上限处非零退出，但 verifier reward `0`/task fail 是有效结果，不重跑；raw/refined C2 均为 `0`，四项无害门
+全通过。
+
+本 identity 结算 23 个可靠 attempts（20 main、3 Guardian）、0 transport retry、`0.723168 USD`；累计 task
+budget `10.574842 USD`、reserved `0`、剩余 `39.425158 USD`。Docker 前后 `11.5GB`，容器/卷/build cache 为 0，
+VHDX 增长 `0`，Windows C: 最终余量 `202302005248` bytes。局部 transport commissioning 已闭环；下一步从包含
+该结果的新 clean source 重建 runtime，并创建全新完整 formal，不复用 diagnostic-v6 结果。
