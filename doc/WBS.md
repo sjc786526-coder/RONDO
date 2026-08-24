@@ -1,6 +1,6 @@
 # RONDO 长程规划（WBS）
 
-最后更新：2026-08-23（Plan 062 实现已提交、等待独立审查；方向 3 下一包为 M3-B1b）
+最后更新：2026-08-23（Plan 062 已通过独立验收；方向 1 当前无 active 工作包；方向 3 下一包为 M3-B1b）
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段指针、跨方向关系、
 稳定工程边界和授权门；已完成成果与验收见 `doc/WBS-COMPLETED.md`，单次任务合同见 `plan/`，执行细节见
@@ -18,7 +18,7 @@
 | 方向 | 当前状态 | 当前规划边界 |
 |---|---|---|
 | 0：量化测评基准 | 既有设施与首次 schema v7 正式 canary 已完成，当前无 active campaign | 保留设施；历史结果见 COMPLETED，新 campaign 须重新立项与授权 |
-| 1：Harness 优化 | **Plan 062 实现已提交，等待独立审查** | 学习教师源码后筛选并自主实现的三项行为保持型热路径优化与轻量测评；不恢复开放式候选探索 |
+| 1：Harness 优化 | **Plan 062 已完成并通过独立验收；当前无 active 工作包** | 保留三项行为保持型热路径优化、轻量测评与既有观测；不恢复开放式候选探索 |
 | 2：本地审批模型 | **已收口，今后不再开启** | 最终结论为“保留为实验”；不改生产默认，不再规划后续工作包 |
 | 3：RONDO Multi | 第一、二期及其收口案例、**三期 M3-A1、M3-A2、M3-B1a、M3-B2a、M3-B2b 已完成** | Plan 059 / M3-B1a revision v7 已完成最终验收与主线整合；M3-B1b 数据前置已解锁，但尚未立项或取得付费执行授权 |
 
@@ -45,8 +45,10 @@
   rollout/CLI/config/app-server 合同，也不恢复 E-A、Terminal-Bench 正式 campaign 或开放式候选探索。
 - clean candidate `22b8766` 已完成 benchmark smoke、定向与 release 回归、3332 项 `codex-core` crate 门禁及
   9-case 正式轻量测评；body-free 聚合见
-  `eval/results/observations/plan062-direction1-teacher-hotpath-optimizations.json`。当前只表示实现已提交，等待 Plan 062
-  审查者独立验收；不自行宣布最终 PASS，合并、推送和归档均未执行。
+  `eval/results/observations/plan062-direction1-teacher-hotpath-optimizations.json`。独立审查复核 live diff、正式 raw、
+  tracked 聚合与窄回归后无剩余 correctness finding，验收通过、任务目标完成；尚未合并、推送或归档。
+- 方向 1 当前不安排下一个优化包。保留现有能力与观测；只有未来 trace 出现高频、跨任务且耗时、分配或正确性影响
+  明显的新瓶颈时，才重新立项，不根据教师候选池继续开放式挖掘。
 
 ### 方向 1：Plan 058 收口事实
 

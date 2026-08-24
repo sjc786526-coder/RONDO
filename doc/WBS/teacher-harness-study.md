@@ -1,6 +1,6 @@
 # 方向 1：Harness 优化
 
-最后更新：2026-08-23 ｜ 状态：**Plan 062 实现已提交、等待独立审查；Plan 058 历史结论保持冻结** ｜
+最后更新：2026-08-23 ｜ 状态：**Plan 062 已完成并通过独立验收；方向 1 当前无 active 工作包** ｜
 源码位置：`mydev/` ｜ Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md`
 
 ## 当前状态
@@ -15,7 +15,8 @@ Plan 062 已在专用 worktree 提交三项学习教师源码后筛选并自主�
 借用式索引与必要时单次删除，模型可见工具规格以不可变共享所有权跨 prompt 复用，unified-exec 快照直接形成连续
 bytes 并在合法 UTF-8 denial 判定中借用视图。无真实 API 的轻量 benchmark 与直接语义等价回归一并提交；本包保持
 `v0.147.0` 基线身份，不改变模型可见语义、工具资格、Guardian、审批或 sandbox，不恢复 E-A、正式
-Terminal-Bench campaign 或开放式候选探索。当前状态是实现已提交，等待独立审查；未合并或推送。
+Terminal-Bench campaign 或开放式候选探索。独立审查未发现剩余 correctness finding，验收通过、任务目标完成；
+尚未合并或推送。方向 1 当前保留能力与观测，不安排下一个优化包。
 
 此前教师 harness 的只读研究 T1—T3 已完成。研究交付
 `doc/research/teacher-harness-performance-candidates.md` 保留为形成时点的证据与候选池；候选进入实现仍必须由
@@ -38,6 +39,8 @@ E-A 轻量离线冻结回放当前不恢复。Plan 052 已确认现有资产、�
   同步热路径，不外推 API 延迟、模型质量、任务成功率或通用 agent 能力。
 - clean candidate 正式轮为 benchmark smoke、定向 48/48、release exact 1/1、parser 4/4、`codex-core`
   3332/3332（8 skipped、2 slow）和正式 benchmark 9/9；所有 Rust 命令均经共享 build lock/watchdog。
+- 独立审查复核三条产品路径、正式 raw/output hash、同 harness 身份与 tracked 重聚合，未发现行为或结果口径 finding；
+  baseline 位于当前分支旁支属于非阻断的长期复现限制，不为此增加 tag、签名链或额外 provenance 设施。
 
 ## Plan 058 结论
 

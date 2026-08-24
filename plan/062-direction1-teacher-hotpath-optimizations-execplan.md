@@ -212,13 +212,11 @@
 
 ### 当前工作
 
-- 实现已提交，等待独立审查。执行者不自行宣布最终 PASS。
+- 独立审查已完成：验收通过、任务目标完成，无剩余 correctness finding。当前只等待用户决定是否进入主线整合。
 
 ### 本任务剩余步骤
 
-1. Plan 062 审查者复核 live diff、语义等价回归、同哈希 baseline/candidate、资源边界和交付记录。
-2. 若审查发现普通窄 finding，在同一授权边界内修复、重新冻结并完整重跑正式轮；原则性变化另行授权。
-3. finding 关闭后由审查者给出 PASS/需整改；合并、推送和分支归档仍由用户另行决定。
+- 任务内无剩余实施或验证步骤。合并、推送和分支归档仍由用户另行决定；方向 1 后续状态以 WBS 为准。
 
 ### 阻塞项
 
@@ -226,8 +224,8 @@
 
 ### 当前验收状态
 
-- `implementation_committed / independent_review_pending`。
-- 正式结果绑定 candidate `22b8766`；尚未经过 Plan 062 审查者的独立验收，不表述为最终 PASS。
+- `accepted / objective_complete / integration_pending`。
+- 正式结果绑定 candidate `22b8766`；独立审查未发现剩余 correctness finding，验收通过。
 - 未运行全 workspace、Bazel、Docker、Terminal-Bench、真实 API、真实本地模型、训练、云任务、CI 或 PR。
 
 ### 主工作区 ignored 资产
@@ -239,9 +237,8 @@
 
 ### 交接边界
 
-- 执行者只负责实现、调试、clean 正式轮、任务内记录和提交 062 worktree；最终独立验收由本计划审查者完成。
-- 当前交付以 `22b8766` 及其后续结果记录提交为基础；方向 1 是否继续安排其他工作只由届时 WBS 和用户决定，
-  不在本计划追加新候选。
+- 执行者已完成实现、调试、clean 正式轮、任务内记录和提交；本计划审查者已完成最终独立验收。
+- 当前交付以 `22b8766` 及其后续结果、审查记录提交为基础；方向 1 当前无 active 工作包，不在本计划追加新候选。
 - 合并、推送、分支重命名/归档必须由用户在独立验收后另行批准。
 
 ## 6. 关键决策记录
@@ -262,3 +259,6 @@
 | 010 | Divan 零分配时省略 allocation block，解析器按零记录并补回归；旧两侧结果作废后以同一新哈希重测 | 保持零分配结果可记录，同时遵守 baseline/candidate 同口径 | eval、结果 | 已落实 |
 | 011 | 工具规格在 router 构造边界转成 `Arc<[ToolSpec]>` 并贯穿 `Prompt`；exec snapshot 直接形成连续 bytes，denial 判定借用 `Cow<str>` | 在当前 ownership 与错误类型边界内消除深拷贝，不改变请求或错误语义 | core | 已落实 |
 | 012 | 只修复正式 crate 门禁暴露的既有窄 fixture：补齐已存在配置字段的 schema snapshot，并以本地 reset server 代替不稳定端口假设 | 让回归在授权网络边界内确定运行，不改变产品语义或基线身份 | 测试 fixture | 已落实 |
+| 013 | 独立审查接受三项优化与当前轻量测评，不重跑完整 crate | live diff、直接回归、正式 JUnit 与 raw 重聚合均未发现 correctness finding，扩大验证收益不足 | 验收、测试 | 审查者已决定 |
+| 014 | baseline 旁支身份作为非阻断复现限制，不增加 tag、签名链或 provenance 平台 | 本次结果已有 clean commit、同 harness 哈希、raw 与 tracked 聚合闭环；保持个人项目测评轻量 | 测评、交付 | 审查者已决定 |
+| 015 | Plan 062 完成后方向 1 回到无 active 工作包，不恢复开放式候选探索 | 三项高性价比优化已完成；后续只在新 trace 出现高频、跨任务、材料影响瓶颈时另行立项 | WBS、方向 1 | 审查者已决定 |
