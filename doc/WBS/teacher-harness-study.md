@@ -1,6 +1,6 @@
 # 方向 1：Harness 优化
 
-最后更新：2026-08-23 ｜ 状态：**Plan 058 已完成、通过外部复验并进入主线；保留默认关闭的 root-only C2 guidance** ｜
+最后更新：2026-08-23 ｜ 状态：**Plan 062 已完成并通过独立验收；方向 1 当前无 active 工作包** ｜
 源码位置：`mydev/` ｜ Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md`
 
 ## 当前状态
@@ -9,8 +9,14 @@
 opt-in、任务级安全离线投影、历史普查器与日期冻结证据继续复用；Plan 058 只新增默认关闭、显式 opt-in 的
 `exec_command` repeat guidance，不改变工具执行资格、Guardian、审批、sandbox 或方向 2/3。外部验收发现普通非 root
 agent 会继承该 feature 后，最终分支已把 recipient 收紧到 root agent，并补 model-visible integration regression；
-外部复验已通过并完成主线整合，feature 保持 UnderDevelopment、默认关闭。当前无 active 方向 1
-工作包；本轮不规划方向 1 后继。
+外部复验已通过并完成主线整合，feature 保持 UnderDevelopment、默认关闭。
+
+Plan 062 已在专用 worktree 提交三项学习教师源码后筛选并自主实现的优化：history orphan normalization 收敛为
+借用式索引与必要时单次删除，模型可见工具规格以不可变共享所有权跨 prompt 复用，unified-exec 快照直接形成连续
+bytes 并在合法 UTF-8 denial 判定中借用视图。无真实 API 的轻量 benchmark 与直接语义等价回归一并提交；本包保持
+`v0.147.0` 基线身份，不改变模型可见语义、工具资格、Guardian、审批或 sandbox，不恢复 E-A、正式
+Terminal-Bench campaign 或开放式候选探索。独立审查未发现剩余 correctness finding，验收通过、任务目标完成；
+尚未合并或推送。方向 1 当前保留能力与观测，不安排下一个优化包。
 
 此前教师 harness 的只读研究 T1—T3 已完成。研究交付
 `doc/research/teacher-harness-performance-candidates.md` 保留为形成时点的证据与候选池；候选进入实现仍必须由
@@ -18,6 +24,23 @@ agent 会继承该 feature 后，最终分支已把 recipient 收紧到 root age
 
 E-A 轻量离线冻结回放当前不恢复。Plan 052 已确认现有资产、原生事实投影和一次有界真实复测足以承接下一步；
 只有未来已经选定的机制确需反复低成本实验时，才重新评估必要的最小 replay 能力。
+
+## Plan 062 当前结果
+
+- clean baseline `d5535fc` 与 clean candidate `22b8766` 使用同一 harness SHA-256
+  `ef8364c8a225226fa1085355ae447f55b9a0aabb3fab6d2f8f264703c77fd5f2`、同一 Divan 0.1.21 workload；两侧
+  `dirty=false`。tracked body-free 聚合见
+  `eval/results/observations/plan062-direction1-teacher-hotpath-optimizations.json`，raw 留在 062 ignored namespace。
+- history 8/32/128-turn case 的 allocation count 从 `11/37/135` 降至 `3/5/7`，allocated bytes 从
+  `860/3650/14750` 降至 `524/2188/8748`；对应 median time 下降约 `37.2%/30.9%/40.5%`。
+- 8/32/64 个工具规格重复共享 case 的 allocation count/bytes 均从 `1296/565200`、`5136/2261000`、
+  `10256/4523000` 降至 `0/0`；4 KiB/256 KiB/1 MiB snapshot 的 allocation count 从 `3/3/4` 降至
+  `1/1/1`，allocated bytes 从 `8240/524300/1572000` 降至 `4096/262100/1048000`。这些结果只解释命名的
+  同步热路径，不外推 API 延迟、模型质量、任务成功率或通用 agent 能力。
+- clean candidate 正式轮为 benchmark smoke、定向 48/48、release exact 1/1、parser 4/4、`codex-core`
+  3332/3332（8 skipped、2 slow）和正式 benchmark 9/9；所有 Rust 命令均经共享 build lock/watchdog。
+- 独立审查复核三条产品路径、正式 raw/output hash、同 harness 身份与 tracked 重聚合，未发现行为或结果口径 finding；
+  baseline 位于当前分支旁支属于非阻断的长期复现限制，不为此增加 tag、签名链或额外 provenance 设施。
 
 ## Plan 058 结论
 

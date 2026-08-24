@@ -70,7 +70,7 @@ struct ToolPlanInputs {
 }
 
 struct ToolPlanProbe {
-    visible_specs: Vec<ToolSpec>,
+    visible_specs: Arc<[ToolSpec]>,
     visible_names: Vec<String>,
     namespace_functions: BTreeMap<String, Vec<String>>,
     registered_names: Vec<String>,

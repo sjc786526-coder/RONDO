@@ -139,6 +139,21 @@ bench *args:
 bench-smoke:
     just bench -- --test
 
+# Plan 062 uses a dedicated Cargo-only Divan target so its lightweight hot-path
+# benchmark does not expand to every workspace benchmark.
+[unix]
+plan062-hotpaths-bench-run *args:
+    {{ watchdog }} cargo bench -p codex-core --bench plan062_hotpaths -- "$@"
+
+plan062-hotpaths-bench-smoke:
+    {{ python }} ../../eval/rondo_eval/plan062_hotpaths.py run smoke --smoke
+
+plan062-hotpaths-bench phase:
+    {{ python }} ../../eval/rondo_eval/plan062_hotpaths.py run "{{ phase }}"
+
+plan062-hotpaths-bench-aggregate baseline candidate output="../../eval/results/observations/plan062-direction1-teacher-hotpath-optimizations.json":
+    {{ python }} ../../eval/rondo_eval/plan062_hotpaths.py aggregate "{{ baseline }}" "{{ candidate }}" "{{ output }}"
+
 # Run Bazel-backed end-to-end macrobenchmarks with optimized binaries.
 bench-e2e:
     # Keep measured binaries comparable to production-style optimized builds.

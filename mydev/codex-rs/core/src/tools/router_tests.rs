@@ -156,6 +156,27 @@ fn test_tool_router(
 }
 
 #[tokio::test]
+async fn model_visible_specs_share_one_immutable_allocation() -> anyhow::Result<()> {
+    let (_, turn) = make_session_and_context().await;
+    let turn = Arc::new(turn);
+    let step_context = StepContext::for_test(Arc::clone(&turn));
+    let router = test_tool_router(
+        step_context.as_ref(),
+        Vec::new(),
+        Vec::new(),
+        &turn.dynamic_tools,
+    );
+
+    let first = router.model_visible_specs();
+    let second = router.model_visible_specs();
+
+    assert!(!first.is_empty());
+    assert!(Arc::ptr_eq(&first, &second));
+    assert_eq!(first.as_ref(), second.as_ref());
+    Ok(())
+}
+
+#[tokio::test]
 async fn parallel_support_does_not_match_namespaced_local_tool_names() -> anyhow::Result<()> {
     let (_, turn) = make_session_and_context().await;
     let turn = Arc::new(turn);
