@@ -30,13 +30,15 @@ minimal handoff。完整路线见
 M4-A 先收敛 Durable Team Session、Session 控制面与可选 writer binding 必须共享的产品和生命周期边界，并决定是否采用
 候选上游窄增量及其条件消费边；之后 S/C 核心与 M4-W0 价值原型有界并行。M4-Z(core) 不被 W 线阻塞，只有 binding GO 后
 才立项正式 W1，其 handoff 范围服从价值门证据。
-Durable Team Session 的 V1 单写者直接复用 Root Thread 原生 active-writer ownership；其他客户端可只读，child Thread writer
-不能绕过 Root ownership，且 V1 不建设 Team lock 或强制接管。只读结果必须来自一个完整已提交 revision；失败 shutdown 只有在
-writer 实际释放后才可报告关闭完成。
-生命周期直接跟随 Codex：resume 保留原 Team；任何 fork 都只复用原生 conversation/thread-history 分叉并创建新的空 TeamInstance，
-不继承 Team State，旧 Team 引用按 instance mismatch fail-closed；`/new` 与 slash `/clear` 创建空 Team，客户端 detach 不关闭 Team，
-archive/delete 跟随 Root。Team clone/branch 与 Team `reset` 不在 V1；MultiAgentV2 resume 只恢复成员身份/metadata，不自动启动 child
-runtime 或模型 turn。
+Durable Team Session 的 V1 写 authority 归属于 canonical Root lineage，并持续覆盖成功 Team 提交；M4-A 根据真实接缝决定复用、
+扩展现有 Root active-writer 能力或增加架构内专用能力，但不建设相互竞争的第二套写者体系。其他客户端可只读，child Thread writer
+不能绕过 Root 归属；只读结果必须是自洽的已提交状态或明确 stale/unknown/unavailable，失败 shutdown 只有在写 authority 实际释放后
+才可报告关闭完成。
+生命周期直接跟随 Codex：resume 保留原 Team；顶层 `thread/fork` 创建新的 Root Thread/Session 与空 TeamInstance，不继承 Team
+State，旧 Team 引用按 instance mismatch fail-closed；`spawn_agent fork_turns=none/all/N` 创建新的 child Thread，但只改变对话上下文
+继承并继续属于原 Session/root lineage 与 TeamInstance。`/new` 与 slash `/clear` 创建空 Team，客户端 detach 不关闭 Team，冷态
+archive/unarchive/delete 跟随 Root 的原生权威生命周期。Team clone/branch 与 Team `reset` 不在 V1；MultiAgentV2 resume 只恢复成员
+身份/metadata，不自动启动 child runtime 或模型 turn。
 四期不增加 RONDO 的模型/API 调用，也不把 Multi 扩张为 scheduler、自动路由或第二套状态平台。具体目标、任务边界、依赖图、
 资源竞争和非目标只见四期子 WBS，实现方法由各任务级 ExecPlan 决定。
 

@@ -28,11 +28,12 @@ Agent runtime 或 Git 实现。
 
 本地 ThreadStore 还已具备按 ThreadId 生效的跨进程 active-writer ownership：create/resume 获得并在 live writer 生命周期内
 持有文件锁，竞争写者收到 conflict，成功 shutdown/discard 释放；进程崩溃后由操作系统释放锁，残留锁文件由既有协调清理处理。
-thread read/list 等只读路径不要求取得 active writer。第四期直接把这套机制作为 Team Session 单写者基础，不再建设 Team lock、
-租约或另一套进程协调。
+thread read/list 等只读路径不要求取得 active writer。这套既有职责是第四期实现 Team Session 单写者语义的优先复用基础，但本 WBS
+不预定具体锁、guard 或 permit 接缝。
 
-当前 Team capability 只按权威 participant/thread 身份解析，尚未把 mutation 资格连接到 Root Thread writer ownership；因此本期
-仍需增加这条检查接缝。现有锁解决并发所有权，新增接缝只把它提升为 Team 写资格，不复制锁实现。
+当前 Team capability 只按权威 participant/thread 身份解析，尚未把 mutation 资格连接到 canonical Root lineage 的写 authority。
+本期必须闭合的是“单一写 authority 持续覆盖成功 Team 提交”的产品边界；M4-A 根据真实提交和生命周期接缝决定直接复用、扩展
+既有能力，或增加与现有架构契合的专用能力，不建设相互竞争的第二套进程协调体系。
 
 Codex 桌面端的 managed worktree、Local/Worktree Handoff、快照和清理不是冻结 CLI 源码中可直接复用的 Team Workspace
 Runtime。第四期 V1 不把这些产品能力视为现有基线，也不移植完整 Project、queue dispatcher、agents dashboard 或 `/cd`
@@ -46,20 +47,21 @@ Runtime。第四期 V1 不把这些产品能力视为现有基线，也不移植
 | Writer Workspace Binding | 保存恢复 writer 执行上下文所需的最小 binding 语义，并在价值门要求时附加 minimal handoff；调用现有 thread/session/Git 能力验证 | 不拥有、创建、删除或调度 worktree，不形成独立 workspace registry |
 | app-server v2 / TUI | 投影权威 Session/Team 状态并提供显式生命周期操作；W 线落地时可按其实际范围增加窄的 binding/handoff 展示与修复入口 | 不成为另一份状态源，不建设通用 project/session/task dashboard |
 
-职责契合时复用现有设施；强行复用会扭曲语义时，只增加解决 Team 特有缺口的专用薄层。新增能力仍遵循现有配置、生命周期、
-错误、测试和观测方式，不建设第二套基础体系。
+职责契合时复用现有设施；强行复用会扭曲语义时，增加解决 Team 特有缺口所需的专用能力。新增能力的复杂度服从实际问题，并继续
+遵循现有配置、生命周期、错误、测试和观测方式，不建设第二套基础体系。
 
 ### 2.2 稳定产品合同
 
-- Team 生命周期直接跟随 Codex 已有的 resume、fork、`/new`、`/clear`、detach、进程退出、archive/unarchive 与 delete；不新增
-  含义不清的 Team `reset`。
+- Team 生命周期直接跟随 Codex 已有的 resume、顶层 `thread/fork`、`/new`、`/clear`、detach、进程退出、archive/unarchive 与
+  delete；`spawn_agent fork_turns` 只控制新 child Thread 的上下文继承，不分叉 Session 或 Team；不新增含义不清的 Team `reset`。
 - Team State 继续拥有团队协作语义；Durable Team Session 只负责持久介质、定位、生命周期、兼容与恢复结果。
-- 每个 Team Session 首版只有一个活跃进程/协调器写 Team State，但 Team 内允许多个 writer Agent。
-- Root Thread 的原生 active-writer ownership 同时是对应 Team Session 的唯一 V1 写入资格。Root 或 child Agent 发起的任何 Team
-  mutation 都必须确认当前进程持有该 Team 的 Root Thread writer；单独持有 child Thread writer 不授予 Team 写能力。
-- 未持有或无法证明 Root writer ownership 的进程只能读取权威 Team 状态，不能直接修改持久 Team 存储。控制面 mutation 必须
-  由已经加载 Root Session 的进程执行；未连接该 owner 时返回 conflict/unavailable，V1 不建设跨进程 mutation 转发平台，也不
-  支持强制接管。
+- 每个 Team Session 首版只有一个有效写 authority，但 Team 内允许多个 writer Agent。只有该 authority 持续有效期间完成的
+  canonical Team mutation 才能成功提交；authority 交接不得与成功 Team commit 重叠。
+- Durable Team 写 authority 的权威归属由 canonical Root lineage 锚定。Root 或 child Agent 使用同一资格；单独持有 child Thread
+  writer 不授予 Team 写能力。无法证明当前写 authority 的进程只能读取权威 Team 状态，不能直接修改持久 Team 状态。
+- 在线 canonical Team mutation 由持有写 authority 的已加载 owner runtime 执行；未连接 owner 时返回 conflict/unavailable，V1
+  不建设跨进程 mutation 转发或强制接管。archive/unarchive/delete 等冷态 Root 生命周期通过 Codex 原生权威生命周期能力执行，
+  不要求为此先加载 Root，其 Team 结果必须跟随真实生命周期结果并诚实报告部分失败或结果未知。
 - shared workspace 继续是默认行为。研究、审查和只读 Agent 不被强制分配 worktree；只有 Root 明确声明且适合独立开发的
   writer 才可以启用 W 线。
 - W 线只接受调用者已经准备、授权且可验证的本地 Git worktree。创建、删除、prune、合并和冲突处理继续属于用户、Root、
@@ -78,7 +80,8 @@ Runtime。第四期 V1 不把这些产品能力视为现有基线，也不移植
 | Codex 操作 | Durable Team V1 语义 |
 |---|---|
 | resume / member reload | 恢复原 TeamInstance 与原 canonical Team State。Root resume 恢复 V2 Agent graph 中仍为 open 的成员身份和 metadata，但不自动加载 child runtime；成员按现有 V2 residency/reload 规则按需加载，恢复本身不启动 model turn 或真实 API |
-| fork（latest 或指定历史位置） | 原生 conversation/thread history 继续按 Codex 的分叉点规则复制，但创建新 Root Thread/Session 与新的空 TeamInstance；来源 Team 保持不变，V1 不继承或克隆 Durable Team State |
+| 顶层 `thread/fork`（latest 或指定历史位置） | 原生 conversation/thread history 继续按 Codex 的分叉点规则复制，但创建新 Root Thread/Session 与新的空 TeamInstance；来源 Team 保持不变，V1 不继承或克隆 Durable Team State |
+| `spawn_agent fork_turns=none/all/N` | 始终创建新的 child Thread；`fork_turns` 只决定不继承、完整继承或有界继承 parent conversation context。child 继续属于原 Session/root lineage 与原 TeamInstance，不复制或分叉 Durable Team State |
 | `/new`、slash `/clear` | 创建新 Root Thread/Session 与新的空 TeamInstance；原 Session/Team 保留并可 resume。纯终端/UI 清屏不改变 Session 或 Team |
 | TUI 切换、unsubscribe、客户端断开 | 只改变客户端附着与展示，不改变 Team 生命周期，也不据此把 Team 标记为 stopped/closed |
 | app-server 正常退出/完整进程终止 | 正常退出先持久化并关闭已加载 thread；完整进程终止最终由操作系统释放仍持有的 writer。所有已成功 Team mutation 仍可恢复，下次 resume 回到原 Team；存活进程内的单个 session/task 失败不等同于完整进程退出 |
@@ -86,9 +89,10 @@ Runtime。第四期 V1 不把这些产品能力视为现有基线，也不移植
 | unarchive Root | Root 回到可恢复状态并恢复原 TeamInstance/Team State；descendant 继续服从其原生 archive/Agent graph 状态，不另造批量复活语义 |
 | delete Root | 复用 Codex 的 Root/spawned-subtree delete，并永久删除对应 Team State；部分失败必须报告 error/degraded，不得把残留或缺失状态展示为正常可恢复 Team |
 
-fork 后的新 Team 从初始 revision 开始，只自动建立新 Root 的当前运行身份。它不复制来源 Team 的 Event/Version/Fact、participants、
-routes/delivery、wake、committed retry、change log、Agent graph、writer binding 或 handoff，也不复制正在运行的 Agent、turn、lock、
-loaded/residency 或 child runtime。Codex 原生 fork 仍可按现有规则继承 conversation history、cwd、权限、模型配置并记录
+顶层 `thread/fork` 后的新 Team 从初始 revision 开始，只自动建立新 Root 的当前运行身份。它不复制来源 Team 的
+Event/Version/Fact、participants、routes/delivery、wake、committed retry、change log、Agent graph、writer binding 或 handoff，
+也不复制正在运行的 Agent、turn、lock、loaded/residency 或 child runtime。Codex 原生 fork 仍可按现有规则继承 conversation history、
+cwd、权限、模型配置并记录
 `forked_from_id`；这不构成 Team State 继承或新的 Team provenance registry。
 
 forked conversation history 中已经出现的旧 Event/Version/Route/Fact 引用仍带来源 TeamInstance tag，对新 Team 使用时必须按现有
@@ -97,15 +101,16 @@ instance mismatch/`InstanceReset` 规则 fail-closed，不能解析到新对象�
 clone/branch 能力立项，不塞入 M4-S2。
 
 Codex 当前 archive 会尝试处理 spawned subtree，但既有实现允许个别 descendant 失败时其余对象完成 archive；unarchive 也没有
-“整棵树批量复活”的统一语义。RONDO 只让 Team State 跟随 Root 的权威生命周期，并如实投影 descendant 的原生结果，不把这处
-现状扩大为新的清理、补偿或事务平台。archive/delete 继续服从原生 active-writer conflict，不允许其他进程借生命周期操作强制
-接管或释放 writer。
+“整棵树批量复活”的统一语义。archive/unarchive/delete 通过原生权威生命周期路径处理冷态 Root，RONDO 只让 Team State 跟随
+Root 的真实结果并如实投影 descendant 的原生结果，不要求预先加载 Root，也不把这处现状扩大为新的清理、补偿或事务平台。
+活跃写 authority 与生命周期操作冲突时不得强制接管；具体排序、幂等和失败恢复由 M4-A 与对应 ExecPlan 决定。
 
 ### 2.4 留给任务级方案决定的内容
 
-本 WBS 不冻结 crate/module 布局、Rust API、wire schema、持久格式、数据库选择、binding descriptor 或 handoff 的字段与载体、
-replacement binding 的具体 thread 实现、分页与通知细节、具体错误类型或测试 fixture。上述内容由各工作包在阅读当时主线、
-完成必要原型和调试后决定，不得反过来扩大本节的产品职责。
+本 WBS 不冻结 crate/module 布局、Rust API、wire schema、持久格式、数据库选择、writer guard/permit/临界区、snapshot/view token、
+重试顺序、binding descriptor 或 handoff 的字段与载体、replacement binding 的具体 thread 实现、分页与通知细节、具体错误类型或
+测试 fixture。上述内容由各工作包在阅读当时主线、完成必要原型和调试后决定，不得反过来扩大本节的产品职责或削弱本 WBS 的
+产品正确性合同。
 
 ## 3. 工作包
 
@@ -120,32 +125,38 @@ replacement binding 的具体 thread 实现、分页与通知细节、具体错�
 
 - 对采用 Team revision 的 canonical mutation，返回成功时对应 revision 已经处于可恢复状态；不推进 Team revision 的独立
   状态轴也须定义等价的耐久成功边界，不能先返回成功再依赖未承诺的后台落盘。
-- 并发只读查询必须返回一个完整已提交 Team revision，并明确携带其 TeamInstance/revision；允许返回较旧但完整的 revision，
-  或明确报告 stale/unknown/unavailable，不得把两个 revision 的字段、分页或投影拼成撕裂状态。该合同不要求新增 Team read lock。
+- 查询必须返回满足领域不变量的、自洽的已提交视图；允许返回较旧视图，或明确报告 stale/unknown/unavailable，不得把不同一致性
+  边界的字段、分页或投影拼成当前事实。Team revision 只约束它实际版本化的 canonical coordination 轴；跨独立状态轴和分页采用
+  何种一致性标识由正式 query ExecPlan 根据真实 read model 决定。
 - 已有持久标记但后端缺失、损坏或版本不兼容时明确失败或降级，不得静默创建空 Team 冒充恢复。
-- 身份优先绑定既有 SessionId 与 Root ThreadId，并在 resume 时保留原 TeamInstanceId；无充分证据不引入第三套 Team Session identity。
-- fork 永远使用新的 Root Thread/Session 与新的空 TeamInstance；来源关系只复用 Codex 原生 thread lineage，不复制 Team revision，
-  也不为来源 TeamInstance 或旧引用增加映射层。
-- “关闭/卸载完成”必须同时意味着应持久的 Team/thread 状态达到承诺边界，且对应 Root Thread writer guard 已经释放。持久化 shutdown
+- Durable Team 归属复用 Codex 已持久化的 Session/root lineage；SessionId 标识 Session lineage，canonical Root ThreadId 锚定
+  Root 生命周期及写 authority 的权威归属，TeamInstanceId 标识该 lineage 上的 Team 实例，不另建第三套 Session 身份。具体解析与
+  ownership 接缝由 M4-A 决定。
+- 顶层 `thread/fork` 使用新的 Root Thread/Session 与新的空 TeamInstance；来源关系只复用 Codex 原生 thread lineage，不复制
+  Team revision，也不为来源 TeamInstance 或旧引用增加映射层。`spawn_agent fork_turns=none/all/N` 创建新的 child Thread，但保持
+  原 Session/root lineage 与 TeamInstance，只改变 conversation context 的继承方式。
+- “关闭/卸载完成”必须同时意味着应持久的 Team/thread 状态达到承诺边界，且对应写 authority 已经释放。持久化 shutdown
   失败、session loop/task 异常退出或进程内 teardown 未完成时，状态保持 closing/failed 并允许重试，不能报告完成或移除唯一可重试
   的运行对象。若任务级方案确需暴露已有 discard 能力，它是独立且显式确认的失败恢复动作，必须说明未持久数据可能丢失，不得
   伪装成正常关闭；本 WBS 不要求新增通用 discard/cleanup 控制面。
 
-**Root writer 复用合同**：
+**写 authority 合同**：
 
-- Root Thread 的既有 active-writer ownership 是 Team Session 的唯一 V1 写者门。第二个进程 create/resume 同一 Root Thread 时
-  复用原生 conflict 并拒绝，不新增 Team lock、租约、lock file 或进程 registry。
-- 其他客户端可以只读定位和查看权威 Team Session；需要 mutation 的控制操作必须路由到持有 Root writer 的进程，不能由只读
-  控制端绕过 Root Session 直接写 Team 持久介质。这里的“路由”只指请求已经连接的 owner Session；若未连接 owner，返回
-  conflict/unavailable，不新增跨进程 relay、queue 或 IPC router。
-- Root 与 child 的 mutation 使用同一资格检查。另一个进程即使成功 resume 某个 child Thread，也只获得该 child 的 thread writer，
-  不得据此加载第二份可写 Team runtime 或提交 Team mutation。
-- V1 不支持强制接管、抢锁或静默接管。正常退出后由既有 shutdown 释放；异常退出后依赖操作系统文件锁释放与现有残留文件清理，
-  后续进程再按原生 resume 取得 Root writer。这里的异常退出指持有锁的完整进程终止；存活 app-server 内的 session/task 失败不会
-  自动释放操作系统锁，必须按上一节报告失败并保留重试或显式 discard 路径。
-- 无法从所选 ThreadStore 后端和 Root lineage 可靠证明 active-writer ownership 时，Team mutation fail-closed 并报告
-  unavailable/unsupported。只有 M4-A 证明现有机制无法承载该合同，才更新 WBS 另行考虑专用 Team 写者机制；不得在 V1 内
-  预建或静默回退第二套锁。
+- canonical Root lineage 同时只能有一个有效 Team 写 authority；第二个进程不得取得重叠写 authority 或成功提交 Team mutation。
+  现有 Root Thread active-writer ownership 是优先复用基础，但具体证明、持有和释放接缝由 M4-A 决定。
+- 写 authority 必须持续覆盖 mutation 的成功提交边界，不能以一次性资格检查替代；authority 交接、关闭或生命周期切换不得与成功
+  Team commit 重叠。具体 guard、permit、锁顺序和提交临界区由对应 ExecPlan 决定。
+- 其他客户端可以只读定位和查看权威 Team Session；在线 mutation 必须交给持有写 authority 的 owner runtime，不能由只读控制端
+  绕过领域能力直接写 Team 持久介质。未连接 owner 时返回 conflict/unavailable，V1 不新增跨进程 relay、queue 或 IPC router。
+- archive/unarchive/delete 等冷态 Root 生命周期由 Codex 原生权威生命周期路径处理，不要求先加载 owner runtime；它们不得强制
+  接管活跃写 authority，并须让 Team durable state 跟随真实结果，部分失败或结果未知不得伪报成功。
+- Root 与 child 的 mutation 使用同一 Team 写 authority。另一个进程即使成功 resume 某个 child Thread，也不得据此加载第二份可写
+  Team runtime 或提交 Team mutation。
+- V1 不支持强制接管、抢锁或静默接管。正常关闭、完整进程终止和存活进程内 session/task 失败分别服从其真实 ownership 结果；
+  未实际释放写 authority 时必须报告失败并保留重试或显式 discard 路径。
+- 无法从所选 ThreadStore 后端和 Root lineage 可靠证明写 authority 时，Team mutation fail-closed 并报告 unavailable/unsupported。
+  M4-A 应先验证现有机制；直接复用会造成耦合、语义扭曲或无法覆盖提交边界时，可以扩展既有能力或增加遵循现有配置、生命周期、
+  错误、测试和观测方式的专用能力，但不得预建或静默回退到相互竞争的第二套写者体系。
 
 **启用与能力合同**：
 
@@ -154,7 +165,8 @@ replacement binding 的具体 thread 实现、分页与通知细节、具体错�
 - 对外形成一套连贯的 opt-in 语义；具体配置形状和内部子开关由任务级方案按职责决定。
 - 首次创建 durable session 前验证所需持久能力和权威 lineage material。仅有内存能力且没有满足合同的 durable authority 时
   报告 unavailable/unsupported，不能把进程内 Team 冒充 durable。
-- 首次加载可写 Team runtime 前还须验证 Root Thread active-writer ownership；只读打开不需要取得该写者资格。
+- 首次加载可写 Team runtime 前还须验证 canonical Root lineage 的写 authority；只读打开不需要取得该写者资格。具体 ownership
+  接缝服从前述 M4-A 决策。
 
 **上游增量决策门**：
 
@@ -183,28 +195,30 @@ M4-S1 的持久接缝。
 
 #### M4-S1：Team Session 持久生命周期
 
-**目标**：让已确认的 canonical Team State 与权威 Root lineage 绑定，并以 Root Thread active-writer ownership 约束可写 Team
-runtime；mutation 成功后对应 revision 可恢复，非 owner 能读取一个完整已提交 revision；进程退出后仍能定位原 Team Session，
-并在重新取得 Root writer 后加载为可写状态。
+**目标**：让已确认的 canonical Team State 与权威 Root lineage 绑定，并以其单一写 authority 约束可写 Team runtime；mutation
+成功后对应状态可恢复，非 owner 能读取自洽的已提交状态；进程退出后仍能定位原 Team Session，并在重新取得写 authority 后加载为
+可写状态。
 
 **边界**：只持久化恢复团队语义所需的状态；不保存完整 transcript、reasoning/CoT，不恢复运行中的模型请求、工具调用或
-外部副作用，也不把 Team State 塞入单个 thread 的历史充当第二份真相。读一致性复用所选持久介质的正常提交/快照能力，具体
-机制由 ExecPlan 决定，不增加 Team read lock 或第二份只读 store。
+外部副作用，也不把 Team State 塞入单个 thread 的历史充当第二份真相。职责契合时复用所选持久介质的正常提交/快照能力；若其
+不足以满足自洽读取合同，ExecPlan 可以选择与现有架构契合的必要读能力，但不形成第二份只读状态源。
 
 #### M4-S2：恢复与生命周期收口
 
-**目标**：按第 2.3 节完整处理 resume/member reload、fork、`/new`、slash `/clear`、客户端 detach、正常关闭、完整进程异常
-终止、archive/unarchive、delete、旧 session、不兼容或损坏状态，使恢复或分叉后的团队身份、权限和 canonical 状态符合原生 Session
-语义，无法确认时明确降级或拒绝。
+**目标**：按第 2.3 节完整处理 resume/member reload、顶层 `thread/fork`、`spawn_agent fork_turns`、`/new`、slash `/clear`、客户端
+detach、正常关闭、完整进程异常终止、archive/unarchive、delete、旧 session、不兼容或损坏状态，使恢复或分叉后的团队身份、权限和
+canonical 状态符合原生 Session 语义，无法确认时明确降级或拒绝。
 
 **边界**：不建设多机、复制、高可用、共识或通用事务平台；可选 writer binding 的失败只影响对应 writer，不默认阻止 Team/root
 read model 被定位、查看和恢复，也不自动启动其他成员。V2 Root resume 只恢复 open descendant 的身份/metadata，child runtime 按需
-reload，不能把旧式 Agent 路径的自动 reopen 行为扩大为本期合同。任何 fork 都从新空 TeamInstance 开始；旧 Team 引用
-fail-closed，不建设 Team clone/branch、ID 映射、历史成员档案或跨 lineage Fact 恢复。只有成功 teardown 或完整进程终止实际释放
-Root writer 后才允许后续 resume；存活进程内 shutdown/session-task 失败保持 closing/failed 且可重试，不实现强制接管。
+reload，不能把旧式 Agent 路径的自动 reopen 行为扩大为本期合同。顶层 `thread/fork` 从新空 TeamInstance 开始；`spawn_agent
+fork_turns` 创建的 child Thread 仍属于原 TeamInstance。旧 Team 引用 fail-closed，不建设 Team clone/branch、ID 映射、历史成员
+档案或跨 lineage Fact 恢复。只有成功 teardown 或完整进程终止实际释放写 authority 后才允许后续写 owner 接管；存活进程内
+shutdown/session-task 失败保持 closing/failed 且可重试，不实现强制接管。
 
-**子线出口**：新建、推进、fork 到新空 Team、detach、关闭、进程终止、恢复、archive/unarchive 与 delete 的生命周期可以稳定重复；
-失败关闭不伪报完成，恢复和 member reload 不自动触发模型/API，且功能关闭态无回归。
+**子线出口**：新建、推进、顶层 `thread/fork` 到新空 Team、`spawn_agent fork_turns` 新建同 Team child、detach、关闭、进程终止、
+恢复、archive/unarchive 与 delete 的生命周期可以稳定重复；失败关闭不伪报完成，恢复和 member reload 不自动触发模型/API，且
+功能关闭态无回归。
 
 ### 控制面子线 C：Session app-server v2 / TUI（必成主线）
 
@@ -214,9 +228,10 @@ Root writer 后才允许后续 resume；存活进程内 shutdown/session-task �
 
 **边界**：C0 不承诺稳定公共 API 或正式 TUI 验收。所有新增接口只进入 app-server v2 并保持 experimental；控制面不复制
 Team State 或 Durable Session，不把 Team Lens 离线结果变成在线状态源，也不建设通用 project/session/task dashboard、
-queue dispatcher 或 daemon-wide agents 管理面。只读查询不要求取得 Root writer；任何状态修改都交给持有 Root writer 的
-已加载 Root Session 处理，未连接到该写者时返回 conflict/unavailable，不得直接写持久介质、伪造成功或建设跨进程 mutation
-转发平台。TUI unsubscribe、切换或断开不改变 Team 生命周期。
+queue dispatcher 或 daemon-wide agents 管理面。只读查询不要求取得写 authority；在线 canonical Team mutation 交给持有写
+authority 的 owner runtime，未连接 owner 时返回 conflict/unavailable。archive/unarchive/delete 等冷态生命周期调用权威领域能力，
+不要求先加载 Root。控制面不得绕过领域能力直接写持久介质、伪造成功或建设跨进程 mutation 转发平台；TUI unsubscribe、切换或
+断开不改变 Team 生命周期。
 
 **后续工作包**：M4-C0 完成且 M4-S1 提供真实 Session read model 后，再按当时接缝建立少量可独立验收的 Session query M4-C*；
 M4-S2 的恢复行为收口后，再建立 Session control/TUI M4-C*。当前不预定具体 RPC、UI 布局或包数。
@@ -354,13 +369,9 @@ W-only delta ─/→ S/C
 - S/C 核心链打通后，记录正式验收使用的准确代码与配置版本，稳定必要的外部兼容边界，再从干净的本地 Session/store 状态
   完整运行一轮。这里不永久冻结内部代码、配置结构或持久格式；具体返修与复跑循环由 M4-Z(core) ExecPlan 决定。
 - 每个工作包先满足就近 `AGENTS.md` 要求的强制测试、生成物和 TUI snapshot 测试门禁；M4-Z(core) 额外运行相称的 S/C 干净全链验收。
-- M4-S1/S2 使用 deterministic/fake 故障与并发回归覆盖两条窄边界：持久化 shutdown 失败或 session task 异常时不得报告关闭完成、
-  不得遗失存活进程内 writer guard 的重试路径；若实际范围包含 discard，再验证其显式数据丢失语义。writer mutation 与非 owner
-  并发 read 时，只能返回一个完整已提交 revision 或明确 stale/unknown/unavailable。该验证不建设 Team read lock、审计或跨进程
-  协调平台。
-- M4-S2 另以一条 deterministic/fake fork 回归确认：原生 conversation history 按所选分叉点进入新 thread，新 TeamInstance 为空，
-  来源 Team 不变，fork history 中的旧 Team 引用对新实例返回 instance mismatch/`InstanceReset`；不为测试建设 ID remint 或 lineage
-  恢复设施。
+- M4-S1/S2 的 ExecPlan 必须以相称的 deterministic/fake 回归覆盖本 WBS 的耐久成功、单写 authority 覆盖提交、自洽读取、失败不
+  伪报完成，以及顶层 `thread/fork` 与 `spawn_agent fork_turns` 的不同 Team 语义；具体 fixture、竞态 interleaving 和版本标识由任务
+  方案根据真实接缝决定，不为验收建设审计、通用事务或第二套跨进程协调平台。
 - M4-W0/W1 使用临时 Git repository/worktree 和 deterministic/fake 测试；若 W1 落地，由其自身出口按价值门范围承担完整 binding
   及可选 minimal handoff 验收。
   第四期不新建或运行性能测评。
@@ -371,15 +382,16 @@ W-only delta ─/→ S/C
 
 - 原 Team Session 在进程退出后可以恢复并继续协作；无法恢复时不会被空团队或虚假成功掩盖。
 - app-server v2 与 TUI 从权威领域状态展示并控制 Team Session；断线或重启后可以重新同步，不维护第三份状态。
-- 持有 Root Thread writer 的进程是唯一 Team 写者；竞争 Root resume 被原生 conflict 拒绝，单独 resume child Thread 不能绕过
-  Root ownership 提交 mutation。其他客户端仍可只读查看；原写者成功关闭或完整进程终止释放 writer 后，后续 resume 才能取得写资格。
-- 非 owner 并发查询只返回带 TeamInstance/revision 的完整已提交状态，或明确 stale/unknown/unavailable；不会观察到跨 revision 撕裂。
-- persistence shutdown 失败、session task 异常或存活进程内 teardown 未完成不会被报告为关闭完成，Root writer 仍可定位并重试；
-  只有成功关闭或完整进程终止实际释放 writer 后，其他进程才能 resume；若实现范围包含显式 discard，其结果也必须先确认 writer
+- canonical Root lineage 同时只有一个有效 Team 写 authority，且该 authority 持续覆盖 mutation 的成功提交；第二个进程不能取得
+  重叠 authority 或成功提交，单独 resume child Thread 不能绕过 Root 归属提交 mutation。其他客户端仍可只读查看；原 authority
+  实际释放后，后续 owner 才能取得写资格。
+- 非 owner 并发查询只返回满足领域不变量的自洽已提交状态，或明确 stale/unknown/unavailable；不会把不同一致性边界拼成当前事实。
+- persistence shutdown 失败、session task 异常或存活进程内 teardown 未完成不会被报告为关闭完成，原写 authority 仍可定位并重试；
+  只有成功关闭或完整进程终止实际释放 authority 后，其他进程才能接管。若实现范围包含显式 discard，其结果也必须确认 authority
   已释放且不得冒充正常关闭。
-- resume/member reload 保留原 TeamInstance；任何 fork 都让原生 conversation/thread history 按 Codex 规则进入新 Thread/Session，
-  但 Durable Team 从新的空 TeamInstance 开始，来源 Team 不变，旧 Team 引用 fail-closed。`/new` 与 slash `/clear` 同样创建空 Team，
-  detach 不改变生命周期。
+- resume/member reload 保留原 TeamInstance；顶层 `thread/fork` 让原生 conversation/thread history 按 Codex 规则进入新的 Root
+  Thread/Session，并从新的空 TeamInstance 开始，来源 Team 不变，旧 Team 引用 fail-closed。`spawn_agent fork_turns` 创建新的 child
+  Thread 但保持原 Session/root lineage 与 TeamInstance；`/new` 与 slash `/clear` 同样创建空 Team，detach 不改变生命周期。
 - V2 resume 恢复 Agent graph 的身份/metadata 但不自动启动 child runtime 或 model turn；archive/unarchive/delete 的 Team 结果跟随
   Root 原生生命周期，部分失败明确暴露且不冒充正常可恢复状态。
 - 功能关闭态和普通 shared workspace 路径保持现有行为。
@@ -406,13 +418,15 @@ W-only delta ─/→ S/C
 - 自动 merge/cherry-pick、冲突修复、修改正确性判断、更新 `main`、fetch/push、PR、CI 或远端发布；
 - 多机/远程 workspace controller、跨文件系统 worktree、分布式 Session、高可用、复制、共识或通用事务平台；
 - 第二套 Team State、thread history、Agent graph、trace 或事件总线；
-- Team 专属 `reset`、fork 时的 Team State 继承、Team clone/branch、ID remint/rewrite 或 old-to-new mapping、历史 contributor 档案、
-  跨 lineage Fact 恢复、route/wake/retry 克隆、revision/turn 时间旅行、自动重启全部 descendant 或批量复活 Agent subtree；
+- Team 专属 `reset`、顶层 `thread/fork` 时的 Team State 继承、Team clone/branch、ID remint/rewrite 或 old-to-new mapping、历史
+  contributor 档案、跨 lineage Fact 恢复、route/wake/retry 克隆、revision/turn 时间旅行、自动重启全部 descendant 或批量复活
+  Agent subtree；
 - 保存或广播完整 transcript、reasoning/CoT、terminal 输出或 Fact 正文；
 - 浏览器后台、远程 SaaS、多用户账号、复杂鉴权、审计/可信平台、严格全局因果或数据资产审计；
 - 完整上游基线升级，或任何为第四期新增的真实 API/模型调用、训练、横评、benchmark 与 RONDO 推理成本。
-- 专用 Team lock、read lock、租约、强制接管、抢锁、跨进程 mutation relay/queue/IPC router、绕过已加载 Root Session 的独立
-  存储写入器或第二套 writer registry；除非未来证明确有独立需求并重新立项。
+- 与 canonical Root lineage 写 authority 相互竞争的第二套 Team lock、租约、独立存储写入器或 writer registry，以及强制接管、
+  抢锁、跨进程 mutation relay/queue/IPC router。若现有设施无法干净承载正确性合同，M4-A 可以选择架构内专用能力，但不得形成
+  第二套权威或静默回退路径。
 
 ## 9. 实施与授权边界
 
