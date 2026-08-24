@@ -86,13 +86,47 @@ def validate_group_closure(
         raise TrainingDataError(f"group components cross splits: {leaking}")
 
 
+def validate_new_to_base_component_closure(
+    combined_components: Mapping[str, str],
+    base_components: Mapping[str, str],
+) -> None:
+    """Reject a combined component that joins distinct frozen base components."""
+
+    if not set(base_components) <= set(combined_components):
+        raise TrainingDataError("combined components omit frozen base candidates")
+    base_components_by_combined: dict[str, set[str]] = defaultdict(set)
+    for candidate_id, base_component in base_components.items():
+        if not isinstance(base_component, str) or not base_component:
+            raise TrainingDataError("frozen base component identity is invalid")
+        base_components_by_combined[combined_components[candidate_id]].add(
+            base_component
+        )
+    merged = sorted(
+        component
+        for component, frozen_components in base_components_by_combined.items()
+        if len(frozen_components) > 1
+    )
+    if merged:
+        raise TrainingDataError(
+            "new group closure joins multiple distinct frozen base components: "
+            f"{merged}"
+        )
+
+
 def deterministic_grouped_stratified_split(
     components: Mapping[str, str],
     supervision_rows: Sequence[Mapping[str, Any]],
     pair_rows: Sequence[Mapping[str, Any]],
     design_lock: Mapping[str, Any],
+    *,
+    fixed_assignments: Mapping[str, str] | None = None,
 ) -> dict[str, str]:
-    """Search deterministic hash-derived group assignments and fail closed."""
+    """Search deterministic hash-derived group assignments and fail closed.
+
+    ``fixed_assignments`` pins the containing component of each named candidate.
+    It is intentionally optional so existing callers retain the original search
+    behavior.
+    """
 
     rows = {str(row["candidate_id"]): row for row in supervision_rows}
     if set(rows) != set(components):
@@ -109,6 +143,23 @@ def deterministic_grouped_stratified_split(
     groups: dict[str, list[str]] = defaultdict(list)
     for candidate_id, component in components.items():
         groups[component].append(candidate_id)
+    fixed_by_group: dict[str, str] = {}
+    for candidate_id, split in (fixed_assignments or {}).items():
+        if candidate_id not in components:
+            raise TrainingDataError(
+                f"fixed split assignment references unknown candidate {candidate_id!r}"
+            )
+        if split not in SPLITS:
+            raise TrainingDataError(
+                f"fixed split assignment for candidate {candidate_id!r} is invalid: {split!r}"
+            )
+        component = components[candidate_id]
+        existing = fixed_by_group.get(component)
+        if existing is not None and existing != split:
+            raise TrainingDataError(
+                f"fixed split assignments conflict within group component {component!r}"
+            )
+        fixed_by_group[component] = split
     for pair in pair_rows:
         left = str(pair["preferred_candidate_id"])
         right = str(pair["dispreferred_candidate_id"])
@@ -119,6 +170,9 @@ def deterministic_grouped_stratified_split(
     for attempt in range(attempts):
         assignment_by_group: dict[str, str] = {}
         for component in sorted(groups):
+            if component in fixed_by_group:
+                assignment_by_group[component] = fixed_by_group[component]
+                continue
             digest = hashlib.sha256(f"{seed}\0{attempt}\0{component}".encode("utf-8")).digest()
             point = int.from_bytes(digest[:8], "big") / 2**64
             cumulative = 0.0
@@ -214,7 +268,53 @@ def coverage_failures(
             if observed < int(boundary_rule["minimum_pairs_per_value_per_split"]):
                 failures.append(f"boundary_split.{split}.{dimension}")
 
+    cell_rule = minimums.get("hard_focus_publication_class_cells")
+    if cell_rule:
+        minimum_groups = int(cell_rule["minimum_scenario_groups_per_cell"])
+        conditional_classes = set(
+            cell_rule["conditional_continuity_publication_classes"]
+        )
+        for dimension in boundary_rule["values"]:
+            applicable_classes = (
+                conditional_classes
+                if dimension == "conditional_continuity"
+                else set(class_rule["values"])
+            )
+            for publication_class in applicable_classes:
+                scenario_groups = {
+                    row["scenario_group"]
+                    for row in rows.values()
+                    if row.get("hard_focus") == dimension
+                    and row["publication_class"] == publication_class
+                }
+                if len(scenario_groups) < minimum_groups:
+                    failures.append(
+                        "hard_focus_publication_class."
+                        f"{dimension}.{publication_class}"
+                    )
+
+    required_boundary_lengths = minimums.get(
+        "required_boundary_length_buckets_per_hard_dimension",
+        [],
+    )
+    for dimension in boundary_rule["values"]:
+        observed_lengths = {
+            rows[str(pair["preferred_candidate_id"])]["length_bucket"]
+            for pair in boundary_pairs
+            if pair["target_dimension"] == dimension
+        }
+        for length_bucket in required_boundary_lengths:
+            if length_bucket not in observed_lengths:
+                failures.append(
+                    f"boundary_length.{dimension}.{length_bucket}"
+                )
+
     within_pairs = [pair for pair in pair_rows if pair["kind"] == "within_pass"]
+    minimum_soft_preferences = int(
+        minimums.get("minimum_distinct_soft_preferences", 0)
+    )
+    if len({pair["soft_preference"] for pair in within_pairs}) < minimum_soft_preferences:
+        failures.append("within_pass.distinct_soft_preferences")
     for split in SPLITS:
         observed = sum(assignments[pair["preferred_candidate_id"]] == split for pair in within_pairs)
         if observed < int(minimums["within_pass_pairs_per_split"]):
@@ -237,6 +337,31 @@ def coverage_failures(
         )
         if long_count < int(minimums["long_input_candidates_per_split"]):
             failures.append(f"long.{split}")
+
+    holdout_rule = minimums.get("holdout_feature_requirements")
+    if holdout_rule:
+        for split in holdout_rule["splits"]:
+            split_rows = [
+                row
+                for candidate_id, row in rows.items()
+                if assignments[candidate_id] == split
+            ]
+            for unicode_value in holdout_rule["unicode_values"]:
+                if not any(row["unicode"] is unicode_value for row in split_rows):
+                    failures.append(f"holdout.{split}.unicode.{unicode_value}")
+            for slice_name in holdout_rule["continuity_slices"]:
+                if not any(slice_name in row["slices"] for row in split_rows):
+                    failures.append(f"holdout.{split}.{slice_name}")
+            for slice_name in holdout_rule["evidence_slices"]:
+                if not any(slice_name in row["slices"] for row in split_rows):
+                    failures.append(f"holdout.{split}.{slice_name}")
+            for label in holdout_rule["natural_mixed_labels"]:
+                if not any(
+                    row["binary_label"] == label
+                    and "natural_mixed" in row["slices"]
+                    for row in split_rows
+                ):
+                    failures.append(f"holdout.{split}.natural_mixed.{label}")
     unicode_groups = {row["scenario_group"] for row in rows.values() if row["unicode"]}
     if len(unicode_groups) < int(minimums["unicode_scenario_groups_global"]):
         failures.append("unicode_scenario_groups_global")
