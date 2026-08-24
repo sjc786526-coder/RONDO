@@ -897,7 +897,8 @@ fn add_shell_tools(context: &CoreToolPlanContext<'_>, registry: &mut ToolRegistr
             registry.add(ExecCommandHandler::new(ExecCommandHandlerOptions {
                 allow_login_shell,
                 exec_permission_approvals_enabled,
-                repeat_guidance_enabled: features.enabled(Feature::ExecCommandRepeatGuidance),
+                repeat_guidance_enabled: features.enabled(Feature::ExecCommandRepeatGuidance)
+                    && !turn_context.session_source.is_non_root_agent(),
                 include_environment_id,
                 include_shell_parameter: unified_exec_should_include_shell_parameter(
                     turn_context,

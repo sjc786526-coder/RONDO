@@ -4,7 +4,8 @@
   "source": {
     "campaign_id": "plan056-direction1-bounded-observation-formal-v6",
     "mode": "read_only",
-    "lock_sha256": "a9567cb0ddeaa9c8e7cdfbd7253000a8453ec1ebbb03ca359deae2c048f7880b",
+    "campaign_lock_sha256": "263cc3fa8ff75ca007100fe39e8bbde8b492f4cfc0898ef4d9490b097f3a9e7f",
+    "v28_lock_sha256": "a9567cb0ddeaa9c8e7cdfbd7253000a8453ec1ebbb03ca359deae2c048f7880b",
     "slots_reviewed": 6,
     "task_controls_reviewed": 0,
     "external_campaigns_reviewed": 0

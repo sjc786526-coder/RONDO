@@ -673,7 +673,7 @@ async fn shell_family_registers_visible_unified_exec_and_hidden_legacy_shell() {
 }
 
 #[tokio::test]
-async fn exec_command_repeat_guidance_is_feature_gated_and_excluded_from_guardian() {
+async fn exec_command_repeat_guidance_is_feature_gated_and_root_agent_only() {
     let disabled = probe(|turn| {
         set_features(turn, &[Feature::ShellTool, Feature::UnifiedExec]);
         set_feature(
@@ -746,6 +746,33 @@ async fn exec_command_repeat_guidance_is_feature_gated_and_excluded_from_guardia
     };
     assert!(
         !guardian_exec
+            .description
+            .contains(EXEC_COMMAND_REPEAT_GUIDANCE)
+    );
+
+    let spawned_agent = probe(|turn| {
+        set_features(
+            turn,
+            &[
+                Feature::ShellTool,
+                Feature::UnifiedExec,
+                Feature::ExecCommandRepeatGuidance,
+            ],
+        );
+        turn.session_source = SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
+            parent_thread_id: ThreadId::new(),
+            depth: 1,
+            agent_path: None,
+            agent_nickname: None,
+            agent_role: None,
+        });
+    })
+    .await;
+    let ToolSpec::Function(spawned_exec) = spawned_agent.visible_spec("exec_command") else {
+        panic!("expected spawned-agent exec_command function tool");
+    };
+    assert!(
+        !spawned_exec
             .description
             .contains(EXEC_COMMAND_REPEAT_GUIDANCE)
     );

@@ -239,7 +239,9 @@
   （`400 ms`）、`8` 次有状态变化或恢复依据的合理重复（`9,708 ms`）、`0` 次证据不足；总计与原始
   `9` 次、`10,108 ms` 严格对齐。六个命中 slot 已提供充分证据，未扩大读取同 cohort 对照或其他 campaign。
 - 私有逐项表只保存在 Plan 058 ignored namespace；tracked body-free Phase A 聚合与预冻判据保存在
-  `eval/results/observations/plan058-direction1-c2-phase-a-2026-08-22.json`，未复制命令、prompt、响应或工具正文。
+  `eval/results/observations/plan058-direction1-c2-phase-a-2026-08-22.json`，其中分别记录 Plan 056 formal-v6 campaign
+  lock `263cc3fa8ff75ca007100fe39e8bbde8b492f4cfc0898ef4d9490b097f3a9e7f` 与 v28 task lock
+  `a9567cb0ddeaa9c8e7cdfbd7253000a8453ec1ebbb03ca359deae2c048f7880b`；未复制命令、prompt、响应或工具正文。
 - 已预冻主要收益门为 refined harmful occurrence 从 `1` 降至 `0`，并冻结合理重复/恢复/用户控制、所有工具仍
   执行、关闭态等价和可信 20/20 等无害门。原始 exact-C2、重复耗时和 pass/fail 仅作可比解释指标。
 - 已完成 Phase B 产品实现：新增默认关闭的 `exec_command_repeat_guidance` feature，只在 RONDO Local main
@@ -324,8 +326,8 @@ revalidator，未保留 Plan 058 已冻结的 agent 非零但 verifier reward �
 投影保留 failed/zero-output/no-exit，不授予 Guardian-limit 豁免。真实 v4 trace 现可 body-free 投影为 14
 responses、12 tools、11 command tools、1 次参数修正后的合理 exact repeat/after-failure，相关回归 `152/152`；
 只读独立诊断确认未发现第三个投影阻塞。
-当前将以新 diagnostic-v5 仍只复验槽 8；打通后提交、重建/复验新 runtime，再建立全新 formal identity 完整运行
-20/20，不重跑 9–20 的脏版本，也不拼接任何旧数据。
+其后 diagnostic-v5 只复验槽 8；打通后提交、重建/复验新 runtime，再建立全新 formal identity 完整运行
+20/20，没有重跑 9–20 的脏版本，也未拼接任何旧数据。
 
 `plan058-direction1-c2-diagnostic-v5` 已完成 preflight/result/source revalidation/finalize `1/1`：task pass/reward
 `1`，raw/refined C2 `0/0`，无害四门全通过；14 个可靠 attempts（12 main、2 Guardian）、`0.378984 USD`，无
@@ -353,7 +355,7 @@ formal-v3 已永久作废并 body-free 发布，正式结果 `0/20`。本 identi
 transport classifier 已窄修为只额外接受精确 `200 + terminal + response.failed + failed + upstream_error` 组合，
 并产生 body-free `upstream_terminal_failed` 重试证据；`model_failed`、context、鉴权、配额、配置和未知错误继续
 fail-closed。相关 `33/33` 回归通过，formal-v3 真实 metadata/预算只读重投影为 7 attempts、`1.074850 USD` 的
-typed pure transport。下一步只用全新 diagnostic identity 复验受影响槽 8；成功后重新冻结并以全新 formal 完整
+typed pure transport。其后只用全新 diagnostic identity 复验受影响槽 8；成功后重新冻结并以全新 formal 完整
 运行 20/20，绝不复活或拼接 v3。
 
 `plan058-direction1-c2-diagnostic-v6` 已完成 preflight/result/source revalidation/finalize `1/1`：槽 8 在第 4 次
@@ -401,7 +403,7 @@ metrics identity 成功 prepare/verify legacy、companion、bwrap 与 runtime。
 `5,207 ms` 均有改动后复查、清理后复测或只读 `.git/index.lock` 失败后恢复依据，故 refined harmful/reasonable/
 insufficient 为 `0/3/0`，无害四门通过。累计 task budget `13.399248 USD`、reserved `0`、剩余
 `36.600752 USD`；Docker/VHDX 增长 `0`，Windows C: 最终余量 `202295300096` bytes。槽 8 局部
-commissioning 再次闭环，下一步从新 clean source 冻结全新 formal-v5 并完整运行 20/20。
+commissioning 再次闭环；其后从新 clean source 冻结全新 formal-v5 并完整运行 20/20。
 
 已从 clean detached source `62387ad1f3e8cdde1eb17fdc95b37ccdd7c36070` 经共享 lock/watchdog 重建并复验
 legacy、companion、bwrap 与 runtime bundle；CLI/host/bwrap SHA-256 分别为
@@ -423,7 +425,7 @@ proof 不同而不用于正式 runtime，随后从同一 detached root 重新构
 validator 与结果发布已窄修为：预算/Guardian 上限继续按原始 API 请求数计算，只把连续 Guardian 请求组成一个
 logical review，并把终态证据绑定到每组末次请求；不改变 Guardian、审批、sandbox、安全策略或历史身份。相关
 Python 回归 `105/105` 通过，formal-v5 第 4 槽真实私有工件离线重验证为 `completed`/reward `1`、3 requests、
-2 reviews、2 evidence、binding valid。按硬合同不复活 v5；下一步仅以新 diagnostic identity 复验绝对槽 4。
+2 reviews、2 evidence、binding valid。按硬合同不复活 v5；其后仅以新 diagnostic identity 复验绝对槽 4。
 
 从 clean `199849b7ea0e6746e7ae8be0c4530a8c19b9a996` 完整重建 diagnostic-v8 legacy/companion，Cargo 分别
 `19m53s`/`16m52s`，watchdog 均 `status=0`、`stop=none`、swap peak `0`；项目 peak
@@ -452,7 +454,7 @@ attempts、0 transport retry、`0.235429 USD`。raw exact-C2 为 3 次/`5,656 ms
 cherry-pick 恢复、成功变更后的终态确认各一次，均有明确失败恢复或状态变化依据，故 refined harmful/reasonable/
 insufficient 为 `0/3/0`，无害四门通过。累计 task budget `15.393502 USD`、reserved `0`、剩余
 `34.606498 USD`。Docker/VHDX 增长 `0`，最终 Docker 11.5 GB 且无容器/卷/cache，Windows C: 实际余量
-`200631042048` bytes。formal-v5 暴露的局部设施缺口至此闭环，下一步提交证据并从新 clean commit 冻结全新 formal。
+`200631042048` bytes。formal-v5 暴露的局部设施缺口至此闭环；其后提交证据并从新 clean commit 冻结全新 formal。
 
 从 clean `0706bf0b711f2734185fb8646a6f170ade682d11` 经共享 lock/watchdog 完成 formal-v6 增量
 legacy/companion 构建及 legacy、companion、既有 bwrap、runtime prepare/verify。CLI/host/bwrap SHA-256 仍分别为
@@ -488,18 +490,21 @@ Python 回归仍为 `106/106`。用 finalized identity、20 条 record、冻结 
 仍如实绑定 `0706bf0` 原文与 `retain` 结果，不重写历史；最终分支按预冻 `adjust` 规则只做非材料收窄：仅在同一
 requester/tool path 且全部调用参数不变时适用 guidance，任一身份、状态、进展、恢复或副作用条件不确定均照常执行。
 新增 tool-spec 文案断言，两个修改文件经 `rustfmt --check` 且源码断言 `3/3`；共享 watchdog 测试在 Cargo 前因
-开发 sandbox 无权连接 systemd user bus fail-closed，宿主执行又被开发工具用量上限拒绝，故新增 Rust 断言未冒充
-已执行。正式冻结版本已有的 Rust `4/4`、真实 20/20 与 Python `106/106` 证据保持原范围。同一上下文干净的
-独立审查者复验上述代码、文档与限制后返回 `PASS`，没有第二个未解 finding。
+开发 sandbox 无权连接 systemd user bus fail-closed，宿主执行又被开发工具用量上限拒绝，故当时新增 Rust 断言未
+冒充已执行。正式冻结版本已有的 Rust `4/4`、真实 20/20 与 Python `106/106` 证据保持原范围。同一上下文干净的
+独立审查者当时复验返回 `PASS`；后续外部验收进一步发现 feature gate 只排除 Guardian、未排除普通非 root agent。
+该 finding 真实，最终分支复用 `SessionSource::is_non_root_agent()` 将 guidance 收紧到 root agent，并在 unit 与真实
+model-visible request integration 覆盖 root off/on、ThreadSpawn 和 CodeModeOnly。该修复只排除 formal 未覆盖的
+recipient，不改变正式 main 行为、工具执行或 formal-v6 有效性。
 
 ### 本任务剩余步骤
 
-无。本计划实现、正式 20/20、费用/资源收尾、最终 `adjust`、独立验收整改与本地分支提交均已完成；后续只由主线
-整合者按方向 1 WBS 处理合并，不在本计划继续维护路线。
+产品、正式 20/20、费用与本地整改均已完成。当前仅剩把本次 root-only 收窄和收尾提交交回同一外部审查者复验；
+通过前 feature 继续为 UnderDevelopment、默认关闭，不进入主线整合。
 
 ### 阻塞项
 
-无。新增 Rust 断言未执行是如实记录的验证限制，不隐藏为通过；独立审查者已在知悉该限制后完成代码复验并 `PASS`。
+无工程阻塞。外部复验是唯一待完成的验收步骤；不因此重跑真实 API、Docker、题目或 round。
 
 ### 当前验收状态
 
@@ -531,21 +536,21 @@ requester/tool path 且全部调用参数不变时适用 guidance，任一身份
 - formal-v2：preflight `10/10`；绝对槽 8 的完整真实执行因 projector 不识别 typed missing-process `write_stdin`
   而使 campaign 作废，正式结果 `0/20`。20 个可靠 attempts（18 main/2 Guardian）、`0.818354 USD` 已结算，
   Docker/VHDX 增长 `0`，Windows C: 最终余量 `201807400960` bytes；累计 task budget `7.351781 USD`、reserved
-  `0`。同一 trace 的 missing-process 与固定 Guardian 拒绝现均可诚实投影，定向回归 `368/368` 通过；待新
-  diagnostic 只复验槽 8。
+  `0`。同一 trace 的 missing-process 与固定 Guardian 拒绝现均可诚实投影，定向回归 `368/368` 通过；其后由
+  diagnostic-v3 只复验槽 8。
 - diagnostic-v3：preflight `1/1`，槽 8 的 agent/Harbor/verifier/projector/预算/record 链路完成，但 finalize 使用
   错误的通用 revalidator 而作废为 `published_slot_source_integrity_failed`。17 个可靠 attempts（14 main/3
   Guardian）、`0.554663 USD` 已结算，Docker/VHDX 增长 `0`，Windows C: 最终余量 `202379096064` bytes；累计
-  task budget `7.906444 USD`、reserved `0`。finalize 已切回既有 Plan 058 专用 source 合同，待 diagnostic-v4
-  只复验槽 8。
+  task budget `7.906444 USD`、reserved `0`。finalize 已切回既有 Plan 058 专用 source 合同；其后由
+  diagnostic-v4 只复验槽 8。
 - diagnostic-v4：preflight `1/1`，槽 8 因 projector 未识别固定 `justification`/`sandbox_permissions` 参数验证失败
   而在 record 前作废。14 个可靠 attempts（13 main/1 Guardian）、`0.491396 USD` 已结算，Docker/VHDX 增长 `0`，
   Windows C: 最终余量 `202330550272` bytes；累计 task budget `8.397840 USD`、reserved `0`。严格 matcher 与真实
-  trace 投影已通过，待 diagnostic-v5 只复验槽 8。
+  trace 投影已通过；其后由 diagnostic-v5 只复验槽 8。
 - diagnostic-v5：preflight/result/source validation/finalize 均 `1/1`，task pass/reward `1`、raw/refined C2
   `0/0`、无害四门通过；14 个可靠 attempts（12 main/2 Guardian）、`0.378984 USD`，Docker/VHDX 增长 `0`，
   Windows C: 最终余量 `202189389824` bytes。累计 task budget `8.776824 USD`、reserved `0`；局部
-  commissioning 已闭环，待提交后重建正式 runtime。
+  commissioning 已闭环；其后提交并重建正式 runtime。
 - formal-v3：新 runtime 与 preflight `10/10` 均通过；首槽第 7 个 main 请求收到类型化上游
   `response.failed/upstream_error`，因本地 transport classifier 缺口作废为 `0/20`，7 attempts、
   `1.074850 USD`。Docker/VHDX 增长 `0`，Windows C: 最终余量 `201641660416` bytes；累计 task budget
@@ -558,13 +563,13 @@ requester/tool path 且全部调用参数不变时适用 guidance，任一身份
   重试，attempt 2 的 Guardian 在预算内使用中间工具轮次后触发第 4 次本地上限，verifier reward `1`，但 classifier
   错误要求 3 个已付费 Guardian 请求各有 terminal decision，campaign 因本地设施缺口作废为 `0/20`。28 attempts、
   1 transport retry、`1.924235 USD`，Docker/VHDX 增长 `0`，Windows C: 最终余量 `202307883008` bytes；累计
-  task budget `12.499077 USD`、reserved `0`。真实工件离线复验与相关回归 `159/159` 已通过，待新 diagnostic
-  只复验槽 8。
+  task budget `12.499077 USD`、reserved `0`。真实工件离线复验与相关回归 `159/159` 已通过；其后由
+  diagnostic-v7 只复验槽 8。
 - diagnostic-v7：新 runtime 与 preflight/result/source validation/finalize 均 `1/1`；冻结 Guardian 上限发生在
   22 main/3 Guardian 后，agent 非零但 verifier reward `1`/task pass 有效保留。25 attempts、0 transport retry、
   `0.900171 USD`；raw C2 `3` 次均分类为 reasonable，refined harmful `0`、无害四门通过。Docker/VHDX 增长
   `0`，Windows C: 最终余量 `202295300096` bytes；累计 task budget `13.399248 USD`、reserved `0`，局部
-  commissioning 闭环。runtime publication 前两次无产品失败及 absolute canonical wrapper 修复证据已保留。
+  commissioning 闭环。runtime publication 前两次非产品失败及 absolute canonical wrapper 修复证据已保留。
 - formal-v5/diagnostic-v8：formal-v5 因连续 Guardian API turns 的 review grouping 本地缺口作废为 `0/20`；
   77 attempts、`1.758825 USD`。修复后 diagnostic-v8 只复验绝对槽 4 并有效完成 `1/1`，12 attempts、
   `0.235429 USD`，raw 3 次均为 reasonable；累计费用 `15.393502 USD`。targeted diagnostic range 同时收敛为
@@ -575,10 +580,19 @@ requester/tool path 且全部调用参数不变时适用 guidance，任一身份
   `0/7/0`，无害四门通过，决策 `retain`。Docker 与 VHDX 增长均 `0`，最终 Docker 11.5 GB 且
   container/volume/cache 均为 `0`，Windows C: campaign final `196718600192` bytes、人工收尾复核
   `196716306432` bytes；项目容量 `166231814144` bytes。
-- 最终定向 Python 回归 `106/106` 通过；formal 冻结 Rust 产品在受监管 `4/4` 后完成真实 20/20。独立验收后
-  又对 guidance 做非材料收窄；两个修改文件通过 targeted `rustfmt --check` 与源码断言
-  `3/3`，但其新增 Rust test 因 sandbox systemd user bus fail-closed 且宿主授权被开发工具用量上限拒绝而未执行。
-- 聚焦独立验收：首轮 P2 finding 经核实后按决策 036 收窄；同一上下文干净审查者复验 `PASS`，无未解 finding。
+- 最终定向 Python 回归 `106/106` 通过；formal 冻结 Rust 产品在受监管 `4/4` 后完成真实 20/20。第一次独立验收
+  后按决策 036 对 guidance 做非材料身份文案收窄；外部验收又发现普通非 root agent 仍会继承 feature，现已按
+  决策 037 收紧到 root agent，并补 unit 与 `core/tests/suite` integration regression。
+- root-only unit 在共享 lock/watchdog 下 `2/2` 通过，新增 integration 和相关 crate 编译通过；但当前宿主的 mock
+  Responses 请求链在发送前超时，同一环境下仓库既有 unified-exec 请求体对照也以相同 0 request 失败。故该
+  integration 未冒充通过，失败/对照 metrics 均保留且 watchdog `stop=none`；外部复验可按代码与 unit 证据验收。
+- 交付资源：已在确认 clean、detached、无进程 cwd 且不被正式交付引用后，用精确 `git worktree remove` 清理
+  两个 measurement 与两个 detached source worktree，合计逻辑体积 `551,213,800` bytes；正式 campaign、binary、
+  manifest、预算、trace、结果和 build metrics 均保留。
+- Rust 复验结束后，按用户容量授权精确删除无进程使用、可重建且不被 campaign 读取的 Plan 058 `62387ad`
+  Cargo target，释放 `27,305,503,016` bytes；项目最终 `150,976,972,426` bytes，正式 bundle/manifest 与 metrics
+  均保留。
+- 聚焦外部复验：上一轮结论为不通过、formal-v6 本身有效；root-only/P2 收尾整改完成后待交回同一审查者复验。
 - 未运行：本地模型、训练、完整数据集、Codex 对照、validation、holdout、额外题目/round、CI、PR、全 workspace
   测试。
 
@@ -654,3 +668,4 @@ Plan 058 worktree，但执行阶段以下 I/O 会由 worktree 中的受控命令
 | 034 | 首个可信 formal-v6 达到 harmful `1 → 0` 且四项无害门通过，保留默认关闭、显式 opt-in 的 C2 tool-spec guidance | 20/20 与 Phase A 同为 8 pass/12 fail；7 次 raw repeat 均有状态/结果变化、失败恢复或改码后复测依据，不能为降低 raw 指标压制合理调用 | 产品变量、方向 1 结论、回滚边界 | 已采纳，正式决策 |
 | 035 | formal-v6 public result 离线补齐 body-free affected slot/task 聚合，不重跑正式 API | 字段可由同一冻结 records 确定性导出，完整结果重生成与 tracked JSON 一致；它只修复报告完整性，不改变评价口径或 campaign 有效性 | 结果发布、验收证据 | 已采纳 |
 | 036 | 独立验收后按预冻 `adjust` 规则把 guidance 收窄到 requester/tool path 与全部调用参数均相同，任一条件不确定即照常执行；formal-v6 结果仍绑定原 `0706bf0` 文案 | 首轮 P2 finding 真实，原文没有明确表达参数/requester 排除；收窄不增加干预、不改变执行资格或历史结果，避免把未正式测试的新文案冒充 formal-v6 原样版本 | 最终产品文案、独立验收、正式结果边界 | 已采纳，非材料收窄 |
+| 037 | 最终 guidance 额外绑定 root agent；普通 ThreadSpawn/Review/Compact 等非 root session 即使继承 feature 配置也不接入，并以 model-visible request integration 覆盖 direct 与 CodeModeOnly | 外部验收确认原 gate 只排除 Guardian，实际扩大到 formal 未覆盖的普通子 agent；复用既有 session-source 判定是职责契合的最小收窄，不改变 main 行为或工具执行语义 | tool plan、unit/integration regression、最终交付 | 已采纳，非材料收窄 |
