@@ -49,8 +49,8 @@ _REQUIRED_CGROUP_COUNTERS = (
     "memory.max",
     "memory.swap.max",
 )
-_DEFAULT_MEMORY_HIGH_BYTES = 19 * 1024**3
-_DEFAULT_MEMORY_MAX_BYTES = 21 * 1024**3
+_DEFAULT_MEMORY_HIGH_BYTES = 21 * 1024**3
+_DEFAULT_MEMORY_MAX_BYTES = 22 * 1024**3
 _DEFAULT_SWAP_MAX_BYTES = 5 * 1024**3
 _WATCHDOG_HEARTBEAT_MAX_AGE_NS = 15_000_000_000
 # WSL's wall clock can step backwards while the wrapper is refreshing this

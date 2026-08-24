@@ -194,7 +194,7 @@ SHA-256 清单；默认 denoland 资产地址在本轮返回 404，不能作为�
 | `test-threads = 10` | 各产品 `codex-rs/.config/nextest.toml` 的 `[profile.default]` | 测试执行阶段并发的测试进程数量 |
 | rustc 总并发槽 = 6 | 仓库根 `.cargo/rustc-throttle.sh` | 所有 Cargo 入口、agent 与 worktree 共用同一组 rustc 槽 |
 | 全局互斥锁 | `scripts/with-build-lock.sh`（仓库根共享） | 同一时刻只允许一个重量级构建 |
-| cgroup 内存边界 | 同上脚本 | `MemoryHigh=19G`、`MemoryMax=21G`、`MemorySwapMax=5G` |
+| cgroup 内存边界 | 同上脚本 | `MemoryHigh=21G`、`MemoryMax=22G`、`MemorySwapMax=5G` |
 | 实时资源看门狗 | 同上脚本 | 磁盘、匿名/文件/内核内存、swap、PSI、宿主可用内存每秒采样 |
 | scope 残留清理 | 同上脚本 | 主命令退出后仍存活的测试子进程会在 5 秒宽限后被精确终止 |
 
@@ -219,29 +219,29 @@ jobs、test-threads 与 rustc 槽是容量防护；全局锁是跨入口串行�
 
 总内存包含大量可回收的 target 文件页缓存；判断危险不能只看 `memory.current`。多轮中真正不可回收
 最高约 12.2 GB，swap 最高约 0.39 GB，宿主最低仍保有约 10.5 GiB 可用内存。PSI 曾瞬时越过 15%，
-但没有持续 20 秒，未触发停止；这验证了持续窗口能容忍短波动。21G 硬上限与 5G swap 上限对
+但没有持续 20 秒，未触发停止；这验证了持续窗口能容忍短波动。当次测量采用的 21G 硬上限与 5G swap 上限对
 26GB RAM / 10GB swap 的 WSL 配置是宽松但有边界的取值。
 
-#### 200 GB 项目存储看门狗
+#### 260 GB 项目存储看门狗
 
 `with-build-lock.sh` 对共享仓库根（包含主工作区、项目 worktree 与 git-ignored 项目 scratch）执行：
 
-- 180,000,000,000 B：一次告警；
-- 195,000,000,000 B：主动冻结并终止本次 scope；
-- 200,000,000,000 B：绝对停机线；
+- 240,000,000,000 B：一次告警；
+- 255,000,000,000 B：主动冻结并终止本次 scope；
+- 260,000,000,000 B：绝对停机线；
 - Windows `C:` 盘实际剩余空间低于 50,000,000,000 B：停机。
 
-磁盘每 5 秒采样一次，195GB 主动线为采样和进程冻结保留约 5GB 缓冲。完整 0.147.0 target 实测约
-126GB，距主动线仍有约 69GB 余量，因此 200GB 足以覆盖正常冷构建。宿主容量门禁必须读取 Windows
+磁盘每 5 秒采样一次，255GB 主动线为采样和进程冻结保留约 5GB 缓冲。完整 0.147.0 target 实测约
+126GB，距主动线仍有约 129GB 余量，因此 260GB 足以覆盖正常冷构建。宿主容量门禁必须读取 Windows
 `C:` 盘的实际余量；看门狗通过 `C:\` 的 WSL drvfs 挂载 `/mnt/c` 采样该值。WSL ext4 根文件系统
 `df` 显示的约 1TB 虚拟容量/余量只能作为诊断信息，不能代替该门禁。
 这是**受控构建看门狗**，不是 ext4 目录 quota；绕过脚本的直接写入不受其保护。
-为避免把项目 target 放到监控根之外绕过 200GB 计数，脚本要求 `CARGO_TARGET_DIR` 必须位于共享
+为避免把项目 target 放到监控根之外绕过 260GB 计数，脚本要求 `CARGO_TARGET_DIR` 必须位于共享
 RONDO 项目根内；外部 target 会在启动前被拒绝。
 
 #### 内存、swap 与 PSI 停机条件
 
-除内核的 `MemoryHigh=19G` / `MemoryMax=21G` / `MemorySwapMax=5G` 外，看门狗还会在以下任一条件成立时
+除内核的 `MemoryHigh=21G` / `MemoryMax=22G` / `MemorySwapMax=5G` 外，看门狗还会在以下任一条件成立时
 先 `SIGSTOP`、再 `SIGKILL` 本次 scope：不可回收内存达到 19GiB；swap 达到 4.75GiB，或连续 20 秒
 超过 4GiB；宿主 `MemAvailable` 低于 3.5GiB；cgroup 或宿主 full PSI avg10 连续 20 秒达到 15%；
 cgroup 报告 OOM kill。短时 1–3GiB swap 只削峰，不会被当作故障。
@@ -266,9 +266,9 @@ cgroup 报告 OOM kill。短时 1–3GiB swap 只削峰，不会被当作故障�
   访问真实外部 OAuth 服务，但属于桌面副作用。需要完全无交互运行时，应先给 browser opener 注入 stub。
 
 ```bash
-RONDO_BUILD_MEMORY_MAX=20G just test       # 单次收紧硬上限
+RONDO_BUILD_MEMORY_HIGH=19G RONDO_BUILD_MEMORY_MAX=21G just test
 RONDO_BUILD_SWAP_MAX=4G just test          # 单次收紧 swap
-RONDO_BUILD_PROJECT_STOP_BYTES=190000000000 just test
+RONDO_BUILD_PROJECT_STOP_BYTES=250000000000 just test
 ```
 
 `RONDO_BUILD_WATCHDOG=0`、`RONDO_BUILD_LOCK=0` 与 `RONDO_RUSTC_THROTTLE=0` 是实现层的紧急
