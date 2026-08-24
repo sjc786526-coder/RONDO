@@ -354,8 +354,7 @@ def validate_dataset(
         expected_kind = "new_event" if row["publication_class"].startswith("new_event_") else "existing_event"
         if packet["target_kind"] != expected_kind:
             _fail(f"candidate {row['candidate_id']} publication_class conflicts with packet")
-        if final:
-            _validate_packet_slice_projection(packet, row)
+        _validate_packet_slice_projection(packet, row)
 
     if scenario_rows:
         scenarios = _index(scenario_rows, "scenario_id", "scenario rows")

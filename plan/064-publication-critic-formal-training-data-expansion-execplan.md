@@ -216,16 +216,20 @@ Plan 054 tokenizer/cache 与 Plan 059 retained namespace 只读，Plan 060/062 n
 - 完整逻辑候选为 123 scenarios、228 candidates、104 pairs，最终 preliminary split 为 train/validation/unseen-test `128/55/45`；37 条
   near-duplicate edges 均闭合，无 reference match、coverage failure、visible/conditioned/length shortcut finding，exact token 为 178,646、
   单项 553--2,094，whole-continuity omission 为 0。
-- release-audit-v5 覆盖 97 个风险分层、123 candidates 和 33 pairs。三路有效盲审中唯一系统性 finding 精确命中既有 `HC-001` 六个 v7
+- `candidate-v11-reviewed` 是当前权威候选。首次 clean-HEAD prefreeze 试跑在写 release 前发现一条 `known_stale` packet 缺少对应的派生
+  freshness slice；只修正该 scenario/supervision metadata，并把 slice projection 校验前移到 generation contract。packet 正文、label、defect、pair、
+  候选身份和抽样集合均未改变；旧失败输出保留为诊断证据。
+- release-audit-v6 覆盖 97 个风险分层、123 candidates 和 33 pairs。它与 v5 的 blind candidate/pair packets、三个 shard、抽样 ID、strata、reveal
+  均逐字节一致，仅 reviewed content binding 因上述 metadata 修正而更新，故机械精确重绑定而未重做语义审查。三路有效盲审中唯一系统性 finding 精确命中既有 `HC-001` 六个 v7
   continuity pairs，并由终态 adjudication 维持 `false_positive`；未解决系统性 finding 为 0。一个 reviewer 主动披露旧会话暴露，其 shard C 输出被
   保留但排除，另启零上下文 reviewer 重审同一 shard C 并得到 0 finding。单条 label/defect/soft-direction 分歧原样记录；按 design lock，附加 audit
   只发现系统性问题，不替代所有新行的 direct admission review。
-- 12 个 Publication Critic focused Python 模块共 135 tests 全部通过；compileall 与 `git diff --check` 通过。全模型、Cargo、Docker、云任务、
+- 12 个 Publication Critic focused Python 模块共 136 tests 全部通过；compileall 与 `git diff --check` 通过。全模型、Cargo、Docker、云任务、
   真实 API、上传、训练和 Plan 060/062 live 资产均未运行或读取。
 
 ### 当前工作
 
-- `PREFREEZE_READY`：`candidate-v10-reviewed` 已绑定完整 direct reviews 和终态 quality-audit；正在形成 clean checkpoint commit，并将从该 exact HEAD
+- `PREFREEZE_READY`：`candidate-v11-reviewed` 已绑定完整 direct reviews 和终态 quality-audit；正在形成 clean checkpoint commit，并将从该 exact HEAD
   运行一次 ignored prefreeze finalization、tokenizer-only census 和 consumer smoke。尚未正式 freeze，尚未创建 tracked training release 或 manifest，
   尚未给出数据 GO。
 
