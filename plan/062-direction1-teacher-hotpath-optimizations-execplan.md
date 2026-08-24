@@ -199,39 +199,49 @@
 - [x] 已核对三项当前实现与直接测试位置；计划不改变模型可见语义，不恢复真实 API/Docker campaign。
 - [x] 已确认当前架构不要求主工作区直接写 ignored 资产：target、watchdog、benchmark raw 可留在 062 worktree，
       临时教师源码/scratch 可留在 `/tmp/rondo-plan062-*`。
+- [x] benchmark scaffold 已由 `aa4c925`、`52e7302` 建立；解析器补丁后的 clean baseline 为 `d5535fc`，
+      clean candidate 为 `22b8766`，两侧 harness SHA-256 均为
+      `ef8364c8a225226fa1085355ae447f55b9a0aabb3fab6d2f8f264703c77fd5f2`。
+- [x] `782baab` 已提交三项学习教师源码后筛选并自主实现的优化：history orphan 借用式索引、模型可见工具规格
+      不可变共享、unified-exec 连续字节快照与合法 UTF-8 借用判定；直接回归覆盖语义等价边界。
+- [x] `22b8766` 的 clean 正式轮已完成：benchmark smoke；定向 48/48；release exact 1/1；Python parser
+      4/4；`just test -p codex-core` 3332/3332（8 skipped、2 slow）；正式 candidate benchmark 9/9 case。
+- [x] body-free 聚合已保存为
+      `eval/results/observations/plan062-direction1-teacher-hotpath-optimizations.json`；raw 只留在 062 worktree
+      ignored namespace。
 
 ### 当前工作
 
-- 规划完成，等待用户把本计划和一次性授权提示词交给执行者；尚未实施、构建、测试或运行 benchmark。
+- 实现已提交，等待独立审查。执行者不自行宣布最终 PASS。
 
 ### 本任务剩余步骤
 
-1. 执行者按 §3.5 建立并测量 clean baseline scaffold。
-2. 逐项实现三项热路径优化，补齐正确性回归并打通轻量测评。
-3. 从 clean candidate 完整运行 §3.7—§3.9 正式轮，记录 body-free 结果与资源/未运行事实。
-4. 更新计划状态、方向 1 WBS 和精炼日志，只提交 062 worktree，交回独立审查。
-5. 审查者复核 live diff、测试/测评与边界；finding 关闭后给出 PASS/需整改，不自行合并或推送。
+1. Plan 062 审查者复核 live diff、语义等价回归、同哈希 baseline/candidate、资源边界和交付记录。
+2. 若审查发现普通窄 finding，在同一授权边界内修复、重新冻结并完整重跑正式轮；原则性变化另行授权。
+3. finding 关闭后由审查者给出 PASS/需整改；合并、推送和分支归档仍由用户另行决定。
 
 ### 阻塞项
 
-- 当前无技术阻塞；进入实施等待用户向执行者发出包含本计划全部授权边界的一次性提示词。
+- 当前无技术阻塞。
 
 ### 当前验收状态
 
-- `planning_complete / implementation_not_started / independent_review_pending`。
-- 本轮只完成规则阅读、worktree 创建和 ExecPlan；没有 Rust/测评实现，没有运行 Cargo、benchmark、Docker、
-  真实 API、本地模型、CI 或 PR。
+- `implementation_committed / independent_review_pending`。
+- 正式结果绑定 candidate `22b8766`；尚未经过 Plan 062 审查者的独立验收，不表述为最终 PASS。
+- 未运行全 workspace、Bazel、Docker、Terminal-Bench、真实 API、真实本地模型、训练、云任务、CI 或 PR。
 
 ### 主工作区 ignored 资产
 
-- 当前不需要，也未创建任何 Plan 062 主工作区 ignored 资产。
-- 执行阶段默认仍不允许主工作区直写。若现有工具硬性要求 Git common root ignored I/O，必须先单独汇报并取得用户
-  对精确路径和用途的授权；不能把“git-ignored”当作自动允许。
+- 未写入主工作区 tracked 或 ignored 资产。Git 提交只短暂更新既有 062 worktree common index；未创建项目外
+  持久数据。
+- 062 worktree 保留受监控 `target/`、`.codex/build-watchdog/`、`.codex/plan062-hotpaths/raw/`、校验过的
+  `.codex/rusty-v8/` 依赖工件和格式/测试缓存；未发现 `/tmp/rondo-plan062-*` scratch。
 
 ### 交接边界
 
 - 执行者只负责实现、调试、clean 正式轮、任务内记录和提交 062 worktree；最终独立验收由本计划审查者完成。
-- 本任务完成后冻结计划。方向 1 是否继续安排其他工作只由届时 WBS 和用户决定，不在本计划追加新候选。
+- 当前交付以 `22b8766` 及其后续结果记录提交为基础；方向 1 是否继续安排其他工作只由届时 WBS 和用户决定，
+  不在本计划追加新候选。
 - 合并、推送、分支重命名/归档必须由用户在独立验收后另行批准。
 
 ## 6. 关键决策记录
@@ -248,3 +258,7 @@
 | 006 | 调试按未打通处边修边跑；全部打通后冻结并从 clean commit 完整跑一轮 | 减少重型编译浪费，同时保证正式结果来自同一干净代码/config/workload | 执行、结果 | 用户明确要求 |
 | 007 | 当前无主工作区直写需求；若执行时出现必须的 common-root ignored I/O，先单独授权 | 现有 target/watchdog/raw 均可位于 062 worktree，不能无必要扩大写边界 | 文件、Git | 已采纳 |
 | 008 | 执行者只提交 062 worktree并等待本计划审查者验收；合并、推送和归档另批 | 用户保留最终集成决定权 | Git、交付 | 用户明确要求 |
+| 009 | benchmark 只通过既有 `test_support` 暴露窄适配器，不扩大生产公共 API | 三个 private 热路径可被确定性测量，同时保持测评不侵入生产调用链 | benchmark、core | 已落实 |
+| 010 | Divan 零分配时省略 allocation block，解析器按零记录并补回归；旧两侧结果作废后以同一新哈希重测 | 保持零分配结果可记录，同时遵守 baseline/candidate 同口径 | eval、结果 | 已落实 |
+| 011 | 工具规格在 router 构造边界转成 `Arc<[ToolSpec]>` 并贯穿 `Prompt`；exec snapshot 直接形成连续 bytes，denial 判定借用 `Cow<str>` | 在当前 ownership 与错误类型边界内消除深拷贝，不改变请求或错误语义 | core | 已落实 |
+| 012 | 只修复正式 crate 门禁暴露的既有窄 fixture：补齐已存在配置字段的 schema snapshot，并以本地 reset server 代替不稳定端口假设 | 让回归在授权网络边界内确定运行，不改变产品语义或基线身份 | 测试 fixture | 已落实 |
