@@ -204,38 +204,47 @@ Plan 054 tokenizer/cache 与 Plan 059 retained namespace 只读，Plan 060/062 n
 
 ### 已完成
 
-- 已核实规划基线为 clean `main@eeeddf6f532c4f116ddc72595196034c20953ad3`，与 `origin/main` 一致；Plan 060/062 各自在独立 worktree 实施。
-- 已从该基线创建 `.claude/worktrees/064-publication-critic-data-expansion` 与分支
-  `worktree-064-publication-critic-data-expansion`；未读取 Plan 060/062 未提交内容或 ignored 运行资产。
-- 已阅读根 AGENTS、README、顶层/方向 3 WBS、plan 模板、Plan 054/059、Plan 059 最终验收、v7 freeze/data card、训练数据设施和数据布局规范；
-  另只读核对 Plan 060 已提交的规划合同，仅用于确认任务范围、v7 smoke 输入与正式吞吐/预算交接边界，不把它当作 Plan 060 实施或吞吐证据。
-- 已确认 v7 当前为 36 scenario、72 candidate、30 Boundary、6 Within-PASS，split 为 42/16/14，exact-token census 为 50,073；这些只是规模/覆盖
-  基线，不是 Plan 064 的机械倍数目标。
-- 已确认执行阶段的 tracked 交付可全部在 worktree 内完成；raw/临时/prefreeze 资产因 `eval-data/` 被 ignore，预计必须单独写主物理根的 Plan 064
-  namespace。本规划阶段未创建该目录，也未修改主工作区 tracked 内容。
-- 已由两个只读子智能体分别审查模板/WBS/并行边界和 Plan 059/v7 设施可实施性；规划者复核并关闭抽样 review 合同、base+delta 全集门禁、
-  prefreeze 再审批及 Plan 060 现场隔离 finding，最终两路复验均为 PASS。该审查只覆盖 ExecPlan，不替代实现后的预冻结审查和最终独立验收。
+- 阶段 A 已完成。物理 v7 身份保持 `tree=435c06fba3196bee21d59d88b9e6d6b1a1e1999a`、manifest content
+  `07666936706786c456e83a7130c211013ff95cfb3e494154e62fca1e3bc528eb`；基线为 36 scenario、72 candidate、36 pair、42/16/14 split、
+  50,073 exact tokens。Plan 060 仅有已提交规划合同，没有可接受的真实吞吐、费用或训练预算汇总，因此数据规模预算适配仍为证据不足。
+- data-design lock、batch/review/finalize、完整逻辑 release 门禁、risk-stratified quality audit、exact v7 membership projection、consumer 和 focused tests
+  已落地。v7 物理目录未修改；v8 仅显式退休 `HONEST-V3-001B` 的六条歧义 honesty qminus 和六条 Boundary relation，保留 66 个 canonically
+  unchanged v7 candidates、36 scenarios 和 30 pairs。
+- 阶段 B 的稳定 delta 为 87 scenarios、162 candidates、74 pairs，所有新 candidate/pair 均有 direct review binding。修复按小块完成并锁定：
+  scope 三块与 honesty train/validation/unseen 三块均由独立 reviewer 只做本块 blind regression；未通过的 honesty train/unseen 只返修本块，
+  未删除样本或重开已通过区域。
+- 完整逻辑候选为 123 scenarios、228 candidates、104 pairs，最终 preliminary split 为 train/validation/unseen-test `128/55/45`；37 条
+  near-duplicate edges 均闭合，无 reference match、coverage failure、visible/conditioned/length shortcut finding，exact token 为 178,646、
+  单项 553--2,094，whole-continuity omission 为 0。
+- release-audit-v5 覆盖 97 个风险分层、123 candidates 和 33 pairs。三路有效盲审中唯一系统性 finding 精确命中既有 `HC-001` 六个 v7
+  continuity pairs，并由终态 adjudication 维持 `false_positive`；未解决系统性 finding 为 0。一个 reviewer 主动披露旧会话暴露，其 shard C 输出被
+  保留但排除，另启零上下文 reviewer 重审同一 shard C 并得到 0 finding。单条 label/defect/soft-direction 分歧原样记录；按 design lock，附加 audit
+  只发现系统性问题，不替代所有新行的 direct admission review。
+- 12 个 Publication Critic focused Python 模块共 135 tests 全部通过；compileall 与 `git diff --check` 通过。全模型、Cargo、Docker、云任务、
+  真实 API、上传、训练和 Plan 060/062 live 资产均未运行或读取。
 
 ### 当前工作
 
-- ExecPlan 已形成，等待用户把包含一次性授权和冻结前停机要求的提示词交给执行者，在现有 Plan 064 worktree 中实施。
+- `PREFREEZE_READY`：`candidate-v10-reviewed` 已绑定完整 direct reviews 和终态 quality-audit；正在形成 clean checkpoint commit，并将从该 exact HEAD
+  运行一次 ignored prefreeze finalization、tokenizer-only census 和 consumer smoke。尚未正式 freeze，尚未创建 tracked training release 或 manifest，
+  尚未给出数据 GO。
 
 ### 本任务剩余步骤
 
-- 完成阶段 A 的 v7 覆盖/规模基线与 data-design lock。
-- 分批完成阶段 B 的数据扩充、风险分层复核、返修和 freeze-ready 全链路验证。
-- 形成 clean prefreeze checkpoint 并停止，交计划制定者审查；按 finding 修复并重新申请，直到获得冻结批准。
+- 从 clean checkpoint 运行官方 prefreeze finalizer，核对 output identity、tokenizer-only、consumer、权限和 ignored 保留状态后停止，交计划制定者审查；
+  按 finding 修复并重新申请，直到获得冻结批准。
 - 获批后从干净状态完成阶段 C 正式 freeze、相关轻量门禁和执行者自检。
 - 完成阶段 D 数据资格建议、建议 WBS delta、任务日志、worktree 提交与最终独立验收交接。
 
 ### 阻塞项
 
-- 当前没有本地数据工作的技术阻塞。Plan 060 尚无本任务可使用的正式吞吐/最终费用事实；这不阻塞阶段 A/B，但在最终规模资格判断时若仍缺失，必须
-  诚实形成“证据不足”或限定结论，不能自动给数据 GO。
+- 当前没有阶段 A/B 的本地技术阻塞。Plan 060 尚无本任务可使用的正式吞吐、最终费用或训练预算事实；这不阻塞 prefreeze，但在最终规模资格判断时
+  若仍缺失，必须形成“证据不足”或限定结论，不能自动给数据 GO。
 
 ### 当前验收状态
 
-- `NOT_STARTED`：当前只有规划与 v7 基线核对，没有 Plan 064 data-design lock、扩充候选、prefreeze 审查或新版本 freeze 证据。
+- `PREFREEZE_READY / NOT_FROZEN`：阶段 A/B 的实现、候选、direct review、risk-stratified audit 和 commissioning 机械链已完成；等待 clean-HEAD
+  prefreeze finalizer 与计划制定者冻结批准。没有正式 release、manifest 或数据资格结论。
 
 ### 交接边界
 
@@ -260,3 +269,7 @@ Plan 054 tokenizer/cache 与 Plan 059 retained namespace 只读，Plan 060/062 n
 | 007 | Plan 060 规划合同可只读；真实吞吐/费用只接受已进 main、正式交接或用户提供的汇总，不读取其并行现场 | 保持并行隔离，避免把瞬时状态当正式吞吐与费用 | 依赖、并行 | 已采纳 |
 | 008 | tracked 交付仅在 064 worktree；raw/prefreeze 资产统一放主物理根 Plan 064 ignored namespace | linked worktree 不共享 ignored 资产，同时避免主工作区 tracked 修改 | Git、数据布局 | 已采纳 |
 | 009 | 执行者不修改当前滞后 WBS，只提供建议 delta；最终编辑在独立验收和用户批准整合后基于最新 clean main 窄完成 | 保护 Plan 060/062 并行成果，保留用户批准主线交付的边界 | 文档、Git | 已采纳 |
+| 010 | v8 对物理 v7 使用 exact membership projection，显式退休 `HONEST-V3-001B` 六条歧义 qminus 及其 relations，不改写 v7 | 保留上游 release 与 Plan 060 smoke 身份，同时避免把已确认歧义监督继承进 v8 | lineage、release | 已采纳 |
+| 011 | 采用完整物化 release；同一 lineage helper 同时约束 commissioning、prefreeze、freeze 和 consumer，不在各入口重复过滤 | 数据规模小，完整物化更易直接消费和完整验证 | freeze、consumer | 已采纳 |
+| 012 | direct review 是新行准入；release audit 只作为系统性风险监控，保留单条分歧但只由未解决系统性 finding 阻断 | 符合 design lock 与风险相称复核，避免反复追问 reviewer 制造一致 | review、质量 | 已采纳 |
+| 013 | grouped split 的确定性搜索预算由 20,000 调为 30,000，算法、seed、ratio、coverage 和 group 规则不变 | 固定候选首次可行分配在 attempt 23,429；这是有界机械搜索预算问题，不是数据语义问题 | split、配置 | 已采纳 |

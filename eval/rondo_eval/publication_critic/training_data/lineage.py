@@ -21,8 +21,10 @@ def validate_v7_lineage(
     combined_packet_rows: Sequence[Mapping[str, Any]],
     combined_supervision_rows: Sequence[Mapping[str, Any]],
     combined_pair_rows: Sequence[Mapping[str, Any]],
+    retired_candidate_ids: Sequence[str] = (),
+    retired_pair_ids: Sequence[str] = (),
 ) -> dict[str, Any]:
-    """Verify that a combined release contains an unchanged frozen v7 base.
+    """Verify the exact unchanged v7 projection inherited by a combined release.
 
     Rows are compared by their stable entity ID after canonical JSON encoding.
     This deliberately does not compare release-local group-component IDs: those
@@ -32,7 +34,7 @@ def validate_v7_lineage(
     if v7_membership.get("dataset_revision") != "v7":
         raise TrainingDataError("v7 membership dataset_revision must equal v7")
 
-    v7 = {
+    physical_v7 = {
         "scenarios": _index(v7_scenario_rows, "scenario_id", "v7 scenarios"),
         "packets": _index(v7_packet_rows, "candidate_id", "v7 packets"),
         "supervision": _index(
@@ -61,8 +63,26 @@ def validate_v7_lineage(
         "pairs": _index(combined_pair_rows, "pair_id", "combined pairs"),
     }
 
-    _validate_v7_relations(v7)
+    _validate_v7_relations(physical_v7)
     validate_memberships(v7_membership, v7_supervision_rows, v7_pair_rows)
+    projection = project_v7_release_rows(
+        v7_scenario_rows=v7_scenario_rows,
+        v7_packet_rows=v7_packet_rows,
+        v7_supervision_rows=v7_supervision_rows,
+        v7_pair_rows=v7_pair_rows,
+        retired_candidate_ids=retired_candidate_ids,
+        retired_pair_ids=retired_pair_ids,
+    )
+    v7 = {
+        "scenarios": _index(projection["scenarios"], "scenario_id", "inherited v7 scenarios"),
+        "packets": _index(projection["packets"], "candidate_id", "inherited v7 packets"),
+        "supervision": _index(
+            projection["supervision"],
+            "candidate_id",
+            "inherited v7 supervision",
+        ),
+        "pairs": _index(projection["pairs"], "pair_id", "inherited v7 pairs"),
+    }
 
     pinned_candidate_splits = {
         candidate_id: _split(row, candidate_id)
@@ -82,21 +102,140 @@ def validate_v7_lineage(
     for kind in ("scenarios", "packets", "supervision", "pairs"):
         _require_unchanged_rows(v7[kind], combined[kind], kind)
 
+    retired_candidates = set(retired_candidate_ids)
+    retired_pairs = set(retired_pair_ids)
+    if retired_candidates & set(combined["packets"]):
+        raise TrainingDataError("combined packets reintroduce a retired v7 candidate")
+    if retired_candidates & set(combined["supervision"]):
+        raise TrainingDataError("combined supervision reintroduces a retired v7 candidate")
+    if retired_pairs & set(combined["pairs"]):
+        raise TrainingDataError("combined pairs reintroduce a retired v7 pair")
+
+    physical_counts = {
+        kind: len(physical_v7[kind]) for kind in sorted(physical_v7)
+    }
     v7_counts = {kind: len(v7[kind]) for kind in sorted(v7)}
     combined_counts = {kind: len(combined[kind]) for kind in sorted(combined)}
     return {
         "schema_version": 1,
         "base_dataset_revision": "v7",
+        "physical_row_counts": physical_counts,
         "verified_row_counts": v7_counts,
+        "retired_candidate_ids": sorted(retired_candidates),
+        "retired_pair_ids": sorted(retired_pairs),
         "combined_row_counts": combined_counts,
         "added_row_counts": {
             kind: combined_counts[kind] - v7_counts[kind]
             for kind in sorted(v7_counts)
         },
         "v7_canonical_content_sha256": {
+            kind: _rows_digest(physical_v7[kind])
+            for kind in sorted(physical_v7)
+        },
+        "inherited_v7_canonical_content_sha256": {
             kind: _rows_digest(v7[kind]) for kind in sorted(v7)
         },
         "pinned_candidate_splits": pinned_candidate_splits,
+    }
+
+
+def project_v7_release_rows(
+    *,
+    v7_scenario_rows: Sequence[Mapping[str, Any]],
+    v7_packet_rows: Sequence[Mapping[str, Any]],
+    v7_supervision_rows: Sequence[Mapping[str, Any]],
+    v7_pair_rows: Sequence[Mapping[str, Any]],
+    retired_candidate_ids: Sequence[str],
+    retired_pair_ids: Sequence[str],
+) -> dict[str, list[Mapping[str, Any]]]:
+    """Select the exact Plan 064 v7 membership projection.
+
+    The physical release remains independently manifest-verified.  This helper
+    only removes explicitly named candidates and relations for v8 membership;
+    it neither rewrites retained rows nor introduces a runtime filter.
+    """
+
+    rows = {
+        "scenarios": _index(v7_scenario_rows, "scenario_id", "v7 scenarios"),
+        "packets": _index(v7_packet_rows, "candidate_id", "v7 packets"),
+        "supervision": _index(
+            v7_supervision_rows,
+            "candidate_id",
+            "v7 supervision",
+        ),
+        "pairs": _index(v7_pair_rows, "pair_id", "v7 pairs"),
+    }
+    _validate_v7_relations(rows)
+    retired_candidates = _projection_ids(
+        retired_candidate_ids,
+        where="retired v7 candidate IDs",
+    )
+    retired_pairs = _projection_ids(
+        retired_pair_ids,
+        where="retired v7 pair IDs",
+    )
+    unknown_candidates = retired_candidates - set(rows["supervision"])
+    unknown_pairs = retired_pairs - set(rows["pairs"])
+    if unknown_candidates:
+        raise TrainingDataError(
+            f"v7 projection retires unknown candidates: {sorted(unknown_candidates)}"
+        )
+    if unknown_pairs:
+        raise TrainingDataError(
+            f"v7 projection retires unknown pairs: {sorted(unknown_pairs)}"
+        )
+
+    inherited_candidate_ids = set(rows["supervision"]) - retired_candidates
+    inherited_pair_ids = set(rows["pairs"]) - retired_pairs
+    for pair_id in sorted(inherited_pair_ids):
+        pair = rows["pairs"][pair_id]
+        endpoints = {
+            str(pair["preferred_candidate_id"]),
+            str(pair["dispreferred_candidate_id"]),
+        }
+        retired_endpoints = endpoints & retired_candidates
+        if retired_endpoints:
+            raise TrainingDataError(
+                f"v7 projection keeps pair {pair_id} with retired endpoints: "
+                f"{sorted(retired_endpoints)}"
+            )
+    for pair_id in sorted(retired_pairs):
+        pair = rows["pairs"][pair_id]
+        endpoints = {
+            str(pair["preferred_candidate_id"]),
+            str(pair["dispreferred_candidate_id"]),
+        }
+        if not endpoints & retired_candidates:
+            raise TrainingDataError(
+                f"v7 projection retires unrelated pair: {pair_id}"
+            )
+
+    referenced_scenarios = {
+        str(rows["supervision"][candidate_id]["scenario_id"])
+        for candidate_id in inherited_candidate_ids
+    }
+    if referenced_scenarios != set(rows["scenarios"]):
+        raise TrainingDataError(
+            "v7 projection would orphan or remove Scenario membership"
+        )
+
+    return {
+        "scenarios": list(v7_scenario_rows),
+        "packets": [
+            row
+            for row in v7_packet_rows
+            if str(row["candidate_id"]) in inherited_candidate_ids
+        ],
+        "supervision": [
+            row
+            for row in v7_supervision_rows
+            if str(row["candidate_id"]) in inherited_candidate_ids
+        ],
+        "pairs": [
+            row
+            for row in v7_pair_rows
+            if str(row["pair_id"]) in inherited_pair_ids
+        ],
     }
 
 
@@ -155,6 +294,22 @@ def _index(
             raise TrainingDataError(f"duplicate {key} in {where}: {row_id}")
         result[row_id] = row
     return result
+
+
+def _projection_ids(values: Sequence[str], *, where: str) -> set[str]:
+    identifiers: set[str] = set()
+    for index, value in enumerate(values):
+        if (
+            not isinstance(value, str)
+            or not value
+            or value.strip() != value
+            or any(character.isspace() for character in value)
+        ):
+            raise TrainingDataError(f"{where}[{index}] must be a stable ID")
+        if value in identifiers:
+            raise TrainingDataError(f"{where} must not contain duplicates")
+        identifiers.add(value)
+    return identifiers
 
 
 def _split(row: Mapping[str, Any], candidate_id: str) -> str:

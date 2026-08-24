@@ -35,6 +35,9 @@ from rondo_eval.publication_critic.training_data.plan064_batch import (  # noqa:
     build_plan064_aggregate_review_bindings,
     create_plan064_review_binding,
 )
+from rondo_eval.publication_critic.training_data.lineage import (  # noqa: E402
+    project_v7_release_rows,
+)
 from rondo_eval.publication_critic.training_data.quality_audit import (  # noqa: E402
     build_plan064_quality_audit_strata,
     plan064_quality_audit_seed,
@@ -125,6 +128,15 @@ class PublicationCriticPlan064ReleaseTests(unittest.TestCase):
         self.delta.mkdir(mode=0o700)
         self.design_lock = self.root / "design-lock.json"
         lock = json.loads(V8_LOCK.read_text(encoding="utf-8"))
+        lock["base_release"]["v8_membership_projection"] = {
+            "policy": "plan064_exact_v7_membership_projection_v1",
+            "finding": "unit-test-none",
+            "reason": "Generic release fixtures exercise full v7 inheritance.",
+            "retained_candidate_count": 72,
+            "retained_pair_count": 36,
+            "retired_candidate_ids": [],
+            "retired_pair_ids": [],
+        }
         lock["bounded_scale"]["logical_release_floor"] = 0
         lock["bounded_scale"]["hard_cap"] = 1000
         minimums = lock["coverage_minimums"]
@@ -208,6 +220,42 @@ class PublicationCriticPlan064ReleaseTests(unittest.TestCase):
             identity["semantic_content_sha256"]["aggregate_review_bindings"],
             sha256_bytes(canonical_json_bytes(source_binding)),
         )
+
+    def test_prefreeze_materializes_exact_v7_membership_projection(self) -> None:
+        retired_candidate = "pc059-b-honest-01-qminus"
+        retired_pair = "pair-b-honest-01-boundary"
+        lock = json.loads(self.design_lock.read_text(encoding="utf-8"))
+        lock["base_release"]["v8_membership_projection"] = {
+            "policy": "plan064_exact_v7_membership_projection_v1",
+            "finding": "unit-test-projection",
+            "reason": "Exercise one exact candidate and relation retirement.",
+            "retained_candidate_count": 71,
+            "retained_pair_count": 35,
+            "retired_candidate_ids": [retired_candidate],
+            "retired_pair_ids": [retired_pair],
+        }
+        self.design_lock.write_text(
+            json.dumps(lock, ensure_ascii=False, sort_keys=True),
+            encoding="utf-8",
+        )
+        self._write_quality_audit()
+
+        output = self.ignored / "prefreeze-projection"
+        result = self._run("prefreeze", output)
+
+        self.assertEqual(result["statistics"]["candidate_count"], 72)
+        dispositions = _jsonl(output / "candidate-dispositions.jsonl")
+        disposition_ids = {str(row["candidate_id"]) for row in dispositions}
+        self.assertNotIn(retired_candidate, disposition_ids)
+        self.assertEqual(
+            sum(row["method"] == "inherited_v7" for row in dispositions),
+            71,
+        )
+        pairs = _jsonl(output / "pairs.jsonl")
+        self.assertNotIn(retired_pair, {str(row["pair_id"]) for row in pairs})
+        lineage = json.loads((output / "lineage.json").read_text(encoding="utf-8"))
+        self.assertEqual(lineage["physical_row_counts"]["supervision"], 72)
+        self.assertEqual(lineage["verified_row_counts"]["supervision"], 71)
 
     def test_complete_release_quality_audit_is_bound_and_copied(self) -> None:
         output = self.ignored / "prefreeze-quality-audit"
@@ -794,27 +842,28 @@ class PublicationCriticPlan064ReleaseTests(unittest.TestCase):
         self._write_jsonl("pair-reviews.jsonl", [])
 
     def _write_quality_audit(self) -> None:
-        scenarios = [
-            *_jsonl(V7_ROOT / "scenarios.jsonl"),
-            *_jsonl(self.delta / "scenarios.jsonl"),
-        ]
-        packets = [
-            *_jsonl(V7_ROOT / "packets.jsonl"),
-            *_jsonl(self.delta / "packets.jsonl"),
-        ]
+        design_lock = json.loads(self.design_lock.read_text(encoding="utf-8"))
+        projection = design_lock["base_release"]["v8_membership_projection"]
+        base = project_v7_release_rows(
+            v7_scenario_rows=_jsonl(V7_ROOT / "scenarios.jsonl"),
+            v7_packet_rows=_jsonl(V7_ROOT / "packets.jsonl"),
+            v7_supervision_rows=_jsonl(V7_ROOT / "supervision.jsonl"),
+            v7_pair_rows=_jsonl(V7_ROOT / "pairs.jsonl"),
+            retired_candidate_ids=projection["retired_candidate_ids"],
+            retired_pair_ids=projection["retired_pair_ids"],
+        )
+        scenarios = [*base["scenarios"], *_jsonl(self.delta / "scenarios.jsonl")]
+        packets = [*base["packets"], *_jsonl(self.delta / "packets.jsonl")]
         supervision = [
-            *_jsonl(V7_ROOT / "supervision.jsonl"),
+            *base["supervision"],
             *_jsonl(self.delta / "supervision.jsonl"),
         ]
-        pairs = [
-            *_jsonl(V7_ROOT / "pairs.jsonl"),
-            *_jsonl(self.delta / "pairs.jsonl"),
-        ]
+        pairs = [*base["pairs"], *_jsonl(self.delta / "pairs.jsonl")]
         candidate_ids = sorted(str(row["candidate_id"]) for row in supervision)
         pair_ids = sorted(str(row["pair_id"]) for row in pairs)
         final_assignments = {
             str(row["candidate_id"]): str(row["proposed_split"])
-            for row in _jsonl(V7_ROOT / "supervision.jsonl")
+            for row in base["supervision"]
         }
         final_assignments["pc064-test-single"] = "train"
         combined = {
@@ -823,7 +872,6 @@ class PublicationCriticPlan064ReleaseTests(unittest.TestCase):
             "supervision": supervision,
             "pairs": pairs,
         }
-        design_lock = json.loads(self.design_lock.read_text(encoding="utf-8"))
         near_edges = find_near_duplicate_edges(
             packets,
             threshold=float(
@@ -835,10 +883,10 @@ class PublicationCriticPlan064ReleaseTests(unittest.TestCase):
             assignments=final_assignments,
             base_candidate_ids={
                 str(row["candidate_id"])
-                for row in _jsonl(V7_ROOT / "supervision.jsonl")
+                for row in base["supervision"]
             },
             base_pair_ids={
-                str(row["pair_id"]) for row in _jsonl(V7_ROOT / "pairs.jsonl")
+                str(row["pair_id"]) for row in base["pairs"]
             },
             near_duplicate_edges=near_edges,
             design_lock=design_lock,

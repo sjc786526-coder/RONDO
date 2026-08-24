@@ -5,8 +5,10 @@
   "lineage_contract": {
     "base_release": "training/publication-critic-v7",
     "requirements": [
-      "Every base scenario, packet, supervision and pair is present and canonically identical.",
-      "Every base candidate retains its frozen split.",
+      "The physical v7 release is manifest-verified and remains byte-identical.",
+      "The design lock partitions v7 candidate and pair membership into one exact inherited projection and an explicit retired set.",
+      "Every inherited base scenario, packet, supervision and pair is present and canonically identical, and every inherited candidate retains its frozen split.",
+      "Retired candidates and pairs are absent from v8 rows, dispositions, membership and consumer output.",
       "New IDs never collide with base IDs.",
       "The complete logical release is checked as one set."
     ]

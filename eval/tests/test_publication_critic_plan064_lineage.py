@@ -15,6 +15,7 @@ from rondo_eval.publication_critic.training_data.contract import (  # noqa: E402
     TrainingDataError,
 )
 from rondo_eval.publication_critic.training_data.lineage import (  # noqa: E402
+    project_v7_release_rows,
     validate_v7_lineage,
 )
 
@@ -46,6 +47,8 @@ def _validate(
     v7: dict[str, object],
     *,
     combined: dict[str, object] | None = None,
+    retired_candidate_ids: tuple[str, ...] = (),
+    retired_pair_ids: tuple[str, ...] = (),
 ) -> dict[str, object]:
     release = v7 if combined is None else combined
     return validate_v7_lineage(
@@ -58,6 +61,8 @@ def _validate(
         combined_packet_rows=release["packets"],  # type: ignore[arg-type]
         combined_supervision_rows=release["supervision"],  # type: ignore[arg-type]
         combined_pair_rows=release["pairs"],  # type: ignore[arg-type]
+        retired_candidate_ids=retired_candidate_ids,
+        retired_pair_ids=retired_pair_ids,
     )
 
 
@@ -166,6 +171,78 @@ class PublicationCriticPlan064LineageTests(unittest.TestCase):
             stage["candidate_ids"].sort()
         with self.assertRaisesRegex(TrainingDataError, "membership"):
             _validate(v7)
+
+    def test_exact_projection_retires_only_named_negative_and_pair(self) -> None:
+        v7 = _v7()
+        retired_candidate = "pc059-b-honest-01-qminus"
+        retired_pair = "pair-b-honest-01-boundary"
+        projected = project_v7_release_rows(
+            v7_scenario_rows=v7["scenarios"],  # type: ignore[arg-type]
+            v7_packet_rows=v7["packets"],  # type: ignore[arg-type]
+            v7_supervision_rows=v7["supervision"],  # type: ignore[arg-type]
+            v7_pair_rows=v7["pairs"],  # type: ignore[arg-type]
+            retired_candidate_ids=[retired_candidate],
+            retired_pair_ids=[retired_pair],
+        )
+        self.assertEqual(len(projected["scenarios"]), 36)
+        self.assertEqual(len(projected["packets"]), 71)
+        self.assertEqual(len(projected["supervision"]), 71)
+        self.assertEqual(len(projected["pairs"]), 35)
+        self.assertNotIn(
+            retired_candidate,
+            {row["candidate_id"] for row in projected["supervision"]},
+        )
+        self.assertIn(
+            "pc059-b-honest-01-qplus",
+            {row["candidate_id"] for row in projected["supervision"]},
+        )
+
+        summary = _validate(
+            v7,
+            combined={**projected, "membership": v7["membership"]},
+            retired_candidate_ids=(retired_candidate,),
+            retired_pair_ids=(retired_pair,),
+        )
+        self.assertEqual(summary["physical_row_counts"]["supervision"], 72)
+        self.assertEqual(summary["verified_row_counts"]["supervision"], 71)
+        self.assertEqual(summary["retired_candidate_ids"], [retired_candidate])
+        self.assertEqual(summary["retired_pair_ids"], [retired_pair])
+
+    def test_projection_rejects_kept_pair_with_retired_endpoint(self) -> None:
+        v7 = _v7()
+        with self.assertRaisesRegex(TrainingDataError, "keeps pair"):
+            project_v7_release_rows(
+                v7_scenario_rows=v7["scenarios"],  # type: ignore[arg-type]
+                v7_packet_rows=v7["packets"],  # type: ignore[arg-type]
+                v7_supervision_rows=v7["supervision"],  # type: ignore[arg-type]
+                v7_pair_rows=v7["pairs"],  # type: ignore[arg-type]
+                retired_candidate_ids=["pc059-b-honest-01-qminus"],
+                retired_pair_ids=[],
+            )
+
+    def test_projection_rejects_unknown_or_unrelated_retirement(self) -> None:
+        v7 = _v7()
+        with self.assertRaisesRegex(TrainingDataError, "unknown candidates"):
+            project_v7_release_rows(
+                v7_scenario_rows=v7["scenarios"],  # type: ignore[arg-type]
+                v7_packet_rows=v7["packets"],  # type: ignore[arg-type]
+                v7_supervision_rows=v7["supervision"],  # type: ignore[arg-type]
+                v7_pair_rows=v7["pairs"],  # type: ignore[arg-type]
+                retired_candidate_ids=["missing"],
+                retired_pair_ids=[],
+            )
+        with self.assertRaisesRegex(TrainingDataError, "unrelated pair"):
+            project_v7_release_rows(
+                v7_scenario_rows=v7["scenarios"],  # type: ignore[arg-type]
+                v7_packet_rows=v7["packets"],  # type: ignore[arg-type]
+                v7_supervision_rows=v7["supervision"],  # type: ignore[arg-type]
+                v7_pair_rows=v7["pairs"],  # type: ignore[arg-type]
+                retired_candidate_ids=["pc059-b-honest-01-qminus"],
+                retired_pair_ids=[
+                    "pair-b-honest-01-boundary",
+                    "pair-b-useful-01-boundary",
+                ],
+            )
 
 
 if __name__ == "__main__":

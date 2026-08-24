@@ -1,8 +1,9 @@
 """Plan 064 full-release materialization with an explicit prefreeze gate.
 
 This is a thin orchestration layer over the Plan 059 row contracts.  It keeps
-the immutable v7 rows, terminalizes only directly reviewed Plan 064 delta rows,
-and runs the same complete mechanical chain for prefreeze and freeze.
+the exact design-locked projection of immutable v7 rows, terminalizes only
+directly reviewed Plan 064 delta rows, and runs the same complete mechanical
+chain for prefreeze and freeze.
 """
 
 from __future__ import annotations
@@ -49,7 +50,7 @@ from .grouping import (
     validate_new_to_base_component_closure,
 )
 from .input_identity import load_plan054_training_input
-from .lineage import validate_v7_lineage
+from .lineage import project_v7_release_rows, validate_v7_lineage
 from .plan064_batch import (
     AGGREGATE_REVIEW_BINDINGS_FILE,
     validate_plan064_aggregate_review_bindings,
@@ -140,7 +141,7 @@ def materialize_plan064_release(
     formal_release_dir: Path,
     approved_prefreeze_identity: str | None = None,
 ) -> dict[str, Any]:
-    """Materialize and validate the complete v7 plus Plan 064 logical release.
+    """Materialize and validate the v7 projection plus Plan 064 logical release.
 
     Prefreeze writes only an ignored checkpoint.  Freeze requires the exact
     approved prefreeze universe identity and is the only phase that writes a
@@ -169,10 +170,19 @@ def materialize_plan064_release(
         design_lock,
         expected_input_identity=verified_input.input_identity,
     )
-    base = {
+    physical_base = {
         key: _load_jsonl(base_dir / relative)
         for key, relative in _ROW_FILES.items()
     }
+    projection = _v7_membership_projection(design_lock)
+    base = project_v7_release_rows(
+        v7_scenario_rows=physical_base["scenarios"],
+        v7_packet_rows=physical_base["packets"],
+        v7_supervision_rows=physical_base["supervision"],
+        v7_pair_rows=physical_base["pairs"],
+        retired_candidate_ids=projection["retired_candidate_ids"],
+        retired_pair_ids=projection["retired_pair_ids"],
+    )
     base_membership = _load_json(base_dir / "membership.json")
     base_reports = _load_json(base_dir / "reports.json")
     delta = {
@@ -291,7 +301,16 @@ def materialize_plan064_release(
     base_components = base_reports.get("group_components")
     if not isinstance(base_components, Mapping):
         raise TrainingDataError("Plan 064 v7 group component evidence is missing")
-    validate_new_to_base_component_closure(components, base_components)
+    inherited_base_components = {
+        candidate_id: component_id
+        for candidate_id, component_id in base_components.items()
+        if candidate_id in base_candidate_ids
+    }
+    if set(inherited_base_components) != base_candidate_ids:
+        raise TrainingDataError(
+            "Plan 064 inherited v7 group component evidence is incomplete"
+        )
+    validate_new_to_base_component_closure(components, inherited_base_components)
     fixed_v7_assignments = {
         str(row["candidate_id"]): str(row["proposed_split"])
         for row in base["supervision"]
@@ -309,15 +328,17 @@ def materialize_plan064_release(
     combined = {**combined, "supervision": final_supervision}
     validate_group_closure(components, assignments)
     lineage = validate_v7_lineage(
-        v7_scenario_rows=base["scenarios"],
-        v7_packet_rows=base["packets"],
-        v7_supervision_rows=base["supervision"],
-        v7_pair_rows=base["pairs"],
+        v7_scenario_rows=physical_base["scenarios"],
+        v7_packet_rows=physical_base["packets"],
+        v7_supervision_rows=physical_base["supervision"],
+        v7_pair_rows=physical_base["pairs"],
         v7_membership=base_membership,
         combined_scenario_rows=combined["scenarios"],
         combined_packet_rows=combined["packets"],
         combined_supervision_rows=combined["supervision"],
         combined_pair_rows=combined["pairs"],
+        retired_candidate_ids=projection["retired_candidate_ids"],
+        retired_pair_ids=projection["retired_pair_ids"],
     )
     audit_strata = build_plan064_quality_audit_strata(
         combined=combined,
@@ -909,6 +930,86 @@ def _validate_design_lock(design_lock: Mapping[str, Any]) -> None:
         raise TrainingDataError("Plan 064 requires direct review of every new row")
     if design_lock.get("release_layout", {}).get("strategy") != "full_materialization":
         raise TrainingDataError("Plan 064 release layout must use full materialization")
+    _v7_membership_projection(design_lock)
+
+
+def _v7_membership_projection(
+    design_lock: Mapping[str, Any],
+) -> dict[str, list[str]]:
+    base = design_lock.get("base_release")
+    if not isinstance(base, Mapping):
+        raise TrainingDataError("Plan 064 base release contract is missing")
+    value = base.get("v8_membership_projection")
+    expected_keys = {
+        "policy",
+        "finding",
+        "reason",
+        "retained_candidate_count",
+        "retained_pair_count",
+        "retired_candidate_ids",
+        "retired_pair_ids",
+    }
+    if not isinstance(value, Mapping) or set(value) != expected_keys:
+        raise TrainingDataError("Plan 064 v7 membership projection keys differ")
+    if value.get("policy") != "plan064_exact_v7_membership_projection_v1":
+        raise TrainingDataError("Plan 064 v7 membership projection policy drifted")
+    for key in ("finding", "reason"):
+        field = value.get(key)
+        if not isinstance(field, str) or not field.strip():
+            raise TrainingDataError(
+                f"Plan 064 v7 membership projection {key} must be non-empty"
+            )
+    retired_candidates = _design_projection_ids(
+        value.get("retired_candidate_ids"),
+        where="Plan 064 retired v7 candidate IDs",
+    )
+    retired_pairs = _design_projection_ids(
+        value.get("retired_pair_ids"),
+        where="Plan 064 retired v7 pair IDs",
+    )
+    physical_candidates = base.get("candidate_count")
+    pair_counts = base.get("pair_counts")
+    if (
+        not isinstance(physical_candidates, int)
+        or isinstance(physical_candidates, bool)
+        or not isinstance(pair_counts, Mapping)
+        or any(
+            not isinstance(count, int) or isinstance(count, bool)
+            for count in pair_counts.values()
+        )
+    ):
+        raise TrainingDataError("Plan 064 physical v7 row counts are invalid")
+    physical_pairs = sum(int(count) for count in pair_counts.values())
+    expected_candidates = physical_candidates - len(retired_candidates)
+    expected_pairs = physical_pairs - len(retired_pairs)
+    if value.get("retained_candidate_count") != expected_candidates:
+        raise TrainingDataError(
+            "Plan 064 retained v7 candidate count does not reconcile"
+        )
+    if value.get("retained_pair_count") != expected_pairs:
+        raise TrainingDataError("Plan 064 retained v7 pair count does not reconcile")
+    return {
+        "retired_candidate_ids": retired_candidates,
+        "retired_pair_ids": retired_pairs,
+    }
+
+
+def _design_projection_ids(value: Any, *, where: str) -> list[str]:
+    if not isinstance(value, list):
+        raise TrainingDataError(f"{where} must be a list")
+    result: list[str] = []
+    for index, identifier in enumerate(value):
+        if (
+            not isinstance(identifier, str)
+            or not identifier
+            or identifier.strip() != identifier
+            or any(character.isspace() for character in identifier)
+        ):
+            raise TrainingDataError(f"{where}[{index}] must be a stable ID")
+        result.append(identifier)
+    if len(result) != len(set(result)):
+        raise TrainingDataError(f"{where} must not contain duplicates")
+    return result
 
 
 def _validate_quality_audit(
@@ -1461,6 +1562,8 @@ def _validate_exact_length_buckets(
             for bucket, values in observed.items()
         },
     }
+
+
 def _data_card(
     dataset_revision: str,
     statistics: Mapping[str, Any],
@@ -1468,8 +1571,8 @@ def _data_card(
 ) -> str:
     return f"""# Publication Critic training data {dataset_revision}
 
-This is the full-materialized Plan 064 release over the immutable v7 base and
-directly reviewed Plan 064 additions.
+This is the full-materialized Plan 064 release over the exact design-locked
+projection of the immutable v7 base and directly reviewed Plan 064 additions.
 
 - Candidates: {statistics['candidate_count']}
 - Splits: {json.dumps(statistics['split_counts'], ensure_ascii=False, sort_keys=True)}

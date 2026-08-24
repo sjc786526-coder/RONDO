@@ -18,7 +18,30 @@
       "unseen_test": 14
     },
     "exact_input_tokens": 50073,
-    "lineage_rule": "Every inherited v7 scenario, packet, supervision row, pair and candidate split remains canonically identical; the v7 directory itself is never rewritten."
+    "lineage_rule": "Every inherited v7 scenario, packet, supervision row, pair and candidate split remains canonically identical; the v7 directory itself is never rewritten.",
+    "v8_membership_projection": {
+      "policy": "plan064_exact_v7_membership_projection_v1",
+      "finding": "HONEST-V3-001B",
+      "reason": "Retire six grammatically ambiguous v7 honesty negatives and their Boundary relations from v8 without changing the physical v7 release; their valid positive endpoints and Scenario rows remain inherited.",
+      "retained_candidate_count": 66,
+      "retained_pair_count": 30,
+      "retired_candidate_ids": [
+        "pc059-b-honest-01-qminus",
+        "pc059-b-honest-02-qminus",
+        "pc059-b-honest-03-qminus",
+        "pc059-b-honest-04-qminus",
+        "pc059-b-honest-05-qminus",
+        "pc059-b-honest-06-qminus"
+      ],
+      "retired_pair_ids": [
+        "pair-b-honest-01-boundary",
+        "pair-b-honest-02-boundary",
+        "pair-b-honest-03-boundary",
+        "pair-b-honest-04-boundary",
+        "pair-b-honest-05-boundary",
+        "pair-b-honest-06-boundary"
+      ]
+    }
   },
   "plan054_input_contract": {
     "plan054_freeze_sha256": "2a8081d3700f4209f5ac3cd7dabb7f6d31d0cb0b0ea0e9e8c639c8f10dbebfeb",
@@ -162,8 +185,8 @@
     "candidate_ratio_tolerance": 0.04,
     "algorithm": "deterministic_grouped_stratified_search_v1_with_fixed_assignments",
     "seed": "plan064-publication-critic-split-v1",
-    "search_attempts": 20000,
-    "base_assignments": "Pin all 72 v7 candidates to their frozen 42/16/14 splits.",
+    "search_attempts": 30000,
+    "base_assignments": "Pin the 66 inherited v7 candidates to their frozen splits; the six explicitly retired HONEST-V3-001B negatives have no v8 membership or split.",
     "closure_fields": [
       "source_group",
       "scenario_group",
@@ -323,7 +346,7 @@
   },
   "review_contract": {
     "admission_strategy": "direct_review_all_new",
-    "inherited_v7": "Retain v7 terminal review evidence through immutable lineage; do not relabel inherited rows as newly reviewed.",
+    "inherited_v7": "Retain terminal review evidence for the exact v8 projection of canonically unchanged v7 rows; do not relabel inherited rows as newly reviewed and do not create dispositions for retired rows.",
     "new_candidates": "Every Plan 064 candidate is directly reviewed independently from generation before admission.",
     "new_pairs": "Every Plan 064 Boundary and Within-PASS pair is directly reviewed for direction, context, omission and atomicity or soft-only semantics.",
     "audit_sampling": {
