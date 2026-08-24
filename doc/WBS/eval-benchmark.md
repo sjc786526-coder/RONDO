@@ -1,6 +1,6 @@
 # 方向 0：量化测评基准
 
-最后更新：2026-08-22 ｜ 状态：**设施保留，当前无 active campaign** ｜ 当前默认被测源码：`mydev/` ｜
+最后更新：2026-08-23 ｜ 状态：**设施保留，当前无 active campaign** ｜ 当前默认被测源码：`mydev/` ｜
 Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md`
 
 ## 当前定位
@@ -11,8 +11,9 @@ Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md`
 Plan 051 已完成首次 schema v7 正式 canary，并验证稳定创建、运行、恢复、结算、发布与相对基线入口。
 完成过程、数字、费用和资源证据统一见 `doc/WBS-COMPLETED.md`；本页不再维护历史 campaign 流水。
 
-当前没有 active identity、可继承预算或默认待跑样本。方向 1 已确定下一有界观测复测，但尚未建立独立 ExecPlan、
-campaign 身份或取得真实 API、Docker 与费用授权。
+当前没有 active identity、可继承预算或默认待跑样本。Plan 056 和 Plan 058 已复用本方向的外围运行能力完成
+方向 1 有界复测与 C2 行为决策，相关 campaign、预算和 active pointer 均已收口。未来任何新测评都必须
+重新立项、冻结身份并取得真实 API、Docker 与费用授权。
 
 ## Plan 052 观测投影边界
 
@@ -22,8 +23,8 @@ Plan 052 为方向 1 增加了默认关闭的原生 trace opt-in、API metadata/
 - 公共投影只保存安全聚合值；原始 trace、prompt、响应和工具正文不进入结果归档。
 - public `exec` 早期错误只有交付事实、没有可靠 render 时明确记为覆盖缺失，不再误计为“零次输出且已测量”。
 - v28 中 C1/C2 只有弱信号，C11 当前样本未观察到，C7 不可测，因此没有选择行为优化。
-- 方向 1 的下一复测直接复用这条事实链；E-A 当前不恢复。只有已选机制确需反复低成本实验时，才重新评估最小
-  replay 能力。
+- Plan 056 与 Plan 058 已按各自冻结合同复用这条事实链；E-A 当前不恢复。只有未来已选机制确需
+  反复低成本实验时，才重新评估最小 replay 能力。
 
 日期冻结证据见 `doc/audit-snapshots/2026-08-22-rondo-local-harness-bottleneck-census.md`，方向内运行合同和
 候选停止门见 `doc/WBS/teacher-harness-study.md`。
@@ -52,7 +53,7 @@ commit 与 manifest、comparison、价格日期及独立 task-budget ID/cap。
 
 ## 与其他方向的关系
 
-- 方向 1 已决定当前不恢复 E-A；下一 10 题 × 2 轮复测直接复用 Plan 052 的原生事实投影。
+- 方向 1 已完成 Plan 056 和 Plan 058，当前无 active campaign；E-A 继续不恢复，新测评不继承旧身份或预算。
 - 已永久收口的方向 2 不再消费本方向的新工作包；其历史 shadow 结果保持原身份。
 - 方向 3 的专用协作测评不自动并入方向 0；如需复用公共设施，应在方向 3 WBS 中显式定义接口。
 - 日常回归由测试体系承担，不借测评设施兜底。

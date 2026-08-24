@@ -1759,7 +1759,7 @@ rehearsal/全新正式 campaign 中继续，本节只冻结 v1 历史事实。
 - 正式 raw C2 为 7 次/4 slot/3 task/9,693 ms；七次均有状态/结果变化、失败恢复或修改后复测依据，
   refined harmful/reasonable/insufficient 为 `0/7/0`。合理重复、恢复/用户控制、工具可执行性和任务
   正确性四门通过，因此保留 feature，不为降低 raw 次数而压制合理复测。
-- 任务全生命周累计 `20.379152 USD`、reservation 0。Docker/VHDX 增长为 0，最终无 active
+- 任务全生命周期累计 `20.379152 USD`、reservation 0。Docker/VHDX 增长为 0，最终无 active
   container、volume 或 build cache。失效 commissioning/formal/diagnostic identity 与费用保留；正式 campaign、
   binary、manifest、账本、trace、结果和 metrics 继续作为历史证据保留。精确清理的可重建 Cargo target
   及临时 detached source 不再重建。
