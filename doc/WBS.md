@@ -20,7 +20,7 @@
 | 0：量化测评基准 | 既有设施与首次 schema v7 正式 canary 已完成，当前无 active campaign | 保留设施；历史结果见 COMPLETED，新 campaign 须重新立项与授权 |
 | 1：Harness 优化 | **正式收口；当前无 active 工作包** | 当前不继续新增观测或内核/热路径优化；既有实现、设施与历史结果保留。未来可由用户另行决定是否重新立项，本次收口不作永久禁止 |
 | 2：本地审批模型 | **已收口，今后不再开启** | 最终结论为“保留为实验”；不改生产默认，不再规划后续工作包 |
-| 3：RONDO Multi | 第一、二期及其收口案例、**三期 M3-A1、M3-A2、M3-B1a、M3-B2a、M3-B2b 与 Plan 064 已完成** | Plan 060 / M3-B1b 已在专用 worktree 实施但尚无正式 GO；Plan 064 已冻结 v8，最终资格为预算适配证据不足，M3-B1c 仍锁定 |
+| 3：RONDO Multi | 第一、二期及其收口案例、**三期 M3-A1、M3-A2、M3-B1a、M3-B2a、M3-B2b 与 Plan 064 已完成**；四期已规划、尚未实施 | Plan 060 / M3-B1b 已在专用 worktree 实施但尚无正式 GO；Plan 064 已冻结 v8，最终资格为预算适配证据不足，M3-B1c 仍锁定；M4-A 尚未立项或取得实施授权 |
 
 ### 方向命名口径
 
@@ -39,9 +39,10 @@
 
 ### 方向 3：Publication Critic 三期
 
-- M3-A1 产品合同、M3-B2a / Plan 055 本地 Critic 服务与 M3-B2b / Plan 057 发布流程接入均已完成并进入主线。三期分为
-  `M3-A2 → M3-B1a → M3-B1b → M3-B1c` 数据/训练链与 `M3-B2a → M3-B2b` 产品链，两链在
-  `M3-C1 → M3-C2` 汇合，最后由 M3-D 收口。
+- M3-A1 产品合同、M3-B2a / Plan 055 本地 Critic 服务与 M3-B2b / Plan 057 发布流程接入均已完成并进入主线。三期模型侧当前由
+  M3-B1b / Plan 060 训练资格 smoke 与已完成但预算适配证据不足的 Plan 064 v8 数据扩充构成并列资格门；只有 Plan 060 训练资格
+  GO、冻结 v8 数据 GO 和新的正式训练授权同时成立，M3-B1c 才具备另行规划条件。产品链与模型链在 `M3-C1 → M3-C2` 汇合，
+  最后由 M3-D 收口。
 - M3-A2 / Plan 054 与 M3-B1a / Plan 059 均已完成并进入主线。Plan 059 revision v7 冻结 72 candidate、30 Boundary 与
   6 Within-PASS，三 split 为 42/16/14；独立最终验收确认输入隔离、group/split、review、50,073-token census、manifest、
   factory-only consumer 与 train-only smoke bundle 闭环，`remaining_findings=[]`，数据结论 GO。详细历史见
@@ -52,6 +53,18 @@
 - Plan 060 / M3-B1b 已立项并在专用 worktree 实施，但尚未形成进入 main 或正式交接的训练资格 GO。它仍须遵守独立的
   RunPod/H100、训练、上传与付费授权。Plan 060 正式事实到达后，只对冻结 v8 做一次有界预算适配复核；只有 Plan 060 训练资格 GO、
   v8 数据 GO 与新的正式训练授权同时成立，M3-B1c 才具备另行规划条件。
+
+### 方向 3：Durable Team Runtime 四期
+
+- 四期必成主线是 Team Session 跨进程持久化/恢复及其 app-server v2 / TUI 控制面；Writer Workspace Binding 降为可选增强，
+  只绑定调用者已准备且授权的 worktree，价值门证明需要时才附加 minimal handoff，不建设 workspace registry、ChangeSet
+  生命周期或 Git 资产平台。
+- 四期详细 WBS 见 [`doc/WBS/durable-team-runtime.md`](WBS/durable-team-runtime.md)。M4-A 是共同前置，之后 Session、控制面原型
+  和 M4-W0 价值原型可有界并行；S/C 可以独立完成 M4-Z(core)，正式 W 实现须先获得 binding GO。M4-A 尚未建立 ExecPlan 或取得实施授权。
+- 四期不依赖 Publication Critic 训练、真实模型、真实 API 或性能测评，可以与三期模型链并行；它保持 shared workspace
+  为默认，不建设通用 scheduler、自动路由、自动 merge/push、第二套 Team State/trace 或审计/可信平台。
+- 三期云计算不占本地 Cargo build lock，可与四期有界并行开发；bundle/checkpoint/结果传输仍竞争本地网络与磁盘，
+  四期重型 Cargo 与三期本地模型、Docker 等重型任务按根 `AGENTS.md` 串行错峰。详细资源关系见四期子 WBS。
 
 如果未来重新启动方向 1，它仍与方向 3 保持产品源码和任务合同独立；本地重型 Cargo、Docker、真实本地模型
 加载/推理继续全局串行，并由实际进入实施的工作包协调共享资源。
@@ -144,3 +157,4 @@ RONDO/
 - `doc/WBS/teacher-harness-study.md` —— 方向 1：正式收口状态与历史归档入口
 - `doc/WBS/local-approval-model.md` —— 方向 2：已永久收口
 - `doc/WBS/multi-agent-trusted-evidence.md` —— 方向 3：现行产品语义与三期 Publication Critic 长程路线
+- `doc/WBS/durable-team-runtime.md` —— 方向 3 四期：Durable Team Session、Session 控制面与可选 Writer Workspace Binding/Minimal Handoff
