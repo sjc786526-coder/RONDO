@@ -102,7 +102,9 @@ impl FromStr for InstanceTag {
 ///
 /// Every committed mutation bumps it. Submissions echo the revision their view was built from so
 /// the store can tell a fresh append from one authored against a stale view.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+#[derive(
+    Clone, Copy, Debug, Default, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize,
+)]
 pub struct TeamRevision(u64);
 
 impl TeamRevision {
@@ -128,7 +130,8 @@ impl fmt::Display for TeamRevision {
 }
 
 /// Team-level identity for one thing the team keeps track of.
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct EventId {
     instance: InstanceTag,
     ordinal: u32,
@@ -169,7 +172,8 @@ impl FromStr for EventId {
 }
 
 /// Identity of one immutable authored entry under an [`EventId`].
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct VersionId {
     instance: InstanceTag,
     event_ordinal: u32,
@@ -228,7 +232,8 @@ impl FromStr for VersionId {
 ///
 /// A route is minted per event, so its reference carries the event it belongs to and cannot be
 /// confused with a version of the same event.
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct RouteId {
     instance: InstanceTag,
     event_ordinal: u32,
@@ -250,6 +255,10 @@ impl RouteId {
 
     pub fn event_id(&self) -> EventId {
         EventId::new(self.instance, self.event_ordinal)
+    }
+
+    pub(crate) fn ordinal(&self) -> u32 {
+        self.ordinal
     }
 }
 
@@ -285,7 +294,8 @@ impl FromStr for RouteId {
 /// the same execution trajectory always produces the same numbering. The tag travels with the
 /// ordinal for the same reason it does on every other reference: a fact minted by an earlier
 /// instance must not resolve against the current one.
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct FactId {
     instance: InstanceTag,
     ordinal: u32,

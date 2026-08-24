@@ -25,6 +25,9 @@ use codex_protocol::protocol::MultiAgentVersion;
 use codex_protocol::protocol::ThreadHistoryMode;
 use codex_protocol::protocol::ThreadSource;
 use codex_protocol::protocol::TurnEnvironmentSelections;
+use codex_team_state::DurableTeamIdentity;
+use codex_team_state::TeamDurabilityStatus;
+use codex_team_state::TeamStateHandle;
 use std::sync::OnceLock;
 use tokio::sync::Semaphore;
 
@@ -600,10 +603,6 @@ impl Session {
                 .effective_agent_max_threads(MultiAgentVersion::V2)
                 .unwrap_or(usize::MAX),
         );
-        // Registration is derived here, from the authoritative thread id and session source, so
-        // team capabilities never depend on what a model reports about itself. It is also how a
-        // member that was unloaded and reloaded rejoins the original team instance.
-        agent_control.register_team_participant(thread_id, &session_configuration.session_source);
         let time_provider = crate::current_time::resolve_time_provider(
             config.current_time_reminder.as_ref(),
             external_time_provider,
@@ -780,6 +779,80 @@ impl Session {
                 error!("failed to initialize thread persistence: {e:#}");
                 e
             })?);
+
+        let durable_team_requested = config.multi_agent_v2.durable_team_enabled;
+        let is_root_session = !session_configuration.session_source.is_non_root_agent();
+        let is_resumed = matches!(&initial_history, InitialHistory::Resumed(_));
+        let durable_activation: anyhow::Result<()> = async {
+            if durable_team_requested {
+                if initial_multi_agent_version != Some(MultiAgentVersion::V2) {
+                    anyhow::bail!(
+                        "durable Team State requires the effective Multi-Agent V2 runtime"
+                    );
+                }
+                if !config.durable_team_enabled() {
+                    anyhow::bail!("durable Team State activation prerequisites are not satisfied");
+                }
+                if config.ephemeral || live_thread_init.as_ref().is_none() {
+                    anyhow::bail!("durable Team State requires a persisted Session");
+                }
+
+                if is_root_session {
+                    if matches!(
+                        &initial_history,
+                        InitialHistory::Cleared | InitialHistory::Forked(_)
+                    ) {
+                        anyhow::bail!(
+                            "durable Team State does not support clear or fork lifecycle entrypoints in M4-S1"
+                        );
+                    }
+                    let identity = DurableTeamIdentity::new(session_id, thread_id);
+                    let authority = crate::team::durable::root_team_write_authority(
+                        &thread_store,
+                        config.codex_home.as_path(),
+                        identity,
+                    )
+                    .await?;
+                    let team = if is_resumed {
+                        TeamStateHandle::resume_durable(authority)?
+                    } else {
+                        TeamStateHandle::create_durable(authority)?
+                    };
+                    agent_control.install_team(team)?;
+                } else {
+                    let team = agent_control.team();
+                    let identity = team.durable_identity().ok_or_else(|| {
+                        anyhow::anyhow!("durable child Session has no canonical Root Team authority")
+                    })?;
+                    if identity.session_id() != session_id
+                        || !matches!(
+                            team.durability_status(),
+                            TeamDurabilityStatus::Writable { .. }
+                        )
+                    {
+                        anyhow::bail!(
+                            "durable child Session does not share the writable canonical Root Team"
+                        );
+                    }
+                }
+            } else if is_root_session
+                && is_resumed
+                && crate::team::durable::committed_snapshot_exists(
+                    config.codex_home.as_path(),
+                    thread_id,
+                )?
+            {
+                anyhow::bail!(
+                    "this Session has durable Team state; writable resume requires durable_team_enabled"
+                );
+            }
+            Ok(())
+        }
+        .await;
+        if let Err(error) = durable_activation {
+            live_thread_init.discard().await;
+            return Err(error);
+        }
         let session_result: anyhow::Result<Arc<Self>> = async {
             let rollout_path = if let Some(live_thread) = live_thread_init.as_ref() {
                 live_thread.local_rollout_path().await?
@@ -1319,6 +1392,20 @@ impl Session {
             {
                 let mut state = sess.state.lock().await;
                 state.queue_pending_session_start_source(session_start_source);
+            }
+            // Participant registration is the first durable Team commit for a new Root. Keep it at
+            // the final fallible initialization boundary so a failed Session startup cannot leave
+            // an orphan marker or participant that later masquerades as a resumable Team.
+            if durable_team_requested {
+                sess.services.agent_control.try_register_team_participant(
+                    thread_id,
+                    &session_configuration.session_source,
+                )?;
+            } else {
+                sess.services.agent_control.register_team_participant(
+                    thread_id,
+                    &session_configuration.session_source,
+                );
             }
             Ok(sess)
         }

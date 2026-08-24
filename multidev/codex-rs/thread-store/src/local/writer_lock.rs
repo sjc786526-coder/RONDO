@@ -17,26 +17,26 @@ use crate::ThreadStoreResult;
 const WRITER_LOCK_DIR: &str = "thread-writer-locks";
 const COORDINATION_LOCK_FILE: &str = ".coordination.lock";
 
-pub(super) struct WriterLockCoordinator {
+pub(crate) struct WriterLockCoordinator {
     directory: PathBuf,
     cleanup_attempted: AtomicBool,
 }
 
-pub(super) struct WriterLockGuard {
+pub(crate) struct WriterLockGuard {
     coordinator: Arc<WriterLockCoordinator>,
     path: PathBuf,
     file: Option<File>,
 }
 
 impl WriterLockCoordinator {
-    pub(super) fn new(codex_home: &Path) -> Self {
+    pub(crate) fn new(codex_home: &Path) -> Self {
         Self {
             directory: codex_home.join(WRITER_LOCK_DIR),
             cleanup_attempted: AtomicBool::new(false),
         }
     }
 
-    pub(super) fn acquire(
+    pub(crate) fn acquire(
         self: &Arc<Self>,
         thread_id: ThreadId,
     ) -> ThreadStoreResult<WriterLockGuard> {

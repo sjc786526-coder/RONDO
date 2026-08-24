@@ -1358,6 +1358,7 @@ pub struct MultiAgentV2Config {
     pub wait_agent_enabled: bool,
     pub non_code_mode_only: bool,
     pub team_state_enabled: bool,
+    pub durable_team_enabled: bool,
     pub publication_critic: Option<PublicationCriticConfig>,
 }
 
@@ -1387,6 +1388,7 @@ impl MultiAgentV2Config {
             wait_agent_enabled: true,
             non_code_mode_only: true,
             team_state_enabled: false,
+            durable_team_enabled: false,
             publication_critic: None,
         }
     }
@@ -1649,6 +1651,16 @@ impl Config {
                 MultiAgentVersion::Disabled
             }
         })
+    }
+
+    /// Returns whether durable Team State is effectively enabled for this session.
+    ///
+    /// Backend support, session persistence, and canonical Root authority are validated by the
+    /// session initializer before it creates a writable durable Team.
+    pub(crate) fn durable_team_enabled(&self) -> bool {
+        self.features.enabled(Feature::MultiAgentV2)
+            && self.multi_agent_v2.team_state_enabled
+            && self.multi_agent_v2.durable_team_enabled
     }
 
     pub(crate) fn multi_agent_version_for_model(
@@ -2862,6 +2874,9 @@ fn resolve_multi_agent_v2_config(config_toml: &ConfigToml) -> std::io::Result<Mu
     let team_state_enabled = base
         .and_then(|config| config.team_state_enabled)
         .unwrap_or(default.team_state_enabled);
+    let durable_team_enabled = base
+        .and_then(|config| config.durable_team_enabled)
+        .unwrap_or(default.durable_team_enabled);
     let publication_critic = base
         .and_then(|config| config.publication_critic.as_ref())
         .map(|critic| {
@@ -2925,6 +2940,12 @@ fn resolve_multi_agent_v2_config(config_toml: &ConfigToml) -> std::io::Result<Mu
             "features.multi_agent_v2.publication_critic requires team_state_enabled = true",
         ));
     }
+    if durable_team_enabled && !team_state_enabled {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "features.multi_agent_v2.durable_team_enabled requires team_state_enabled = true",
+        ));
+    }
 
     Ok(MultiAgentV2Config {
         max_concurrent_threads_per_session,
@@ -2942,6 +2963,7 @@ fn resolve_multi_agent_v2_config(config_toml: &ConfigToml) -> std::io::Result<Mu
         wait_agent_enabled,
         non_code_mode_only,
         team_state_enabled,
+        durable_team_enabled,
         publication_critic,
     })
 }

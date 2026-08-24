@@ -12,6 +12,7 @@ use crate::model::ProducerState;
 use crate::model::RootState;
 use crate::model::RouteDuty;
 use crate::mutation::TeamError;
+use serde::Deserialize;
 use serde::Serialize;
 
 /// Hard ceiling on one dump or change-log page.
@@ -131,7 +132,7 @@ pub struct ChangeLogView {
     pub wake: WakeDecisionView,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ChangeKind {
     Publish,
@@ -278,7 +279,8 @@ impl DumpCursor {
 }
 
 /// Internal change-log row. Labels are resolved at read time so a rename cannot rewrite history.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct ChangeRecord {
     pub revision: TeamRevision,
     pub actor: codex_protocol::ThreadId,
@@ -289,13 +291,29 @@ pub(crate) struct ChangeRecord {
     pub wake: StoredWake,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) enum StoredWake {
     Signalled {
         participant: codex_protocol::ThreadId,
-        rule: &'static str,
+        rule: String,
     },
     None {
-        rule: &'static str,
+        rule: String,
     },
+}
+
+impl StoredWake {
+    pub(crate) fn signalled(participant: codex_protocol::ThreadId, rule: &'static str) -> Self {
+        Self::Signalled {
+            participant,
+            rule: rule.to_string(),
+        }
+    }
+
+    pub(crate) fn none(rule: &'static str) -> Self {
+        Self::None {
+            rule: rule.to_string(),
+        }
+    }
 }

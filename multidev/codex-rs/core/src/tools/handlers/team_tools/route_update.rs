@@ -70,7 +70,8 @@ async fn handle_call(invocation: ToolInvocation) -> Result<Box<dyn ToolOutput>, 
             } else {
                 let recorded =
                     deliver_and_record(&access, &session, &turn, &step_context, &source, &dispatch)
-                        .await;
+                        .await
+                        .map_err(team_error)?;
                 (recorded.delivery, recorded.revision)
             };
             TeamRouteUpdateResult {

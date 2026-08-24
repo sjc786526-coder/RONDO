@@ -20,12 +20,14 @@ use crate::model::ProducerState;
 use crate::model::RootState;
 use crate::model::RouteDuty;
 use codex_protocol::ThreadId;
+use serde::Deserialize;
 use serde::Serialize;
 use std::fmt;
 
 /// Context every mutation is submitted with. The actor is supplied by the harness from the
 /// authoritative session identity, never by the caller's payload.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct Submission {
     /// The view revision the author believes it acted on.
     pub based_on: TeamRevision,
@@ -34,20 +36,23 @@ pub struct Submission {
 }
 
 /// What to publish: a new team-level matter, or another entry under an existing one.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub enum PublishTarget {
     NewEvent { title: String },
     ExistingEvent { event_id: EventId },
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct PublishRequest {
     pub target: PublishTarget,
     pub summary: String,
     pub handoff: Option<String>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct PublishOutcome {
     pub event_id: EventId,
     pub version_id: VersionId,
@@ -64,7 +69,8 @@ pub struct PublishOutcome {
 }
 
 /// The lifecycle change requested for one version.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub enum LifecycleChange {
     /// Author-side close. Only the version's own author may do this.
     CloseProducer,
@@ -73,7 +79,8 @@ pub enum LifecycleChange {
 }
 
 /// One target of a lifecycle batch, with the precondition the caller believes holds.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct LifecycleTarget {
     pub version_id: VersionId,
     pub expected_producer_state: ProducerState,
@@ -81,20 +88,23 @@ pub struct LifecycleTarget {
     pub change: LifecycleChange,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct LifecycleRequest {
     /// Only these versions are touched. Concurrently added versions are never swept up.
     pub targets: Vec<LifecycleTarget>,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct LifecycleSnapshot {
     pub version_id: VersionId,
     pub producer_state: ProducerState,
     pub root_state: RootState,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct LifecycleOutcome {
     pub revision: TeamRevision,
     pub updated: Vec<LifecycleSnapshot>,
@@ -104,7 +114,8 @@ pub struct LifecycleOutcome {
 }
 
 /// What a route asks of its target.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub enum RouteIntent {
     /// Hand over work: create an assignment and ask the target to start or continue.
     Assign,
@@ -114,7 +125,8 @@ pub enum RouteIntent {
     Notify,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct RouteRequest {
     pub event_id: EventId,
     pub target: ThreadId,
@@ -127,7 +139,8 @@ pub struct RouteRequest {
 ///
 /// It deliberately carries locators and the root's hint only: the target reads the event itself
 /// from the canonical state, so nothing here has to duplicate a chain that could then drift.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct RouteDispatch {
     pub instance: TeamInstanceId,
     pub route_id: RouteId,
@@ -138,7 +151,8 @@ pub struct RouteDispatch {
     pub delivery: DeliveryState,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct RouteOutcome {
     pub dispatch: RouteDispatch,
     pub revision: TeamRevision,
@@ -147,13 +161,15 @@ pub struct RouteOutcome {
 }
 
 /// The result of one attempt to deliver a route's notice.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub enum DeliveryResult {
     Delivered,
     Failed { reason: String },
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct DeliveryOutcome {
     pub route_id: RouteId,
     pub delivery: DeliveryState,
@@ -162,7 +178,8 @@ pub struct DeliveryOutcome {
     pub changed: bool,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct EndAssignmentOutcome {
     pub route_id: RouteId,
     pub event_id: EventId,
@@ -172,7 +189,8 @@ pub struct EndAssignmentOutcome {
 }
 
 /// Root retirement of one version whose author is confirmed truly unavailable.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct RetireRequest {
     pub version_id: VersionId,
     pub expected_producer_state: ProducerState,
@@ -182,7 +200,8 @@ pub struct RetireRequest {
     pub reason: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct RetireOutcome {
     pub revision: TeamRevision,
     pub version_id: VersionId,
@@ -200,6 +219,9 @@ pub struct RetireOutcome {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(tag = "error", rename_all = "snake_case")]
 pub enum TeamError {
+    /// The domain mutation was valid but its durable commit did not establish success. The reason
+    /// preserves conflict, unavailable and indeterminate distinctions from the storage boundary.
+    Durability { reason: String },
     /// The caller's session is not a registered participant of this team instance. Team
     /// capabilities are refused rather than defaulted.
     UnknownParticipant,
@@ -265,6 +287,7 @@ pub enum TeamError {
 impl fmt::Display for TeamError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Durability { reason } => write!(f, "Team durability refused the mutation: {reason}"),
             Self::UnknownParticipant => f.write_str(
                 "this session is not a registered participant of the team; team tools are unavailable",
             ),

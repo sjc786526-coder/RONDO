@@ -11,10 +11,12 @@
 //! what was observed at the time, never that it still holds, and the observation itself stays where
 //! Codex put it — this crate holds identities and locators, not tool output.
 //!
-//! Nothing here is persisted across processes; a team instance lives exactly as long as its root
-//! tree. Members unloaded and reloaded inside that tree rejoin the same instance.
+//! By default a team instance lives exactly as long as its root tree. An explicitly configured
+//! durable root can instead bind this same canonical state to its session lineage and commit it
+//! through the root thread's existing writer authority.
 
 mod availability;
+mod durable;
 mod evidence;
 mod handle;
 mod ids;
@@ -30,6 +32,14 @@ mod wake;
 pub use availability::AvailabilityEpoch;
 pub use availability::AvailabilitySnapshot;
 pub use availability::ProducerAvailability;
+pub use durable::DurableTeamIdentity;
+pub use durable::TeamClosePermit;
+pub use durable::TeamDurabilityError;
+pub use durable::TeamDurabilityFuture;
+pub use durable::TeamDurabilityStatus;
+pub use durable::TeamWriteAuthority;
+pub use durable::TeamWritePermit;
+pub use durable::committed_snapshot_generation;
 pub use evidence::FactCategory;
 pub use evidence::FactView;
 pub use evidence::NotedObservation;

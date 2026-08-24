@@ -101,7 +101,10 @@ impl Handler {
         let deadline = Instant::now() + Duration::from_millis(timeout_ms as u64);
         let outcome = match team_waiter {
             Some(team_waiter) => tokio::select! {
-                () = team_waiter.wait() => WaitOutcome::TeamActivity,
+                result = team_waiter.wait() => {
+                    result.map_err(crate::tools::handlers::team_tools::team_error)?;
+                    WaitOutcome::TeamActivity
+                },
                 outcome = wait_for_activity(&mut activity_rx, pending_activity, deadline) => outcome,
             },
             None => wait_for_activity(&mut activity_rx, pending_activity, deadline).await,

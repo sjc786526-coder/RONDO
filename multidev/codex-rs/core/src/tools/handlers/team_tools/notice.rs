@@ -18,8 +18,8 @@ use crate::tools::handlers::multi_agents_v2::communication_from_tool_message;
 use codex_protocol::AgentPath;
 use codex_team_state::DeliveryOutcome;
 use codex_team_state::DeliveryResult;
-use codex_team_state::DeliveryState;
 use codex_team_state::RouteDispatch;
+use codex_team_state::TeamError;
 use std::sync::Arc;
 
 /// Deliver the notice for `dispatch` and record how it went on the canonical route.
@@ -33,7 +33,7 @@ pub(super) async fn deliver_and_record(
     step_context: &StepContext,
     source: &ToolCallSource,
     dispatch: &RouteDispatch,
-) -> DeliveryOutcome {
+) -> Result<DeliveryOutcome, TeamError> {
     let result = match deliver(session, turn, step_context, source, dispatch).await {
         Ok(()) => DeliveryResult::Delivered,
         Err(reason) => {
@@ -45,26 +45,9 @@ pub(super) async fn deliver_and_record(
             DeliveryResult::Failed { reason }
         }
     };
-    match access
+    access
         .handle()
         .record_delivery(access.actor(), dispatch.route_id, result)
-    {
-        Ok(outcome) => outcome,
-        Err(err) => {
-            // Only reachable if the route vanished or changed hands between the two calls, which
-            // the store's rules make impossible. Report the problem rather than a delivery nobody
-            // recorded.
-            tracing::error!(route_id = %dispatch.route_id, %err, "could not record route delivery");
-            DeliveryOutcome {
-                route_id: dispatch.route_id,
-                delivery: DeliveryState::Failed {
-                    reason: err.to_string(),
-                },
-                revision: access.handle().revision(),
-                changed: false,
-            }
-        }
-    }
 }
 
 async fn deliver(

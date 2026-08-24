@@ -92,7 +92,8 @@ async fn handle_call(invocation: ToolInvocation) -> Result<Box<dyn ToolOutput>, 
             &source,
             &outcome.dispatch,
         )
-        .await;
+        .await
+        .map_err(team_error)?;
         (recorded.delivery, recorded.revision)
     };
 

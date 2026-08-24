@@ -11049,6 +11049,8 @@ tool_namespace = "agents"
 hide_spawn_agent_metadata = true
 expose_spawn_agent_model_overrides = false
 wait_agent_enabled = false
+team_state_enabled = true
+durable_team_enabled = true
 non_code_mode_only = true
 
 [agents]
@@ -11104,7 +11106,54 @@ max_concurrent_threads_per_session = 9
     assert!(config.multi_agent_v2.hide_spawn_agent_metadata);
     assert!(!config.multi_agent_v2.expose_spawn_agent_model_overrides);
     assert!(!config.multi_agent_v2.wait_agent_enabled);
+    assert!(config.multi_agent_v2.team_state_enabled);
+    assert!(config.multi_agent_v2.durable_team_enabled);
+    assert!(config.durable_team_enabled());
     assert!(config.multi_agent_v2.non_code_mode_only);
+
+    Ok(())
+}
+
+#[test]
+fn durable_team_is_off_by_default_and_requires_team_state() {
+    let default = resolve_multi_agent_v2_config(&ConfigToml::default())
+        .expect("default multi-agent v2 config should resolve");
+    assert!(!default.durable_team_enabled);
+
+    let config_toml: ConfigToml = toml::from_str(
+        r#"[features.multi_agent_v2]
+durable_team_enabled = true
+"#,
+    )
+    .expect("multi-agent v2 config should parse");
+    let error = resolve_multi_agent_v2_config(&config_toml)
+        .expect_err("durable Team State without Team State should fail");
+    assert_eq!(
+        error.to_string(),
+        "features.multi_agent_v2.durable_team_enabled requires team_state_enabled = true"
+    );
+}
+
+#[tokio::test]
+async fn durable_team_effective_gate_requires_multi_agent_v2() -> std::io::Result<()> {
+    let codex_home = TempDir::new()?;
+    std::fs::write(
+        codex_home.path().join(CONFIG_TOML_FILE),
+        r#"[features.multi_agent_v2]
+enabled = false
+team_state_enabled = true
+durable_team_enabled = true
+"#,
+    )?;
+
+    let config = ConfigBuilder::without_managed_config_for_tests()
+        .codex_home(codex_home.path().to_path_buf())
+        .fallback_cwd(Some(codex_home.path().to_path_buf()))
+        .build()
+        .await?;
+
+    assert!(config.multi_agent_v2.durable_team_enabled);
+    assert!(!config.durable_team_enabled());
 
     Ok(())
 }

@@ -17,6 +17,7 @@ use crate::LoadThreadHistoryParams;
 use crate::LocalThreadStore;
 use crate::ReadThreadParams;
 use crate::ResumeThreadParams;
+use crate::RootWriterAuthority;
 use crate::StoredThread;
 use crate::StoredThreadHistory;
 use crate::ThreadMetadataPatch;
@@ -262,6 +263,11 @@ impl LiveThread {
         self.thread_store.flush_thread(self.thread_id).await?;
         self.flush_pending_metadata_update_for_existing_history()
             .await
+    }
+
+    /// Returns the Team mutation capability backed by this live thread's canonical writer.
+    pub async fn writer_authority(&self) -> ThreadStoreResult<RootWriterAuthority> {
+        self.thread_store.writer_authority(self.thread_id).await
     }
 
     pub async fn shutdown(&self) -> ThreadStoreResult<()> {

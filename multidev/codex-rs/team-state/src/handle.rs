@@ -5,6 +5,14 @@
 //! depends on which members happen to be loaded right now.
 
 use crate::availability::AvailabilitySnapshot;
+use crate::durable::DurableTeamIdentity;
+use crate::durable::TeamClosePermit;
+use crate::durable::TeamDurabilityError;
+use crate::durable::TeamDurabilityStatus;
+use crate::durable::TeamWriteAuthority;
+use crate::durable::TeamWritePermit;
+use crate::durable::decode_snapshot;
+use crate::durable::encode_snapshot;
 use crate::evidence::FactView;
 use crate::evidence::NotedObservation;
 use crate::ids::FactId;
@@ -40,6 +48,7 @@ use crate::view::TeamSnapshot;
 use codex_protocol::ThreadId;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::RwLock;
 use tokio::sync::watch;
 
 pub struct TeamStateHandle {
@@ -47,6 +56,14 @@ pub struct TeamStateHandle {
     /// Bumped on every wake-worthy change so waiters re-check their own ledger entry. The value
     /// itself carries no meaning; the per-participant ledger inside the store does.
     change_tx: watch::Sender<u64>,
+    durable: RwLock<Option<Arc<DurableRuntime>>>,
+}
+
+struct DurableRuntime {
+    identity: DurableTeamIdentity,
+    authority: Option<Arc<dyn TeamWriteAuthority>>,
+    mutation_gate: Mutex<()>,
+    status: Mutex<TeamDurabilityStatus>,
 }
 
 impl Default for TeamStateHandle {
@@ -54,11 +71,56 @@ impl Default for TeamStateHandle {
         Self {
             store: Mutex::new(TeamStore::new()),
             change_tx: watch::Sender::new(0),
+            durable: RwLock::new(None),
         }
     }
 }
 
 impl TeamStateHandle {
+    fn from_parts(store: TeamStore, durable: Option<DurableRuntime>) -> Self {
+        Self {
+            store: Mutex::new(store),
+            change_tx: watch::Sender::new(0),
+            durable: RwLock::new(durable.map(Arc::new)),
+        }
+    }
+
+    fn durable_runtime(&self) -> Option<Arc<DurableRuntime>> {
+        self.durable
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    /// Replace the initial in-memory placeholder with a proven durable Team while preserving the
+    /// stable handle shared by every control clone. Root activation calls this before admitting any
+    /// child, so no runtime can observe a half-installed Team.
+    pub fn install_durable(&self, replacement: Self) -> Result<(), TeamDurabilityError> {
+        let replacement_runtime = replacement
+            .durable
+            .into_inner()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .ok_or_else(|| {
+                TeamDurabilityError::conflict("cannot install an in-memory Team as durable")
+            })?;
+        let replacement_store = replacement
+            .store
+            .into_inner()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut runtime = self
+            .durable
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if runtime.is_some() {
+            return Err(TeamDurabilityError::conflict(
+                "a durable Team is already installed for this root tree",
+            ));
+        }
+        self.with_store(|store| *store = replacement_store);
+        *runtime = Some(replacement_runtime);
+        Ok(())
+    }
+
     fn with_store<R>(&self, f: impl FnOnce(&mut TeamStore) -> R) -> R {
         // A poisoned team mutex means a previous mutation panicked mid-commit. Recovering the
         // guard is still the right call here: the store's mutations validate before they write,
@@ -68,6 +130,433 @@ impl TeamStateHandle {
             poisoned.into_inner()
         });
         f(&mut store)
+    }
+
+    /// Open a fresh durable Team without publishing a marker yet.
+    pub fn create_durable(
+        authority: Arc<dyn TeamWriteAuthority>,
+    ) -> Result<Self, TeamDurabilityError> {
+        let identity = authority.identity();
+        let mut permit = authority.begin_write()?;
+        if permit.read_snapshot()?.is_some() {
+            return Err(TeamDurabilityError::conflict(
+                "a committed Team snapshot already exists for this lineage",
+            ));
+        }
+        // Initialization after this point may still fail. Generation zero intentionally has no
+        // marker: the authoritative Root registration commits the first snapshot only at the
+        // caller's final successful activation boundary.
+        let store = TeamStore::new();
+        let runtime = DurableRuntime {
+            identity,
+            authority: Some(authority),
+            mutation_gate: Mutex::new(()),
+            status: Mutex::new(TeamDurabilityStatus::Writable {
+                commit_generation: 0,
+            }),
+        };
+        Ok(Self::from_parts(store, Some(runtime)))
+    }
+
+    /// Resume the last complete committed Team while holding current Root writer authority.
+    pub fn resume_durable(
+        authority: Arc<dyn TeamWriteAuthority>,
+    ) -> Result<Self, TeamDurabilityError> {
+        let identity = authority.identity();
+        let mut permit = authority.begin_write()?;
+        let encoded = permit.read_snapshot()?.ok_or_else(|| {
+            TeamDurabilityError::unavailable("no committed Team snapshot exists for this lineage")
+        })?;
+        let hydrated = decode_snapshot(identity, &encoded)?;
+        let runtime = DurableRuntime {
+            identity,
+            authority: Some(authority),
+            mutation_gate: Mutex::new(()),
+            status: Mutex::new(TeamDurabilityStatus::Writable {
+                commit_generation: hydrated.commit_generation,
+            }),
+        };
+        Ok(Self::from_parts(hydrated.store, Some(runtime)))
+    }
+
+    /// Hydrate the canonical committed blob without acquiring mutation authority.
+    ///
+    /// This is the only non-owner constructor: it always returns a read-only handle and validates
+    /// the same checksum, lineage, graph, counters, and retry/wake invariants as owner resume.
+    pub fn from_committed_snapshot(
+        identity: DurableTeamIdentity,
+        encoded: &[u8],
+    ) -> Result<Self, TeamDurabilityError> {
+        let hydrated = decode_snapshot(identity, encoded)?;
+        let runtime = DurableRuntime {
+            identity,
+            authority: None,
+            mutation_gate: Mutex::new(()),
+            status: Mutex::new(TeamDurabilityStatus::ReadOnly {
+                commit_generation: hydrated.commit_generation,
+            }),
+        };
+        Ok(Self::from_parts(hydrated.store, Some(runtime)))
+    }
+
+    /// Replace a non-owner view with a newer blob read from the same canonical snapshot medium.
+    pub fn refresh_from_committed_snapshot(
+        &self,
+        encoded: &[u8],
+    ) -> Result<(), TeamDurabilityError> {
+        let runtime = self
+            .durable_runtime()
+            .ok_or(TeamDurabilityError::ReadOnly)?;
+        if runtime.authority.is_some() {
+            return Err(TeamDurabilityError::conflict(
+                "owner handles reconcile through their write permit",
+            ));
+        }
+        let _gate = runtime
+            .mutation_gate
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let hydrated = decode_snapshot(runtime.identity, encoded)?;
+        let current_generation = match self.durability_status() {
+            TeamDurabilityStatus::ReadOnly { commit_generation } => commit_generation,
+            _ => 0,
+        };
+        if hydrated.commit_generation < current_generation {
+            return Err(TeamDurabilityError::conflict(
+                "committed Team snapshot generation moved backwards",
+            ));
+        }
+        self.with_store(|store| *store = hydrated.store);
+        *runtime
+            .status
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = TeamDurabilityStatus::ReadOnly {
+            commit_generation: hydrated.commit_generation,
+        };
+        Ok(())
+    }
+
+    /// Reconcile an owner after an unavailable or indeterminate commit by reading under a fresh
+    /// Root write permit. No mutation is accepted until this succeeds.
+    pub fn reconcile_durable(&self) -> Result<(), TeamDurabilityError> {
+        let runtime = self.durable_runtime().ok_or_else(|| {
+            TeamDurabilityError::conflict("an in-memory Team has no durable snapshot")
+        })?;
+        let authority = runtime
+            .authority
+            .as_ref()
+            .ok_or(TeamDurabilityError::ReadOnly)?;
+        let _gate = runtime
+            .mutation_gate
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        // Capture the state only after serializing with mutations and other reconciliation. A
+        // caller that observed Unknown outside this gate may arrive after another caller has
+        // already reconciled and continued; using that stale generation would reject valid state.
+        let previous_status = *runtime
+            .status
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let last_known_generation = match previous_status {
+            TeamDurabilityStatus::Writable { commit_generation }
+            | TeamDurabilityStatus::ReadOnly { commit_generation } => commit_generation,
+            TeamDurabilityStatus::Unknown {
+                expected_generation,
+            } => expected_generation,
+            TeamDurabilityStatus::Unavailable {
+                last_known_generation,
+            } => last_known_generation,
+            TeamDurabilityStatus::InMemory => unreachable!("durable runtime has durable status"),
+        };
+        let mut permit = match authority.begin_write() {
+            Ok(permit) => permit,
+            Err(error) => {
+                Self::mark_durability_failure(&runtime, last_known_generation, &error);
+                return Err(error);
+            }
+        };
+        let reconciled = (|| {
+            let encoded = permit.read_snapshot()?.ok_or_else(|| {
+                TeamDurabilityError::unavailable("the committed Team snapshot disappeared")
+            })?;
+            let hydrated = decode_snapshot(runtime.identity, &encoded)?;
+            let generation_is_allowed = match previous_status {
+                TeamDurabilityStatus::Unknown {
+                    expected_generation,
+                } => {
+                    hydrated.commit_generation == expected_generation
+                        || expected_generation
+                            .checked_add(1)
+                            .is_some_and(|next| hydrated.commit_generation == next)
+                }
+                TeamDurabilityStatus::Writable { commit_generation }
+                | TeamDurabilityStatus::ReadOnly { commit_generation } => {
+                    hydrated.commit_generation == commit_generation
+                }
+                TeamDurabilityStatus::Unavailable {
+                    last_known_generation,
+                } => hydrated.commit_generation == last_known_generation,
+                TeamDurabilityStatus::InMemory => {
+                    unreachable!("durable runtime has durable status")
+                }
+            };
+            if !generation_is_allowed {
+                return Err(TeamDurabilityError::conflict(format!(
+                    "durable Team reconciliation found unexpected generation {} after {}",
+                    hydrated.commit_generation, last_known_generation
+                )));
+            }
+            if hydrated.commit_generation == last_known_generation {
+                let current =
+                    self.with_store(|store| serde_json::to_vec(store))
+                        .map_err(|error| {
+                            TeamDurabilityError::corrupt(format!(
+                                "cannot compare current Team state during reconciliation: {error}"
+                            ))
+                        })?;
+                let committed = serde_json::to_vec(&hydrated.store).map_err(|error| {
+                    TeamDurabilityError::corrupt(format!(
+                        "cannot compare committed Team state during reconciliation: {error}"
+                    ))
+                })?;
+                if committed != current {
+                    return Err(TeamDurabilityError::conflict(
+                        "durable Team state changed without advancing its generation",
+                    ));
+                }
+            }
+            Ok(hydrated)
+        })();
+        let hydrated = match reconciled {
+            Ok(hydrated) => hydrated,
+            Err(error) => {
+                Self::mark_durability_failure(&runtime, last_known_generation, &error);
+                return Err(error);
+            }
+        };
+        self.with_store(|store| *store = hydrated.store);
+        *runtime
+            .status
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = TeamDurabilityStatus::Writable {
+            commit_generation: hydrated.commit_generation,
+        };
+        Ok(())
+    }
+
+    pub fn durability_status(&self) -> TeamDurabilityStatus {
+        let Some(runtime) = self.durable_runtime() else {
+            return TeamDurabilityStatus::InMemory;
+        };
+        *runtime
+            .status
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    pub fn durable_identity(&self) -> Option<DurableTeamIdentity> {
+        self.durable_runtime().map(|runtime| runtime.identity)
+    }
+
+    /// Gate every product read that claims to represent committed Team state.
+    pub fn ensure_readable(&self) -> Result<(), TeamDurabilityError> {
+        match self.durability_status() {
+            TeamDurabilityStatus::InMemory
+            | TeamDurabilityStatus::Writable { .. }
+            | TeamDurabilityStatus::ReadOnly { .. } => Ok(()),
+            TeamDurabilityStatus::Unknown { .. } => Err(TeamDurabilityError::unknown(
+                "the last Team commit must be reconciled before reading",
+            )),
+            TeamDurabilityStatus::Unavailable { .. } => Err(TeamDurabilityError::unavailable(
+                "Team durability must be reconciled before reading",
+            )),
+        }
+    }
+
+    /// Restore a live owner's committed view after a transient or indeterminate storage failure,
+    /// then prove that reads are safe. Read-only handles never enter reconciliation because they
+    /// carry no writer authority; they remain limited to their validated committed snapshot.
+    pub fn ensure_readable_or_reconcile(&self) -> Result<(), TeamDurabilityError> {
+        if matches!(
+            self.durability_status(),
+            TeamDurabilityStatus::Unknown { .. } | TeamDurabilityStatus::Unavailable { .. }
+        ) {
+            self.reconcile_durable()?;
+        }
+        self.ensure_readable()
+    }
+
+    /// Enter the minimal close barrier. The returned permit remains the caller's responsibility:
+    /// abort it if shutdown fails, or complete it after the final durable Team flush and thread
+    /// writer close have succeeded.
+    pub async fn begin_close(&self) -> Result<Box<dyn TeamClosePermit>, TeamDurabilityError> {
+        let runtime = self.durable_runtime().ok_or_else(|| {
+            TeamDurabilityError::conflict("an in-memory Team has no durable close barrier")
+        })?;
+        let authority = runtime
+            .authority
+            .as_ref()
+            .ok_or(TeamDurabilityError::ReadOnly)?;
+        match self.durability_status() {
+            TeamDurabilityStatus::Writable { .. } => authority.begin_close().await,
+            TeamDurabilityStatus::ReadOnly { .. } => Err(TeamDurabilityError::ReadOnly),
+            TeamDurabilityStatus::Unknown { .. } => Err(TeamDurabilityError::unknown(
+                "reconcile the last Team commit before close",
+            )),
+            TeamDurabilityStatus::Unavailable { .. } => Err(TeamDurabilityError::unavailable(
+                "reconcile Team durability before close",
+            )),
+            TeamDurabilityStatus::InMemory => unreachable!("durable runtime has durable status"),
+        }
+    }
+
+    fn mark_durability_failure(
+        runtime: &DurableRuntime,
+        expected_generation: u64,
+        error: &TeamDurabilityError,
+    ) {
+        let next = match error {
+            TeamDurabilityError::Unknown { .. } => TeamDurabilityStatus::Unknown {
+                expected_generation,
+            },
+            TeamDurabilityError::ReadOnly => TeamDurabilityStatus::ReadOnly {
+                commit_generation: expected_generation,
+            },
+            _ => TeamDurabilityStatus::Unavailable {
+                last_known_generation: expected_generation,
+            },
+        };
+        *runtime
+            .status
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = next;
+    }
+
+    fn verify_committed_state(
+        runtime: &DurableRuntime,
+        permit: &mut dyn TeamWritePermit,
+        expected_generation: u64,
+        expected_store: &[u8],
+    ) -> Result<(), TeamDurabilityError> {
+        let committed = permit.read_snapshot()?;
+        if expected_generation == 0 {
+            return if committed.is_none() {
+                Ok(())
+            } else {
+                Err(TeamDurabilityError::conflict(
+                    "durable Team marker appeared before the initial commit",
+                ))
+            };
+        }
+        let encoded = committed.ok_or_else(|| {
+            TeamDurabilityError::unavailable("the committed Team snapshot disappeared")
+        })?;
+        let hydrated = decode_snapshot(runtime.identity, &encoded)?;
+        if hydrated.commit_generation != expected_generation {
+            return Err(TeamDurabilityError::conflict(format!(
+                "durable Team generation changed: expected {expected_generation}, found {}",
+                hydrated.commit_generation
+            )));
+        }
+        let committed_store = serde_json::to_vec(&hydrated.store).map_err(|error| {
+            TeamDurabilityError::corrupt(format!("cannot compare committed Team state: {error}"))
+        })?;
+        if committed_store != expected_store {
+            return Err(TeamDurabilityError::conflict(
+                "durable Team state changed without advancing its generation",
+            ));
+        }
+        Ok(())
+    }
+
+    fn durable_mutate<R>(
+        &self,
+        notify: bool,
+        mutate: impl FnOnce(&mut TeamStore) -> Result<R, TeamDurabilityError>,
+    ) -> Result<R, TeamDurabilityError> {
+        let runtime = self.durable_runtime().ok_or_else(|| {
+            TeamDurabilityError::conflict("this Team uses the in-memory mutation path")
+        })?;
+        let authority = runtime
+            .authority
+            .as_ref()
+            .ok_or(TeamDurabilityError::ReadOnly)?;
+        let _gate = runtime
+            .mutation_gate
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let expected_generation = match self.durability_status() {
+            TeamDurabilityStatus::Writable { commit_generation } => commit_generation,
+            TeamDurabilityStatus::ReadOnly { .. } => return Err(TeamDurabilityError::ReadOnly),
+            TeamDurabilityStatus::Unknown { .. } => {
+                return Err(TeamDurabilityError::unknown(
+                    "the previous Team commit must be reconciled",
+                ));
+            }
+            TeamDurabilityStatus::Unavailable { .. } => {
+                return Err(TeamDurabilityError::unavailable(
+                    "Team durability must be reconciled",
+                ));
+            }
+            TeamDurabilityStatus::InMemory => unreachable!("durable runtime has durable status"),
+        };
+
+        // Root authority begins before the candidate is cloned or mutated and remains in this
+        // stack frame through install, notification, and construction of the success result.
+        let mut permit = match authority.begin_write() {
+            Ok(permit) => permit,
+            Err(error) => {
+                Self::mark_durability_failure(&runtime, expected_generation, &error);
+                return Err(error);
+            }
+        };
+
+        let current = self.with_store(|store| store.clone());
+        let revision_before = current.revision();
+        let before = serde_json::to_vec(&current).map_err(|error| {
+            TeamDurabilityError::corrupt(format!("cannot compare Team state: {error}"))
+        })?;
+        let mut candidate = current;
+        let result = mutate(&mut candidate)?;
+        let after = serde_json::to_vec(&candidate).map_err(|error| {
+            TeamDurabilityError::corrupt(format!("cannot compare Team state: {error}"))
+        })?;
+        if before == after {
+            if let Err(error) = Self::verify_committed_state(
+                &runtime,
+                permit.as_mut(),
+                expected_generation,
+                &before,
+            ) {
+                Self::mark_durability_failure(&runtime, expected_generation, &error);
+                return Err(error);
+            }
+            return Ok(result);
+        }
+
+        let next_generation = expected_generation
+            .checked_add(1)
+            .ok_or(TeamDurabilityError::GenerationOverflow)?;
+        let snapshot = encode_snapshot(runtime.identity, next_generation, &candidate)?;
+        if let Err(error) = permit.compare_and_swap(expected_generation, snapshot) {
+            Self::mark_durability_failure(&runtime, expected_generation, &error);
+            return Err(error);
+        }
+
+        let revision_changed = candidate.revision() != revision_before;
+        self.with_store(|store| *store = candidate);
+        *runtime
+            .status
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = TeamDurabilityStatus::Writable {
+            commit_generation: next_generation,
+        };
+        if notify && revision_changed {
+            self.notify_change();
+        }
+        // `permit` is deliberately still live here. It drops only as this function returns the
+        // success, preserving one continuous Root authority interval for the whole mutation.
+        Ok(result)
     }
 
     pub fn instance(&self) -> TeamInstanceId {
@@ -88,7 +577,40 @@ impl TeamStateHandle {
         role: ParticipantRole,
         label: String,
     ) -> bool {
-        self.with_store(|store| store.register_participant(thread_id, role, label))
+        if self.durable_runtime().is_some() {
+            match self.register_durable_participant(thread_id, role, label) {
+                Ok(created) => created,
+                Err(error) => {
+                    tracing::error!(%error, "durable Team participant registration failed");
+                    false
+                }
+            }
+        } else {
+            self.with_store(|store| store.register_participant(thread_id, role, label))
+        }
+    }
+
+    /// Error-preserving registration for durable activation. Core uses this at the final Session
+    /// success boundary so a failed initialization cannot leave an orphan Team marker.
+    pub fn register_durable_participant(
+        &self,
+        thread_id: ThreadId,
+        role: ParticipantRole,
+        label: String,
+    ) -> Result<bool, TeamError> {
+        if self.durable_runtime().is_none() {
+            return Ok(self.with_store(|store| store.register_participant(thread_id, role, label)));
+        }
+        let identity = self
+            .durable_identity()
+            .ok_or_else(|| {
+                TeamDurabilityError::conflict("durable registration has no durable identity")
+            })
+            .map_err(TeamError::from)?;
+        self.durable_mutate(false, move |store| {
+            store.register_durable_participant(identity, thread_id, role, label)
+        })
+        .map_err(TeamError::from)
     }
 
     pub fn participant(&self, thread_id: ThreadId) -> Option<Participant> {
@@ -111,6 +633,15 @@ impl TeamStateHandle {
         submission: &Submission,
         request: PublishRequest,
     ) -> Result<PublishOutcome, TeamError> {
+        if self.durable_runtime().is_some() {
+            return self
+                .durable_mutate(true, |store| {
+                    store
+                        .publish(actor, submission, request)
+                        .map_err(Into::into)
+                })
+                .map_err(TeamError::from);
+        }
         self.with_store(|store| {
             let outcome = store.publish(actor, submission, request)?;
             if !outcome.deduplicated {
@@ -131,6 +662,7 @@ impl TeamStateHandle {
         submission: &Submission,
         request: &PublishRequest,
     ) -> Result<PublishPreparation, TeamError> {
+        self.ensure_readable().map_err(TeamError::from)?;
         self.with_store(|store| store.prepare_publish(actor, submission, request))
     }
 
@@ -142,6 +674,7 @@ impl TeamStateHandle {
         request: &PublishRequest,
         history_limit: usize,
     ) -> Result<(PublishPreparation, Option<PreparedPublishHistory>), TeamError> {
+        self.ensure_readable().map_err(TeamError::from)?;
         self.with_store(|store| {
             store.prepare_publish_with_history(actor, submission, request, history_limit)
         })
@@ -152,6 +685,13 @@ impl TeamStateHandle {
         actor: ThreadId,
         request: LifecycleRequest,
     ) -> Result<LifecycleOutcome, TeamError> {
+        if self.durable_runtime().is_some() {
+            return self
+                .durable_mutate(true, |store| {
+                    store.update_lifecycle(actor, request).map_err(Into::into)
+                })
+                .map_err(TeamError::from);
+        }
         self.with_store(|store| {
             let outcome = store.update_lifecycle(actor, request)?;
             if outcome.changed {
@@ -171,6 +711,13 @@ impl TeamStateHandle {
         submission: &Submission,
         request: RouteRequest,
     ) -> Result<RouteOutcome, TeamError> {
+        if self.durable_runtime().is_some() {
+            return self
+                .durable_mutate(true, |store| {
+                    store.route(actor, submission, request).map_err(Into::into)
+                })
+                .map_err(TeamError::from);
+        }
         self.with_store(|store| {
             let outcome = store.route(actor, submission, request)?;
             if !outcome.deduplicated {
@@ -186,6 +733,15 @@ impl TeamStateHandle {
         route_id: RouteId,
         result: DeliveryResult,
     ) -> Result<DeliveryOutcome, TeamError> {
+        if self.durable_runtime().is_some() {
+            return self
+                .durable_mutate(true, |store| {
+                    store
+                        .record_delivery(actor, route_id, result)
+                        .map_err(Into::into)
+                })
+                .map_err(TeamError::from);
+        }
         self.with_store(|store| {
             let outcome = store.record_delivery(actor, route_id, result)?;
             if outcome.changed {
@@ -200,6 +756,13 @@ impl TeamStateHandle {
         actor: ThreadId,
         route_id: RouteId,
     ) -> Result<EndAssignmentOutcome, TeamError> {
+        if self.durable_runtime().is_some() {
+            return self
+                .durable_mutate(true, |store| {
+                    store.end_assignment(actor, route_id).map_err(Into::into)
+                })
+                .map_err(TeamError::from);
+        }
         self.with_store(|store| {
             let outcome = store.end_assignment(actor, route_id)?;
             self.notify_change();
@@ -215,6 +778,15 @@ impl TeamStateHandle {
         availability: &AvailabilitySnapshot,
         live_epoch: impl FnOnce() -> crate::availability::AvailabilityEpoch,
     ) -> Result<RetireOutcome, TeamError> {
+        if self.durable_runtime().is_some() {
+            return self
+                .durable_mutate(true, |store| {
+                    store
+                        .retire(actor, submission, request, availability, live_epoch())
+                        .map_err(Into::into)
+                })
+                .map_err(TeamError::from);
+        }
         self.with_store(|store| {
             let outcome = store.retire(actor, submission, request, availability, live_epoch())?;
             if !outcome.deduplicated {
@@ -231,6 +803,7 @@ impl TeamStateHandle {
         query: ObserveQuery,
         cursor: Option<DumpCursor>,
     ) -> Result<TeamDumpPage, TeamError> {
+        self.ensure_readable().map_err(TeamError::from)?;
         self.with_store(|store| {
             let wake_generation = *self.change_tx.borrow();
             store.dump(actor, availability, wake_generation, query, cursor)
@@ -242,6 +815,7 @@ impl TeamStateHandle {
         actor: ThreadId,
         query: ObserveQuery,
     ) -> Result<ChangeLogPage, TeamError> {
+        self.ensure_readable().map_err(TeamError::from)?;
         self.with_store(|store| {
             let wake_generation = *self.change_tx.borrow();
             store.change_log(actor, wake_generation, query)
@@ -253,6 +827,7 @@ impl TeamStateHandle {
         actor: ThreadId,
         query: ObserveQuery,
     ) -> Result<crate::observe::PublicationStatsPage, TeamError> {
+        self.ensure_readable().map_err(TeamError::from)?;
         self.with_store(|store| {
             let wake_generation = *self.change_tx.borrow();
             store.publication_stats(actor, wake_generation, query)
@@ -264,12 +839,40 @@ impl TeamStateHandle {
         actor: ThreadId,
         route_id: RouteId,
     ) -> Result<RouteDispatch, TeamError> {
+        self.ensure_readable().map_err(TeamError::from)?;
         self.with_store(|store| store.route_dispatch(actor, route_id))
     }
 
     /// Note a completed, supported tool result whose retention is not confirmed yet.
     pub fn note_observation(&self, producer: ThreadId, noted: NotedObservation) {
+        if self.durable_runtime().is_some() {
+            if let Err(error) = self.note_durable_observation(producer, noted) {
+                tracing::error!(%error, "durable Team observation note failed");
+            }
+            return;
+        }
         self.with_store(|store| store.note_observation(producer, noted));
+    }
+
+    pub fn note_durable_observation(
+        &self,
+        producer: ThreadId,
+        noted: NotedObservation,
+    ) -> Result<(), TeamError> {
+        let Some(runtime) = self.durable_runtime() else {
+            self.with_store(|store| store.note_observation(producer, noted));
+            return Ok(());
+        };
+        if runtime.authority.is_none() {
+            return Err(TeamError::from(TeamDurabilityError::ReadOnly));
+        }
+        let _gate = runtime
+            .mutation_gate
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.ensure_readable().map_err(TeamError::from)?;
+        self.with_store(|store| store.note_observation(producer, noted));
+        Ok(())
     }
 
     /// Mint the fact for an observation the caller has confirmed Codex retained.
@@ -277,19 +880,72 @@ impl TeamStateHandle {
     /// No change notification follows: recording evidence is not itself a team event, and nothing in
     /// anyone's active view moves until an author decides to publish.
     pub fn confirm_observation(&self, producer: ThreadId, item_id: &str) -> Option<FactId> {
-        self.with_store(|store| store.confirm_observation(producer, item_id))
+        if self.durable_runtime().is_some() {
+            match self.confirm_durable_observation(producer, item_id) {
+                Ok(fact_id) => fact_id,
+                Err(error) => {
+                    tracing::error!(%error, "durable Team evidence confirmation failed");
+                    None
+                }
+            }
+        } else {
+            self.with_store(|store| store.confirm_observation(producer, item_id))
+        }
+    }
+
+    pub fn confirm_durable_observation(
+        &self,
+        producer: ThreadId,
+        item_id: &str,
+    ) -> Result<Option<FactId>, TeamError> {
+        if self.durable_runtime().is_none() {
+            return Ok(self.with_store(|store| store.confirm_observation(producer, item_id)));
+        }
+        self.durable_mutate(false, |store| {
+            Ok(store.confirm_observation(producer, item_id))
+        })
+        .map_err(TeamError::from)
     }
 
     /// Drop a note whose result the harness ended up throwing away.
     pub fn discard_observation(&self, producer: ThreadId, item_id: &str) {
+        if self.durable_runtime().is_some() {
+            if let Err(error) = self.discard_durable_observation(producer, item_id) {
+                tracing::error!(%error, "durable Team observation discard failed");
+            }
+            return;
+        }
         self.with_store(|store| store.discard_observation(producer, item_id));
     }
 
+    pub fn discard_durable_observation(
+        &self,
+        producer: ThreadId,
+        item_id: &str,
+    ) -> Result<(), TeamError> {
+        let Some(runtime) = self.durable_runtime() else {
+            self.with_store(|store| store.discard_observation(producer, item_id));
+            return Ok(());
+        };
+        if runtime.authority.is_none() {
+            return Err(TeamError::from(TeamDurabilityError::ReadOnly));
+        }
+        let _gate = runtime
+            .mutation_gate
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.ensure_readable().map_err(TeamError::from)?;
+        self.with_store(|store| store.discard_observation(producer, item_id));
+        Ok(())
+    }
+
     pub fn read_fact(&self, actor: ThreadId, fact_id: FactId) -> Result<FactView, TeamError> {
+        self.ensure_readable().map_err(TeamError::from)?;
         self.with_store(|store| store.read_fact(actor, fact_id))
     }
 
     pub fn snapshot_for(&self, viewer: ThreadId) -> Result<TeamSnapshot, TeamError> {
+        self.ensure_readable().map_err(TeamError::from)?;
         self.with_store(|store| store.snapshot_for(viewer))
     }
 
@@ -298,6 +954,7 @@ impl TeamStateHandle {
         viewer: ThreadId,
         query: &HistoryQuery,
     ) -> Result<HistoryPage, TeamError> {
+        self.ensure_readable().map_err(TeamError::from)?;
         self.with_store(|store| store.history(viewer, query))
     }
 
@@ -305,8 +962,31 @@ impl TeamStateHandle {
         self.with_store(|store| store.has_pending_wake(participant))
     }
 
+    pub fn has_pending_durable_wake(&self, participant: ThreadId) -> Result<bool, TeamError> {
+        self.ensure_readable().map_err(TeamError::from)?;
+        Ok(self.with_store(|store| store.has_pending_wake(participant)))
+    }
+
     pub fn consume_wake(&self, participant: ThreadId) -> bool {
-        self.with_store(|store| store.consume_wake(participant))
+        if self.durable_runtime().is_some() {
+            match self.consume_durable_wake(participant) {
+                Ok(consumed) => consumed,
+                Err(error) => {
+                    tracing::error!(%error, "durable Team wake consumption failed");
+                    false
+                }
+            }
+        } else {
+            self.with_store(|store| store.consume_wake(participant))
+        }
+    }
+
+    pub fn consume_durable_wake(&self, participant: ThreadId) -> Result<bool, TeamError> {
+        if self.durable_runtime().is_none() {
+            return Ok(self.with_store(|store| store.consume_wake(participant)));
+        }
+        self.durable_mutate(false, |store| Ok(store.consume_wake(participant)))
+            .map_err(TeamError::from)
     }
 
     fn notify_change(&self) {
@@ -339,10 +1019,10 @@ pub struct TeamWakeWaiter {
 impl TeamWakeWaiter {
     /// Resolve as soon as this participant has an unconsumed team change, consuming it so the same
     /// change cannot wake it a second time.
-    pub async fn wait(mut self) {
+    pub async fn wait(mut self) -> Result<(), TeamError> {
         loop {
-            if self.handle.consume_wake(self.participant) {
-                return;
+            if self.handle.consume_durable_wake(self.participant)? {
+                return Ok(());
             }
             if self.change_rx.changed().await.is_err() {
                 // The sender lives inside the handle this waiter holds, so this is unreachable in

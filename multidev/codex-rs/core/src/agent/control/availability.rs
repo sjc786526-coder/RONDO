@@ -24,7 +24,7 @@ impl AgentControl {
     pub(crate) async fn producer_availability_snapshot(&self) -> AvailabilitySnapshot {
         let Some(state) = self.manager.upgrade() else {
             let entries = self
-                .team
+                .team()
                 .participants()
                 .into_iter()
                 .map(|participant| (participant.thread_id, ProducerAvailability::Unknown))
@@ -35,7 +35,7 @@ impl AgentControl {
             let (generation, store_transition_active) = state.availability_marker();
             if store_transition_active {
                 let entries = self
-                    .team
+                    .team()
                     .participants()
                     .into_iter()
                     .map(|participant| (participant.thread_id, ProducerAvailability::Unknown))
@@ -50,7 +50,7 @@ impl AgentControl {
                 );
             }
             let mut entries = Vec::new();
-            for participant in self.team.participants() {
+            for participant in self.team().participants() {
                 let class = self
                     .classify_with_state(&state, participant.thread_id)
                     .await;

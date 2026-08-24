@@ -113,6 +113,66 @@ fn register_session_root_skips_threads_with_explicit_parent() {
     assert_eq!(control.state.agent_id_for_path(&AgentPath::root()), None);
 }
 
+#[test]
+fn team_handle_is_shared_with_existing_control_clones() {
+    let control = AgentControl::default();
+    let child_control = control.clone();
+    assert!(Arc::ptr_eq(control.team(), child_control.team()));
+}
+
+#[test]
+fn durable_team_root_close_rejects_admission_until_aborted() {
+    let control = AgentControl::default();
+    let close = control
+        .begin_durable_team_root_close(ThreadId::new())
+        .expect("root close should begin");
+
+    let err = match control.reserve_team_child_admission() {
+        Ok(_) => panic!("closing root must reject child admission"),
+        Err(err) => err,
+    };
+    assert_eq!(
+        err.to_string(),
+        "unsupported operation: durable team root is closing; new child admission is unavailable"
+    );
+
+    close.abort();
+    let admission = control
+        .reserve_team_child_admission()
+        .expect("aborted close should reopen child admission");
+    drop(admission);
+}
+
+#[test]
+fn durable_team_root_close_waits_for_admission_and_complete_stays_closed() {
+    let control = AgentControl::default();
+    let admission = control
+        .reserve_team_child_admission()
+        .expect("child admission should begin");
+    let err = match control.begin_durable_team_root_close(ThreadId::new()) {
+        Ok(_) => panic!("root close must not overlap child admission"),
+        Err(err) => err,
+    };
+    assert_eq!(
+        err.to_string(),
+        "unsupported operation: durable team root cannot close while a child admission is in progress"
+    );
+    drop(admission);
+
+    control
+        .begin_durable_team_root_close(ThreadId::new())
+        .expect("root close should begin after admission ends")
+        .complete();
+    let err = match control.reserve_team_child_admission() {
+        Ok(_) => panic!("completed close must keep child admission closed"),
+        Err(err) => err,
+    };
+    assert_eq!(
+        err.to_string(),
+        "unsupported operation: durable team root is closed; new child admission is unavailable"
+    );
+}
+
 fn spawn_agent_call(call_id: &str) -> ResponseItem {
     ResponseItem::FunctionCall {
         id: None,
@@ -156,6 +216,22 @@ impl AgentControlHarness {
             manager,
             control,
         }
+    }
+
+    async fn new_durable() -> Self {
+        let (home, mut config) = test_config().await;
+        config
+            .features
+            .enable(Feature::Collab)
+            .expect("test config allows collaboration");
+        config
+            .features
+            .enable(Feature::MultiAgentV2)
+            .expect("test config allows Multi-Agent V2");
+        config.multi_agent_v2.team_state_enabled = true;
+        config.multi_agent_v2.durable_team_enabled = true;
+        config.multi_agent_v2.max_concurrent_threads_per_session = 3;
+        Self::new_with_config(home, config).await
     }
 
     async fn start_thread(&self) -> (ThreadId, Arc<CodexThread>) {
@@ -202,6 +278,109 @@ impl AgentControlHarness {
             .expect("child spawn should succeed")
             .thread_id
     }
+}
+
+#[tokio::test]
+async fn durable_team_root_close_rejects_loaded_running_descendant() {
+    let harness = AgentControlHarness::new().await;
+    let (root_thread_id, _root_thread) = harness.start_thread().await;
+    let child_thread_id = harness
+        .spawn_anonymous_child(root_thread_id, SpawnAgentOptions::default())
+        .await;
+
+    let close = harness
+        .control
+        .begin_durable_team_root_close(root_thread_id)
+        .expect("root close should begin");
+    let err = close
+        .ensure_no_live_descendants()
+        .await
+        .expect_err("loaded descendant must block root close");
+    assert!(
+        err.to_string().contains(&child_thread_id.to_string()),
+        "close error should identify the live descendant: {err}"
+    );
+    close.abort();
+
+    let admission = harness
+        .control
+        .reserve_team_child_admission()
+        .expect("failed close should reopen admission");
+    drop(admission);
+}
+
+#[tokio::test]
+async fn durable_session_failed_close_emits_no_completion_and_remains_retryable() {
+    let harness = AgentControlHarness::new_durable().await;
+    let (root_thread_id, root_thread) = harness.start_thread().await;
+    let root_control = root_thread.session.services.agent_control.clone();
+    let child_thread_id = root_control
+        .spawn_agent_with_metadata(
+            harness.config.clone(),
+            text_input("child task"),
+            Some(SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
+                parent_thread_id: root_thread_id,
+                depth: 1,
+                agent_path: None,
+                agent_nickname: None,
+                agent_role: None,
+            })),
+            SpawnAgentOptions::default(),
+        )
+        .await;
+    let child_thread_id = child_thread_id
+        .expect("durable child spawn should succeed")
+        .thread_id;
+
+    let close_id = root_thread
+        .submit(Op::Shutdown {})
+        .await
+        .expect("submit Root close");
+    let close_error = loop {
+        let event = root_thread.next_event().await.expect("Root close event");
+        if event.id == close_id
+            && let EventMsg::Error(error) = event.msg
+        {
+            break error;
+        }
+    };
+    assert!(close_error.message.contains(&child_thread_id.to_string()));
+    let no_completion = timeout(Duration::from_millis(100), async {
+        loop {
+            let event = root_thread.next_event().await.expect("post-close event");
+            if event.id == close_id && matches!(event.msg, EventMsg::ShutdownComplete) {
+                panic!("failed durable close must not emit ShutdownComplete");
+            }
+        }
+    })
+    .await;
+    assert!(no_completion.is_err(), "failed close should remain open");
+
+    let team = root_control.team();
+    team.publish(
+        root_thread_id,
+        &codex_team_state::Submission {
+            based_on: team.revision(),
+            request_id: "after-failed-close".to_string(),
+        },
+        codex_team_state::PublishRequest {
+            target: codex_team_state::PublishTarget::NewEvent {
+                title: "owner remains retryable".to_string(),
+            },
+            summary: "the failed close retained canonical Root authority".to_string(),
+            handoff: None,
+        },
+    )
+    .expect("failed close must reopen durable mutation");
+
+    root_control
+        .shutdown_live_agent(child_thread_id)
+        .await
+        .expect("shutdown child before retry");
+    root_thread
+        .shutdown_and_wait()
+        .await
+        .expect("Root close succeeds after child exits");
 }
 
 async fn persisted_originator(thread: &CodexThread) -> String {
@@ -457,6 +636,56 @@ async fn spawn_agent_errors_when_manager_dropped() {
         err.to_string(),
         "unsupported operation: thread manager dropped"
     );
+}
+
+#[tokio::test]
+async fn durable_team_root_close_gates_spawn_and_both_cold_load_paths() {
+    let control = AgentControl::default();
+    let (_home, config) = test_config().await;
+    let root_thread_id = ThreadId::new();
+    let close = control
+        .begin_durable_team_root_close(root_thread_id)
+        .expect("root close should begin");
+    let session_source = SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
+        parent_thread_id: root_thread_id,
+        depth: 1,
+        agent_path: None,
+        agent_nickname: None,
+        agent_role: None,
+    });
+
+    let spawn_err = control
+        .spawn_agent(
+            config.clone(),
+            text_input("blocked child"),
+            Some(session_source),
+        )
+        .await
+        .expect_err("closing root must reject new child spawn");
+    let load_err = control
+        .ensure_v2_agent_loaded(config.clone(), ThreadId::new())
+        .await
+        .expect_err("closing root must reject V2 residency load");
+    let resume_err = control
+        .resume_agent_from_rollout(config, ThreadId::new(), SessionSource::Exec)
+        .await
+        .expect_err("closing root must reject explicit cold resume");
+    let expected =
+        "unsupported operation: durable team root is closing; new child admission is unavailable";
+    assert_eq!(
+        (
+            spawn_err.to_string(),
+            load_err.to_string(),
+            resume_err.to_string(),
+        ),
+        (
+            expected.to_string(),
+            expected.to_string(),
+            expected.to_string(),
+        )
+    );
+
+    close.abort();
 }
 
 #[tokio::test]

@@ -18,7 +18,7 @@ mod thread_history_materialization;
 mod thread_sections;
 mod unarchive_thread;
 mod update_thread_metadata;
-mod writer_lock;
+pub(crate) mod writer_lock;
 
 #[cfg(test)]
 mod test_support;
@@ -60,6 +60,7 @@ use crate::ReadThreadByRolloutPathParams;
 use crate::ReadThreadParams;
 use crate::RenameThreadSectionParams;
 use crate::ResumeThreadParams;
+use crate::RootWriterAuthority;
 use crate::SearchThreadOccurrencesParams;
 use crate::SearchThreadsParams;
 use crate::StoredModelContext;
@@ -76,6 +77,7 @@ use crate::ThreadStoreFuture;
 use crate::ThreadStoreResult;
 use crate::TurnPage;
 use crate::UpdateThreadMetadataParams;
+use crate::authority::RootWriterAuthorityState;
 use crate::local::writer_lock::WriterLockCoordinator;
 use crate::local::writer_lock::WriterLockGuard;
 
@@ -114,7 +116,15 @@ struct LiveRecorderEntry {
     // canonical SessionMeta is durable. Retain the mode captured when live persistence was opened
     // so missing SQLite rows can still be seeded.
     history_mode: ThreadHistoryMode,
-    writer_lock: WriterLockGuard,
+    // This strong authority owns the OS writer lock. Capabilities handed to Team state are weak,
+    // while an in-flight permit keeps both the authority and lock alive through durable success.
+    root_writer_authority: Arc<RootWriterAuthorityState>,
+}
+
+impl Drop for LiveRecorderEntry {
+    fn drop(&mut self) {
+        self.root_writer_authority.detach_owner();
+    }
 }
 
 #[derive(Default)]
@@ -300,7 +310,7 @@ impl LocalThreadStore {
                 entry.insert(LiveRecorderEntry {
                     recorder,
                     history_mode,
-                    writer_lock,
+                    root_writer_authority: RootWriterAuthorityState::new(thread_id, writer_lock),
                 });
                 Ok(())
             }
@@ -405,6 +415,10 @@ impl ThreadStore for LocalThreadStore {
 
     fn flush_thread(&self, thread_id: ThreadId) -> ThreadStoreFuture<'_, ()> {
         Box::pin(async move { live_writer::flush_thread(self, thread_id).await })
+    }
+
+    fn writer_authority(&self, thread_id: ThreadId) -> ThreadStoreFuture<'_, RootWriterAuthority> {
+        Box::pin(async move { live_writer::writer_authority(self, thread_id).await })
     }
 
     fn shutdown_thread(&self, thread_id: ThreadId) -> ThreadStoreFuture<'_, ()> {
@@ -558,6 +572,7 @@ impl ThreadStore for LocalThreadStore {
 
 #[cfg(test)]
 mod tests {
+    use std::process::Command;
     use std::sync::Arc;
 
     use codex_protocol::ThreadId;
@@ -590,6 +605,12 @@ mod tests {
     use crate::local::test_support::write_archived_session_file;
     use crate::local::test_support::write_session_file;
     use crate::local::test_support::write_session_file_with_history_mode;
+
+    const WRITER_AUTHORITY_PROCESS_TEST: &str =
+        "local::tests::root_writer_authority_survives_competing_process_and_failed_close";
+    const WRITER_AUTHORITY_CHILD_MODE: &str = "CODEX_THREAD_STORE_AUTHORITY_CHILD_MODE";
+    const WRITER_AUTHORITY_CHILD_HOME: &str = "CODEX_THREAD_STORE_AUTHORITY_CHILD_HOME";
+    const WRITER_AUTHORITY_CHILD_THREAD: &str = "CODEX_THREAD_STORE_AUTHORITY_CHILD_THREAD";
 
     #[tokio::test]
     async fn live_writer_lifecycle_writes_and_closes() {
@@ -1372,6 +1393,88 @@ mod tests {
                 .await
                 .expect("resume after shutdown should acquire writer ownership");
         }
+    }
+
+    #[tokio::test]
+    async fn root_writer_authority_survives_competing_process_and_failed_close() {
+        if let Ok(mode) = std::env::var(WRITER_AUTHORITY_CHILD_MODE) {
+            let home = std::env::var_os(WRITER_AUTHORITY_CHILD_HOME).expect("child home");
+            let thread_id = ThreadId::from_string(
+                &std::env::var(WRITER_AUTHORITY_CHILD_THREAD).expect("child thread id"),
+            )
+            .expect("valid child thread id");
+            let coordinator = Arc::new(WriterLockCoordinator::new(std::path::Path::new(&home)));
+            match mode.as_str() {
+                "conflict" => {
+                    let error = match coordinator.acquire(thread_id) {
+                        Ok(_) => panic!("live writer must reject the child process"),
+                        Err(error) => error,
+                    };
+                    assert!(matches!(error, ThreadStoreError::Conflict { .. }));
+                }
+                "acquire" => {
+                    let _owner = coordinator
+                        .acquire(thread_id)
+                        .expect("released writer must admit the child process");
+                }
+                other => panic!("unexpected writer authority child mode {other}"),
+            }
+            return;
+        }
+
+        let home = TempDir::new().expect("temp dir");
+        let store = LocalThreadStore::new(test_config(home.path()), /*state_db*/ None);
+        let thread_id = ThreadId::default();
+        store
+            .create_thread(create_thread_params(thread_id))
+            .await
+            .expect("create live root writer");
+        let authority = store
+            .writer_authority(thread_id)
+            .await
+            .expect("derive root writer authority");
+
+        run_writer_authority_child(home.path(), thread_id, "conflict");
+        let close = authority.begin_close().await.expect("start close barrier");
+        close
+            .abort()
+            .expect("abort simulated durable close failure");
+
+        let write = authority
+            .begin_write()
+            .expect("failed close must leave the owner retryable");
+        assert_eq!(write.thread_id(), thread_id);
+        drop(write);
+        run_writer_authority_child(home.path(), thread_id, "conflict");
+
+        let close = authority.begin_close().await.expect("retry close barrier");
+        store
+            .shutdown_thread(thread_id)
+            .await
+            .expect("shutdown under external close permit");
+        assert!(authority.begin_write().is_err());
+        run_writer_authority_child(home.path(), thread_id, "conflict");
+        close.complete().expect("complete external close");
+        run_writer_authority_child(home.path(), thread_id, "acquire");
+    }
+
+    fn run_writer_authority_child(home: &std::path::Path, thread_id: ThreadId, mode: &str) {
+        let output = Command::new(std::env::current_exe().expect("current test executable"))
+            .arg("--exact")
+            .arg(WRITER_AUTHORITY_PROCESS_TEST)
+            .arg("--nocapture")
+            .env(WRITER_AUTHORITY_CHILD_MODE, mode)
+            .env(WRITER_AUTHORITY_CHILD_HOME, home)
+            .env(WRITER_AUTHORITY_CHILD_THREAD, thread_id.to_string())
+            .output()
+            .expect("run writer authority child process");
+        assert!(
+            output.status.success(),
+            "writer authority child failed: status={:?}\nstdout={}\nstderr={}",
+            output.status.code(),
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
     }
 
     #[tokio::test]

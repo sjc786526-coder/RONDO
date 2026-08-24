@@ -467,6 +467,8 @@ tool_namespace = "agents"
 hide_spawn_agent_metadata = true
 expose_spawn_agent_model_overrides = true
 wait_agent_enabled = false
+team_state_enabled = true
+durable_team_enabled = true
 non_code_mode_only = true
 "#,
     )
@@ -495,7 +497,8 @@ non_code_mode_only = true
             expose_spawn_agent_model_overrides: Some(true),
             wait_agent_enabled: Some(false),
             non_code_mode_only: Some(true),
-            team_state_enabled: None,
+            team_state_enabled: Some(true),
+            durable_team_enabled: Some(true),
             publication_critic: None,
         }))
     );

@@ -375,6 +375,7 @@ impl AgentControl {
         mut config: Config,
         thread_id: ThreadId,
     ) -> CodexResult<()> {
+        let _admission = self.reserve_team_child_admission()?;
         let state = self.upgrade()?;
         let stored_thread;
         let history;
@@ -502,6 +503,16 @@ impl AgentControl {
         session_source: Option<SessionSource>,
         options: SpawnAgentOptions,
     ) -> CodexResult<LiveAgent> {
+        let _admission = session_source
+            .as_ref()
+            .is_some_and(|source| {
+                matches!(
+                    source,
+                    SessionSource::SubAgent(SubAgentSource::ThreadSpawn { .. })
+                )
+            })
+            .then(|| self.reserve_team_child_admission())
+            .transpose()?;
         let state = self.upgrade()?;
         let multi_agent_version = state
             .effective_multi_agent_version_for_spawn(
@@ -967,6 +978,9 @@ impl AgentControl {
         thread_id: ThreadId,
         session_source: SessionSource,
     ) -> CodexResult<ThreadId> {
+        // This API is also used with a reconstructed non-subagent source, so the target's caller-
+        // supplied source cannot decide whether it participates in the root close barrier.
+        let _admission = self.reserve_team_child_admission()?;
         let root_depth = thread_spawn_depth(&session_source).unwrap_or(0);
         let (resumed_thread_id, resumed_multi_agent_version) = Box::pin(
             self.resume_single_agent_from_rollout(config.clone(), thread_id, session_source),

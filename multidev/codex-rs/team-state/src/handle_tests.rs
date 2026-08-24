@@ -47,7 +47,8 @@ async fn a_change_published_before_the_wait_starts_is_not_lost() {
     let waiter = handle.wake_waiter(root);
     tokio::time::timeout(Duration::from_secs(5), waiter.wait())
         .await
-        .expect("a change published before the wait must still resolve it");
+        .expect("a change published before the wait must still resolve it")
+        .expect("the durable wake remains readable");
 }
 
 #[tokio::test]
@@ -65,7 +66,8 @@ async fn a_change_published_during_the_wait_resolves_it() {
 
     tokio::time::timeout(Duration::from_secs(5), waiter.wait())
         .await
-        .expect("a change published during the wait must resolve it");
+        .expect("a change published during the wait must resolve it")
+        .expect("the durable wake remains readable");
     publisher.await.expect("publisher finishes");
 }
 
@@ -76,7 +78,8 @@ async fn an_already_consumed_change_does_not_resolve_the_next_wait() {
 
     tokio::time::timeout(Duration::from_secs(5), handle.wake_waiter(root).wait())
         .await
-        .expect("the first wait consumes the change");
+        .expect("the first wait consumes the change")
+        .expect("the durable wake remains readable");
 
     let second =
         tokio::time::timeout(Duration::from_millis(200), handle.wake_waiter(root).wait()).await;

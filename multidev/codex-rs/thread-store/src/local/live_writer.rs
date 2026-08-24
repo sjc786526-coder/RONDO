@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use codex_protocol::ThreadId;
 use codex_protocol::protocol::RolloutItem;
@@ -16,8 +17,11 @@ use crate::AppendThreadItemsParams;
 use crate::CreateThreadParams;
 use crate::ReadThreadParams;
 use crate::ResumeThreadParams;
+use crate::RootWriterAuthority;
 use crate::ThreadStoreError;
 use crate::ThreadStoreResult;
+use crate::authority::OwnerCloseState;
+use crate::authority::RootWriterAuthorityState;
 use crate::types::canonical_history_mode_from_rollout_items;
 
 const ROLLOUT_SIZE_BYTES_METRIC: &str = "codex.rollout.size_bytes";
@@ -141,33 +145,57 @@ pub(super) async fn flush_thread(
     write_and_project(store, thread_id, RolloutWriteOp::Flush).await
 }
 
+pub(super) async fn writer_authority(
+    store: &LocalThreadStore,
+    thread_id: ThreadId,
+) -> ThreadStoreResult<RootWriterAuthority> {
+    let live_recorders = store.live_recorders.lock().await;
+    let entry = live_recorders
+        .get(&thread_id)
+        .ok_or(ThreadStoreError::ThreadNotFound { thread_id })?;
+    Ok(entry.root_writer_authority.downgrade())
+}
+
 pub(super) async fn shutdown_thread(
     store: &LocalThreadStore,
     thread_id: ThreadId,
 ) -> ThreadStoreResult<()> {
     let _live_writer_guard = store.live_writer_locks.lock(thread_id).await;
-    let (recorder, history_mode) = live_writer_parts(store, thread_id).await?;
+    let (recorder, history_mode, root_writer_authority) =
+        live_writer_parts(store, thread_id).await?;
+    // A durable Team close keeps its external permit unfinished across this call, allowing it to
+    // abort and reopen the owner if recorder shutdown fails. Ordinary callers get an internal
+    // permit with the same barrier semantics.
+    let owner_close = root_writer_authority.begin_owner_close().await?;
     let rollout_path = recorder.rollout_path().to_path_buf();
-    if matches!(history_mode, ThreadHistoryMode::Legacy) {
-        recorder.shutdown().await.map_err(thread_store_io_error)?;
-    } else {
-        recorder.shutdown().await.map_err(thread_store_io_error)?;
-        if let Err(err) = super::thread_history_materialization::materialize_to_sqlite(
-            store,
-            thread_id,
-            rollout_path.as_path(),
-        )
-        .await
-        {
-            warn!("failed to project durable rollout during shutdown for {thread_id}: {err}");
+    let shutdown_result: ThreadStoreResult<()> = async {
+        if matches!(history_mode, ThreadHistoryMode::Legacy) {
+            recorder.shutdown().await.map_err(thread_store_io_error)?;
+        } else {
+            recorder.shutdown().await.map_err(thread_store_io_error)?;
+            if let Err(err) = super::thread_history_materialization::materialize_to_sqlite(
+                store,
+                thread_id,
+                rollout_path.as_path(),
+            )
+            .await
+            {
+                warn!("failed to project durable rollout during shutdown for {thread_id}: {err}");
+            }
         }
+        sync_materialized_rollout_path(store, thread_id, rollout_path.as_path()).await?;
+        Ok(())
     }
-    sync_materialized_rollout_path(store, thread_id, rollout_path.as_path()).await?;
+    .await;
+    shutdown_result?;
     if let Some(metrics) = codex_otel::global()
-        && let Ok(metadata) = tokio::fs::metadata(rollout_path).await
+        && let Ok(metadata) = std::fs::metadata(&rollout_path)
     {
         let size_bytes = i64::try_from(metadata.len()).unwrap_or(i64::MAX);
         let _ = metrics.histogram(ROLLOUT_SIZE_BYTES_METRIC, size_bytes, &[]);
+    }
+    if let OwnerCloseState::Permit(close) = owner_close {
+        close.complete()?;
     }
     store.live_recorders.lock().await.remove(&thread_id);
     Ok(())
@@ -178,6 +206,10 @@ pub(super) async fn discard_thread(
     thread_id: ThreadId,
 ) -> ThreadStoreResult<()> {
     let _live_writer_guard = store.live_writer_locks.lock(thread_id).await;
+    let (_, _, root_writer_authority) = live_writer_parts(store, thread_id).await?;
+    if let OwnerCloseState::Permit(close) = root_writer_authority.begin_owner_close().await? {
+        close.complete()?;
+    }
     store
         .live_recorders
         .lock()
@@ -269,12 +301,20 @@ enum RolloutWriteOp {
 async fn live_writer_parts(
     store: &LocalThreadStore,
     thread_id: ThreadId,
-) -> ThreadStoreResult<(RolloutRecorder, ThreadHistoryMode)> {
+) -> ThreadStoreResult<(
+    RolloutRecorder,
+    ThreadHistoryMode,
+    Arc<RootWriterAuthorityState>,
+)> {
     let live_recorders = store.live_recorders.lock().await;
     let entry = live_recorders
         .get(&thread_id)
         .ok_or(ThreadStoreError::ThreadNotFound { thread_id })?;
-    Ok((entry.recorder.clone(), entry.history_mode))
+    Ok((
+        entry.recorder.clone(),
+        entry.history_mode,
+        Arc::clone(&entry.root_writer_authority),
+    ))
 }
 
 async fn write_and_project(
@@ -286,7 +326,7 @@ async fn write_and_project(
     // shutdown/discard/delete removes it. Keep the lookup defensive so late writes fail after
     // teardown.
     let _live_writer_guard = store.live_writer_locks.lock(thread_id).await;
-    let (recorder, history_mode) = live_writer_parts(store, thread_id).await?;
+    let (recorder, history_mode, _) = live_writer_parts(store, thread_id).await?;
     let sync_rollout_path = matches!(&write_op, RolloutWriteOp::Persist | RolloutWriteOp::Flush);
     let write_op = match write_op {
         RolloutWriteOp::AppendItems(items) => {

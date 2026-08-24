@@ -139,9 +139,7 @@ impl TeamStore {
             target: request.version_id.to_string(),
             before: Some(before),
             after: Some(after),
-            wake: StoredWake::None {
-                rule: "root_does_not_self_wake",
-            },
+            wake: StoredWake::none("root_does_not_self_wake"),
         });
 
         let outcome = RetireOutcome {

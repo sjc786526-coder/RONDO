@@ -9,11 +9,12 @@
 //! the original picture, or a stale retirement could land after a producer had come back.
 
 use codex_protocol::ThreadId;
+use serde::Deserialize;
 use serde::Serialize;
 use std::fmt;
 
 /// What the harness currently believes about one producer's recoverability in this team instance.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProducerAvailability {
     /// Currently loaded, or otherwise able to receive work without a restore.
@@ -48,7 +49,7 @@ impl fmt::Display for ProducerAvailability {
 /// The harness assigns this from a monotonic generation that advances on load, unload, restore and
 /// stored-thread deletion. It is not a hash of the classified set, so an ABA cycle cannot replay
 /// an earlier epoch. The value is session-local.
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 pub struct AvailabilityEpoch(u64);
 
 impl AvailabilityEpoch {

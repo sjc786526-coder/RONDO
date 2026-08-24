@@ -196,33 +196,36 @@ Team State、writer authority、Session identity 或只读状态源。
 
 ### 已完成
 
-- 已确认并推送主工作区 `main@445b6eae7f1df5bfd106fcd963141173a1292af5`，`origin/main` 已与其一致；主工作区 tracked clean。
-- 已从该精确提交创建 `.claude/worktrees/069-m4-s1-durable-team-session` /
-  `worktree-069-m4-s1-durable-team-session`，未读取或修改 Plan 068 worktree 内容。
-- 已完整阅读根 `AGENTS.md`、README、当前 WBS、`doc/WBS/durable-team-runtime.md`、`multidev/AGENTS.md`、Plan 模板、Plan 067 合同/
-  冻结快照/独立审查及相关 Plan 065 验收记录，并核对 live Team State、Root writer、cold resume、配置和测试接缝。
-- 已把用户补充的 068/069/070 三任务所有权、共享面串行、资源切换和整合顺序纳入本合同；并行开发期本计划不修改共享 WBS。
-- 已完成 Plan 069 ExecPlan 起草和独立规划审查；规划任务未运行 Cargo、Docker、真实 API/模型、训练、测评或产品实现测试。
+- 已在指定基线和 069 worktree 内完成阶段 A-C 主体实现；四份共享 WBS、Plan 068/070 资产及控制面协议均未进入写集。
+- canonical Team snapshot 已具备版本、checksum、完整领域状态、严格 hydrate、committed read、未知结果 reconcile 与 durable success 边界；
+  pending observation 保持短生命周期，不伪装为 committed state。
+- Root active writer 已扩展为可传递 capability；Root/child mutation 共用同一 OS-backed authority，写 permit 连续覆盖 commit、安装、通知和成功返回；
+  close permit 跨越 thread persistence shutdown，失败 abort 后保留 owner。
+- Session 已接入默认关闭的 durable 配置、fresh/cold resume、marker/legacy fail-closed、稳定共享 Team handle、显式初始化失败清理和最小 live-child close barrier。
+- 调试与聚焦预验收已覆盖 Team 领域、thread-store authority、真实子进程竞争/恢复、真实 Session/tool cold resume、durable-off marker 拒绝、
+  failed close 无 `ShutdownComplete` 且可继续 mutation；配置 schema 已生成，Bazel 9 lock update 成功且无 lock diff。
+- 独立终审发现 owner 在 transient/unknown commit 后缺少产品路径自动 reconcile；已把串行 reconcile 接入 Team capability resolve，补足
+  unavailable 与 after-write unknown 重试回归，同一审查者复验通过且无剩余高/中 correctness finding。
+- 最终 `just fix`（team-state、thread-store、core）与 `just fmt` 已执行。标准 `just test` 因上游 rusty-v8 默认归档 404 在测试前失败；
+  checksum-verified Codex V8 等价完整轮实际执行 14,373 项：14,363 passed、10 failed、24 skipped。失败为 8 项 068 Publication Critic
+  fixture/断言和 2 项未修改 realtime 连接失败超时；069 durable cold-resume 主链在该完整轮通过。
 
 ### 当前工作
 
-- ExecPlan 已冻结并完成规划交接；产品实现尚未开始。
+- 阶段 D 预验收已完成；069 停在本地提交与外部前置等待边界。
 
 ### 本任务剩余步骤
 
-- 执行阶段 A-C，完成 S1 自有实现、调试链、失败/竞争/兼容回归和聚焦预验收。
-- 精炼执行日志并形成 069 自有实现的本地提交；独立审查并自主关闭普通高/中 finding。
 - 等待 `#37198` 由独立任务进入 `main`，以及用户另行批准把最新 `main` 合入 069 分支。
 - 执行阶段 E 的聚焦回归、全新领域状态正式轮和独立终审，形成最终本地提交。
 
 ### 阻塞项
 
-- 当前无实现开工阻塞。最终 `M4-S1 PASS` 受 `#37198` 独立进入 `main` 与后续分支同步批准约束；此前可以完成开发、调试和预验收，
-  但不得越权回移或宣布最终 PASS。
+- 当前无 069 主体实现阻塞。最终 `M4-S1 PASS` 仍受 `#37198` 独立进入 `main` 与后续分支同步批准约束；不得越权回移或宣布最终 PASS。
 
 ### 当前验收状态
 
-- `PLAN_READY / IMPLEMENTATION_NOT_STARTED`。规划只形成任务合同，不构成产品实现或 M4-S1 验收证据。
+- `IMPLEMENTATION_COMPLETE / PREACCEPTANCE_COMPLETE / FINAL_PASS_BLOCKED_BY_#37198`。
 
 ### 交接边界
 
@@ -245,3 +248,8 @@ Team State、writer authority、Session identity 或只读状态源。
 | 007 | `#37198` 独立回移是最终 PASS 前置，不属于 069 实现；吸收最新 main 也等待用户另行批准 | 上游增量有独立任务合同，不能夹带；用户要求本地提交后不自行 merge/push | 外部依赖/Git | 已采纳 |
 | 008 | 不为 069 建设 app-server/TUI 控制面、Publication Critic 集成、workspace binding 或通用审计/可信设施 | 保持三任务所有权和第四期子线边界，复杂度只服务真实 S1 问题 | 范围 | 已采纳 |
 | 009 | 规划与实现不需要直接写主工作区或 ignored 产品资产；构建缓存/锁/fixture 只由既有受监控命令管理 | linked worktree 足以交付 tracked 代码，手工共享状态会破坏隔离和资源门禁 | 工作区/资源 | 已采纳 |
+| 010 | committed Team 使用 Root `ThreadId` 下的版本化 checksummed snapshot；格式与领域校验由 team-state 拥有，core 只实现本地介质适配 | 避免把 Team 状态塞进 transcript，也避免介质层复制领域不变量 | durability/read | 已采纳 |
+| 011 | AgentControl 保留稳定共享的 `Arc<TeamStateHandle>`，在 Root 激活时原位安装 durable runtime，不改变既有 `team()` API | 已存在的 control clone 必须看到同一 Team，同时避免为热替换触碰 068 owned 测试和扩大共享 API churn | lifecycle/API | 已采纳 |
+| 012 | fresh generation 0 不落 marker，最终 Root 注册才首次提交；激活错误显式等待 `LiveThreadInitGuard::discard` | 避免失败初始化留下可竞争 writer；提交结果未知时仍 fail-closed，不把不确定结果报成功 | activation/failure | 已采纳 |
+| 013 | Root close 先停止 child admission并拒绝 live descendant，再取得 Team close permit；thread shutdown 失败时双 barrier abort | 保证 close 与 mutation 不重叠、失败无 `ShutdownComplete`、owner 仍可重试 | close barrier | 已采纳 |
+| 014 | owner 的 Team capability resolve 在 read/mutation 前串行执行必要 reconcile；read-only handle 不获得该能力 | transient/unknown durable commit 后必须能从产品入口恢复可写状态，同时不能让非 owner 越权取得写 authority | recovery/authority | 已采纳 |

@@ -1854,6 +1854,10 @@
           "minimum": 0.0,
           "type": "integer"
         },
+        "durable_team_enabled": {
+          "description": "Persist the canonical Team State across process lifetimes.\n\nThis is an explicit opt-in and also requires `team_state_enabled`.",
+          "type": "boolean"
+        },
         "enabled": {
           "type": "boolean"
         },

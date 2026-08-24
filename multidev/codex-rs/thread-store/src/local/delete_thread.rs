@@ -113,7 +113,7 @@ fn referenced_thread_error(thread_id: codex_protocol::ThreadId) -> ThreadStoreEr
 async fn delete_thread_after_reference_check(
     store: &LocalThreadStore,
     thread_id: codex_protocol::ThreadId,
-    writer_guards: &mut Vec<super::writer_lock::WriterLockGuard>,
+    _writer_guards: &mut Vec<super::writer_lock::WriterLockGuard>,
 ) -> ThreadStoreResult<()> {
     let thread_id_str = thread_id.to_string();
     let state_db_ctx = store.state_db().await;
@@ -154,10 +154,21 @@ async fn delete_thread_after_reference_check(
     }
     super::thread_history::delete_thread(store, thread_id).await?;
 
-    // Drop the recorder before removing files, but retain its writer lock until cleanup finishes.
-    if let Some(entry) = store.live_recorders.lock().await.remove(&thread_id) {
-        writer_guards.push(entry.writer_lock);
-    }
+    // Drop the recorder before removing files, but retain its Root authority (and therefore its
+    // OS writer lock) until cleanup finishes. Detaching first prevents the retained authority from
+    // admitting any new Team writes after the live recorder has gone away.
+    let _removed_writer_authority =
+        store
+            .live_recorders
+            .lock()
+            .await
+            .remove(&thread_id)
+            .map(|entry| {
+                entry.root_writer_authority.detach_owner();
+                let authority = std::sync::Arc::clone(&entry.root_writer_authority);
+                drop(entry);
+                authority
+            });
     let found_rollout_path = !rollout_paths.is_empty();
     for rollout_path in rollout_paths {
         delete_rollout_file(store, rollout_path.as_path(), thread_id)?;
