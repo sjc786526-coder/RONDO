@@ -1,6 +1,6 @@
 # 方向 1：Harness 优化
 
-最后更新：2026-08-23 ｜ 状态：**Plan 058 正式 20/20 有效；root-only 收尾待外部复验** ｜
+最后更新：2026-08-23 ｜ 状态：**Plan 058 已完成并通过外部复验；保留默认关闭的 root-only C2 guidance** ｜
 源码位置：`mydev/` ｜ Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md`
 
 ## 当前状态
@@ -9,7 +9,7 @@
 opt-in、任务级安全离线投影、历史普查器与日期冻结证据继续复用；Plan 058 只新增默认关闭、显式 opt-in 的
 `exec_command` repeat guidance，不改变工具执行资格、Guardian、审批、sandbox 或方向 2/3。外部验收发现普通非 root
 agent 会继承该 feature 后，最终分支已把 recipient 收紧到 root agent，并补 model-visible integration regression；
-复验通过前 feature 保持 UnderDevelopment、默认关闭。
+外部复验已通过，feature 保持 UnderDevelopment、默认关闭。
 
 此前教师 harness 的只读研究 T1—T3 已完成。研究交付
 `doc/research/teacher-harness-performance-candidates.md` 保留为形成时点的证据与候选池；候选进入实现仍必须由
@@ -32,7 +32,7 @@ E-A 轻量离线冻结回放当前不恢复。Plan 052 已确认现有资产、�
 - 第一次独立验收后按预冻 `adjust` 边界进一步把最终 guidance 收窄到同 requester/tool path 且全部调用参数不变，
   并明确任何条件不确定即照常执行；后续外部验收又确认普通非 root agent 未被 gate 排除，最终分支已复用既有
   session-source 判定收紧为 root-only。formal-v6 公共结果仍如实绑定原冻结文案，不把收窄后的版本冒充为正式原样
-  被测版本；当前只待同一外部审查者复验，不重跑正式实验。
+  被测版本；同一外部审查者复验通过，没有重跑正式实验。
 - Docker/VHDX 增长均为 0，最终无容器、volume 或 build cache；未运行 Codex 对照、validation、holdout、额外
   题目/round、完整数据集、本地模型、训练、CI 或 PR。详细合同、失效 campaign 与设施修复证据见 Plan 058 及日志。
 

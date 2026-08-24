@@ -499,12 +499,12 @@ recipient，不改变正式 main 行为、工具执行或 formal-v6 有效性。
 
 ### 本任务剩余步骤
 
-产品、正式 20/20、费用与本地整改均已完成。当前仅剩把本次 root-only 收窄和收尾提交交回同一外部审查者复验；
-通过前 feature 继续为 UnderDevelopment、默认关闭，不进入主线整合。
+无。产品、正式 20/20、费用、本地整改和同一外部审查者复验均已完成；feature 保持 UnderDevelopment、默认关闭。
+后续只按用户批准进入主线整合，不在本计划继续规划。
 
 ### 阻塞项
 
-无工程阻塞。外部复验是唯一待完成的验收步骤；不因此重跑真实 API、Docker、题目或 round。
+无。
 
 ### 当前验收状态
 
@@ -592,7 +592,9 @@ recipient，不改变正式 main 行为、工具执行或 formal-v6 有效性。
 - Rust 复验结束后，按用户容量授权精确删除无进程使用、可重建且不被 campaign 读取的 Plan 058 `62387ad`
   Cargo target，释放 `27,305,503,016` bytes；项目最终 `150,976,972,426` bytes，正式 bundle/manifest 与 metrics
   均保留。
-- 聚焦外部复验：上一轮结论为不通过、formal-v6 本身有效；root-only/P2 收尾整改完成后待交回同一审查者复验。
+- 聚焦外部复验：上一轮不通过所列 root-only/P2 均已关闭；同一审查者复验代码、unit、model-visible integration
+  调用链、双 lock、资源和当前状态后通过，无未解功能 finding。清除代理变量后六个相关 Python 模块复跑
+  `262/262` 通过；不为已由既有对照证明的 mock 回环环境失败重建已清理 Cargo target。
 - 未运行：本地模型、训练、完整数据集、Codex 对照、validation、holdout、额外题目/round、CI、PR、全 workspace
   测试。
 
@@ -669,3 +671,4 @@ Plan 058 worktree，但执行阶段以下 I/O 会由 worktree 中的受控命令
 | 035 | formal-v6 public result 离线补齐 body-free affected slot/task 聚合，不重跑正式 API | 字段可由同一冻结 records 确定性导出，完整结果重生成与 tracked JSON 一致；它只修复报告完整性，不改变评价口径或 campaign 有效性 | 结果发布、验收证据 | 已采纳 |
 | 036 | 独立验收后按预冻 `adjust` 规则把 guidance 收窄到 requester/tool path 与全部调用参数均相同，任一条件不确定即照常执行；formal-v6 结果仍绑定原 `0706bf0` 文案 | 首轮 P2 finding 真实，原文没有明确表达参数/requester 排除；收窄不增加干预、不改变执行资格或历史结果，避免把未正式测试的新文案冒充 formal-v6 原样版本 | 最终产品文案、独立验收、正式结果边界 | 已采纳，非材料收窄 |
 | 037 | 最终 guidance 额外绑定 root agent；普通 ThreadSpawn/Review/Compact 等非 root session 即使继承 feature 配置也不接入，并以 model-visible request integration 覆盖 direct 与 CodeModeOnly | 外部验收确认原 gate 只排除 Guardian，实际扩大到 formal 未覆盖的普通子 agent；复用既有 session-source 判定是职责契合的最小收窄，不改变 main 行为或工具执行语义 | tool plan、unit/integration regression、最终交付 | 已采纳，非材料收窄 |
+| 038 | 接受 root-only 整改并完成外部复验；不重建已清理 target、不重跑正式 API/Docker | unit `2/2` 通过，integration 与相关 crate 编译通过；新增测试和既有请求体对照均在 mock 请求前受同一回环环境影响，代码调用链无旁路，清代理后的 Python 为 `262/262`；继续重型重建没有相称收益 | 最终验收、测试边界、正式结果 | 已采纳，验收通过 |
