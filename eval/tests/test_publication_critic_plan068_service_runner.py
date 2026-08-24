@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 from pathlib import Path
 import sys
@@ -14,7 +15,10 @@ EVAL_ROOT = REPO_ROOT / "eval"
 if str(EVAL_ROOT) not in sys.path:
     sys.path.insert(0, str(EVAL_ROOT))
 
-from rondo_eval.publication_critic.local_deployment.service_runner import main  # noqa: E402
+from rondo_eval.publication_critic.local_deployment.service_runner import (  # noqa: E402
+    _announcement_matches,
+    main,
+)
 from rondo_eval.publication_critic.local_deployment.qualification import (  # noqa: E402
     FREEZE_SCHEMA,
     freeze_sha256,
@@ -264,6 +268,21 @@ def _pid_exists(pid: int) -> bool:
 
 
 class ServiceRunnerTests(unittest.TestCase):
+    def test_announcement_allows_only_one_ulp_threshold_round_trip(self) -> None:
+        expected = {
+            "identity": {"scoring": {"threshold": 0.9350569011196121}},
+            "limits": {"queue_capacity": 8},
+        }
+        announced = json.loads(json.dumps(expected))
+        announced["identity"]["scoring"]["threshold"] = math.nextafter(
+            expected["identity"]["scoring"]["threshold"],
+            0.0,
+        )
+        self.assertEqual(_announcement_matches(expected, announced), (True, True))
+
+        announced["limits"]["queue_capacity"] = 9
+        self.assertEqual(_announcement_matches(expected, announced), (False, False))
+
     def test_formal_run_records_typed_bounded_calls_and_private_output(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             fixture = Fixture(Path(temporary))

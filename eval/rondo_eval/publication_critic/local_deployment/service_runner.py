@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import argparse
 from concurrent.futures import ThreadPoolExecutor
+import copy
 import ipaddress
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -139,6 +141,33 @@ def _validate_descriptor(value: Mapping[str, Any]) -> dict[str, Any]:
     ):
         raise ServiceRunnerError("descriptor_identity_invalid")
     return dict(value)
+
+
+def _announcement_matches(
+    expected: Mapping[str, Any],
+    announced: Any,
+) -> tuple[bool, bool]:
+    if announced == expected:
+        return True, False
+    if not isinstance(announced, dict):
+        return False, False
+    try:
+        expected_threshold = expected["identity"]["scoring"]["threshold"]
+        announced_threshold = announced["identity"]["scoring"]["threshold"]
+    except (KeyError, TypeError):
+        return False, False
+    if (
+        type(expected_threshold) is not float
+        or type(announced_threshold) is not float
+        or not math.isfinite(expected_threshold)
+        or not math.isfinite(announced_threshold)
+        or abs(expected_threshold - announced_threshold) > math.ulp(expected_threshold)
+    ):
+        return False, False
+    normalized = copy.deepcopy(announced)
+    normalized["identity"]["scoring"]["threshold"] = expected_threshold
+    matches = normalized == expected
+    return matches, matches
 
 
 def _bind_frozen_runtime(
@@ -511,13 +540,18 @@ def _run(args: argparse.Namespace, evidence: dict[str, Any]) -> str | None:
         if announcement["protocol"] != "rondo_publication_critic_v1":
             raise ServiceRunnerError("announcement_protocol_mismatch")
         observed_endpoint = _endpoint(announcement["endpoint"])
-        if announcement["descriptor"] != descriptor["service_descriptor"]:
+        announcement_matches, threshold_normalized = _announcement_matches(
+            descriptor["service_descriptor"],
+            announcement["descriptor"],
+        )
+        if not announcement_matches:
             raise ServiceRunnerError("announcement_identity_mismatch")
         endpoint = observed_endpoint
         evidence["announcement"] = {
             "protocol": announcement["protocol"],
             "endpoint": endpoint,
             "descriptor_matches_trusted_input": True,
+            "threshold_ulp_normalized": threshold_normalized,
         }
         drain_thread = threading.Thread(target=_discard, args=(service.stdout,), daemon=True)
         drain_thread.start()
