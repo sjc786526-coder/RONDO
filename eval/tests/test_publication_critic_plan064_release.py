@@ -17,6 +17,9 @@ sys.path.insert(0, str(EVAL_ROOT))
 from rondo_eval.publication_critic.training_data.contract import (  # noqa: E402
     TrainingDataError,
 )
+from rondo_eval.publication_critic.training_data.consumer import (  # noqa: E402
+    DatasetConsumer,
+)
 from rondo_eval.publication_critic.training_data.dedup import (  # noqa: E402
     find_near_duplicate_edges,
 )
@@ -45,6 +48,7 @@ from rondo_eval.publication_critic.training_data.quality_audit import (  # noqa:
 
 
 V7_ROOT = REPO_ROOT / "training/publication-critic-v7"
+V8_ROOT = REPO_ROOT / "training/publication-critic-v8"
 V8_LOCK = (
     REPO_ROOT / "eval/templates/publication-critic/training-data-design-lock-v8.json"
 )
@@ -116,6 +120,39 @@ class _FakeTokenizer:
 
 def _jsonl(path: Path) -> list[dict[str, object]]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+
+
+class PublicationCriticPlan064FrozenReleaseTests(unittest.TestCase):
+    def test_checked_in_v8_release_matches_approval_and_consumer_boundary(self) -> None:
+        manifest = json.loads((V8_ROOT / "manifest.json").read_text(encoding="utf-8"))
+        identity = json.loads(
+            (V8_ROOT / "prefreeze-identity.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            manifest["content_sha256"],
+            "a9a31a61e0a1e070ee8d076dd313b7efabb5e01ffa42773a841b123a2686cb98",
+        )
+        self.assertEqual(
+            identity["universe_sha256"],
+            "3fdfc0ada4a67451e4f1fc7e66302067119172fea809802ff1d01576b3be40d9",
+        )
+
+        training = DatasetConsumer.from_frozen_directory(
+            V8_ROOT,
+            repo_root=REPO_ROOT,
+        )
+        self.assertEqual(len(training.supervision), 128)
+        for stage, pair_count in (("C1", 0), ("C2", 50), ("C3", 58)):
+            rows = training.stage(stage)
+            self.assertEqual(len(rows["binary"]), 128)
+            self.assertEqual(len(rows["pairs"]), pair_count)
+
+        evaluation = DatasetConsumer.from_frozen_directory(
+            V8_ROOT,
+            repo_root=REPO_ROOT,
+            allow_evaluation=True,
+        )
+        self.assertEqual(len(evaluation.supervision), 228)
 
 
 class PublicationCriticPlan064ReleaseTests(unittest.TestCase):

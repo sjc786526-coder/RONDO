@@ -1,0 +1,39 @@
+{
+  "base_manifest_content_sha256": "07666936706786c456e83a7130c211013ff95cfb3e494154e62fca1e3bc528eb",
+  "dataset_revision": "v8",
+  "design_lock_sha256": "4ebcc01ff1349651c80742f7e40ead157d7d518b62fee73893127dfbd23ef341",
+  "plan054_input_identity": {
+    "adopted_window_tokens": 16384,
+    "candidate_truncation": "forbidden",
+    "continuity_overflow": "drop_whole_oldest_prior_publications_then_explicitly_encode_additional_omission",
+    "input_template_revision": "v3-sha256-dc3209af0d284dfe4be57403873717ba5f2790e2257cd4a39a2376de5696044c",
+    "packet_schema": {
+      "name": "rondo-publication-packet",
+      "revision": "v1"
+    },
+    "plan054_freeze_sha256": "2a8081d3700f4209f5ac3cd7dabb7f6d31d0cb0b0ea0e9e8c639c8f10dbebfeb",
+    "qualification_rubric": {
+      "name": "rondo-publication-qualification",
+      "revision": "v1"
+    },
+    "render_contract": "rondo-publication-critic-render@v3",
+    "tokenizer_name": "skywork-reward-v2-qwen3-1.7b-tokenizer",
+    "tokenizer_revision": "e51ea3e08fb81326c3b812a7ff0cb9cee83e59cc"
+  },
+  "schema": "rondo-publication-critic-plan064-prefreeze-identity-v1",
+  "semantic_content_sha256": {
+    "aggregate_review_bindings": "0aa9ccf866d0524475c69309dea7fe9db8734ddd61afdac8b328f5f3240cd64f",
+    "candidate_dispositions": "8cf5db21f820594731af0719af579f8713fddc63b41c1ec8ada61e806eff801b",
+    "candidate_reviews": "6d8a949cfe2791922c82bfd4a3d2dc1c5b943fc64d31242f056a6e4cd2b9beca",
+    "lineage": "0289b3507182660bdae0c5dcf538572b377e3e19c28c75a252410ff1f96a1d5f",
+    "mechanical_artifacts": "15d12f7821476267fc9628acf6b50f51e0350e0df713bf34846f6e4ae199e438",
+    "packets": "68b3aec1fb1ab696de3b7fd2229bec8b35e59b63a96a2a8fd910880d8669fe96",
+    "pair_dispositions": "6987619bc5d1a57724ad8354448f0ba0fc057c329725ff0444ca9f0770ffca30",
+    "pair_reviews": "ab6c087965cba176b751eedbac32f4bdf48d700872de18741c63fc07f5b53a9b",
+    "pairs": "0b9031e5dfca25977c82c6669389339d97c6505b49b78ffe77b4d93be1142ff9",
+    "quality_audit": "d927b863e5ab0875b5a923ad583c7b36c0e280e27a34868e1b853b1b2a0c9afb",
+    "scenarios": "02cd67dd6c4fbc007fbf7190e26a8b4d922192e4659a2683e79697ec95ce09c4",
+    "supervision": "dc17ae6270f96db4513e24982d1e8af87b7ea23bde06911b565094f09d109ff0"
+  },
+  "universe_sha256": "3fdfc0ada4a67451e4f1fc7e66302067119172fea809802ff1d01576b3be40d9"
+}

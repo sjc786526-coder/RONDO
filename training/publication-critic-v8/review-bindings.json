@@ -1,0 +1,252 @@
+{
+  "aggregate": {
+    "counts": {
+      "candidate_reviews": 162,
+      "packets": 162,
+      "pair_reviews": 74,
+      "pairs": 74,
+      "scenarios": 87,
+      "supervision": 162
+    },
+    "schema": "rondo-publication-critic-plan064-review-binding-v1",
+    "semantic_sha256": {
+      "candidate_reviews": "6d8a949cfe2791922c82bfd4a3d2dc1c5b943fc64d31242f056a6e4cd2b9beca",
+      "packets": "b9d7105fae877b2fcb3d29899baa9dc009c9876d75174305eae161d1c72f6faf",
+      "pair_reviews": "ab6c087965cba176b751eedbac32f4bdf48d700872de18741c63fc07f5b53a9b",
+      "pairs": "56e8638c67a4306ec17e8cc6e2a9e0292addd836d000f5207b20fbff8330c0f0",
+      "scenarios": "59848f625d4a909b9deaef00ac1109d9c990f2a85d2c26fdaf3a903ad57e9e48",
+      "supervision": "31a3bf9484fd7ba8b12a301be29845b7a07ecdf7bf08d4e9eee532664bcd38c9"
+    }
+  },
+  "schema": "rondo-publication-critic-plan064-aggregate-review-bindings-v1",
+  "source_bindings": [
+    {
+      "counts": {
+        "candidate_reviews": 33,
+        "packets": 33,
+        "pair_reviews": 14,
+        "pairs": 14,
+        "scenarios": 18,
+        "supervision": 33
+      },
+      "schema": "rondo-publication-critic-plan064-review-binding-v1",
+      "semantic_sha256": {
+        "candidate_reviews": "5d989c2cf012303810bbc6ee5a8d35d41140d984e73a99dcaecb56102ad34859",
+        "packets": "07d8b47f1b1a3c866d265fe4688a00a807ec1cc0f703e96f054df7660aa22ae9",
+        "pair_reviews": "ea68f26dcd6fa9317a3d1f6ee09ce803dea026afbb12775fb8572314428f5ec2",
+        "pairs": "6766f33da0c9c2da238520a8489d2d0a6fdf2b689a90b7268676e69a4da8a483",
+        "scenarios": "a835626d82c3c443d958c58152f50fe3a2a85579462eef57f2e163e09a9373ba",
+        "supervision": "1d3e513883166e6280759d62e54a4d0be9f077abb274d34c49b20b7465550df5"
+      }
+    },
+    {
+      "counts": {
+        "candidate_reviews": 33,
+        "packets": 33,
+        "pair_reviews": 15,
+        "pairs": 15,
+        "scenarios": 18,
+        "supervision": 33
+      },
+      "schema": "rondo-publication-critic-plan064-review-binding-v1",
+      "semantic_sha256": {
+        "candidate_reviews": "aed0aec5764f2e9f6fb3a91f4404b3837f93d1c58c78dc37787698c7ec22ada1",
+        "packets": "de7045a1f3b8ba06902a95b5675da63c8860b0c6ee69a639bb0fd17292cd95df",
+        "pair_reviews": "4ce41ef6de42461d1b4b16181371697859173061d13dcccfee9b66f43860f3fe",
+        "pairs": "7381c943d45f6e6fd42356656c306984713a1cc9f5d0973033c52528b958b3df",
+        "scenarios": "4cf56467091fcd534eb15c40b9dfc29f5845610b885a3652050ad6cff9e1de50",
+        "supervision": "a3f62e13b0fe0da9c77a49a918a6814922c514b792da48103f1b486f6c46e050"
+      }
+    },
+    {
+      "counts": {
+        "candidate_reviews": 4,
+        "packets": 4,
+        "pair_reviews": 2,
+        "pairs": 2,
+        "scenarios": 2,
+        "supervision": 4
+      },
+      "schema": "rondo-publication-critic-plan064-review-binding-v1",
+      "semantic_sha256": {
+        "candidate_reviews": "9fff693907ce36a0b5bab94418886ece16e7ac4d4095982df69cdad2da24283f",
+        "packets": "df2c19b4cbcf3d0989c80220177d07a000264ac52884463ce5cdbe8aa0f19f60",
+        "pair_reviews": "f77bfa9d4cdb9157529d73b87cf0c17d1210f71d1829972045a4fb0490d2450c",
+        "pairs": "447811dd1b619267b0c514262c53f434d1efb5507b1838108f387ba6f5d1ffbe",
+        "scenarios": "a9a4193a22c3938000cda2874f8bbe6334c9b38bc93504d47e6c460906f40635",
+        "supervision": "77143c000e17277ec1b9e0219e044ac7e0ee7973e1d88925a87562149b3f94de"
+      }
+    },
+    {
+      "counts": {
+        "candidate_reviews": 4,
+        "packets": 4,
+        "pair_reviews": 2,
+        "pairs": 2,
+        "scenarios": 2,
+        "supervision": 4
+      },
+      "schema": "rondo-publication-critic-plan064-review-binding-v1",
+      "semantic_sha256": {
+        "candidate_reviews": "3dc480ee8add7350c2fe4617901cc4faae0f8acdc6ace6a470d0e83096b3b754",
+        "packets": "c7c13150687719bea79ddc50cf2df7a850190a9478575580403ac7fb84940bf2",
+        "pair_reviews": "a1356ca1aa33b751c5097ae5a506bdac49db67c584808b38d416b0555e823a9a",
+        "pairs": "450d2fd6bfe3e760d5ea65c7adc354632e7e28ad6b13d45d7293dd7309e70c7f",
+        "scenarios": "3c99cd6b2630d0f84f7632d7ea91936292b9df9947869d10768a6b1f99f81272",
+        "supervision": "4557659a11450d4bd8707b0062fd102ae7de1f8ed12b1dd3e2dfe758943bd9e6"
+      }
+    },
+    {
+      "counts": {
+        "candidate_reviews": 4,
+        "packets": 4,
+        "pair_reviews": 2,
+        "pairs": 2,
+        "scenarios": 2,
+        "supervision": 4
+      },
+      "schema": "rondo-publication-critic-plan064-review-binding-v1",
+      "semantic_sha256": {
+        "candidate_reviews": "8ff9df5b41322b9c6d752a5648189a6bf49747df3cd799c3a0cdf77f6853da9d",
+        "packets": "8aed6fe41caff39908ee0c4dfb0f562ce8be1c8b71c7acc536797c068335eb0c",
+        "pair_reviews": "e9b352bddc0549ec0f77e5b1d99386b3f48d412a1c9123e82a01aeb332f7b170",
+        "pairs": "69528ecab2fc7611e60a1cf384ba636e44ddd98dff50b99361d7127013423fa7",
+        "scenarios": "54ec0fbb2509168ab8bf912ea44d68369d82cbcf54598e074cdcfbb778c70592",
+        "supervision": "9cb7072cb60b46fbf029435cc7ae5ffcbdbb5ce7dad177869562dd4eadec38fc"
+      }
+    },
+    {
+      "counts": {
+        "candidate_reviews": 16,
+        "packets": 16,
+        "pair_reviews": 8,
+        "pairs": 8,
+        "scenarios": 8,
+        "supervision": 16
+      },
+      "schema": "rondo-publication-critic-plan064-review-binding-v1",
+      "semantic_sha256": {
+        "candidate_reviews": "5f25e4d3fb5d4a37a0b665a812a0f5bbf3f8ae182cb6a2ccfe5b40b7702b7814",
+        "packets": "538b9c743896c001427ea340598c7585c88851ccd1a61495fc30a302ebb1886f",
+        "pair_reviews": "8f1074669f36465cb70ab2928dcd9f1062ac412ee0de865b2711954ea34e7dbc",
+        "pairs": "efc5ced3283603990b0ba04d99c779c224d07801c92e53d2ce00934d33a36fbc",
+        "scenarios": "c5e76fb34b0e17a9ab3abe6db79e7d5f439d658343a6003d860715f85bbd2f48",
+        "supervision": "134bbe4369ce5fd33ffaf1c48e1e1bf6739d778affe83ff52733b81b83f588fe"
+      }
+    },
+    {
+      "counts": {
+        "candidate_reviews": 9,
+        "packets": 9,
+        "pair_reviews": 5,
+        "pairs": 5,
+        "scenarios": 4,
+        "supervision": 9
+      },
+      "schema": "rondo-publication-critic-plan064-review-binding-v1",
+      "semantic_sha256": {
+        "candidate_reviews": "821ee83d3db0d3bfac72c5eae47dba2d8d9fe079d65b3801b0d8ff974f6ae529",
+        "packets": "92527ac05fc5bd79745b0dbf800d3739f21b2131322d83bbc9c7271e9e32945b",
+        "pair_reviews": "5fc81a79c89341fc3717ac247d5b2a70920bce73a30ce252ba3717b9d721d27e",
+        "pairs": "357697cd93e33f8ec0121f890d0ecf02618ac7c8e9b7c7e3045da58e8493d433",
+        "scenarios": "7328095770a4cba97b7f67a25e21c88f3407028363c48f56b0536a05fc25757c",
+        "supervision": "10487ae8fd78f8bd6ee067c5dc3cca50db473fbae8ccc626f456d85a2576ff1f"
+      }
+    },
+    {
+      "counts": {
+        "candidate_reviews": 10,
+        "packets": 10,
+        "pair_reviews": 6,
+        "pairs": 6,
+        "scenarios": 4,
+        "supervision": 10
+      },
+      "schema": "rondo-publication-critic-plan064-review-binding-v1",
+      "semantic_sha256": {
+        "candidate_reviews": "57701cc82df020718043d1b0ee7bba6caf03323d8f30ce0aa0d3f30da58640a8",
+        "packets": "a20b5f97e9af0c949921808efe069bed2480b1270043d4e4e4adc97eee15d018",
+        "pair_reviews": "4b56353b1fc1ffc09570374abbbca4c4bfcc93e40b1c6b24098a988d68911bc9",
+        "pairs": "736d820f8c0e9ed338a2bbca82c6ea24bda1d7a1cc7121099bf54719a0670372",
+        "scenarios": "25fc1b3c15ef792068334e65c0352345e1b3a71b44cc67c316d21f360abaeb32",
+        "supervision": "982963a1d4468788b761f56220a9ee68374167e27f86669713499e31b068c5d0"
+      }
+    },
+    {
+      "counts": {
+        "candidate_reviews": 8,
+        "packets": 8,
+        "pair_reviews": 4,
+        "pairs": 4,
+        "scenarios": 4,
+        "supervision": 8
+      },
+      "schema": "rondo-publication-critic-plan064-review-binding-v1",
+      "semantic_sha256": {
+        "candidate_reviews": "5161b505f12ad4621514430905ae358262dcae694c4698fadfa37ada5f839356",
+        "packets": "ce8e4a4bf45108ccbcd4ec5632c35cbdb5849bfcdcc1e3fb954276fade1c09a4",
+        "pair_reviews": "d73b5b983e1a5a38e7f2cc8f45cc533367f923c7f10f170f6448b98daa1b8a12",
+        "pairs": "701571262e884b5354386f173ad410110b3e0336789d9b26f2258449721e2b10",
+        "scenarios": "24e5239de6d544ee30225f3b429621be6a61301a1782ef579f531253266e79a1",
+        "supervision": "0a4e04376e24fa9e2803b20ae756f31634d0d247270789202a7e07c52f11aa18"
+      }
+    },
+    {
+      "counts": {
+        "candidate_reviews": 6,
+        "packets": 6,
+        "pair_reviews": 0,
+        "pairs": 0,
+        "scenarios": 6,
+        "supervision": 6
+      },
+      "schema": "rondo-publication-critic-plan064-review-binding-v1",
+      "semantic_sha256": {
+        "candidate_reviews": "ec3811c8476cefe2df7b9b9e732f8e9b6d13733d91130e56f19835ea18759e73",
+        "packets": "94fcd63bb399ced69aa9d674206cd24f59b032fd0d9dbfc4ac9cbe4663c82744",
+        "pair_reviews": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+        "pairs": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+        "scenarios": "a6e27a5874ede312a74562693aaeb21f0fd8439f4930fca68cdf66da57eb3801",
+        "supervision": "a857d71817584a75aec935a82b4de831c81f6f4aa2843493a474496e3f5df45e"
+      }
+    },
+    {
+      "counts": {
+        "candidate_reviews": 33,
+        "packets": 33,
+        "pair_reviews": 15,
+        "pairs": 15,
+        "scenarios": 18,
+        "supervision": 33
+      },
+      "schema": "rondo-publication-critic-plan064-review-binding-v1",
+      "semantic_sha256": {
+        "candidate_reviews": "ad5e84bb60b21357f3db1561222644a5ad7978fea5d9f0a6f909daa944327f44",
+        "packets": "a7cbc37ab22e1e0a87a4ab76ca66f68b34a50544e61c5e94314ad5c66bec7639",
+        "pair_reviews": "279c09dc99174267ffec434a61e1c232a89554d72f7161a8c64b66793840eaa8",
+        "pairs": "d7537c1dff987608395a93461beb5e0aa882d14307dc0df8e2269d3fdcde4cd7",
+        "scenarios": "3ee70e04d28970ceb8a1cd44f9a60fd353aafc89006ca9639a61ec86a7c2421e",
+        "supervision": "27d1892d9236297158180f971eb7dc45963b41c9ae3c846effc0e853f84e4fec"
+      }
+    },
+    {
+      "counts": {
+        "candidate_reviews": 2,
+        "packets": 2,
+        "pair_reviews": 1,
+        "pairs": 1,
+        "scenarios": 1,
+        "supervision": 2
+      },
+      "schema": "rondo-publication-critic-plan064-review-binding-v1",
+      "semantic_sha256": {
+        "candidate_reviews": "dbf87d5dda851b45848089246db60c93ff1e97ef61d6c95274a456d36c4ce4fe",
+        "packets": "7d89320557aa4fc24cd3461b20c1f9c22d8ffd7f27d37d4cf4fc44f4b2ef4245",
+        "pair_reviews": "b697901ecc46ba98b15f3f66724cb8ac4c36c63ed3a4bbbc7fd6bc6fa616b612",
+        "pairs": "96f45142d45053f3149a2b2f425d0bcf1ebe79e503f6863265780119dc4f30eb",
+        "scenarios": "e419f42a47dcd6356b58d970c601e66a64869c9944aa329bb2542a9b9ed7e64f",
+        "supervision": "c58506ebfe66ea272aa3bcd3b1acb70f718df4bcd5dea7fe7130deddeee28c39"
+      }
+    }
+  ]
+}

@@ -33,38 +33,38 @@
 
 ### 完成/验收标准
 
-- [ ] Plan 059 `training/publication-critic-v7/` 全目录及其已冻结标签/配对/split/manifest/身份保持逐字节不变，其中包括 Plan 060 使用的 tracked
+- [x] Plan 059 `training/publication-critic-v7/` 全目录及其已冻结标签/配对/split/manifest/身份保持逐字节不变，其中包括 Plan 060 使用的 tracked
       `train-only-smoke-bundle.json`；新资产使用独立版本和目录，不覆盖旧版本。Plan 060 worktree/ignored 中的 bundle 或 upload 资产零读取、零写入、
       零替换，不把它们列为 Plan 064 必须直接比对的对象。
-- [ ] 阶段 A 形成版本化 data-design lock：说明 v7 已覆盖与缺口、正式训练用途、数据来源、覆盖矩阵、训练/validation/unseen-test 保留策略、规模
+- [x] 阶段 A 形成版本化 data-design lock：说明 v7 已覆盖与缺口、正式训练用途、数据来源、覆盖矩阵、训练/validation/unseen-test 保留策略、规模
       判断输入、目标区间或等强有界表达、停止/NO-GO/证据不足条件及复核策略。规模依据必须能关联覆盖、质量、可用 Plan 060 吞吐和正式训练预算，
       不能只写一个想当然的总数或为了填满上限继续生成。
-- [ ] 新数据扩大四类 publication、五项 hard qualification、明显/边界/mixed 难度、角色、长度、continuity/Evidence、文风、Unicode 与自然表达覆盖；
+- [x] 新数据扩大四类 publication、五项 hard qualification、明显/边界/mixed 难度、角色、长度、continuity/Evidence、文风、Unicode 与自然表达覆盖；
       采用稀疏而有意义的组合，不要求维度笛卡尔积或人为制造均匀外观。
-- [ ] 所有正式数据通过 schema、packet/render/input allowlist、split/group、引用、hash、重复、明显捷径和 exact-tokenizer 可消费性校验；candidate 不被
+- [x] 所有正式数据通过 schema、packet/render/input allowlist、split/group、引用、hash、重复、明显捷径和 exact-tokenizer 可消费性校验；candidate 不被
       静默截断，continuity 只沿用 Plan 054 的整条省略语义。
-- [ ] 语义质量采用与数据用途和风险相称的复核：holdout、Boundary/Within-PASS、近边界/混合/高风险切片得到充分直接检查；大规模清晰训练样本可按
+- [x] 语义质量采用与数据用途和风险相称的复核：holdout、Boundary/Within-PASS、近边界/混合/高风险切片得到充分直接检查；大规模清晰训练样本可按
       覆盖分层抽样，不要求每一条都达到手工精品水准。抽样暴露的系统性问题须回到受影响集合修复、替换、降级或排除，不能用总体数量掩盖。
-- [ ] 若采用抽样语义复核，新版本使用诚实的版本化 review/finalize 合同区分直接复核、风险全审和按已声明抽样策略接纳的训练行，并绑定抽样范围、
+- [x] 若采用抽样语义复核，新版本使用诚实的版本化 review/finalize 合同区分直接复核、风险全审和按已声明抽样策略接纳的训练行，并绑定抽样范围、
       结果与处置；不得修改 v7 合同，也不得给未被直接复核的行伪造“独立 reviewer accept”。简单字段或紧凑 sidecar 即可，不建设审计平台。
-- [ ] v7 原有 validation 与 unseen-test 成员没有迁入训练集；若新版本纳入任何 v7 成员，其正文、监督、group 和 split 身份保持不变。所有新增关系按
+- [x] v7 原有 validation 与 unseen-test 成员没有迁入训练集；若新版本纳入任何 v7 成员，其正文、监督、group 和 split 身份保持不变。所有新增关系按
       source/scenario/pair/template/near-duplicate 组闭包切分，train、validation 与 unseen-test 不存在已知泄漏或悬空引用。
-- [ ] 无论新版本完整物化还是采用 base+delta，group/split、exact/near-duplicate、shortcut、token、manifest 和 consumer 门禁都针对组合后的完整逻辑
+- [x] 无论新版本完整物化还是采用 base+delta，group/split、exact/near-duplicate、shortcut、token、manifest 和 consumer 门禁都针对组合后的完整逻辑
       release；与 v7 holdout 形成同组或明显近重复关系的新增行不得进入 train，只能留在同一 holdout 或排除，不能靠 delta 边界绕过。
-- [ ] 扩充后的 validation 与 unseen-test 对正式训练后的评价仍有明确用途和足够覆盖；训练入口、membership 和任何 train-only bundle 默认不能触达
+- [x] 扩充后的 validation 与 unseen-test 对正式训练后的评价仍有明确用途和足够覆盖；训练入口、membership 和任何 train-only bundle 默认不能触达
       holdout。调试集合、被淘汰/返修的旧行和中间 freeze 不得拼入正式版本。
-- [ ] 新版本直接继承 Plan 054 的 packet、render、tokenizer、16,384-token window 和 scalar 语义，并能通过现有或职责清楚的窄扩展 consumer 物化
+- [x] 新版本直接继承 Plan 054 的 packet、render、tokenizer、16,384-token window 和 scalar 语义，并能通过现有或职责清楚的窄扩展 consumer 物化
       M3-B1c 所需的 Binary、Boundary 与 Within-PASS 输入；不在本任务设计 loss、optimizer、batch recipe 或模型质量判定。
-- [ ] freeze-ready 候选全集在最终冻结前形成可恢复、可检查的 checkpoint；执行者提交范围内 tracked 实现/合同后保持 worktree clean，向计划制定者
+- [x] freeze-ready 候选全集在最终冻结前形成可恢复、可检查的 checkpoint；执行者提交范围内 tracked 实现/合同后保持 worktree clean，向计划制定者
       提交规模依据、覆盖/质量汇总、抽样与 finding、split/泄漏、重复/捷径、token/consumer、Plan 060 事实引用及拟冻结文件清单，等待明确批准。
-- [ ] 获得冻结批准后，从固定候选集合和干净状态完整运行一轮 finalization、review 终态核对、group/split、dedup/shortcut、exact-token census、
+- [x] 获得冻结批准后，从固定候选集合和干净状态完整运行一轮 finalization、review 终态核对、group/split、dedup/shortcut、exact-token census、
       consumer 和 freeze；最终 manifest 绑定新版本的输入/设计/实现/数据身份，正式目录与该轮输出一致。
-- [ ] pure/focused tests 覆盖实际改变的 schema、继承/版本、split/group、重复/捷径、freeze/hash、consumer/bundle 与旧 v7 不变性；全量新数据完成
+- [x] pure/focused tests 覆盖实际改变的 schema、继承/版本、split/group、重复/捷径、freeze/hash、consumer/bundle 与旧 v7 不变性；全量新数据完成
       tokenizer-only 和 consumer smoke。只跑相关轻量门禁，不运行 Cargo、Docker 或完整模型。
-- [ ] 执行者最终报告明确冻结规模、主要覆盖、已知限制、正式训练可消费边界和数据 `GO`/`NO-GO`/“证据不足”的 provisional 建议；计划制定者在
+- [x] 执行者最终报告明确冻结规模、主要覆盖、已知限制、正式训练可消费边界和数据 `GO`/`NO-GO`/“证据不足”的 provisional 建议；计划制定者在
       独立验收中作出最终结论。没有可用且足够的 Plan 060 吞吐/预算事实时，可以完成扩充与冻结，但不得仅凭数据量宣称规模已被正式训练预算证明；
       应如实建议“证据不足”或带条件的上限结论。
-- [ ] 执行者只窄更新本计划状态/决策、职责相关说明和一份精炼 `agent_log`，并给出建议的 WBS delta；规划时的共享 WBS 已滞后，执行分支不得用它
+- [x] 执行者只窄更新本计划状态/决策、职责相关说明和一份精炼 `agent_log`，并给出建议的 WBS delta；规划时的共享 WBS 已滞后，执行分支不得用它
       覆盖 Plan 060/062 并行成果。最终 WBS 同步留到独立验收通过、用户批准主线整合后，基于届时最新 clean `main` 窄完成。worktree 形成少量清晰
       提交并保持 clean，不合并、不推送、不归档、不删除 worktree或重命名分支。
 - [ ] 计划制定者对最终代码、数据、测试、ignored 交接和结论完成独立验收；数据 `GO` 要求无剩余 correctness/functionality 阻断 finding。普通非阻断
@@ -229,26 +229,24 @@ Plan 054 tokenizer/cache 与 Plan 059 retained namespace 只读，Plan 060/062 n
 
 ### 当前工作
 
-- `PREFREEZE_READY`：`candidate-v11-reviewed` 已绑定完整 direct reviews 和终态 quality-audit；正在形成 clean checkpoint commit，并将从该 exact HEAD
-  运行一次 ignored prefreeze finalization、tokenizer-only census 和 consumer smoke。尚未正式 freeze，尚未创建 tracked training release 或 manifest，
-  尚未给出数据 GO。
+- `FINAL_REVIEW_READY`：计划制定者已批准 universe `3fdfc0ada4a67451e4f1fc7e66302067119172fea809802ff1d01576b3be40d9`；
+  `training/publication-critic-v8/` 已从 clean `d9225398c75f45a5c612a54d2d892f0e39e57b91` 完整冻结，manifest content SHA-256 为
+  `a9a31a61e0a1e070ee8d076dd313b7efabb5e01ffa42773a841b123a2686cb98`。阶段 D 执行者结论为“证据不足（训练预算适配未决）”，不是数据 GO。
 
 ### 本任务剩余步骤
 
-- 从 clean checkpoint 运行官方 prefreeze finalizer，核对 output identity、tokenizer-only、consumer、权限和 ignored 保留状态后停止，交计划制定者审查；
-  按 finding 修复并重新申请，直到获得冻结批准。
-- 获批后从干净状态完成阶段 C 正式 freeze、相关轻量门禁和执行者自检。
-- 完成阶段 D 数据资格建议、建议 WBS delta、任务日志、worktree 提交与最终独立验收交接。
+- 执行者提交阶段 C/D 正式 release、窄文档和任务日志，保持 worktree clean，交计划制定者做最终独立验收。
+- 最终验收通过后的 WBS 窄同步与主线整合仍按用户边界留给后续整合者；本分支不修改 WBS、不合并、不推送、不归档。
 
 ### 阻塞项
 
-- 当前没有阶段 A/B 的本地技术阻塞。Plan 060 尚无本任务可使用的正式吞吐、最终费用或训练预算事实；这不阻塞 prefreeze，但在最终规模资格判断时
-  若仍缺失，必须形成“证据不足”或限定结论，不能自动给数据 GO。
+- 当前没有本地 correctness/functionality 阻塞。Plan 060 尚无本任务可使用的正式吞吐、最终费用或训练预算事实，因此阶段 D 只能建议
+  “证据不足（训练预算适配未决）”；这不推翻正式 freeze，但禁止数据 GO 或启动 M3-B1c。
 
 ### 当前验收状态
 
-- `PREFREEZE_READY / NOT_FROZEN`：阶段 A/B 的实现、候选、direct review、risk-stratified audit 和 commissioning 机械链已完成；等待 clean-HEAD
-  prefreeze finalizer 与计划制定者冻结批准。没有正式 release、manifest 或数据资格结论。
+- `FROZEN / EXECUTOR_EVIDENCE_INSUFFICIENT / WAITING_FINAL_ACCEPTANCE`：阶段 A--D 执行者范围完成，正式 v8、manifest、DATA_CARD、tokenizer-only、
+  consumer 和 137 项 focused tests 通过；等待计划制定者最终独立验收。没有数据 GO，也未启动训练。
 
 ### 交接边界
 
@@ -277,3 +275,4 @@ Plan 054 tokenizer/cache 与 Plan 059 retained namespace 只读，Plan 060/062 n
 | 011 | 采用完整物化 release；同一 lineage helper 同时约束 commissioning、prefreeze、freeze 和 consumer，不在各入口重复过滤 | 数据规模小，完整物化更易直接消费和完整验证 | freeze、consumer | 已采纳 |
 | 012 | direct review 是新行准入；release audit 只作为系统性风险监控，保留单条分歧但只由未解决系统性 finding 阻断 | 符合 design lock 与风险相称复核，避免反复追问 reviewer 制造一致 | review、质量 | 已采纳 |
 | 013 | grouped split 的确定性搜索预算由 20,000 调为 30,000，算法、seed、ratio、coverage 和 group 规则不变 | 固定候选首次可行分配在 attempt 23,429；这是有界机械搜索预算问题，不是数据语义问题 | split、配置 | 已采纳 |
+| 014 | 只冻结计划制定者批准的 `3fdfc0...40d9` universe；Plan 060 正式预算事实缺失时，阶段 D 结论固定为“证据不足” | 保持冻结身份精确，同时不把覆盖规模冒充训练预算资格 | freeze、结论 | 已采纳 |
