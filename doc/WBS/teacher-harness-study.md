@@ -1,6 +1,6 @@
 # 方向 1：Harness 优化
 
-最后更新：2026-08-23 ｜ 状态：**Plan 058 已完成并通过外部复验；保留默认关闭的 root-only C2 guidance** ｜
+最后更新：2026-08-23 ｜ 状态：**Plan 058 已完成、通过外部复验并进入主线；保留默认关闭的 root-only C2 guidance** ｜
 源码位置：`mydev/` ｜ Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md`
 
 ## 当前状态
@@ -9,7 +9,8 @@
 opt-in、任务级安全离线投影、历史普查器与日期冻结证据继续复用；Plan 058 只新增默认关闭、显式 opt-in 的
 `exec_command` repeat guidance，不改变工具执行资格、Guardian、审批、sandbox 或方向 2/3。外部验收发现普通非 root
 agent 会继承该 feature 后，最终分支已把 recipient 收紧到 root agent，并补 model-visible integration regression；
-外部复验已通过，feature 保持 UnderDevelopment、默认关闭。
+外部复验已通过并完成主线整合，feature 保持 UnderDevelopment、默认关闭。当前无 active 方向 1
+工作包；本轮不规划方向 1 后继。
 
 此前教师 harness 的只读研究 T1—T3 已完成。研究交付
 `doc/research/teacher-harness-performance-candidates.md` 保留为形成时点的证据与候选池；候选进入实现仍必须由

@@ -1742,3 +1742,32 @@ rehearsal/全新正式 campaign 中继续，本节只冻结 v1 历史事实。
   `agent_log/2026-08-23-184721-plan059-v7-final-independent-acceptance.md`。
 - M3-B1b 数据前置已解锁，但尚未启动；它需要独立 ExecPlan 及 RunPod/H100、训练、上传与付费预算授权。Plan 059 的 GO 不代表训练成功、
   性能提升或产品上线资格。
+
+## 方向 1 C2 行为优化与有界正式决策（Plan 058，2026-08-23）
+
+**状态**：单一 C2 优化、真实测评、独立验收整改、外部复验与主线整合均已完成；最终决策为
+`retain`，能力继续 root-only、UnderDevelopment、默认关闭。实现/验收分支 HEAD 为
+`65184a20158f19559d908ecd5140bd0d64076756`，主线整合提交为
+`6c9503980f1cd870d1e4e70a3cdc16ed0e9c65a9`。
+
+- Phase A 对 Plan 056 raw C2 的私有 trace 做最小只读分类，冻结 harmful/reasonable/insufficient 为
+  `1/8/0`。产品只在 root agent 的 `exec_command` tool spec 增加有界 guidance；关闭态不增加文本，
+  启用态不抑制工具，不改变 exit/error、Guardian、审批、sandbox、取消或用户 steer。
+- `formal-v6` 使用同一 v28 十题、两个 round、Terra medium/low 与冻结顺序完成可信
+  20/20：20 completed、8 pass/12 fail、225 upstream attempts，campaign `4.985650 USD`。唯一 pure
+  transport 故障按冻结语义保留费用后同槽重试成功。
+- 正式 raw C2 为 7 次/4 slot/3 task/9,693 ms；七次均有状态/结果变化、失败恢复或修改后复测依据，
+  refined harmful/reasonable/insufficient 为 `0/7/0`。合理重复、恢复/用户控制、工具可执行性和任务
+  正确性四门通过，因此保留 feature，不为降低 raw 次数而压制合理复测。
+- 任务全生命周累计 `20.379152 USD`、reservation 0。Docker/VHDX 增长为 0，最终无 active
+  container、volume 或 build cache。失效 commissioning/formal/diagnostic identity 与费用保留；正式 campaign、
+  binary、manifest、账本、trace、结果和 metrics 继续作为历史证据保留。精确清理的可重建 Cargo target
+  及临时 detached source 不再重建。
+- 首次验收后 guidance 按预冻 `adjust` 边界收窄到同 requester/tool path、全部调用参数不变，
+  且条件不确定时照常执行；外部验收继续发现非 root agent 继承缺口，最终复用既有
+  session-source 边界收紧为 root-only。`formal-v6` 仍绑定原冻结文案，不把验收后收窄版冒充为正式原样重测。
+- 最终 root-only unit `2/2` 通过；清除代理变量后 Python 回归 `262/262` 通过。新增 model-visible
+  integration 与既有对照都在 mock request 前受当前环境阻断，只作编译与静态调用链证据，不表述为运行通过。
+  未重建已清理 target，未重跑 API、Docker、正式实验、全 workspace、CI、本地模型或训练。
+- 最终报告见 `agent_log/2026-08-23-plan058-final.md`，外部复验见
+  `agent_log/2026-08-23-plan058-reviewer-reacceptance.md`。任务完成不自动授权方向 1 后继 campaign。

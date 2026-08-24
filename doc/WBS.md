@@ -1,6 +1,6 @@
 # RONDO 长程规划（WBS）
 
-最后更新：2026-08-23（Plan 058 正在独立 worktree 推进 C2；Plan 059 / M3-B1a revision v7 已完成最终验收与主线整合）
+最后更新：2026-08-23（Plan 058 与 Plan 059 均已完成验收并进入主线；方向 3 下一包为 M3-B1b）
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段指针、跨方向关系、
 稳定工程边界和授权门；已完成成果与验收见 `doc/WBS-COMPLETED.md`，单次任务合同见 `plan/`，执行细节见
@@ -18,7 +18,7 @@
 | 方向 | 当前状态 | 当前规划边界 |
 |---|---|---|
 | 0：量化测评基准 | 既有设施与首次 schema v7 正式 canary 已完成，当前无 active campaign | 保留设施；历史结果见 COMPLETED，新 campaign 须重新立项与授权 |
-| 1：Harness 优化 | **Plan 058 正在独立 worktree 推进 C2** | 正式 campaign 的冻结身份、账本、资产与最终结论仍由 Plan 058 独立负责，尚未主线整合 |
+| 1：Harness 优化 | **Plan 058 已完成并进入主线，当前无 active 工作包** | 保留 root-only、UnderDevelopment、默认关闭的 C2 repeat guidance；本轮不规划方向 1 后继 |
 | 2：本地审批模型 | **已收口，今后不再开启** | 最终结论为“保留为实验”；不改生产默认，不再规划后续工作包 |
 | 3：RONDO Multi | 第一、二期及其收口案例、**三期 M3-A1、M3-A2、M3-B1a、M3-B2a、M3-B2b 已完成** | Plan 059 / M3-B1a revision v7 已完成最终验收与主线整合；M3-B1b 数据前置已解锁，但尚未立项或取得付费执行授权 |
 
@@ -37,20 +37,18 @@
 
 方向 1 与方向 3 是两套产品源码上的独立推进面，不互为默认前置。
 
-### 方向 1：C2 候选交接
+### 方向 1：Plan 058 已收口
 
-Plan 056 已完成。首个可信正式 campaign `formal-v6` 使用 v28 同一冻结 10 题、两个完整 round 和固定
-Terra medium/low 条件形成有效 20/20；20 个 slot 均有完整 API usage、原生 trace 投影、Terminal-Bench 终态和
-Docker receipt，8 pass/12 fail。formal-v6 为 219 attempts、`4.677962 USD`；连同 v1、三次 rehearsal 和
-formal-v5，Plan 056 累计 483 attempts、`10.329028 USD`，reservation 0，随后停止付费运行。
-
-冻结门槛只选出 **C2**：9 次 occurrence，影响 6 个 slot/4 个任务，其中 3 个失败 slot，两轮均观察到，影响值
-10108；C1 和 C11 未达门槛，C7 继续不可测。公共 body-free 结果见
-`eval/results/observations/plan056-direction1-bounded-observation-formal-v6-2026-08-22.json`，详细历史和验收证据见
-`doc/WBS-COMPLETED.md` 与 `plan/056-direction1-bounded-observation-execplan.md`。
-
-方向 1 当前由 Plan 058 在独立 worktree 推进 C2 行为优化与正式 campaign；其冻结身份、预算/账本、运行资产、结算、资源释放和最终结论
-以 Plan 058 自身合同与后续主线整合为准。本页不根据并行工作树的中间状态预写结果，也不授权其他任务读取、修改或清理其现场。
+- Plan 058 完成单一 C2 行为优化及同一冻结十题、两个 round 的 `formal-v6`：20/20 completed、
+  8 pass/12 fail、225 upstream attempts、campaign `4.985650 USD`，任务全生命周期 `20.379152 USD`、
+  reservation 0。
+- raw C2 为 7 次/4 slot/3 task/9,693 ms；按预冻规则复核后 harmful/reasonable/insufficient 为
+  `0/7/0`，四项无害门通过，结论为 `retain`。最终产品能力收窄为 root-only、UnderDevelopment、
+  默认关闭的 opt-in guidance，不改变工具可执行性、Guardian、审批或 sandbox。
+- 最终 root-only 文案是验收后的有界收窄，没有被 `formal-v6` 原样重测；受环境阻断的 model-visible
+  integration 只作编译与对照证据，不冒充运行通过。详细结果、失效 campaign、资源清理与验收见
+  `doc/WBS-COMPLETED.md`、Plan 058 及其最终日志。
+- 方向 1 当前无 active campaign 或工作包；按用户当前决策，本轮不规划其后继任务。
 
 ### 方向 3：Publication Critic 三期
 
@@ -150,6 +148,6 @@ RONDO/
 ## 7. 子 WBS 索引
 
 - `doc/WBS/eval-benchmark.md` —— 方向 0：现行测评设施与方向 1 观测投影边界
-- `doc/WBS/teacher-harness-study.md` —— 方向 1：Plan 052/056 观测结论与 C2 下一边界
+- `doc/WBS/teacher-harness-study.md` —— 方向 1：Plan 052/056 观测与 Plan 058 C2 收口结论
 - `doc/WBS/local-approval-model.md` —— 方向 2：已永久收口
 - `doc/WBS/multi-agent-trusted-evidence.md` —— 方向 3：现行产品语义与三期 Publication Critic 长程路线
