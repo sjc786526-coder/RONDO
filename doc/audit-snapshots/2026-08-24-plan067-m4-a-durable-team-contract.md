@@ -39,7 +39,10 @@ Local ThreadStore 的真实子进程回归还证明第二 writer conflict、原 
   延迟阈值后，现行 app-server 会独立尝试 SessionEnd/shutdown、移除 thread 并发出 `thread/closed`
   （`app-server/src/request_processors/thread_lifecycle.rs:349-380,394-449`）。当前实现会在 shutdown 成功前撤掉 bookkeeping，失败/超时
   也可能留下“仍 loaded”与已移除状态的矛盾；第四期必须让该 deferred idle unload 走同一 member unload 或 owner/Team close
-  barrier，只有成功才能卸载，且仅 owner/Root close 成功可释放 authority。
+  barrier。`AgentControl` 与 Team handle 由 root tree 共享，而 idle unload 按具体 ThreadId 触发；running child 又不满足普通 residency
+  unload 条件（`core/src/agent/control.rs:93-116`；`core/src/agent/control/residency.rs:217-232`）。因此只要仍有 descendant 具备
+  Team mutation 能力，Root close 就不能完成或释放 authority；实现可以阻止 close，或在同一 barrier 内先安全 quiesce/close
+  descendants，但不能先让新 owner 接管。
 - 原生 archive 会尝试 subtree，但 descendant 失败可形成部分结果；unarchive 只处理指定 root；delete 顺序执行 store/state 删除，
   均不提供整棵树原子事务（`app-server/src/request_processors/thread_processor.rs:1465-1542,1772-1805`；
   `thread-store/src/local/archive_thread.rs:12-51`；`app-server/src/request_processors/thread_delete.rs:31-76`；

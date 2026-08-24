@@ -220,14 +220,16 @@ authority、耐久成功、自洽读取、失败责任、在线/冷态控制、�
 - 干净上下文独立终审发现并关闭 1 个中等级 lifecycle finding：即时 detach 与零订阅 deferred idle unload 已分离，后者统一服从
   durable close barrier；复核者最终返回 `PASS`。
 - 链接/术语/允许写集检查及完整 staged `git diff --cached --check` 已通过；差异精确限于四个授权路径。
+- 外部独立验收报告对首个提交提出 M1 Root-close/live-child authority 缺口、M2 三期状态过期和 L1 当前工作停留在提交前；三项均已
+  依据现行源码及已提交 `main` 确认为真实，并在本轮后续提交中完成最小整改。
 
 ### 当前工作
 
-- 合同、验证与独立验收均已完成；正在执行唯一剩余的本地提交交付动作，提交后停止。
+- 执行者侧合同整改、静态复核和本地提交均已完成；独立复审状态由后续审查报告拥有，本计划不复制维护其最终结论。
 
 ### 本任务剩余步骤
 
-- 无内容步骤；本计划随当前精确 staged diff 一并冻结。本地提交是最后交付动作，不再修改合同内容。
+- 无执行者侧内容步骤；若独立复审提出新的真实 finding，再按同一窄修流程恢复任务。
 
 ### 阻塞项
 
@@ -235,7 +237,8 @@ authority、耐久成功、自洽读取、失败责任、在线/冷态控制、�
 
 ### 当前验收状态
 
-- `M4_A_GO`。共同合同、S1/C0/W0 交接、轻量门禁和干净上下文独立审查均已通过；无未关闭 correctness finding。
+- 首个提交未获外部独立验收；M1/M2/L1 已在本日志所在后续提交中修复，执行者侧轻量门禁通过。当前仍为 `M4_A_GO` 路线且不存在
+  `REPLAN_REQUIRED` 阻塞；最终接受状态以独立复审报告为准。
 
 ### 交接边界
 
@@ -262,4 +265,6 @@ authority、耐久成功、自洽读取、失败责任、在线/冷态控制、�
 | 011 | Team State canonical 语义直接复用；新增与其集成的专用 durability/read 能力，并冻结 durable success、自洽 committed read、close barrier、partial/unknown/fail-closed 结果 | 当前 cold resume 会创建 fresh Team handle，且 shutdown/archive/delete 存在表面成功或部分结果，必须闭合但无需建设通用事务平台 | 耐久、读取与关闭 | 已采纳 |
 | 012 | Durable writable 依赖有效 V2 + Team State + durable backend + Root authority；Control 可独立只读历史 durable 数据；W1 依赖 W0 GO + Durable/S1；全部新能力默认关闭 | 保留现有关闭态并允许有价值的 headless/read-only 组合，同时防止内存 Team 或孤立 binding 冒充 durable | 启用组合 | 已采纳 |
 | 013 | `#37198`→S1 PASS、`#37847`→S2 PASS；`#39616` 仅在 W0 GO 且 W1 消费 trust 时于 W1 开始前适配；`#39153` 仅在 W0 GO 后按 fail-closed 权限语义适配并于采用它的 W1 PASS 前进入主线 | 四项都对应真实缺口，但消费者和产品语义不同；W-only 增量不得阻塞 S/C，permission fallback 不能破坏 durable binding | 上游候选与消费边 | 已采纳 |
-| 014 | `M4_A_GO`，分别解锁 M4-S1、M4-C0、M4-W0 建立 ExecPlan；正式 W1 仍等待价值门与 S1 | 当前架构可通过窄专用能力和既有设施扩展闭合，不需要修改第四期宏观边界；干净上下文独立终审已通过 | 最终方向 | 已采纳 |
+| 014 | `M4_A_GO`，分别解锁 M4-S1、M4-C0、M4-W0 建立 ExecPlan；正式 W1 仍等待价值门与 S1 | 当前架构可通过窄专用能力和既有设施扩展闭合，不需要修改第四期宏观边界；验收状态以后续独立报告为准 | 最终方向 | 已采纳 |
+| 015 | 任何 mutation-capable descendant 存活时，Root/Team close 不得完成或释放 authority；下游可阻止 close，或在同一 barrier 内安全 quiesce/close descendants | Team capability 由 root tree 共享，而 idle unload 按 ThreadId 独立发生；不闭合该边界会允许旧 child 与新 owner 重叠写入 | close 与 authority | 已采纳 |
+| 016 | 第四期 WBS 只按已提交 main 同步三期当前事实：M3-B1c 已完成、计算 Pod 已删除且无活跃云训练；不读取 Plan 068 未提交内容 | 持续维护 WBS 不得保留已失效前置，也不能以并行 worktree 作为权威 | 当前路线与资源 | 已采纳 |

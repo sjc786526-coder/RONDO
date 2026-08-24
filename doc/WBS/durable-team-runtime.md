@@ -58,9 +58,11 @@ dashboard 或 `/cd`，也不建设第二套 Team State、writer authority、Sess
   conflict/unknown/unavailable/unsupported，不把内存成功冒充 durable 成功。
 - 查询只返回一个满足领域不变量的已提交视图；允许明确标记旧视图，或返回 stale/unknown/unavailable，不得把不同提交边界拼成
   当前事实。只读不要求取得 writer authority，但不得绕过 canonical durable read model。
-- 正常 owner/Team close 完成必须同时证明应持久的 Team/thread 状态达到承诺边界且 Root authority 已释放。持久化或 session task
-  失败时保持 closing/failed 与可重试对象，不伪报完成；若下游复用显式 discard，它必须单独确认可能丢失未持久数据，不能冒充
-  正常关闭。完整进程退出由操作系统最终释放进程锁，但后续加载仍须验证 durable 状态。
+- 正常 owner/Team close 完成必须同时证明应持久的 Team/thread 状态达到承诺边界、所有 descendant runtime 已不再具备提交 Team
+  mutation 的能力，且 Root authority 已释放。只要仍有 mutation-capable descendant，close 就必须保持 closing/failed，或在同一
+  barrier 内先将其安全 quiesce/close；下游自主选择机制，但不得先释放 authority。持久化或 session task 失败时保留可重试对象，
+  不伪报完成；若下游复用显式 discard，它必须单独确认可能丢失未持久数据，不能冒充正常关闭。完整进程退出由操作系统最终释放
+  进程锁，但后续加载仍须验证 durable 状态。
 - durable marker 与后端不一致、数据缺失/损坏/版本不兼容、lineage 无法证明或 TeamInstance 不匹配时 fail-closed；只有可独立
   验证的兼容部分可显式只读降级，绝不静默创建空 Team、换新 ID、退回内存状态或写另一份存储。
 - 在线 canonical mutation 只由持有 Root authority 的已加载 owner runtime 执行；未连接 owner 时控制面只读并报告 unavailable。
@@ -77,9 +79,9 @@ dashboard 或 `/cd`，也不建设第二套 Team State、writer authority、Sess
 | `/new`、slash `/clear` | 新 Session/Root 与新空 Team；原 Session/Team 保留可 resume |
 | 纯终端/UI clear | 只清展示，不改变 Session、Team 或 authority |
 | TUI switch/unsubscribe、客户端断开（即时） | 只解除附着，不立即 close/unload Team，也不改变 authority |
-| 零订阅后的 deferred idle unload | 是独立生命周期动作，必须按对象走 member unload 或 owner/Team close barrier；只有成功才卸载，并仅在 owner/Root close 成功时释放 authority。submit failure/timeout 保持 loaded/closing 且不得交接 authority |
+| 零订阅后的 deferred idle unload | 是独立生命周期动作，必须按对象走 member unload 或 owner/Team close barrier。若目标是 owner/Root，任一 mutation-capable descendant 都会阻止完成和 authority 释放，除非在同一 barrier 内已被安全 quiesce/close；submit failure/timeout 保持 loaded/closing 且不得交接 authority |
 | member residency unload | 只卸载满足既有安全条件的 child runtime，保留同一 Session/Team 身份与可恢复 metadata；不 close Team，也不释放 Root authority |
-| 正常 owner/Team close | durable Team/thread 边界与 Root authority 释放均成功后才完成；失败保持 closing/failed 并可重试 |
+| 正常 owner/Team close | durable Team/thread 边界完成、所有 descendant 已失去 Team mutation 能力且 Root authority 释放后才完成；任一条件失败都保持 closing/failed 并可重试 |
 | 存活进程内 session task/shutdown 失败 | 不等同进程退出，不移除唯一可重试 owner，不允许第二 writer 接管或伪报关闭 |
 | 完整进程退出 | OS 最终释放进程持有的 writer；所有已报告成功的 Team mutation 下次必须可恢复，未确认提交仍按 unknown/failure 处理 |
 | archive Root | 走原生 Root/subtree 路径；Root archive 成功后 Team 保留原 ID 并只读 archived。descendant 部分失败须逐项暴露 |
@@ -125,7 +127,8 @@ Root active-writer、V2 reload、控制面和 gates，并为 canonical Team 增�
 **M4-S1 可直接建计划的交接**：以第 2 节的三类身份、Root authority、durable success、自洽读取、关闭/失败与在线/冷态责任为
 冻结输入；S1 拥有 canonical Team durability/read 专用能力及 Root writer 的架构内扩展。S1 自主选择介质、格式、模块/API、
 capability 接缝、提交/读取/重试机制和测试 interleaving，但必须覆盖 Root/child 双进程竞争、authority 丢失、损坏 lineage/state、
-只读非 owner 与 shutdown 失败，且不得建立第二套 Team 或 writer authority。
+只读非 owner、shutdown 失败，以及 Root idle/close 时仍有 mutation-capable live child 的场景，且不得建立第二套 Team 或 writer
+authority。
 
 **M4-C0 可直接建计划的交接**：以同一身份与生命周期矩阵为实验语义，原型验证 Session/Team 只读发现、owner 在线操作边界、
 冷态 lifecycle 与 stale/unknown/unavailable 展示；不承诺正式 RPC/TUI 或复制 read model。C0 自主选择 experimental API、最小 UI 与
@@ -163,6 +166,8 @@ reload，不能把旧式 Agent 路径的自动 reopen 行为扩大为本期合�
 fork_turns` 创建的 child Thread 仍属于原 TeamInstance。旧 Team 引用 fail-closed，不建设 Team clone/branch、ID 映射、历史成员
 档案或跨 lineage Fact 恢复。只有成功 teardown 或完整进程终止实际释放写 authority 后才允许后续写 owner 接管；存活进程内
 shutdown/session-task 失败保持 closing/failed 且可重试，不实现强制接管。
+Root/Team close 还必须在释放 authority 前证明所有 descendant 已失去 Team mutation 能力；S2 可阻止 close，或在同一 barrier 内
+安全 quiesce/close descendants，但不建设新的 descendant registry 或通用 shutdown 平台。
 
 **子线出口**：新建、推进、顶层 `thread/fork` 到新空 Team、`spawn_agent fork_turns` 新建同 Team child、detach、关闭、进程终止、
 恢复、archive/unarchive 与 delete 的生命周期可以稳定重复；失败关闭不伪报完成，恢复和 member reload 不自动触发模型/API，且
@@ -182,8 +187,8 @@ Team State 或 Durable Session，不把 Team Lens 离线结果变成在线状态
 queue dispatcher 或 daemon-wide agents 管理面。只读查询不要求取得写 authority；在线 canonical Team mutation 交给持有写
 authority 的 owner runtime，未连接 owner 时返回 conflict/unavailable。archive/unarchive/delete 等冷态生命周期调用权威领域能力，
 不要求先加载 Root。控制面不得绕过领域能力直接写持久介质、伪造成功或建设跨进程 mutation 转发平台；TUI unsubscribe、切换或
-断开的即时结果只解除附着，但零订阅后的 deferred idle unload 必须调用同一领域 close barrier，失败保持 loaded/closing 且不得交接
-Root authority。
+断开的即时结果只解除附着，但零订阅后的 deferred idle unload 必须调用同一领域 close barrier；存在 mutation-capable descendant
+或其他失败时展示 loaded/closing/failed/unknown，且不得交接 Root authority。
 
 **后续工作包**：M4-C0 完成且 M4-S1 提供真实 Session read model 后，再按当时接缝建立少量可独立验收的 Session query M4-C*；
 M4-S2 的恢复行为收口后，再建立 Session control/TUI M4-C*。当前不预定具体 RPC、UI 布局或包数。
@@ -288,9 +293,8 @@ W-only delta ─/→ S/C
 ### 5.1 产品与工作包依赖
 
 - 四期不依赖 Publication Critic 模型、训练数据、真实权重、部署资格或横评结果；三期后续工作也不依赖第四期完成。
-- 三期 Plan 060/M3-B1b 的后续执行，以及其正式结果到达后对冻结 v8 的有界预算适配复核，都可以和四期 M4-S*、
-  M4-C* 或可选 M4-W* 工作包有界并行。M3-B1c 只有在 Plan 060 训练资格 GO、冻结 v8 数据 GO 与新的正式训练授权同时成立后
-  才具备另行规划条件；四期不参与或替代这些前置。
+- 三期 Plan 060/M3-B1b 的 `TECHNICAL_GO`、Plan 064 的 `DATA_GO` 与 Plan 066/M3-B1c 正式训练和验收均已完成；计算 Pod 已删除，
+  当前没有活跃云训练任务。后续 M3-C* 仍须各自规划和授权，但与四期没有产品前置关系。
 - 三期 M3-C1/M3-C2/M3-D 若与四期同时修改 `multidev/` 公共协议、Team 生命周期、app-server/TUI 或共享配置，分别在独立
   worktree 开发，进入主线时串行整合；不存在固定的三期或四期优先顺序。
 - 每个工作包从开始时的最新主线建立任务合同。并行工作只共享已经进入主线的稳定事实，不以其他 worktree 中尚未合并的
@@ -303,11 +307,11 @@ W-only delta ─/→ S/C
 
 | 工作类型 | 默认资源 | 与其他工作的关系 |
 |---|---|---|
-| 四期规划、源码研究、文档、轻量实现与非重型测试 | 开发用 Codex、普通 CPU/内存 | 可与三期云训练、数据合成和模型链监控并行；不产生 RONDO API/模型费用 |
+| 四期规划、源码研究、文档、轻量实现与非重型测试 | 开发用 Codex、普通 CPU/内存 | 可与三期非重型工作或未来另行授权的云任务并行；不产生 RONDO API/模型费用 |
 | M4-W0/W1 临时 Git 正确性验证 | 临时 repository/worktree、普通磁盘 I/O | 不需要真实模型、API、Docker 或长期 Git 资产；可与非重型 S/C 工作并行 |
 | 四期 Rust 重型构建或测试 | 仓库共享 Cargo build lock、本地内存与磁盘 | 所有 worktree 全局串行；按根 `AGENTS.md` 与 Docker、真实本地模型加载/推理互斥 |
-| 三期已授权的真实 API 数据合成或横评 | 中转 API 预算与网络 | 不占 Cargo build lock，可与四期开发并行；范围、费用和授权与开发用 Codex 额度完全分开 |
-| 三期 M3-B1b/M3-B1c 云端训练 | 相应任务获得授权后使用的云 GPU、预算与工件传输 | 云计算不占本地 Cargo build lock；Plan 060 尚无正式训练资格 GO，M3-B1c 尚不具备启动条件；获批后的 bundle、checkpoint 与结果传输仍竞争本地网络和磁盘，按实际压力错峰 |
+| 三期未来另行授权的真实 API 数据合成或横评 | 中转 API 预算与网络 | 不占 Cargo build lock，可与四期开发并行；范围、费用和授权与开发用 Codex 额度完全分开 |
+| 三期云端训练（当前无活跃任务） | 未来任务另行授权后使用的云 GPU、预算与工件传输 | M3-B1c 已完成且计算 Pod 已删除；未来任务不占本地 Cargo build lock，但工件传输仍竞争本地网络和磁盘，按实际压力错峰 |
 | 三期 M3-C1/M3-C2/M3-D 本地模型与测评 | 本地模型/GPU、可能的 Docker、测评数据与已授权 API | 与四期重型 Cargo、Docker 和其他真实本地模型任务按根资源门禁串行错峰 |
 | 任一方向的 Docker 工作 | Docker、本地磁盘和宿主容量 | 第四期默认不需要；若具体任务确有必要，须单独授权并与重型 Cargo、真实本地模型互斥 |
 
@@ -323,8 +327,9 @@ W-only delta ─/→ S/C
   完整运行一轮。这里不永久冻结内部代码、配置结构或持久格式；具体返修与复跑循环由 M4-Z(core) ExecPlan 决定。
 - 每个工作包先满足就近 `AGENTS.md` 要求的强制测试、生成物和 TUI snapshot 测试门禁；M4-Z(core) 额外运行相称的 S/C 干净全链验收。
 - M4-S1/S2 的 ExecPlan 必须以相称的 deterministic/fake 回归覆盖本 WBS 的耐久成功、单写 authority 覆盖提交、自洽读取、失败不
-  伪报完成，以及顶层 `thread/fork` 与 `spawn_agent fork_turns` 的不同 Team 语义；具体 fixture、竞态 interleaving 和版本标识由任务
-  方案根据真实接缝决定，不为验收建设审计、通用事务或第二套跨进程协调平台。
+  伪报完成、Root idle/close 与 mutation-capable live child 的 barrier，以及顶层 `thread/fork` 与 `spawn_agent fork_turns` 的不同
+  Team 语义；具体 fixture、竞态 interleaving 和版本标识由任务方案根据真实接缝决定，不为验收建设审计、通用事务或第二套
+  跨进程协调平台。
 - M4-W0/W1 使用临时 Git repository/worktree 和 deterministic/fake 测试；若 W1 落地，由其自身出口按价值门范围承担完整 binding
   及可选 minimal handoff 验收。
   第四期不新建或运行性能测评。
@@ -340,8 +345,8 @@ W-only delta ─/→ S/C
   实际释放后，后续 owner 才能取得写资格。
 - 非 owner 并发查询只返回满足领域不变量的自洽已提交状态，或明确 stale/unknown/unavailable；不会把不同一致性边界拼成当前事实。
 - persistence shutdown 失败、session task 异常或存活进程内 teardown 未完成不会被报告为关闭完成，原写 authority 仍可定位并重试；
-  只有成功关闭或完整进程终止实际释放 authority 后，其他进程才能接管。若实现范围包含显式 discard，其结果也必须确认 authority
-  已释放且不得冒充正常关闭。
+  mutation-capable descendant 存活时同样不得完成 Root/Team close 或释放 authority。只有成功 barrier 或完整进程终止实际释放
+  authority 后，其他进程才能接管。若实现范围包含显式 discard，其结果也必须确认 authority 已释放且不得冒充正常关闭。
 - resume/member reload 保留原 TeamInstance；顶层 `thread/fork` 让原生 conversation/thread history 按 Codex 规则进入新的 Root
   Thread/Session，并从新的空 TeamInstance 开始，来源 Team 不变，旧 Team 引用 fail-closed。`spawn_agent fork_turns` 创建新的 child
   Thread 但保持原 Session/root lineage 与 TeamInstance；`/new` 与 slash `/clear` 同样创建空 Team，detach 不改变生命周期。

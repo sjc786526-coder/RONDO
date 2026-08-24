@@ -1,7 +1,7 @@
 # Plan 067：M4-A Durable Team Runtime 共同合同
 
 日期：2026-08-24
-结论：`M4_A_GO`（独立终审闭环后冻结）
+执行者结论：`M4_A_GO`；最终接受状态以独立验收报告为准。
 
 ## 实质结果
 
@@ -42,5 +42,16 @@
 - 已把即时 detach 与 deferred idle unload 分开：后者必须走同一 member unload 或 owner/Team close barrier，失败保持
   loaded/closing 且不得交接 Root authority；冻结 snapshot 同步补上现行源码事实。另补 legacy non-durable Session 和 Durable
   关闭时已有 durable lineage 不得空 Team fallback 的关闭态。
-- 同一审查者复核确认 lifecycle finding 关闭；随后发现两份新 Markdown 的日期行尾双空格未被未暂存 diff 覆盖，已删除并对
-  精确四文件 staged diff 重跑 `git diff --cached --check`。最终复核结果：`PASS`，无未关闭 correctness finding。
+- 同一执行内审查者复核确认 lifecycle finding 关闭；随后发现两份新 Markdown 的日期行尾双空格未被未暂存 diff 覆盖，已删除并对
+  精确四文件 staged diff 重跑 `git diff --cached --check`。该轮执行内审查结果为 `PASS`。
+
+### 外部独立验收整改
+
+- 独立报告 `agent_log/2026-08-24-plan067-m4-a-independent-review.md` 未接受首个提交，提出两个中等级和一个低等级问题；执行者逐项
+  复核后确认均存在。
+- Root idle/close 现在明确要求：任何 descendant 仍具备 Team mutation 能力时不得完成或释放 authority；S1/S2 可以阻止 close，
+  或在同一 barrier 内安全 quiesce/close descendants，不预选内部机制。S1/S2 回归交接与 C0 诚实投影同步更新。
+- 第四期 WBS 已按已提交 `main` 窄同步：Plan 060 `TECHNICAL_GO`、Plan 064 `DATA_GO`、M3-B1c/Plan 066 正式训练和验收完成，计算
+  Pod 已删除且当前无活跃云训练；未读取或吸收 Plan 068 未提交内容。
+- ExecPlan 当前工作改为真实的整改提交/外部复审所有权，不再停留在首次提交前。修复只做静态源码/WBS 对照、允许写集与 diff
+  门禁，未运行 Cargo、Docker 或其他重型验证。
