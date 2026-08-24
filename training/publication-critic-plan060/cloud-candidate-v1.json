@@ -1,0 +1,99 @@
+{
+  "schema": "rondo-publication-critic-plan060-cloud-candidate-v1",
+  "status": "candidate",
+  "provider": "RunPod",
+  "compute": {
+    "task_name_prefix": "rondo-plan060-publication-critic",
+    "cloud_type": "SECURE",
+    "gpu_count": 1,
+    "minimum_memory_gb": 80,
+    "running_gpu_pod_limit": 1,
+    "candidates": [
+      {
+        "candidate_id": "h100-pcie-80gb",
+        "gpu_id": "NVIDIA H100 PCIe",
+        "same_stock_preference": 0
+      },
+      {
+        "candidate_id": "h100-sxm-80gb",
+        "gpu_id": "NVIDIA H100 80GB HBM3",
+        "same_stock_preference": 1
+      }
+    ],
+    "stock_preference": [
+      "HIGH",
+      "MEDIUM",
+      "LOW"
+    ],
+    "image": "runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404",
+    "minimum_cuda": "12.8",
+    "container_disk_gb": 40,
+    "network_volume_mount_path": "/workspace",
+    "ports": "22/tcp",
+    "maximum_lifetime_seconds": null
+  },
+  "selection": {
+    "winner_condition": "first_running_candidate_with_verified_provider_and_hardware_identity",
+    "winner_lock_required_before_training": true,
+    "winner_gpu_model_is_immutable": true,
+    "training_result_must_not_influence_selection": true,
+    "post_lock_replacement": {
+      "allowed": true,
+      "gpu_id_must_equal_locked_winner": true,
+      "reuse_winner_network_volume": true,
+      "predecessor_must_not_be_running": true
+    }
+  },
+  "storage": {
+    "pre_selection_asset_source": {
+      "kind": "existing_stopped_task_pod_local_volume",
+      "winner_eligible": false,
+      "identity_source": "external_controller_state_and_live_provider_facts"
+    },
+    "network_volume": {
+      "cloud_type": "SECURE",
+      "type": "STANDARD",
+      "size_gb": 60,
+      "object_limit": 2,
+      "data_center_selection": "runtime_candidate_placement",
+      "terminal_retained_count": 1,
+      "retain": "verified_winner_volume",
+      "delete": "loser_and_superseded_task_volumes"
+    }
+  },
+  "budget": {
+    "authority": "eval-data/publication-critic/plan060/controller/budget-policy.json",
+    "runtime_field": "hard_cap_usd",
+    "reload_before_each_decision": true,
+    "cutoffs": "derived_from_fixed_cleanup_reserves",
+    "include_compute_storage_and_cleanup": true,
+    "settled_compute_and_deleted_resource_billing_required": true,
+    "retained_winner_storage_rate_required": true
+  },
+  "runtime_facts": {
+    "refresh_before_each_create_start_or_replacement": true,
+    "required": [
+      "candidate_stock",
+      "gpu_price",
+      "data_center",
+      "network_volume_support_and_price",
+      "account_and_task_billing",
+      "effective_budget_policy"
+    ],
+    "provider_evidence_only": true,
+    "excluded_from_training_identity": [
+      "live_price",
+      "effective_budget_value",
+      "pod_id",
+      "pod_name",
+      "data_center_id"
+    ]
+  },
+  "terminal_state": {
+    "terminate_all_task_compute": true,
+    "running_gpu_pods": 0,
+    "retain_verified_winner_network_volume": true,
+    "delete_loser_and_superseded_network_volumes": true,
+    "delete_redundant_local_volume_with_source_pod": true
+  }
+}

@@ -1,7 +1,7 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
 最后更新：2026-08-24 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
-状态：**第一期、第二期、M3-A1、M3-A2、M3-B1a、M3-B2a、M3-B2b 与 Plan 064 已完成；Plan 060 / M3-B1b 实施中，M3-B1c 仍锁定；四期已规划、尚未实施**
+状态：**第一期、第二期、M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b 与 Plan 064 已完成；Plan 060 技术 GO、Plan 064 DATA_GO、Plan 066 正式训练 GO；四期已规划、尚未实施**
 
 ## 当前定位
 
@@ -74,7 +74,7 @@ M3-B1a v7 数据冻结                M3-B2b Multi 发布流程接入
    ┌────┴─────┐                        │
    ↓          ↓                        │
 M3-B1b      Plan 064 v8 数据扩充         │
-资格 smoke   已冻结，预算适配证据不足      │
+技术 GO      已冻结，DATA_GO              │
    └────┬─────┘                        │
         ↓                              │
 M3-B1c 正式分阶段训练与工件回收          │
@@ -120,7 +120,7 @@ error slice 均存在。tracked v4 同时保留 8 条 calibration 投影、conte
 **交接**：基座工程路径与 M3-B1a 数据建设 GO，未微调模型直接产品使用 NO-GO。M3-B1a 应复用 v4 输入/评价合同并建立独立
 train/validation/unseen-test split，优先补足 `internal_consistency` 精致 hard negative、new/completed useful-state 边界、
 threshold-near handoff 与 continuity/evidence omission 对照，并避免长度、角色和模板捷径。M3-A2 cohort 不得冒充未来 unseen test；
-M3-C1 继续等待 M3-B1c 提供至少一个训练候选。
+M3-B1c 已提供通过独立验收的训练候选；M3-C1 可另行规划和授权。
 
 ### B 阶段：模型链与产品链并行
 
@@ -139,45 +139,63 @@ M3-C1 继续等待 M3-B1c 提供至少一个训练候选。
 其余 review 只在模型可见输入逐字节相等后复用。group closure、Plan 054 reference 隔离、文本与 exact-token 长度 shortcut、50,073-token
 census、manifest、factory-only consumer 和 train-only smoke bundle 均通过；最终结论为数据 GO，`remaining_findings=[]`。
 
-**交接**：M3-B1b 的数据前置已经解锁，Plan 060 已据此独立立项并在专用 worktree 实施；本结论不是训练或模型质量证据，
-也不授权任何付费运行。Plan 060 的正式资格、吞吐、费用和预算事实仍等待其自身交接。
+**交接**：M3-B1b 的数据前置已经解锁，Plan 060 已据此完成正式 smoke 并通过独立验收；本结论本身不是训练或模型质量证据。
+Plan 060 的技术 GO、v8 DATA_GO 与 Plan 066 授权现已共同解锁正式训练。
 
-#### M3-B1c 数据规模前置：Plan 064（已完成，资格证据不足）
+#### M3-B1c 数据规模前置：Plan 064（已完成，DATA_GO）
 
 **结果**：`publication-critic-v8` 已正式冻结并完成最终独立验收：123 scenarios、228 candidates、104 pairs，
 train/validation/unseen-test 为 128/55/45，exact-token 总量 178,646；C1/C2/C3 为 128 Binary、50 Boundary、
 再加 8 Within-PASS。默认 consumer 只暴露 train，显式 evaluation 模式才可访问完整 228 candidates。v7 物理 tree、继承成员与
 split 保持不变，Plan 060 继续使用原 smoke bundle。
 
-**资格结论**：覆盖、review、lineage、group/split、dedup/shortcut、tokenizer-only、manifest、bundle 和 consumer 门禁均通过，
-但 Plan 060 尚无正式吞吐、费用或训练预算事实，因此最终结论为“证据不足（训练预算适配未决）”，不是数据 GO。
+**资格结论**：覆盖、review、lineage、group/split、dedup/shortcut、tokenizer-only、manifest、bundle 和 consumer 门禁均通过。
+v8 冻结时的“证据不足（训练预算适配未决）”已由 Plan 060 final-19 的正式吞吐、checkpoint/恢复、费用和 23 USD 连续总账有界复核闭合；
+三个阶段各一遍约 451,743 tokens，当前结论为 `DATA_GO`。这只证明冻结规模适合进入有界训练，不保证模型质量改善。
 
-**交接**：Plan 060 正式结果到达后，对冻结 v8 做一次有界预算适配复核，不默认生成新数据或重做 freeze。只有 Plan 060 训练资格
-GO、v8 数据 GO 与新的正式训练授权同时成立，M3-B1c 才能另立 ExecPlan；任一条件缺失都不得启动训练。
+**交接**：有界预算适配不生成新数据、不改 split/label/review、不重做 freeze。Plan 060 技术 GO、v8 DATA_GO 和新的正式训练授权均已成立；
+Plan 066 已复用当时的热资源执行 M3-B1c，计算资源终态见下文。
 
 #### M3-B1b：H100 训练资格 smoke（独立 go/no-go 门）
 
-**状态**：Plan 060 已立项并在专用 worktree 实施；当前尚无进入 main 或正式交接的训练资格、吞吐、费用和预算结论。
+**状态**：Plan 060 final-19 已完成正式 smoke、本地提交和独立验收，`remaining correctness/functionality findings=[]`，M3-B1b 结论为
+`TECHNICAL_GO`。用户当时决定把 RUNNING Pod、胜者卷和连续费用总账直接交给 Plan 066；后者现已删除计算 Pod，并统一收口 resource terminal facts
+与控制台任务期账单。
 
 **目标**：在单张 RunPod H100 PCIe 80GB 上验证 Skywork 1.7B BF16 全参数训练、FlashOptim/FlashAdamW 主路径、阶段保存与恢复
 是否适合进入正式训练。
 
 **边界**：只运行有界资格 smoke，不顺带启动正式训练；本包需要单独的付费授权，并与 M3-B1c 的正式训练授权分离。
 
+**当前状态**：Plan 060 已在 Secure 单卡 `NVIDIA H100 PCIe` 80GB、US-KS-2 上完成 BF16 全参数 FlashAdamW commissioning 和
+final-19 干净 formal start/resume。C1→C2→C3、1,720,577,024 个 trainable 参数/311 个 optimizer tensor 覆盖、约 10.56GB 完整
+checkpoint、新 OS 进程恢复与 step 3→4 继续更新均通过；最终 archive 与三项审查整改独立复核 `remaining_findings=[]`。
+正式 receipts 已回收，独立验收结论为 `TECHNICAL_GO`。final-19 checkpoint、exact 模型、venv、FlashOptim 与 cache 曾随胜者 Standard 卷
+直接交给 Plan 066；新恢复点验证后 final-19 checkpoint 已删除，其余可复用资产继续保留。Plan 060/066 的最终任务费用以用户确认的控制台任务期账单为准，
+provider terminal facts 已由 Plan 066 收口。
+
 **宏观验收**：模型、数据、环境、显存、吞吐、保存/恢复和预算余量形成明确 go/no-go 结论。no-go 时停止训练链并更新 WBS，
 不得自动消耗剩余预算继续训练或静默更换未授权路线。
 
 #### M3-B1c：正式分阶段训练与工件回收
 
-**目标**：只有 Plan 060 / M3-B1b 经独立验收给出训练资格 GO，且冻结 v8 完成数据 GO 复核并取得新的正式训练授权后，
-才另行规划本包；随后沿同一 lineage 连续完成研究设计中的 C1→C2→C3 训练，回收各阶段候选与必要运行结果。
+**目标**：Plan 060 / M3-B1b 技术 GO、冻结 v8 DATA_GO 与新的正式训练授权已经成立；Plan 066 沿同一 lineage 连续完成研究设计中的
+C1→C2→C3 训练，回收各阶段候选与必要运行结果。
 这里的 C1/C2/C3 是训练 checkpoint 名称，不是 M3-C1/M3-C2 工作包编号。
 
 **边界**：三个训练 checkpoint 留在同一 ExecPlan 内，不拆成行政任务；不扩展候选底模池、不建设通用训练平台、不追加
-论文式大规模消融。Plan 060 GO 与 Plan 064 数据 GO 缺一不可；当前两项均未成立。M3-B1b 与本包共用 23 USD 总硬上限。
+论文式大规模消融。Plan 060 GO 与 Plan 064 DATA_GO 已成立；M3-B1b 与本包共用 23 USD 连续总硬上限。
 
 **宏观验收**：正式训练在预算内完成或按门禁诚实停止；各阶段候选、必要恢复工件和同口径指标安全回收，至少一个候选可进入
 M3-C1。最后一个 checkpoint 不自动获得产品资格。
+
+**当前状态**：Plan 066 `final-01` 已从 exact base 干净完成 C1→C2→C3，实际消费 128 Binary、C2 加 50 Boundary、C3 再加 8
+Within-PASS，共 451,743 tokens；三阶段均完成 1,720,577,024 个 BF16 参数和 311/311 optimizer tensors 的 FlashAdamW 有限更新。
+C1/C2/C3 三个 model-only safetensors 候选、55-candidate 固定 validation、正式 C3 full checkpoint 和新进程 step 3→4 恢复继续均已形成并复验；
+validation 不进入梯度或训练决策，unseen-test 未导出、未运行。计算 Pod 已停止并永久删除，winner 卷保留 formal checkpoint、三个候选、exact 模型、
+venv 与 cache；final-01 terminal receipt 已 superseded，final-02 保留生成时的控制台费用快照。独立终审按用户指定冻结最新 provider 快照总费用
+`$10.9647715263`，距 `$23` 上限 `$12.0352284737`；correctness/functionality `remaining_findings=[]`，M3-B1c 完成并验收通过。
+M3-C1 可另行规划和授权，但不自动获得实施授权或产品资格。
 
 #### M3-B2a：本地 Critic 服务（已完成并通过独立验收）
 
@@ -250,8 +268,8 @@ active cycle，每次阻断反馈轮换 continuation，Team State 专用 history
 
 - M3-A1、M3-A2 与 M3-B1a 已完成共同前置。Plan 060 / M3-B1b 与已完成的 Plan 064 构成 M3-B1c 的并列资格门；产品链的
   M3-B2a、M3-B2b 均已完成，两链在 M3-C1 前汇合。
-- M3-B1b 是独立付费资格门；Plan 064 当前为预算适配证据不足。M3-B1c 只有在 Plan 060 训练资格 GO、冻结 v8 数据 GO 和新的
-  正式训练授权同时成立后才能开始；no-go 或证据不足都不自动继续消费预算。
+- M3-B1b 是独立付费资格门；Plan 060 `TECHNICAL_GO`、Plan 064 `DATA_GO` 与正式训练授权均已成立，Plan 066 已据此完成训练执行、
+  资源终态与 final-02 receipt。独立验收未闭合前不自动启动 M3-C1，也不继续追加训练消费。
 - M3-C1 等待 M3-B1c 与 M3-B2b，M3-C2 等待 M3-C1，M3-D 最后串行收口。
 - RunPod 云端 smoke/训练不占本地 Cargo build lock，可与产品代码、数据整理和四期非冲突开发并行；真实本地模型、
   Docker 与重型 Cargo 仍按根 `AGENTS.md` 全局串行。

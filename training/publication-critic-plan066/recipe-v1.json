@@ -1,0 +1,66 @@
+{
+  "schema": "rondo-publication-critic-plan066-recipe-v1",
+  "seed": 60066,
+  "stage_order": ["C1", "C2", "C3"],
+  "updates_per_stage": {"C1": 1, "C2": 1, "C3": 1},
+  "resume_stage": "C3",
+  "resume_updates": 1,
+  "binary_micro_batch_size": 1,
+  "pair_micro_batch_size": 2,
+  "gradient_accumulation": "one_deterministic_full_stage_update",
+  "binary_loss": "softplus(-signed_target*logits[:,0])",
+  "pair_loss": "softplus(dispreferred-preferred)",
+  "component_weights": {
+    "C1": {"binary": 1.0},
+    "C2": {"binary": 0.5, "boundary": 0.5},
+    "C3": {
+      "binary": 0.3333333333333333,
+      "boundary": 0.3333333333333333,
+      "within_pass": 0.3333333333333333
+    }
+  },
+  "learning_rate": 0.0004,
+  "weight_decay": 0.0,
+  "betas": [0.9, 0.999],
+  "epsilon": 1e-8,
+  "gradient_clip_norm": 1.0,
+  "scheduler": "constant",
+  "activation_checkpointing": false,
+  "attention_backend": "sdpa",
+  "loader_workers": 0,
+  "checkpoint": {
+    "model_state": "bf16_full_state_dict",
+    "optimizer_state": "flashadamw_compressed_state_dict",
+    "scheduler_state": true,
+    "python_rng": true,
+    "numpy_rng_if_loaded": true,
+    "torch_cpu_rng": true,
+    "torch_cuda_rng": true,
+    "stage_and_cursor": true,
+    "identity": true
+  },
+  "formal_data": {
+    "binary_candidates": 128,
+    "c2_boundary_pairs": 50,
+    "c3_within_pass_pairs": 8,
+    "one_full_pass_per_stage": true
+  },
+  "validation": {
+    "candidate_count": 55,
+    "boundary_pairs": 19,
+    "within_pass_pairs": 7,
+    "after_each_stage": true,
+    "gradient_access": false,
+    "feeds_training_decisions": false,
+    "threshold": 0.0
+  },
+  "resume_probe": {
+    "data_role": "v8_commissioning_smoke",
+    "binary_candidates": 6,
+    "boundary_pairs": 1,
+    "within_pass_pairs": 1,
+    "updates": 1,
+    "does_not_replace_formal_candidate": true
+  },
+  "unseen_test": {"run": false, "feeds_training_decisions": false}
+}

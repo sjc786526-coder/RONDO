@@ -1838,3 +1838,34 @@ rehearsal/全新正式 campaign 中继续，本节只冻结 v1 历史事实。
   `137/137` 通过。未运行 Cargo、Docker、完整模型、真实 API、云任务、上传或训练，也未增加通用审计/可信设施。
 - Plan 060 尚无进入 main 或正式交接的吞吐、费用与预算事实，因此冻结数据不能宣称训练预算适配 GO。后续只在 Plan 060
   正式结果到达后对冻结 v8 做一次有界预算适配复核；默认不生成新数据、不修改 split/label/review、不重新 freeze，M3-B1c 仍锁定。
+
+## Publication Critic H100 全参数训练资格 Smoke（Plan 060，2026-08-24）
+
+**状态**：final-19 正式 smoke、本地提交与独立验收均已完成；验收通过，`remaining correctness/functionality findings=[]`，
+M3-B1b 结论为 `TECHNICAL_GO`。实现提交为 `c7cf3b4c7999c76dbeea2c129186c05ee4de9299`，验收与 Plan 066 规划提交为
+`6273705d30ca509fbd27674a11883f611c84bd46`。
+
+- Secure 单卡 H100 PCIe 80GB 上完成 BF16 全参数 FlashAdamW commissioning 与 final-19 干净 formal start/resume；
+  1,720,577,024 个参数、311/311 optimizer tensors 完整覆盖，C1/C2/C3 和新 OS 进程 step 3→4 均有真实、有限更新证据。
+- final-19 archive、start/pending receipt、约 10.56GB full checkpoint、依赖/recipe、模型 revision 与提交源码身份闭合；两路独立复核均
+  `remaining=[]`。formal C1/C2/C3 为 11.108/1.342/1.471 秒，resume C3 为 2.381 秒，峰值 CUDA allocated/reserved 约 18.29/21.27GB。
+- Plan 064 v8 的 128 train candidates、C2 50 Boundary、C3 再加 8 Within-PASS，三个阶段各一遍约 451,743 tokens；基于 Plan 060 正式吞吐、
+  当前费用与 23 USD 连续总账的有界复核转为 `DATA_GO`，不重做数据或 freeze，也不代表模型质量 GO。
+- 用户决定不为任务切换停止稀缺热资源。当前 Pod、胜者 Standard 卷、exact 模型/venv/FlashOptim/cache 与 final-19 checkpoint 直接交给
+  Plan 066；Plan 060/066 从原 Plan 060 基线连续计费，资源终态和 settled billing 由 Plan 066 完成正式训练后统一收口。
+- focused 门禁为 128 passed、1 optional local Torch seam skipped、77 subtests；真实 H100 链覆盖对应组合路径。未运行 Docker、Cargo、
+  本地完整模型、validation/unseen-test 训练、M3-C1、CI 或 PR。
+
+## Publication Critic 正式全参数训练（Plan 066，2026-08-24）
+
+**状态**：C1→C2→C3 正式训练、候选保存、恢复验证、资源收口与独立终验均已完成；验收通过，任务目标完成，
+correctness/functionality `remaining_findings=[]`，路线结论为 `GO`。
+
+- exact base 上消费 128 Binary、50 Boundary 与 8 Within-PASS，共 451,743 tokens；三阶段均以 BF16 全参数 FlashAdamW 更新
+  1,720,577,024 个参数，311/311 optimizer tensors 完整且有限。
+- C1/C2/C3 三个约 3.46GB safetensors 候选、约 10.56GB 正式 checkpoint 和新 OS 进程 step 3→4 恢复继续均已复验；每阶段固定
+  validation 55 candidates，不进入梯度或改变 optimizer/scheduler，unseen-test 未运行。
+- 计算 Pod 已永久删除，RunPod Pod 数为 0；唯一 Standard 60GB winner 卷 `hi3iaz8rsr` 保留候选、checkpoint、exact 模型与环境。
+  独立终审按用户指定冻结最新 provider 快照总费用 `$10.9647715263`，距 `$23` 连续硬上限 `$12.0352284737`。
+- final-02 的 v1/v2 兼容、费用算术、哈希绑定与预算门正确；终审 focused 11/11、三个 launcher `bash -n` 和 diff 门禁通过。
+  本结论只使候选具备进入 M3-C1 独立工作包的资格，不代表模型质量、threshold、部署或产品收益通过，也不自动授权 M3-C1。

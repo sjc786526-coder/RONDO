@@ -1,0 +1,75 @@
+{
+  "schema": "rondo-publication-critic-plan060-model-contract-v1",
+  "model": {
+    "repository": "Skywork/Skywork-Reward-V2-Qwen3-1.7B",
+    "revision": "e51ea3e08fb81326c3b812a7ff0cb9cee83e59cc",
+    "class": "Qwen3ForSequenceClassification",
+    "parameter_count": 1720577024,
+    "weight_file": "model.safetensors",
+    "weight_sha256": "117da8e3a6c3e9c9b9b66e74d69373b8f186e7fe27be2d64e0bb18510c9a07d9",
+    "storage_dtype": "BF16",
+    "training_dtype": "bfloat16",
+    "num_labels": 1,
+    "pad_token_id": 151654,
+    "eos_token_id": 151645,
+    "bos_token_id": 151643,
+    "use_cache": false
+  },
+  "input": {
+    "plan054_measurement_freeze_sha256": "2a8081d3700f4209f5ac3cd7dabb7f6d31d0cb0b0ea0e9e8c639c8f10dbebfeb",
+    "input_contract_sha256": "bba923d37c4b533086d3753b3f47c3f45843f6ca729ee8cb275c6567772a2311",
+    "qualification_rubric_sha256": "cc15207b3c6e2482e56710f735d01893f8c8c020df35a18918e1a0a1be7f02e4",
+    "product_packet_limits_sha256": "eb2ec31c1dc4cb271fca8f291b53b75771fd42ede4a49a03fa0628ef147f9397",
+    "render_contract_sha256": "8bd5449956f20f26c6d68fe410f22fc2925540eb07d63050ddad70ef87cfef2c",
+    "adopted_window_tokens": 16384,
+    "padding_side": "right",
+    "candidate_truncation": "forbidden",
+    "scalar": "logits[:,0]",
+    "direction": "higher_is_better"
+  },
+  "training_data": {
+    "dataset_revision": "v7",
+    "manifest_sha256": "bad48a77b27aaa40c4a47226cf3aa546cddd7028888bc7c1144a34e308b03127",
+    "train_only_bundle_sha256": "5aba49c0eb0cb01df02ff3eecbe527234c3af884331742507c56852ccd0e9839",
+    "source_sha256": {
+      "membership.json": "170d586f578def0a69a01816860c60755ba41ce189de618970ea07b3720a0b0d",
+      "packets.jsonl": "1f7b33e435ab795b5e8d236a9ab6dcb56ce42e96e945f7d7e56d31ee6fa7a871",
+      "pairs.jsonl": "6efe20ad3cadccf63a5b0e1920ee62f3ef2f5c2aa5352503da81c3ac8cd38f86",
+      "supervision.jsonl": "6b7b49ea09520272a38deda17510d3da9388a536c2f782e4b1ff240735472db5"
+    },
+    "counts": {
+      "binary": 6,
+      "boundary": 1,
+      "within_pass": 1
+    }
+  },
+  "optimizer": {
+    "package": "flashoptim",
+    "version": "0.1.4",
+    "release_commit": "1b1f1531bb870dd044c1a1280f93fc524d5666e6",
+    "wheel_sha256": "8a4a3f2528fbda419d4f4dd0c9debb3de22bd0a45969bee2eb5a58185d3bd451",
+    "class": "flashoptim.FlashAdamW",
+    "quantize": true,
+    "fused": true,
+    "master_weight_bits": 32,
+    "compress_state_dict": true,
+    "check_numerics": true,
+    "global_numerics_preflight": true,
+    "decouple_lr": false,
+    "gradient_release": false
+  },
+  "route": {
+    "allowed_hardware": [
+      "NVIDIA H100 PCIe",
+      "NVIDIA H100 80GB HBM3"
+    ],
+    "winner_lock_required": true,
+    "gpu_count": 1,
+    "minimum_vram_gb": 80,
+    "full_parameter_training": true,
+    "peft": false,
+    "quantized_model": false,
+    "cpu_or_nvme_offload": false,
+    "optimizer_fallback": false
+  }
+}
