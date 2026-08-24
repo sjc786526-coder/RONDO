@@ -1786,3 +1786,35 @@ rehearsal/全新正式 campaign 中继续，本节只冻结 v1 历史事实。
   收尾门禁通过。
 - Plan 054 v4 历史 evidence/result/summary 保持不变并继续可验证，但不再接受新 wrapper summary；
   未来新 campaign 另行升级证据版本。未运行 Cargo、Docker、模型、API 或全量测试。
+
+## 方向 1 教师源码热路径优化完成（Plan 062，2026-08-23）
+
+**状态**：三项行为保持型热路径优化、轻量测评、独立验收和主线整合均已完成。clean candidate 为 `22b8766`，
+最终通过 merge commit `2fff868c9d7ffac013cc0447d6993d6b560e7354` 进入 `main`；收口时本地 `main` 与
+`origin/main` 一致。
+
+- 学习教师源码后筛选并自主实现 history orphan normalization 借用式索引、模型可见工具规格不可变共享、
+  unified-exec 连续字节快照与合法 UTF-8 借用判定；保持 Codex CLI `v0.147.0` 基线身份，不改变模型可见语义、
+  工具资格、Guardian、审批或 sandbox。
+- clean baseline `d5535fc` 与 candidate `22b8766` 使用同一 harness SHA-256
+  `ef8364c8a225226fa1085355ae447f55b9a0aabb3fab6d2f8f264703c77fd5f2`。正式结果为 benchmark smoke、定向
+  48/48、release exact 1/1、Python parser 4/4、`codex-core` 3332/3332（8 skipped、2 slow）及 9/9 benchmark；
+  独立审查重聚合正式 raw 后与 tracked body-free JSON 逐字节一致，无剩余 correctness finding。
+- history 8/32/128-turn allocation count 从 `11/37/135` 降至 `3/5/7`；工具规格共享 case 的 allocation
+  count/bytes 从 `1296/565200`、`5136/2261000`、`10256/4523000` 降至 `0/0`；4 KiB/256 KiB/1 MiB
+  snapshot allocation count 从 `3/3/4` 降至 `1/1/1`。这些结果只解释命名热路径，不外推 API 延迟、模型质量、
+  Terminal-Bench 成功率或通用 agent 能力。
+- 所有 Rust 构建、测试和 benchmark 均经共享 build lock/watchdog；未运行全 workspace、Bazel、Docker、
+  Terminal-Bench、真实 API、真实本地模型、训练、云任务、CI 或 PR。详细执行与验收见 Plan 062 及对应 agent log。
+
+## 方向 1 正式收口与当前 WBS 迁移（2026-08-24）
+
+**状态**：用户决定方向 1 在 Plan 052、056、058、062 完成后正式收口。当前不再安排新的观测、内核/Harness
+优化、热路径优化或正式 campaign。
+
+- 既有默认关闭观测能力、任务级安全投影、root-only C2 guidance、三项热路径优化、轻量测评和历史结果均保持；
+  本次收口不回退实现、不删除证据，也不把历史测评外推成未证明的端到端收益。
+- 已完成任务的分解、指标和验收记录由本文件、冻结 plan、审计快照与 agent log 承载。顶层 WBS 只保留正式收口
+  状态；方向 1 子 WBS 精简为状态与归档入口，不再维护已完成任务流水。
+- 这是当前阶段的收口决定，不是永久禁止。未来如果用户决定重新启动方向 1，应按届时目标重新立项并建立新的
+  任务合同；旧 campaign、预算与真实执行授权不自动继承。

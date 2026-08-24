@@ -1,6 +1,6 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
-最后更新：2026-08-23 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
+最后更新：2026-08-24 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
 状态：**第一期、第二期、M3-A1、M3-A2 与 M3-B1a 已完成；Plan 055 / M3-B2a、Plan 057 / M3-B2b 与 Plan 059 / M3-B1a 已主线整合**
 
 ## 当前定位
@@ -212,8 +212,8 @@ active cycle，每次阻断反馈轮换 continuation，Team State 专用 history
 - M3-C1 等待 M3-B1c 与 M3-B2b，M3-C2 等待 M3-C1，M3-D 最后串行收口。
 - RunPod 云端 smoke/训练可以与不占用本地重型资源的产品代码、数据整理和受控替身测试并行；真实本地模型、Docker 与
   重型 Cargo 仍按根 `AGENTS.md` 全局串行。
-- 三期与方向 1 没有产品依赖。方向 1 重启后可以并行安排普通工作，但共享 API 预算、本地 GPU、Docker、构建锁和磁盘时
-  必须显式错峰。
+- 三期与已经正式收口的方向 1 没有产品依赖。如果未来重新启动方向 1，普通工作仍可并行安排，但共享 API 预算、
+  本地 GPU、Docker、构建锁和磁盘时必须显式错峰。
 - M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、M3-C2、M3-D 各自对应一个任务级 plan；
   阶段叙事不单独创建总 plan，长程 WBS 也不替执行者冻结模块布局、API schema、训练超参数或部署技术路线。
 

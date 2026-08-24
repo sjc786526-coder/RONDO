@@ -1,6 +1,6 @@
 # RONDO 长程规划（WBS）
 
-最后更新：2026-08-23（Plan 062 已通过独立验收；方向 1 当前无 active 工作包；方向 3 下一包为 M3-B1b）
+最后更新：2026-08-24
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段指针、跨方向关系、
 稳定工程边界和授权门；已完成成果与验收见 `doc/WBS-COMPLETED.md`，单次任务合同见 `plan/`，执行细节见
@@ -18,7 +18,7 @@
 | 方向 | 当前状态 | 当前规划边界 |
 |---|---|---|
 | 0：量化测评基准 | 既有设施与首次 schema v7 正式 canary 已完成，当前无 active campaign | 保留设施；历史结果见 COMPLETED，新 campaign 须重新立项与授权 |
-| 1：Harness 优化 | **Plan 062 已完成并通过独立验收；当前无 active 工作包** | 保留三项行为保持型热路径优化、轻量测评与既有观测；不恢复开放式候选探索 |
+| 1：Harness 优化 | **正式收口；当前无 active 工作包** | 当前不继续新增观测或内核/热路径优化；既有实现、设施与历史结果保留。未来可由用户另行决定是否重新立项，本次收口不作永久禁止 |
 | 2：本地审批模型 | **已收口，今后不再开启** | 最终结论为“保留为实验”；不改生产默认，不再规划后续工作包 |
 | 3：RONDO Multi | 第一、二期及其收口案例、**三期 M3-A1、M3-A2、M3-B1a、M3-B2a、M3-B2b 已完成** | Plan 059 / M3-B1a revision v7 已完成最终验收与主线整合；M3-B1b 数据前置已解锁，但尚未立项或取得付费执行授权 |
 
@@ -35,33 +35,7 @@
 
 ## 2. 下一工作包与顺序
 
-方向 1 与方向 3 是两套产品源码上的独立推进面，不互为默认前置。
-
-### 方向 1：Plan 062 教师源码热路径优化
-
-- Plan 062 已在专用 worktree 提交 history orphan normalization、模型可见工具规格不可变共享、unified-exec
-  输出快照三项学习教师源码后筛选并自主实现的优化，以及一条无真实 API 的轻量 benchmark。
-- 本包保持 Codex CLI `v0.147.0` 基线身份，不改变模型可见内容、工具执行资格、Guardian、审批、sandbox、
-  rollout/CLI/config/app-server 合同，也不恢复 E-A、Terminal-Bench 正式 campaign 或开放式候选探索。
-- clean candidate `22b8766` 已完成 benchmark smoke、定向与 release 回归、3332 项 `codex-core` crate 门禁及
-  9-case 正式轻量测评；body-free 聚合见
-  `eval/results/observations/plan062-direction1-teacher-hotpath-optimizations.json`。独立审查复核 live diff、正式 raw、
-  tracked 聚合与窄回归后无剩余 correctness finding，验收通过、任务目标完成；尚未合并、推送或归档。
-- 方向 1 当前不安排下一个优化包。保留现有能力与观测；只有未来 trace 出现高频、跨任务且耗时、分配或正确性影响
-  明显的新瓶颈时，才重新立项，不根据教师候选池继续开放式挖掘。
-
-### 方向 1：Plan 058 收口事实
-
-- Plan 058 完成单一 C2 行为优化及同一冻结十题、两个 round 的 `formal-v6`：20/20 completed、
-  8 pass/12 fail、225 upstream attempts、campaign `4.985650 USD`，任务全生命周期 `20.379152 USD`、
-  reservation 0。
-- raw C2 为 7 次/4 slot/3 task/9,693 ms；按预冻规则复核后 harmful/reasonable/insufficient 为
-  `0/7/0`，四项无害门通过，结论为 `retain`。最终产品能力收窄为 root-only、UnderDevelopment、
-  默认关闭的 opt-in guidance，不改变工具可执行性、Guardian、审批或 sandbox。
-- 最终 root-only 文案是验收后的有界收窄，没有被 `formal-v6` 原样重测；受环境阻断的 model-visible
-  integration 只作编译与对照证据，不冒充运行通过。详细结果、失效 campaign、资源清理与验收见
-  `doc/WBS-COMPLETED.md`、Plan 058 及其最终日志。
-- Plan 058 的产品、campaign 和历史结论保持冻结；Plan 062 不继承其身份、预算或正式结果。
+方向 3 是当前唯一已经明确下一工作包的产品推进面。方向 1 已正式收口，不作为方向 3 的前置或旁支。
 
 ### 方向 3：Publication Critic 三期
 
@@ -75,16 +49,18 @@
 - M3-B1b 是数据链下一工作包，数据前置已解锁但尚未启动。它必须另建 ExecPlan 并取得 RunPod/H100、训练、上传与付费预算授权；
   Plan 059 的完成不自动授权任何外部或付费操作。
 
-方向 1 与方向 3 的只读研究、轻量代码和数据工作可以并行；本地重型 Cargo、Docker、真实本地模型加载/推理继续
-全局串行，并由实际进入实施的工作包协调共享资源。
+如果未来重新启动方向 1，它仍与方向 3 保持产品源码和任务合同独立；本地重型 Cargo、Docker、真实本地模型
+加载/推理继续全局串行，并由实际进入实施的工作包协调共享资源。
 
 - 方向 0 的设施保持可用，但不自行创建新 campaign；任何真实 API、Docker 或新预算均需针对新任务重新授权。
+- 方向 1 当前正式收口，不排期观测或内核/Harness 优化；未来是否重新启动由用户另行决定。
 - 方向 2 永久收口，不作为方向 1 或方向 3 的前置、旁支或待恢复项目。
 - 上游 Codex 基线升级继续保留为独立、不排期任务；只有用户明确启动时才进入规划。
 
 ## 3. 方向关系
 
-- 方向 1 在 `mydev/` 推进 Harness 优化；方向 3 在 `multidev/` 推进多智能体与 Publication Critic，不互相夹带实现。
+- 方向 1 的既有产品源码位于 `mydev/`，当前正式收口；方向 3 在 `multidev/` 推进多智能体与 Publication Critic。
+  如果方向 1 未来重新启动，两者仍不互相夹带实现。
 - 方向 0 是可复用设施，不再作为解锁其他方向的总闸门；只在具体任务需要时提供相称测评。
 - 方向 2 已永久收口，不参与后续路线，也不阻塞其他方向。
 - 所有方向只共享排期、API 预算、Docker、构建和本地模型等全局资源约束，重型操作保持串行。
@@ -95,7 +71,7 @@
 
 ```text
 RONDO/
-├── mydev/        # 方向 1 当前产品源码（目录名沿用现状）
+├── mydev/        # 方向 1 产品源码（当前收口，目录名沿用现状）
 ├── multidev/     # 方向 3 产品源码
 ├── eval/         # 两套产品可复用的通用测评设施
 ├── scripts/      # 共享构建锁与资源看门狗入口
@@ -160,7 +136,7 @@ RONDO/
 
 ## 7. 子 WBS 索引
 
-- `doc/WBS/eval-benchmark.md` —— 方向 0：现行测评设施与方向 1 观测投影边界
-- `doc/WBS/teacher-harness-study.md` —— 方向 1：Plan 052/056 观测与 Plan 058 C2 收口结论
+- `doc/WBS/eval-benchmark.md` —— 方向 0：现行测评设施与新任务授权边界
+- `doc/WBS/teacher-harness-study.md` —— 方向 1：正式收口状态与历史归档入口
 - `doc/WBS/local-approval-model.md` —— 方向 2：已永久收口
 - `doc/WBS/multi-agent-trusted-evidence.md` —— 方向 3：现行产品语义与三期 Publication Critic 长程路线
