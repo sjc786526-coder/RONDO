@@ -1,0 +1,111 @@
+{
+  "schema": "rondo-publication-critic-plan059-teacher-freeze-v7",
+  "plan": "059",
+  "dataset_revision": "v7",
+  "supersedes": {
+    "relative_path": "eval/manifests/publication-critic/training-data-teacher-freeze-v6.json",
+    "sha256": "921e9fc1d94867120887491b1a24fb51e80963fb613ea9cf12013da5d562ea4f"
+  },
+  "formal_generation_allowed": true,
+  "generator": {
+    "date": "2026-08-23",
+    "model": "gpt-5.6-sol",
+    "prompt_sha256": "a37213453e87c4b4d61dcdd2514b197bd4493f75dea242fee6edbc9b5ed191bf",
+    "reasoning_effort": "runtime_not_exposed",
+    "role": "direct_plan059_generator",
+    "session_identity": "01a02ec2-6085-73a1-95bf-dee63931a3c1"
+  },
+  "reviewer": {
+    "model": "gpt-5.6-sol",
+    "reasoning_effort": "xhigh",
+    "role": "independent_teacher_reviewer",
+    "prompt_sha256": "38235f56bcb3a0a29ce39dd90b6ca1d32dda4e6c9866c430bf9f72db25878d2c",
+    "date": "2026-08-23",
+    "session_identity": "/root/teacher_reviewer_v2"
+  },
+  "input_identity": {
+    "packet_schema": {"name": "rondo-publication-packet", "revision": "v1"},
+    "qualification_rubric": {"name": "rondo-publication-qualification", "revision": "v1"},
+    "plan054_freeze_sha256": "2a8081d3700f4209f5ac3cd7dabb7f6d31d0cb0b0ea0e9e8c639c8f10dbebfeb",
+    "render_contract": "rondo-publication-critic-render@v3",
+    "input_template_revision": "v3-sha256-dc3209af0d284dfe4be57403873717ba5f2790e2257cd4a39a2376de5696044c",
+    "tokenizer_name": "skywork-reward-v2-qwen3-1.7b-tokenizer",
+    "tokenizer_revision": "e51ea3e08fb81326c3b812a7ff0cb9cee83e59cc",
+    "adopted_window_tokens": 16384,
+    "candidate_truncation": "forbidden",
+    "continuity_overflow": "drop_whole_oldest_prior_publications_then_explicitly_encode_additional_omission"
+  },
+  "contracts": {
+    "eval/rondo_eval/publication_critic/training_data/__init__.py": "ee834503a2f7ea76ca056e0099b253ffd8a345b465b962fb0f94685e4acec8b2",
+    "eval/rondo_eval/publication_critic/training_data/consumer.py": "04175cafc49f43305a421a8274f0fec341e80e21a916f9b914ea3ef1542a7f50",
+    "eval/rondo_eval/publication_critic/training_data/contract.py": "2050e408d6db3dfaee0eb834daf862769864049c5ec7844b3f9a14562189717a",
+    "eval/rondo_eval/publication_critic/training_data/dedup.py": "b3b868dc7ca7e5a0416f1eadc2f00f03bde59c8f6fbc1f4a979baf9259b87e0d",
+    "eval/rondo_eval/publication_critic/training_data/freeze.py": "a3d1d189c0288d2f750260a6bf7295c0592c22b03d41c7624a93d68ba601cacb",
+    "eval/rondo_eval/publication_critic/training_data/grouping.py": "cd2fb37dedd52a4bf543235d2258687a8371fd1c1c173e5d88d77b13cb8bc69d",
+    "eval/rondo_eval/publication_critic/training_data/input_identity.py": "653b95c4e49cdfb32f89984f6e1568524d07018d10a80eb060fe404bb8344a81",
+    "eval/rondo_eval/publication_critic/training_data/shortcuts.py": "647fd7d69835896b3230b8ce61d818cc68aa0713e6a8aae53de100c12adca955",
+    "eval/rondo_eval/publication_critic/training_data/token_census.py": "2179a28beccab354847d6bb49718b1c2ebfd3a9161fdafc80dd1183705e64a82",
+    "eval/templates/publication-critic/input-contract-v2.md": "bba923d37c4b533086d3753b3f47c3f45843f6ca729ee8cb275c6567772a2311",
+    "eval/templates/publication-critic/product-packet-limits-v1.json": "eb2ec31c1dc4cb271fca8f291b53b75771fd42ede4a49a03fa0628ef147f9397",
+    "eval/templates/publication-critic/qualification-rubric-v1.md": "cc15207b3c6e2482e56710f735d01893f8c8c020df35a18918e1a0a1be7f02e4",
+    "eval/templates/publication-critic/render-contract-v3.json": "8bd5449956f20f26c6d68fe410f22fc2925540eb07d63050ddad70ef87cfef2c",
+    "eval/templates/publication-critic/training-data-design-lock-v1.json": "cc56ba61778d84bddce468070333deaafce2f888507e2ea2f52fe1be1dd7843b",
+    "eval/templates/publication-critic/training-data-design-lock-v6.json": "6b177962b202156990c3a63e14e928fc64550f73c78ac0fd2e3ace49e9f8047f",
+    "eval/templates/publication-critic/training-data-design-lock-v7.json": "b7f41133c4f62ebbe392b76e4e75add7348157571fe974d85831eba0fb8709d6",
+    "eval/templates/publication-critic/training-data-generator-prompt-v7.md": "a37213453e87c4b4d61dcdd2514b197bd4493f75dea242fee6edbc9b5ed191bf",
+    "eval/templates/publication-critic/training-data-reviewer-prompt-v1.md": "38235f56bcb3a0a29ce39dd90b6ca1d32dda4e6c9866c430bf9f72db25878d2c",
+    "eval/templates/publication-critic/training-data-schema-v1.json": "4cdd069d8e2ed7ee3ba9b008bb1fab567da113f387f6f7e222e6bb3359bc484c",
+    "eval/tools/finalize_publication_critic_training_data.py": "9a1f3d77193e475268aac5e300a98054067b0c20ebe1a7d6b14e87a4f9a80e2c",
+    "eval/tools/generate_publication_critic_training_data.py": "74a52a9acbab0abd7ec3ba446e49464c4bb430caafa2fdb3baae6e54cf28d575"
+  },
+  "rehearsal": {
+    "run_id": "plan059-rehearsal-v23",
+    "generator_run_sha256": "ae546216322fc1f3bd426275d32d6fde7483bf8af7b0d3d370dc81072a7bf7d5",
+    "reviewer_run_sha256": "2be4f8ca3bc3db987c739f90d836856428a76a5a06d4c864ce39c3e1ab967cb6",
+    "candidate_reviews_sha256": "e865a6b70dfcdcf199f415463beb608c51ceb0d315f6156cde68f536f5f7797b",
+    "pair_reviews_sha256": "eb921da655a549424e3ad11e931c9b5b867d0bcf9e028315ea3384df49d5bf22",
+    "finalization_manifest_sha256": "d9afa090097d3b091c77d27feee1d9622d30615891b57ec7fa86d26a1f030f4f",
+    "finalization_content_sha256": "a3fa3e67e432fe789f86be9211d6d4872272a0e65acbd515f902904580373e41",
+    "candidate_count": 33,
+    "candidate_decisions": {"accept": 33, "revise": 0, "exclude": 0},
+    "pair_count": 17,
+    "pair_decisions": {"accept": 17, "downgrade": 0, "exclude": 0},
+    "token_total": 26635,
+    "token_min": 572,
+    "token_max": 1367,
+    "dropped_oldest_publications_total": 0,
+    "model_visible_text_shortcuts": 0,
+    "model_visible_candidate_length_shortcuts": 0,
+    "plan054_reference_matches": 0,
+    "consumer_smoke": "pass",
+    "remaining_findings": []
+  },
+  "revision_reason": {
+    "origin": "revision_v6_independent_acceptance_findings",
+    "v6_status": "data_no_go",
+    "findings_closed": [
+      "made DatasetConsumer construction factory-only so direct callers cannot inject holdout rows or an arbitrary rubric",
+      "interleaved the six Scope Q+ and Q- exact candidate-token ranges with four shorter and two longer Q- endpoints",
+      "re-reviewed every changed Scope endpoint, all six Scope Boundary pairs, and the affected Scope Within-PASS pair"
+    ],
+    "review_policy": "The compressed v21 Scope negatives were rejected rather than forced through review. Rehearsal v23 received fresh independent review for all 12 Scope endpoints, six Scope Boundary pairs, and the affected Within-PASS pair; other rows were reused only after exact model-visible packet equality checks."
+  },
+  "formal_scale": {
+    "candidate_target": 72,
+    "candidate_hard_cap": 84,
+    "boundary_pair_target": 30,
+    "boundary_pair_hard_cap": 36,
+    "within_pass_pair_target": 6,
+    "within_pass_pair_hard_cap": 8,
+    "stop_rule": "stop when the frozen target satisfies every formal gate; do not expand toward hard caps for volume"
+  },
+  "resource_boundary": {
+    "external_api": false,
+    "local_model": false,
+    "model_forward": false,
+    "weights": false,
+    "docker": false,
+    "training": false,
+    "tokenizer_only": true
+  }
+}

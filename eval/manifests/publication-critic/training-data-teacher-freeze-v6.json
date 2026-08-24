@@ -1,0 +1,109 @@
+{
+  "schema": "rondo-publication-critic-plan059-teacher-freeze-v6",
+  "plan": "059",
+  "dataset_revision": "v6",
+  "supersedes": {
+    "relative_path": "eval/manifests/publication-critic/training-data-teacher-freeze-v5.json",
+    "sha256": "9bcb8d83f0be0351befe1c4c35ffe6062a59a5b79d06ec36df6ace0ed0d60222"
+  },
+  "formal_generation_allowed": true,
+  "generator": {
+    "date": "2026-08-23",
+    "model": "gpt-5.6-sol",
+    "prompt_sha256": "c40aac8f9aca869dfdc05d5731fa29c42a498b99829314eb3554a8a289e0d1d9",
+    "reasoning_effort": "runtime_not_exposed",
+    "role": "direct_plan059_generator",
+    "session_identity": "01a02ec2-6085-73a1-95bf-dee63931a3c1"
+  },
+  "reviewer": {
+    "model": "gpt-5.6-sol",
+    "reasoning_effort": "xhigh",
+    "role": "independent_teacher_reviewer",
+    "prompt_sha256": "38235f56bcb3a0a29ce39dd90b6ca1d32dda4e6c9866c430bf9f72db25878d2c",
+    "date": "2026-08-23",
+    "session_identity": "/root/teacher_reviewer_v2"
+  },
+  "input_identity": {
+    "packet_schema": {"name": "rondo-publication-packet", "revision": "v1"},
+    "qualification_rubric": {"name": "rondo-publication-qualification", "revision": "v1"},
+    "plan054_freeze_sha256": "2a8081d3700f4209f5ac3cd7dabb7f6d31d0cb0b0ea0e9e8c639c8f10dbebfeb",
+    "render_contract": "rondo-publication-critic-render@v3",
+    "input_template_revision": "v3-sha256-dc3209af0d284dfe4be57403873717ba5f2790e2257cd4a39a2376de5696044c",
+    "tokenizer_name": "skywork-reward-v2-qwen3-1.7b-tokenizer",
+    "tokenizer_revision": "e51ea3e08fb81326c3b812a7ff0cb9cee83e59cc",
+    "adopted_window_tokens": 16384,
+    "candidate_truncation": "forbidden",
+    "continuity_overflow": "drop_whole_oldest_prior_publications_then_explicitly_encode_additional_omission"
+  },
+  "contracts": {
+    "eval/rondo_eval/publication_critic/training_data/__init__.py": "ee834503a2f7ea76ca056e0099b253ffd8a345b465b962fb0f94685e4acec8b2",
+    "eval/rondo_eval/publication_critic/training_data/consumer.py": "bd56b703e85b9796928e803bddc38b7bb37a5bcd84f743b7c7b31d8de8c9a2a8",
+    "eval/rondo_eval/publication_critic/training_data/contract.py": "2050e408d6db3dfaee0eb834daf862769864049c5ec7844b3f9a14562189717a",
+    "eval/rondo_eval/publication_critic/training_data/dedup.py": "b3b868dc7ca7e5a0416f1eadc2f00f03bde59c8f6fbc1f4a979baf9259b87e0d",
+    "eval/rondo_eval/publication_critic/training_data/freeze.py": "a3d1d189c0288d2f750260a6bf7295c0592c22b03d41c7624a93d68ba601cacb",
+    "eval/rondo_eval/publication_critic/training_data/grouping.py": "cd2fb37dedd52a4bf543235d2258687a8371fd1c1c173e5d88d77b13cb8bc69d",
+    "eval/rondo_eval/publication_critic/training_data/input_identity.py": "653b95c4e49cdfb32f89984f6e1568524d07018d10a80eb060fe404bb8344a81",
+    "eval/rondo_eval/publication_critic/training_data/shortcuts.py": "647fd7d69835896b3230b8ce61d818cc68aa0713e6a8aae53de100c12adca955",
+    "eval/rondo_eval/publication_critic/training_data/token_census.py": "2179a28beccab354847d6bb49718b1c2ebfd3a9161fdafc80dd1183705e64a82",
+    "eval/templates/publication-critic/input-contract-v2.md": "bba923d37c4b533086d3753b3f47c3f45843f6ca729ee8cb275c6567772a2311",
+    "eval/templates/publication-critic/product-packet-limits-v1.json": "eb2ec31c1dc4cb271fca8f291b53b75771fd42ede4a49a03fa0628ef147f9397",
+    "eval/templates/publication-critic/qualification-rubric-v1.md": "cc15207b3c6e2482e56710f735d01893f8c8c020df35a18918e1a0a1be7f02e4",
+    "eval/templates/publication-critic/render-contract-v3.json": "8bd5449956f20f26c6d68fe410f22fc2925540eb07d63050ddad70ef87cfef2c",
+    "eval/templates/publication-critic/training-data-design-lock-v1.json": "cc56ba61778d84bddce468070333deaafce2f888507e2ea2f52fe1be1dd7843b",
+    "eval/templates/publication-critic/training-data-design-lock-v5.json": "2318f805326c3fb653f3e7ebd01c48fdd521764a18fef74b53f22fba9cb3361c",
+    "eval/templates/publication-critic/training-data-design-lock-v6.json": "6b177962b202156990c3a63e14e928fc64550f73c78ac0fd2e3ace49e9f8047f",
+    "eval/templates/publication-critic/training-data-generator-prompt-v6.md": "c40aac8f9aca869dfdc05d5731fa29c42a498b99829314eb3554a8a289e0d1d9",
+    "eval/templates/publication-critic/training-data-reviewer-prompt-v1.md": "38235f56bcb3a0a29ce39dd90b6ca1d32dda4e6c9866c430bf9f72db25878d2c",
+    "eval/templates/publication-critic/training-data-schema-v1.json": "4cdd069d8e2ed7ee3ba9b008bb1fab567da113f387f6f7e222e6bb3359bc484c",
+    "eval/tools/finalize_publication_critic_training_data.py": "28e86a51705638c1d58f69ce9433319a74c63401d13df68117bc833cc1b267a2",
+    "eval/tools/generate_publication_critic_training_data.py": "efbd1cb4e6823d875e91b5c8bd5b7571c1bc14d2c4a8b351139e1911dfba4ff4"
+  },
+  "rehearsal": {
+    "run_id": "plan059-rehearsal-v20",
+    "generator_run_sha256": "b81bbcec56b80cdeca103ee01c2ad96faa6cedd74a95c5d3c646dea6e581dd0e",
+    "reviewer_run_sha256": "42fb2a998eb01a71cc5525677dc755761116de5a244e2f3f6e80f951d6c049dc",
+    "candidate_reviews_sha256": "8399ed8642d927c3ab1060233d1b19b4706fc3a1206872b4125f6939f72787d1",
+    "pair_reviews_sha256": "ca0c1f7b8c187200c93c70317ee2cc4867693dcebc49baac7b9005ec045dde18",
+    "finalization_manifest_sha256": "f854cb47a2adc8d5dc936c32cb4c1e0551b208c8eac9875723b98504e99d1493",
+    "finalization_content_sha256": "df5a7ffec3311fc4247ef4f8c3fd1dbc9445ab61f36d8eb7f5e490abf4d6c474",
+    "candidate_count": 33,
+    "candidate_decisions": {"accept": 33, "revise": 0, "exclude": 0},
+    "pair_count": 17,
+    "pair_decisions": {"accept": 17, "downgrade": 0, "exclude": 0},
+    "token_total": 26196,
+    "token_min": 572,
+    "token_max": 1367,
+    "dropped_oldest_publications_total": 0,
+    "model_visible_text_shortcuts": 0,
+    "model_visible_candidate_length_shortcuts": 0,
+    "plan054_reference_matches": 0,
+    "consumer_smoke": "pass",
+    "remaining_findings": []
+  },
+  "revision_reason": {
+    "origin": "formal_v10_normalized_text_shortcut",
+    "v5_status": "data_no_go",
+    "findings_closed": [
+      "replaced the four-way cross-split REWRITE-only normalized fragment without changing the reviewed continuity boundary"
+    ],
+    "review_policy": "Per the user's temporary instruction, the v19 independent semantic decision was reused for the semantically unchanged surface repair; the executor reran shortcut, tokenizer, consumer, and freeze checks."
+  },
+  "formal_scale": {
+    "candidate_target": 72,
+    "candidate_hard_cap": 84,
+    "boundary_pair_target": 30,
+    "boundary_pair_hard_cap": 36,
+    "within_pass_pair_target": 6,
+    "within_pass_pair_hard_cap": 8,
+    "stop_rule": "stop when the frozen target satisfies every formal gate; do not expand toward hard caps for volume"
+  },
+  "resource_boundary": {
+    "external_api": false,
+    "local_model": false,
+    "model_forward": false,
+    "weights": false,
+    "docker": false,
+    "training": false,
+    "tokenizer_only": true
+  }
+}

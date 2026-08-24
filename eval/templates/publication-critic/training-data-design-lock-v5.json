@@ -1,0 +1,46 @@
+{
+  "schema": "rondo-publication-critic-training-data-design-lock-v5",
+  "dataset_revision": "v5",
+  "purpose": "Plan 059 M3-B1a corrective revision with product-semantic continuity negatives, diverse scope process noise, scenario-scoped exact long inputs, and mandatory Plan 054 input identity",
+  "base_lock": {
+    "relative_path": "eval/templates/publication-critic/training-data-design-lock-v1.json",
+    "sha256": "cc56ba61778d84bddce468070333deaafce2f888507e2ea2f52fe1be1dd7843b"
+  },
+  "supersedes": {
+    "relative_path": "eval/templates/publication-critic/training-data-design-lock-v4.json",
+    "sha256": "3820ef2b210d707f336092f1021bb53b127456130317af9f4ad6a81ec3d5a942"
+  },
+  "overrides": {
+    "split_seed": "plan059-publication-critic-split-v1",
+    "generator_prompt_relative_path": "eval/templates/publication-critic/training-data-generator-prompt-v5.md",
+    "visible_text_shortcut_contract": {
+      "fields": [
+        "candidate.summary",
+        "candidate.handoff"
+      ],
+      "normalization": "NFKC_casefold_whitespace_collapse",
+      "character_ngram_width": 4,
+      "minimum_candidate_support": 4,
+      "minimum_split_support": 2,
+      "reject_when": "the same model-visible fragment occurs in at least four candidates across at least two splits and all occurrences have one Binary label"
+    },
+    "candidate_token_length_shortcut_contract": {
+      "source": "exact_tokenizer_census.buckets.candidate",
+      "directions": [
+        "at_most",
+        "at_least"
+      ],
+      "minimum_candidate_support": 6,
+      "minimum_split_support": 2,
+      "reject_when": "an exact candidate-token threshold selects at least six candidates across at least two splits and every selected candidate has one Binary label"
+    },
+    "template_group_rule": "scenario-local only after explicit authored Q-/Within-PASS text has no shared cross-scenario lexical or semantic process template; any future shared template must use one truthful group",
+    "length_bucket_contract": {
+      "responsibility": "Scenario-scoped; every candidate endpoint must exactly inherit its Scenario length_bucket",
+      "long_exact_input_min_tokens": 1000,
+      "non_long_exact_input_max_tokens": 999,
+      "coverage_source": "exact-tokenizer total token_count after overflow handling",
+      "long_content_rule": "four distinct product-shaped prior publications; repeated mechanical filler is forbidden"
+    }
+  }
+}

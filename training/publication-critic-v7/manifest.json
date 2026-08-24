@@ -1,0 +1,158 @@
+{
+  "content_sha256": "07666936706786c456e83a7130c211013ff95cfb3e494154e62fca1e3bc528eb",
+  "contracts": {
+    "eval/manifests/publication-critic/training-data-teacher-freeze-v7.json": "07075d1736e38e600ebd0e6361b3a7ec1d518744b0f96ced7edaaed2e645a6ab",
+    "eval/rondo_eval/publication_critic/training_data/__init__.py": "ee834503a2f7ea76ca056e0099b253ffd8a345b465b962fb0f94685e4acec8b2",
+    "eval/rondo_eval/publication_critic/training_data/consumer.py": "04175cafc49f43305a421a8274f0fec341e80e21a916f9b914ea3ef1542a7f50",
+    "eval/rondo_eval/publication_critic/training_data/contract.py": "2050e408d6db3dfaee0eb834daf862769864049c5ec7844b3f9a14562189717a",
+    "eval/rondo_eval/publication_critic/training_data/dedup.py": "b3b868dc7ca7e5a0416f1eadc2f00f03bde59c8f6fbc1f4a979baf9259b87e0d",
+    "eval/rondo_eval/publication_critic/training_data/freeze.py": "a3d1d189c0288d2f750260a6bf7295c0592c22b03d41c7624a93d68ba601cacb",
+    "eval/rondo_eval/publication_critic/training_data/grouping.py": "cd2fb37dedd52a4bf543235d2258687a8371fd1c1c173e5d88d77b13cb8bc69d",
+    "eval/rondo_eval/publication_critic/training_data/input_identity.py": "653b95c4e49cdfb32f89984f6e1568524d07018d10a80eb060fe404bb8344a81",
+    "eval/rondo_eval/publication_critic/training_data/shortcuts.py": "647fd7d69835896b3230b8ce61d818cc68aa0713e6a8aae53de100c12adca955",
+    "eval/rondo_eval/publication_critic/training_data/token_census.py": "2179a28beccab354847d6bb49718b1c2ebfd3a9161fdafc80dd1183705e64a82",
+    "eval/templates/publication-critic/input-contract-v2.md": "bba923d37c4b533086d3753b3f47c3f45843f6ca729ee8cb275c6567772a2311",
+    "eval/templates/publication-critic/product-packet-limits-v1.json": "eb2ec31c1dc4cb271fca8f291b53b75771fd42ede4a49a03fa0628ef147f9397",
+    "eval/templates/publication-critic/qualification-rubric-v1.md": "cc15207b3c6e2482e56710f735d01893f8c8c020df35a18918e1a0a1be7f02e4",
+    "eval/templates/publication-critic/render-contract-v3.json": "8bd5449956f20f26c6d68fe410f22fc2925540eb07d63050ddad70ef87cfef2c",
+    "eval/templates/publication-critic/training-data-design-lock-v1.json": "cc56ba61778d84bddce468070333deaafce2f888507e2ea2f52fe1be1dd7843b",
+    "eval/templates/publication-critic/training-data-design-lock-v6.json": "6b177962b202156990c3a63e14e928fc64550f73c78ac0fd2e3ace49e9f8047f",
+    "eval/templates/publication-critic/training-data-design-lock-v7.json": "b7f41133c4f62ebbe392b76e4e75add7348157571fe974d85831eba0fb8709d6",
+    "eval/templates/publication-critic/training-data-generator-prompt-v7.md": "a37213453e87c4b4d61dcdd2514b197bd4493f75dea242fee6edbc9b5ed191bf",
+    "eval/templates/publication-critic/training-data-reviewer-prompt-v1.md": "38235f56bcb3a0a29ce39dd90b6ca1d32dda4e6c9866c430bf9f72db25878d2c",
+    "eval/templates/publication-critic/training-data-schema-v1.json": "4cdd069d8e2ed7ee3ba9b008bb1fab567da113f387f6f7e222e6bb3359bc484c",
+    "eval/tools/finalize_publication_critic_training_data.py": "9a1f3d77193e475268aac5e300a98054067b0c20ebe1a7d6b14e87a4f9a80e2c",
+    "eval/tools/generate_publication_critic_training_data.py": "74a52a9acbab0abd7ec3ba446e49464c4bb430caafa2fdb3baae6e54cf28d575"
+  },
+  "dataset_name": "rondo-publication-critic-training",
+  "dataset_revision": "v7",
+  "design_lock_sha256": "b7f41133c4f62ebbe392b76e4e75add7348157571fe974d85831eba0fb8709d6",
+  "files": {
+    "DATA_CARD.md": {
+      "bytes": 2321,
+      "sha256": "ed2ffa849a52ade4c3f92b8d0835adde68283865779bcedb31b3ec4de904e66f"
+    },
+    "membership.json": {
+      "bytes": 6517,
+      "sha256": "170d586f578def0a69a01816860c60755ba41ce189de618970ea07b3720a0b0d"
+    },
+    "packets.jsonl": {
+      "bytes": 80606,
+      "sha256": "1f7b33e435ab795b5e8d236a9ab6dcb56ce42e96e945f7d7e56d31ee6fa7a871"
+    },
+    "pairs.jsonl": {
+      "bytes": 11162,
+      "sha256": "6efe20ad3cadccf63a5b0e1920ee62f3ef2f5c2aa5352503da81c3ac8cd38f86"
+    },
+    "reports.json": {
+      "bytes": 22908,
+      "sha256": "a592561b28f4301907cd76f5107f9cb48bc242e4db57704a4b5e9696d80edfeb"
+    },
+    "scenarios.jsonl": {
+      "bytes": 34301,
+      "sha256": "d4665f46320b13a6b20b862709d85dcafc1c79e9e953f18cd5f7038a8f14a6db"
+    },
+    "split-index.json": {
+      "bytes": 2668,
+      "sha256": "239871cd9b2801446e899a2f11a7abb093b15377ff64b000b4d7629fa50c2572"
+    },
+    "supervision.jsonl": {
+      "bytes": 85405,
+      "sha256": "6b7b49ea09520272a38deda17510d3da9388a536c2f782e4b1ff240735472db5"
+    },
+    "teacher-identity.json": {
+      "bytes": 813,
+      "sha256": "65fe6d48f177a1a6480a8d6f99ed9050e1300f0f30595bd6097e33e162490190"
+    },
+    "token-census.jsonl": {
+      "bytes": 24811,
+      "sha256": "d568c9e6d26bbb0fb7bef48a4208e4899f7d7d9001a8254ab67e5af32738a10e"
+    },
+    "train-only-smoke-bundle.json": {
+      "bytes": 17966,
+      "sha256": "5aba49c0eb0cb01df02ff3eecbe527234c3af884331742507c56852ccd0e9839"
+    }
+  },
+  "generation_commit": "62982ee35920ceff6e3dd6c5a2e296f81b25d031",
+  "input_identity": {
+    "adopted_window_tokens": 16384,
+    "candidate_truncation": "forbidden",
+    "continuity_overflow": "drop_whole_oldest_prior_publications_then_explicitly_encode_additional_omission",
+    "input_template_revision": "v3-sha256-dc3209af0d284dfe4be57403873717ba5f2790e2257cd4a39a2376de5696044c",
+    "packet_schema": {
+      "name": "rondo-publication-packet",
+      "revision": "v1"
+    },
+    "plan054_freeze_sha256": "2a8081d3700f4209f5ac3cd7dabb7f6d31d0cb0b0ea0e9e8c639c8f10dbebfeb",
+    "qualification_rubric": {
+      "name": "rondo-publication-qualification",
+      "revision": "v1"
+    },
+    "render_contract": "rondo-publication-critic-render@v3",
+    "tokenizer_name": "skywork-reward-v2-qwen3-1.7b-tokenizer",
+    "tokenizer_revision": "e51ea3e08fb81326c3b812a7ff0cb9cee83e59cc"
+  },
+  "schema": "rondo-publication-critic-training-freeze-v1",
+  "statistics": {
+    "binary_by_split": {
+      "train": {
+        "PASS": 22,
+        "REWRITE": 20
+      },
+      "unseen_test": {
+        "PASS": 8,
+        "REWRITE": 6
+      },
+      "validation": {
+        "PASS": 9,
+        "REWRITE": 7
+      }
+    },
+    "binary_counts": {
+      "PASS": 39,
+      "REWRITE": 33
+    },
+    "candidate_count": 72,
+    "pair_counts": {
+      "boundary": 30,
+      "within_pass": 6
+    },
+    "pairs_by_split": {
+      "train": {
+        "boundary": 18,
+        "within_pass": 3
+      },
+      "unseen_test": {
+        "boundary": 6,
+        "within_pass": 1
+      },
+      "validation": {
+        "boundary": 6,
+        "within_pass": 2
+      }
+    },
+    "scenario_group_count": 36,
+    "split_counts": {
+      "train": 42,
+      "unseen_test": 14,
+      "validation": 16
+    },
+    "token_census": {
+      "bucket_totals": {
+        "candidate": 5206,
+        "continuity": 7715,
+        "cross_segment_framing": 8064,
+        "evidence_v1": 1296,
+        "packet_framing": 4104,
+        "policy": 23400,
+        "special_tokens": 288
+      },
+      "candidate_count": 72,
+      "dropped_oldest_publications_total": 0,
+      "schema_version": 1,
+      "token_max": 1367,
+      "token_min": 553,
+      "token_total": 50073
+    }
+  }
+}

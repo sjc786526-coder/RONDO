@@ -1,6 +1,6 @@
 # RONDO 长程规划（WBS）
 
-最后更新：2026-08-22（Plan 056 已完成并选择 C2；Plan 055 / M3-B2a 与 Plan 057 / M3-B2b 已主线整合）
+最后更新：2026-08-23（Plan 058 正在独立 worktree 推进 C2；Plan 054 / M3-A2 已主线整合，Plan 059 / M3-B1a revision v7 已在 059 worktree 完成正式冻结与独立功能预审）
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段指针、跨方向关系、
 稳定工程边界和授权门；已完成成果与验收见 `doc/WBS-COMPLETED.md`，单次任务合同见 `plan/`，执行细节见
@@ -18,9 +18,9 @@
 | 方向 | 当前状态 | 当前规划边界 |
 |---|---|---|
 | 0：量化测评基准 | 既有设施与首次 schema v7 正式 canary 已完成，当前无 active campaign | 保留设施；历史结果见 COMPLETED，新 campaign 须重新立项与授权 |
-| 1：Harness 优化 | **Plan 056 已完成有效 20/20，选择 C2** | 测量已停止；C2 行为优化尚未立项或授权，须另建 ExecPlan |
+| 1：Harness 优化 | **Plan 058 正在独立 worktree 推进 C2** | 正式 campaign 的冻结身份、账本、资产与最终结论仍由 Plan 058 独立负责，尚未主线整合 |
 | 2：本地审批模型 | **已收口，今后不再开启** | 最终结论为“保留为实验”；不改生产默认，不再规划后续工作包 |
-| 3：RONDO Multi | 第一、二期及其收口案例已完成；**三期 M3-A1、M3-B2a、M3-B2b 已完成** | 当前唯一已解锁工作包为 M3-A2；产品链等待模型链在 M3-C1 汇合 |
+| 3：RONDO Multi | 第一、二期及其收口案例、**三期 M3-A1、M3-A2、M3-B2a、M3-B2b 已完成** | Plan 059 / M3-B1a revision v7 已在 059 worktree 正式冻结并通过独立功能预审，待计划制定者最终验收与主线整合；M3-B1b 尚未解锁 |
 
 ### 方向命名口径
 
@@ -49,18 +49,21 @@ formal-v5，Plan 056 累计 483 attempts、`10.329028 USD`，reservation 0，随
 `eval/results/observations/plan056-direction1-bounded-observation-formal-v6-2026-08-22.json`，详细历史和验收证据见
 `doc/WBS-COMPLETED.md` 与 `plan/056-direction1-bounded-observation-execplan.md`。
 
-方向 1 的下一工作边界是另行规划 C2 行为优化；当前结果只选择候选，不授权修改 prompt、工具语义、Guardian、
-调度、审批或安全策略，也不预设实现路线、收益或预算。启动时须单独建立 ExecPlan、正确性回归、成功/停止条件和
-有界测评授权；在此之前方向 1 没有 active campaign。
+方向 1 当前由 Plan 058 在独立 worktree 推进 C2 行为优化与正式 campaign；其冻结身份、预算/账本、运行资产、结算、资源释放和最终结论
+以 Plan 058 自身合同与后续主线整合为准。本页不根据并行工作树的中间状态预写结果，也不授权其他任务读取、修改或清理其现场。
 
 ### 方向 3：Publication Critic 三期
 
 - M3-A1 产品合同、M3-B2a / Plan 055 本地 Critic 服务与 M3-B2b / Plan 057 发布流程接入均已完成并进入主线。三期分为
   `M3-A2 → M3-B1a → M3-B1b → M3-B1c` 数据/训练链与 `M3-B2a → M3-B2b` 产品链，两链在
   `M3-C1 → M3-C2` 汇合，最后由 M3-D 收口。
-- 当前方向 3 唯一已解锁工作包是 M3-A2。产品链已经到达汇合点前，但 M3-C1 仍须等待
-  `M3-A2 → M3-B1a → M3-B1b → M3-B1c` 完成，不能作为 Plan 057 的直接后继提前启动。
-- 已完成工作不授权提前创建训练数据、下载模型、运行付费训练或启用真实 Critic。每个后续包仍须按自身范围取得授权。
+- M3-A2 / Plan 054 已完成并进入主线。M3-B1a / Plan 059 的 v1/v2 shortcut、v3 独立验收 6 项 finding、v4 预审的 continuity/scope
+  finding、v5 正式文本 shortcut 与 v6 独立验收的 consumer 构造旁路/Scope 长度信号均判定数据 NO-GO。revision v7 在 059 worktree
+  冻结 72 candidate、30 Boundary 与 6 Within-PASS：三 split 为 42/16/14，39 PASS / 33 REWRITE；受影响的 12 个 Scope endpoint、
+  6 个 Boundary 与 1 个 Within-PASS 已独立复核，其余行经模型可见输入相等门禁复用。group/dedup、文本与 exact-token 长度 shortcut、
+  50,073-token census、manifest、factory-only 默认 train consumer 与 smoke bundle 均通过。计划制定者最终验收尚未完成，M3-B1b 仍未解锁，
+  不能提前启动。
+- Plan 059 的当前授权只覆盖其轻量数据工作，不授权训练、完整模型、项目真实 API、Docker 或启用真实 Critic；每个后续包仍须按自身范围取得授权。
 
 方向 1 与方向 3 的只读研究、轻量代码和数据工作可以并行；本地重型 Cargo、Docker、真实本地模型加载/推理继续
 全局串行，并由实际进入实施的工作包协调共享资源。

@@ -1,0 +1,113 @@
+{
+  "schema": "rondo-publication-critic-plan059-teacher-freeze-v1",
+  "plan": "059",
+  "dataset_revision": "v1",
+  "planning_baseline_commit": "086f5d39ca48d910bd164aa9f77a0a534eaaeb5d",
+  "formal_generation_allowed": true,
+  "generator": {
+    "model": "gpt-5.6-sol",
+    "reasoning_effort": "runtime_not_exposed",
+    "role": "direct_plan059_generator",
+    "prompt_sha256": "e72a763f9e73498e5a62641ac3c8f7aca92cb7e170a5d779e5e543cc762a78f3",
+    "date": "2026-08-23",
+    "session_identity": "01a02d8e-e011-71e0-a2b7-503a04bb2119"
+  },
+  "reviewer": {
+    "model": "gpt-5.6-sol",
+    "reasoning_effort": "xhigh",
+    "role": "independent_teacher_reviewer",
+    "prompt_sha256": "38235f56bcb3a0a29ce39dd90b6ca1d32dda4e6c9866c430bf9f72db25878d2c",
+    "date": "2026-08-23",
+    "session_identity": "/root/teacher_reviewer"
+  },
+  "input_identity": {
+    "packet_schema": "rondo-publication-packet@v1",
+    "rubric": "rondo-publication-qualification@v1",
+    "render_contract": "rondo-publication-critic-render@v3",
+    "input_template_revision": "v3-sha256-dc3209af0d284dfe4be57403873717ba5f2790e2257cd4a39a2376de5696044c",
+    "tokenizer_revision": "e51ea3e08fb81326c3b812a7ff0cb9cee83e59cc",
+    "adopted_window_tokens": 16384
+  },
+  "contracts": {
+    "eval/templates/publication-critic/training-data-design-lock-v1.json": "cc56ba61778d84bddce468070333deaafce2f888507e2ea2f52fe1be1dd7843b",
+    "eval/templates/publication-critic/training-data-schema-v1.json": "4cdd069d8e2ed7ee3ba9b008bb1fab567da113f387f6f7e222e6bb3359bc484c",
+    "eval/templates/publication-critic/training-data-generator-prompt-v1.md": "e72a763f9e73498e5a62641ac3c8f7aca92cb7e170a5d779e5e543cc762a78f3",
+    "eval/templates/publication-critic/training-data-reviewer-prompt-v1.md": "38235f56bcb3a0a29ce39dd90b6ca1d32dda4e6c9866c430bf9f72db25878d2c",
+    "eval/tools/generate_publication_critic_training_data.py": "88bd5e0a6b6211d4eced8c09df4114c15effb8431d151dfe09b60f6a502f077c",
+    "eval/tools/finalize_publication_critic_training_data.py": "645ef96dfc095032c979387885c98a0bbb90204b77c24f54ad44882e88b1a068",
+    "eval/rondo_eval/publication_critic/training_data/__init__.py": "9bc9467172c794c97cf0c63a4181e4ec1c2e5f2e66faaa01f4e756fe032082db",
+    "eval/rondo_eval/publication_critic/training_data/consumer.py": "b5025c34a1aa94c52f585e6edd6a897692840d6eeb4d16181878bc76695cef23",
+    "eval/rondo_eval/publication_critic/training_data/contract.py": "4c117cc6dcb3a9dc8addaba811f54e3161a5704feaa816fbb711a56215e156c5",
+    "eval/rondo_eval/publication_critic/training_data/dedup.py": "b3b868dc7ca7e5a0416f1eadc2f00f03bde59c8f6fbc1f4a979baf9259b87e0d",
+    "eval/rondo_eval/publication_critic/training_data/freeze.py": "e46cb5f145f33ff04f5e52f36bc1d43d95a1d8fe325d08bbb025b3da87cced22",
+    "eval/rondo_eval/publication_critic/training_data/grouping.py": "cd2fb37dedd52a4bf543235d2258687a8371fd1c1c173e5d88d77b13cb8bc69d",
+    "eval/rondo_eval/publication_critic/training_data/token_census.py": "2179a28beccab354847d6bb49718b1c2ebfd3a9161fdafc80dd1183705e64a82"
+  },
+  "rehearsal": {
+    "run_id": "plan059-rehearsal-v3",
+    "generator_run_sha256": "e8778cd94f4f651a0a9e72484043039560dd8230803553d675e9834e0e9c1188",
+    "reviewer_run_sha256": "71f56ff2618f3a64bb295575017cf834b2cb496f93a0961d8aa5926e4bc7dc6c",
+    "candidate_reviews_sha256": "66bc8761bc6eb89471958497f1cabdd122e6f76cfee442bc0738075f2e364094",
+    "pair_reviews_sha256": "93683a63da70530bc51f6cf1af8ea543d25b42b7fdb18bd732ec9bb0702fdb61",
+    "finalization_manifest_sha256": "425b648fa61cee719be95a797d84ab5932eadbc0418d41de6355e949a41ed689",
+    "candidate_count": 12,
+    "candidate_decisions": {
+      "accept": 12,
+      "revise": 0,
+      "exclude": 0
+    },
+    "pair_count": 6,
+    "pair_decisions": {
+      "accept": 6,
+      "downgrade": 0,
+      "exclude": 0
+    },
+    "token_total": 7598,
+    "dropped_oldest_publications_total": 0,
+    "plan054_reference_matches": 0,
+    "consumer_smoke": "pass",
+    "closed_findings": [
+      "new_event_continuity_metadata_mismatch",
+      "candidate_length_bucket_mismatch",
+      "honest_uncertainty_pair_changes_mechanism_specificity",
+      "mixed_hard_focus_schema_violation"
+    ],
+    "remaining_findings": []
+  },
+  "formal_scale": {
+    "candidate_target": 72,
+    "candidate_hard_cap": 84,
+    "boundary_pair_target": 30,
+    "boundary_pair_hard_cap": 36,
+    "within_pass_pair_target": 6,
+    "within_pass_pair_hard_cap": 8,
+    "stop_rule": "stop when the frozen target satisfies every formal gate; do not expand toward hard caps for volume"
+  },
+  "formal_repairs": [
+    {
+      "origin": "formal-v1-batch-honest_uncertainty",
+      "code": "honest_pair_mechanism_specificity_drift",
+      "affected_pair_id": "pair-b-honest-04-boundary",
+      "resolution": "Q+ now names the same comparator-defect mechanism as Q- while retaining explicit uncertainty; only the affected endpoint and pair require re-review"
+    },
+    {
+      "origin": "formal-v2-batch-internal_consistency",
+      "code": "incomplete_consistency_pair_removed_actionable_continuity",
+      "affected_pair_ids": [
+        "pair-b-consistency-02-boundary",
+        "pair-b-consistency-04-boundary",
+        "pair-b-consistency-06-boundary"
+      ],
+      "resolution": "Q- retains the exact actionable handoff and introduces only a contradictory completed claim inside the summary; only the three affected endpoints and pairs require re-review"
+    }
+  ],
+  "resource_boundary": {
+    "external_api": false,
+    "local_model": false,
+    "model_forward": false,
+    "weights": false,
+    "docker": false,
+    "training": false,
+    "tokenizer_only": true
+  }
+}

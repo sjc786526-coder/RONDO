@@ -1,0 +1,535 @@
+{
+  "dataset_revision": "v7",
+  "membership": {
+    "dataset_revision": "v7",
+    "schema_version": 1,
+    "stages": {
+      "C1": {
+        "candidate_ids": [
+          "pc059-b-consistency-01-qminus",
+          "pc059-b-consistency-01-qplus",
+          "pc059-b-useful-02-qminus",
+          "pc059-b-useful-02-qplus",
+          "pc059-b-useful-06-pass-soft",
+          "pc059-b-useful-06-qplus"
+        ],
+        "pair_ids": []
+      },
+      "C2": {
+        "candidate_ids": [
+          "pc059-b-consistency-01-qminus",
+          "pc059-b-consistency-01-qplus",
+          "pc059-b-useful-02-qminus",
+          "pc059-b-useful-02-qplus",
+          "pc059-b-useful-06-pass-soft",
+          "pc059-b-useful-06-qplus"
+        ],
+        "pair_ids": [
+          "pair-b-useful-02-boundary"
+        ]
+      },
+      "C3": {
+        "candidate_ids": [
+          "pc059-b-consistency-01-qminus",
+          "pc059-b-consistency-01-qplus",
+          "pc059-b-useful-02-qminus",
+          "pc059-b-useful-02-qplus",
+          "pc059-b-useful-06-pass-soft",
+          "pc059-b-useful-06-qplus"
+        ],
+        "pair_ids": [
+          "pair-b-useful-02-boundary",
+          "pair-b-useful-06-within-pass"
+        ]
+      }
+    }
+  },
+  "packets": [
+    {
+      "candidate_id": "pc059-b-consistency-01-qminus",
+      "packet": {
+        "actor_role": "member",
+        "candidate": {
+          "handoff": "锁文件已经清除，但任务仍未完成，需要继续查同一故障。",
+          "summary": "任务锁文件已清除；定向用例通过，事项完成。"
+        },
+        "continuity": {
+          "state": "not_applicable"
+        },
+        "evidence_v1": {
+          "candidate_window": "not_frozen_before_commit",
+          "semantic_entailment": "not_evaluated"
+        },
+        "local_scope": {
+          "title": "临时文件清理遗漏锁文件"
+        },
+        "qualification": {
+          "packet_schema": {
+            "name": "rondo-publication-packet",
+            "revision": "v1"
+          },
+          "rubric": {
+            "name": "rondo-publication-qualification",
+            "revision": "v1"
+          }
+        },
+        "target_kind": "new_event"
+      },
+      "schema_version": 1
+    },
+    {
+      "candidate_id": "pc059-b-consistency-01-qplus",
+      "packet": {
+        "actor_role": "member",
+        "candidate": {
+          "handoff": null,
+          "summary": "任务锁文件已清除；定向用例通过，事项完成。"
+        },
+        "continuity": {
+          "state": "not_applicable"
+        },
+        "evidence_v1": {
+          "candidate_window": "not_frozen_before_commit",
+          "semantic_entailment": "not_evaluated"
+        },
+        "local_scope": {
+          "title": "临时文件清理遗漏锁文件"
+        },
+        "qualification": {
+          "packet_schema": {
+            "name": "rondo-publication-packet",
+            "revision": "v1"
+          },
+          "rubric": {
+            "name": "rondo-publication-qualification",
+            "revision": "v1"
+          }
+        },
+        "target_kind": "new_event"
+      },
+      "schema_version": 1
+    },
+    {
+      "candidate_id": "pc059-b-useful-02-qminus",
+      "packet": {
+        "actor_role": "root",
+        "candidate": {
+          "handoff": "从 UNC 前缀归一化分支继续，先固定尾随空格用例。",
+          "summary": "部分路径有进展，剩余问题还需后续处理。"
+        },
+        "continuity": {
+          "state": "not_applicable"
+        },
+        "evidence_v1": {
+          "candidate_window": "not_frozen_before_commit",
+          "semantic_entailment": "not_evaluated"
+        },
+        "local_scope": {
+          "title": "Windows 路径归一化仍有缺口"
+        },
+        "qualification": {
+          "packet_schema": {
+            "name": "rondo-publication-packet",
+            "revision": "v1"
+          },
+          "rubric": {
+            "name": "rondo-publication-qualification",
+            "revision": "v1"
+          }
+        },
+        "target_kind": "new_event"
+      },
+      "schema_version": 1
+    },
+    {
+      "candidate_id": "pc059-b-useful-02-qplus",
+      "packet": {
+        "actor_role": "root",
+        "candidate": {
+          "handoff": "从 UNC 前缀归一化分支继续，先固定尾随空格用例。",
+          "summary": "普通盘符路径已通过；带尾随空格的 UNC 路径仍在前缀归一化后被拒，事项未完成。"
+        },
+        "continuity": {
+          "state": "not_applicable"
+        },
+        "evidence_v1": {
+          "candidate_window": "not_frozen_before_commit",
+          "semantic_entailment": "not_evaluated"
+        },
+        "local_scope": {
+          "title": "Windows 路径归一化仍有缺口"
+        },
+        "qualification": {
+          "packet_schema": {
+            "name": "rondo-publication-packet",
+            "revision": "v1"
+          },
+          "rubric": {
+            "name": "rondo-publication-qualification",
+            "revision": "v1"
+          }
+        },
+        "target_kind": "new_event"
+      },
+      "schema_version": 1
+    },
+    {
+      "candidate_id": "pc059-b-useful-06-pass-soft",
+      "packet": {
+        "actor_role": "root",
+        "candidate": {
+          "handoff": "验证空分片直接完成的状态迁移，并复跑混合分片恢复。",
+          "summary": "非空分片恢复通过；空分片仍等待不存在的首条记录，尚未验证跳过等待是否安全。接续范围仍限空分片状态迁移和混合分片复跑。"
+        },
+        "continuity": {
+          "freshness": "known_stale",
+          "last_known_revision": 40,
+          "state": "unavailable"
+        },
+        "evidence_v1": {
+          "candidate_window": "not_frozen_before_commit",
+          "semantic_entailment": "not_evaluated"
+        },
+        "local_scope": {
+          "title": "索引恢复在空分片上停住"
+        },
+        "qualification": {
+          "packet_schema": {
+            "name": "rondo-publication-packet",
+            "revision": "v1"
+          },
+          "rubric": {
+            "name": "rondo-publication-qualification",
+            "revision": "v1"
+          }
+        },
+        "target_kind": "existing_event"
+      },
+      "schema_version": 1
+    },
+    {
+      "candidate_id": "pc059-b-useful-06-qplus",
+      "packet": {
+        "actor_role": "root",
+        "candidate": {
+          "handoff": "验证空分片直接完成的状态迁移，并复跑混合分片恢复。",
+          "summary": "非空分片恢复通过；空分片仍等待不存在的首条记录，尚未验证跳过等待是否安全。"
+        },
+        "continuity": {
+          "freshness": "known_stale",
+          "last_known_revision": 40,
+          "state": "unavailable"
+        },
+        "evidence_v1": {
+          "candidate_window": "not_frozen_before_commit",
+          "semantic_entailment": "not_evaluated"
+        },
+        "local_scope": {
+          "title": "索引恢复在空分片上停住"
+        },
+        "qualification": {
+          "packet_schema": {
+            "name": "rondo-publication-packet",
+            "revision": "v1"
+          },
+          "rubric": {
+            "name": "rondo-publication-qualification",
+            "revision": "v1"
+          }
+        },
+        "target_kind": "existing_event"
+      },
+      "schema_version": 1
+    }
+  ],
+  "pairs": [
+    {
+      "dispreferred_candidate_id": "pc059-b-useful-02-qminus",
+      "kind": "boundary",
+      "pair_id": "pair-b-useful-02-boundary",
+      "preferred_candidate_id": "pc059-b-useful-02-qplus",
+      "review_status": "accept",
+      "scenario_id": "b-useful-02",
+      "schema_version": 1,
+      "soft_preference": null,
+      "target_dimension": "useful_state_transfer"
+    },
+    {
+      "dispreferred_candidate_id": "pc059-b-useful-06-pass-soft",
+      "kind": "within_pass",
+      "pair_id": "pair-b-useful-06-within-pass",
+      "preferred_candidate_id": "pc059-b-useful-06-qplus",
+      "review_status": "accept",
+      "scenario_id": "b-useful-06",
+      "schema_version": 1,
+      "soft_preference": "directness_and_lower_repetition",
+      "target_dimension": null
+    }
+  ],
+  "schema_version": 1,
+  "source_hashes": {
+    "membership.json": "170d586f578def0a69a01816860c60755ba41ce189de618970ea07b3720a0b0d",
+    "packets.jsonl": "1f7b33e435ab795b5e8d236a9ab6dcb56ce42e96e945f7d7e56d31ee6fa7a871",
+    "pairs.jsonl": "6efe20ad3cadccf63a5b0e1920ee62f3ef2f5c2aa5352503da81c3ac8cd38f86",
+    "supervision.jsonl": "6b7b49ea09520272a38deda17510d3da9388a536c2f782e4b1ff240735472db5"
+  },
+  "supervision": [
+    {
+      "actor_role": "member",
+      "binary_label": "REWRITE",
+      "candidate_id": "pc059-b-consistency-01-qminus",
+      "completion_state": "completed",
+      "defects": [
+        "internal_consistency"
+      ],
+      "generator_identity": {
+        "date": "2026-08-23",
+        "model": "gpt-5.6-sol",
+        "prompt_sha256": "a37213453e87c4b4d61dcdd2514b197bd4493f75dea242fee6edbc9b5ed191bf",
+        "reasoning_effort": "runtime_not_exposed",
+        "role": "direct_plan059_generator",
+        "session_identity": "01a02ec2-6085-73a1-95bf-dee63931a3c1"
+      },
+      "hard_focus": "internal_consistency",
+      "length_bucket": "medium",
+      "proposed_split": "train",
+      "publication_class": "new_event_completed",
+      "review_status": "accept",
+      "reviewer_identity": {
+        "date": "2026-08-23",
+        "model": "gpt-5.6-sol",
+        "prompt_sha256": "38235f56bcb3a0a29ce39dd90b6ca1d32dda4e6c9866c430bf9f72db25878d2c",
+        "reasoning_effort": "xhigh",
+        "role": "independent_teacher_reviewer",
+        "session_identity": "/root/teacher_reviewer_v2"
+      },
+      "scenario_group": "b-consistency-01",
+      "scenario_id": "b-consistency-01",
+      "schema_version": 1,
+      "slices": [
+        "internal_consistency",
+        "new_event_completed",
+        "continuity_not_applicable",
+        "evidence_not_applicable",
+        "internal_consistency_rewrite"
+      ],
+      "source_group": "plan059-synthetic-product-shaped-v1:b-consistency-01",
+      "style": "formal",
+      "template_group": "b-consistency-01",
+      "unicode": false
+    },
+    {
+      "actor_role": "member",
+      "binary_label": "PASS",
+      "candidate_id": "pc059-b-consistency-01-qplus",
+      "completion_state": "completed",
+      "defects": [],
+      "generator_identity": {
+        "date": "2026-08-23",
+        "model": "gpt-5.6-sol",
+        "prompt_sha256": "a37213453e87c4b4d61dcdd2514b197bd4493f75dea242fee6edbc9b5ed191bf",
+        "reasoning_effort": "runtime_not_exposed",
+        "role": "direct_plan059_generator",
+        "session_identity": "01a02ec2-6085-73a1-95bf-dee63931a3c1"
+      },
+      "hard_focus": "internal_consistency",
+      "length_bucket": "medium",
+      "proposed_split": "train",
+      "publication_class": "new_event_completed",
+      "review_status": "accept",
+      "reviewer_identity": {
+        "date": "2026-08-23",
+        "model": "gpt-5.6-sol",
+        "prompt_sha256": "38235f56bcb3a0a29ce39dd90b6ca1d32dda4e6c9866c430bf9f72db25878d2c",
+        "reasoning_effort": "xhigh",
+        "role": "independent_teacher_reviewer",
+        "session_identity": "/root/teacher_reviewer_v2"
+      },
+      "scenario_group": "b-consistency-01",
+      "scenario_id": "b-consistency-01",
+      "schema_version": 1,
+      "slices": [
+        "internal_consistency",
+        "new_event_completed",
+        "continuity_not_applicable",
+        "evidence_not_applicable"
+      ],
+      "source_group": "plan059-synthetic-product-shaped-v1:b-consistency-01",
+      "style": "formal",
+      "template_group": "b-consistency-01",
+      "unicode": false
+    },
+    {
+      "actor_role": "root",
+      "binary_label": "REWRITE",
+      "candidate_id": "pc059-b-useful-02-qminus",
+      "completion_state": "incomplete",
+      "defects": [
+        "useful_state_transfer"
+      ],
+      "generator_identity": {
+        "date": "2026-08-23",
+        "model": "gpt-5.6-sol",
+        "prompt_sha256": "a37213453e87c4b4d61dcdd2514b197bd4493f75dea242fee6edbc9b5ed191bf",
+        "reasoning_effort": "runtime_not_exposed",
+        "role": "direct_plan059_generator",
+        "session_identity": "01a02ec2-6085-73a1-95bf-dee63931a3c1"
+      },
+      "hard_focus": "useful_state_transfer",
+      "length_bucket": "medium",
+      "proposed_split": "train",
+      "publication_class": "new_event_incomplete",
+      "review_status": "accept",
+      "reviewer_identity": {
+        "date": "2026-08-23",
+        "model": "gpt-5.6-sol",
+        "prompt_sha256": "38235f56bcb3a0a29ce39dd90b6ca1d32dda4e6c9866c430bf9f72db25878d2c",
+        "reasoning_effort": "xhigh",
+        "role": "independent_teacher_reviewer",
+        "session_identity": "/root/teacher_reviewer_v2"
+      },
+      "scenario_group": "b-useful-02",
+      "scenario_id": "b-useful-02",
+      "schema_version": 1,
+      "slices": [
+        "useful_state_transfer",
+        "new_event_incomplete",
+        "continuity_not_applicable",
+        "evidence_not_applicable",
+        "unicode"
+      ],
+      "source_group": "plan059-synthetic-product-shaped-v1:b-useful-02",
+      "style": "conversational",
+      "template_group": "b-useful-02",
+      "unicode": true
+    },
+    {
+      "actor_role": "root",
+      "binary_label": "PASS",
+      "candidate_id": "pc059-b-useful-02-qplus",
+      "completion_state": "incomplete",
+      "defects": [],
+      "generator_identity": {
+        "date": "2026-08-23",
+        "model": "gpt-5.6-sol",
+        "prompt_sha256": "a37213453e87c4b4d61dcdd2514b197bd4493f75dea242fee6edbc9b5ed191bf",
+        "reasoning_effort": "runtime_not_exposed",
+        "role": "direct_plan059_generator",
+        "session_identity": "01a02ec2-6085-73a1-95bf-dee63931a3c1"
+      },
+      "hard_focus": "useful_state_transfer",
+      "length_bucket": "medium",
+      "proposed_split": "train",
+      "publication_class": "new_event_incomplete",
+      "review_status": "accept",
+      "reviewer_identity": {
+        "date": "2026-08-23",
+        "model": "gpt-5.6-sol",
+        "prompt_sha256": "38235f56bcb3a0a29ce39dd90b6ca1d32dda4e6c9866c430bf9f72db25878d2c",
+        "reasoning_effort": "xhigh",
+        "role": "independent_teacher_reviewer",
+        "session_identity": "/root/teacher_reviewer_v2"
+      },
+      "scenario_group": "b-useful-02",
+      "scenario_id": "b-useful-02",
+      "schema_version": 1,
+      "slices": [
+        "useful_state_transfer",
+        "new_event_incomplete",
+        "continuity_not_applicable",
+        "evidence_not_applicable",
+        "unicode"
+      ],
+      "source_group": "plan059-synthetic-product-shaped-v1:b-useful-02",
+      "style": "conversational",
+      "template_group": "b-useful-02",
+      "unicode": true
+    },
+    {
+      "actor_role": "root",
+      "binary_label": "PASS",
+      "candidate_id": "pc059-b-useful-06-pass-soft",
+      "completion_state": "incomplete",
+      "defects": [],
+      "generator_identity": {
+        "date": "2026-08-23",
+        "model": "gpt-5.6-sol",
+        "prompt_sha256": "a37213453e87c4b4d61dcdd2514b197bd4493f75dea242fee6edbc9b5ed191bf",
+        "reasoning_effort": "runtime_not_exposed",
+        "role": "direct_plan059_generator",
+        "session_identity": "01a02ec2-6085-73a1-95bf-dee63931a3c1"
+      },
+      "hard_focus": "useful_state_transfer",
+      "length_bucket": "medium",
+      "proposed_split": "train",
+      "publication_class": "existing_event_incomplete",
+      "review_status": "accept",
+      "reviewer_identity": {
+        "date": "2026-08-23",
+        "model": "gpt-5.6-sol",
+        "prompt_sha256": "38235f56bcb3a0a29ce39dd90b6ca1d32dda4e6c9866c430bf9f72db25878d2c",
+        "reasoning_effort": "xhigh",
+        "role": "independent_teacher_reviewer",
+        "session_identity": "/root/teacher_reviewer_v2"
+      },
+      "scenario_group": "b-useful-06",
+      "scenario_id": "b-useful-06",
+      "schema_version": 1,
+      "slices": [
+        "useful_state_transfer",
+        "existing_event_incomplete",
+        "continuity_unavailable",
+        "freshness_known_stale",
+        "evidence_not_applicable",
+        "unicode"
+      ],
+      "source_group": "plan059-synthetic-product-shaped-v1:b-useful-06",
+      "style": "conversational",
+      "template_group": "b-useful-06",
+      "unicode": true
+    },
+    {
+      "actor_role": "root",
+      "binary_label": "PASS",
+      "candidate_id": "pc059-b-useful-06-qplus",
+      "completion_state": "incomplete",
+      "defects": [],
+      "generator_identity": {
+        "date": "2026-08-23",
+        "model": "gpt-5.6-sol",
+        "prompt_sha256": "a37213453e87c4b4d61dcdd2514b197bd4493f75dea242fee6edbc9b5ed191bf",
+        "reasoning_effort": "runtime_not_exposed",
+        "role": "direct_plan059_generator",
+        "session_identity": "01a02ec2-6085-73a1-95bf-dee63931a3c1"
+      },
+      "hard_focus": "useful_state_transfer",
+      "length_bucket": "medium",
+      "proposed_split": "train",
+      "publication_class": "existing_event_incomplete",
+      "review_status": "accept",
+      "reviewer_identity": {
+        "date": "2026-08-23",
+        "model": "gpt-5.6-sol",
+        "prompt_sha256": "38235f56bcb3a0a29ce39dd90b6ca1d32dda4e6c9866c430bf9f72db25878d2c",
+        "reasoning_effort": "xhigh",
+        "role": "independent_teacher_reviewer",
+        "session_identity": "/root/teacher_reviewer_v2"
+      },
+      "scenario_group": "b-useful-06",
+      "scenario_id": "b-useful-06",
+      "schema_version": 1,
+      "slices": [
+        "useful_state_transfer",
+        "existing_event_incomplete",
+        "continuity_unavailable",
+        "freshness_known_stale",
+        "evidence_not_applicable",
+        "unicode"
+      ],
+      "source_group": "plan059-synthetic-product-shaped-v1:b-useful-06",
+      "style": "conversational",
+      "template_group": "b-useful-06",
+      "unicode": true
+    }
+  ]
+}

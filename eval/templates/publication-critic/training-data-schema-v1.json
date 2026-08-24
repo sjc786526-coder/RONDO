@@ -1,0 +1,36 @@
+{
+  "schema": "rondo-publication-critic-training-data-schema-v1",
+  "revision": 1,
+  "packet_contract": {
+    "row_keys": ["schema_version", "candidate_id", "packet"],
+    "packet": "rondo-publication-packet@v1 validated by the frozen Plan 054 strict validator",
+    "model_visible_fields": "packet only; no label, split, defect, pair, source, generator, or reviewer metadata"
+  },
+  "scenario_contract": {
+    "row_keys": ["schema_version", "scenario_id", "source_id", "source_group", "scenario_group", "template_group", "publication_class", "completion_state", "actor_role", "style", "length_bucket", "unicode", "slices", "blueprint"],
+    "blueprint_keys": ["local_scope_title", "public_state", "continuity_state", "evidence_appearance", "candidate_brief"],
+    "publication_classes": ["new_event_completed", "new_event_incomplete", "existing_event_completed", "existing_event_incomplete"],
+    "continuity_states": ["not_applicable", "available", "unavailable"],
+    "evidence_appearances": ["none", "present", "present_omitted", "not_applicable"]
+  },
+  "supervision_contract": {
+    "row_keys": ["schema_version", "candidate_id", "scenario_id", "source_group", "scenario_group", "template_group", "proposed_split", "binary_label", "publication_class", "completion_state", "hard_focus", "defects", "slices", "actor_role", "style", "length_bucket", "unicode", "generator_identity", "reviewer_identity", "review_status"],
+    "splits": ["train", "validation", "unseen_test"],
+    "binary_labels": ["PASS", "REWRITE"],
+    "hard_dimensions": ["useful_state_transfer", "honest_uncertainty", "conditional_continuity", "scope_and_signal", "internal_consistency"],
+    "final_requirement": "split assigned, review_status accept, reviewer identity present, and Binary label independently confirmed"
+  },
+  "pair_contract": {
+    "row_keys": ["schema_version", "pair_id", "kind", "scenario_id", "preferred_candidate_id", "dispreferred_candidate_id", "target_dimension", "soft_preference", "review_status"],
+    "kinds": ["boundary", "within_pass"],
+    "boundary": "PASS over REWRITE; one named hard dimension; identical non-candidate model-visible context and final omission",
+    "within_pass": "PASS over PASS; soft preference only; identical non-candidate model-visible context and final omission"
+  },
+  "review_contract": {
+    "candidate_row_keys": ["schema_version", "candidate_id", "decision", "independent_label", "failed_hard_dimensions", "rationale", "reviewer_identity"],
+    "pair_row_keys": ["schema_version", "pair_id", "decision", "direction_confirmed", "context_equal", "omission_equal", "atomicity_confirmed", "soft_only_confirmed", "rationale", "reviewer_identity"],
+    "terminal_selection": "only accepted candidates and accepted pairs enter the frozen dataset"
+  },
+  "teacher_identity_keys": ["model", "reasoning_effort", "role", "prompt_sha256", "date", "session_identity"],
+  "authoritative_validation": "eval/rondo_eval/publication_critic/training_data/contract.py"
+}
