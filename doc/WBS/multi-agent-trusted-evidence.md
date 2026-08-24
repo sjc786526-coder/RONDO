@@ -1,7 +1,7 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
 最后更新：2026-08-24 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
-状态：**第一期、第二期、M3-A1、M3-A2 与 M3-B1a 已完成；Plan 055 / M3-B2a、Plan 057 / M3-B2b 与 Plan 059 / M3-B1a 已主线整合**
+状态：**第一期、第二期、M3-A1、M3-A2 与 M3-B1a 已完成；Plan 055 / M3-B2a、Plan 057 / M3-B2b 与 Plan 059 / M3-B1a 已主线整合；Plan 060 / M3-B1b 已执行但仍为 `LOCAL_READY / REMOTE_INCOMPLETE`，Plan 064 为 `NOT_STARTED`；四期已规划、尚未实施**
 
 ## 当前定位
 
@@ -18,6 +18,27 @@ Multi-Agent 作为存在前提。预期团队规模为 2–8 个 Agent，通常�
 三期建设一个专用本地 **Publication Critic**：Producer 提交 `team_publish` 前，由小模型审查拟发布内容是否达到最低公共状态
 质量。稳定产品语义见 [`doc/rondo-multi-publication-critic-product-contract.md`](../rondo-multi-publication-critic-product-contract.md)；
 Producer、Critic、Harness、Root 的职责及现行 Team State 不变量以该合同为共同前置。
+
+四期建设 **RONDO Multi Durable Team Runtime**：Durable Team Session 与 Session app-server v2/TUI 控制面是必成主线；
+Writer Workspace Binding 是先经价值门的可选增强，只绑定调用者已准备且授权的 Git worktree；价值门证明需要时才附加
+minimal handoff。完整路线见
+[`doc/WBS/durable-team-runtime.md`](durable-team-runtime.md)。四期与 Publication Critic 三期正交，不依赖训练、真实模型、
+真实 API 或测评；当前产品在四期完成前仍保持进程内 Team State 与默认 shared workspace 语义。
+
+## 四期目标与路线入口
+
+M4-A 先收敛 Durable Team Session、Session 控制面与可选 writer binding 必须共享的产品和生命周期边界，并决定是否采用
+候选上游窄增量及其条件消费边；之后 S/C 核心与 M4-W0 价值原型有界并行。M4-Z(core) 不被 W 线阻塞，只有 binding GO 后
+才立项正式 W1，其 handoff 范围服从价值门证据。
+Durable Team Session 的 V1 单写者直接复用 Root Thread 原生 active-writer ownership；其他客户端可只读，child Thread writer
+不能绕过 Root ownership，且 V1 不建设 Team lock 或强制接管。只读结果必须来自一个完整已提交 revision；失败 shutdown 只有在
+writer 实际释放后才可报告关闭完成。
+生命周期直接跟随 Codex：resume 保留原 Team；任何 fork 都只复用原生 conversation/thread-history 分叉并创建新的空 TeamInstance，
+不继承 Team State，旧 Team 引用按 instance mismatch fail-closed；`/new` 与 slash `/clear` 创建空 Team，客户端 detach 不关闭 Team，
+archive/delete 跟随 Root。Team clone/branch 与 Team `reset` 不在 V1；MultiAgentV2 resume 只恢复成员身份/metadata，不自动启动 child
+runtime 或模型 turn。
+四期不增加 RONDO 的模型/API 调用，也不把 Multi 扩张为 scheduler、自动路由或第二套状态平台。具体目标、任务边界、依赖图、
+资源竞争和非目标只见四期子 WBS，实现方法由各任务级 ExecPlan 决定。
 
 ## 三期目标与冻结决定
 
@@ -48,9 +69,12 @@ M3-A1 产品合同与质量边界
 M3-A2 数据/评价设施与基座测评      M3-B2a 本地 Critic 服务
         ↓                              ↓
 M3-B1a 训练数据冻结               M3-B2b Multi 发布流程接入
-        ↓                              │
-M3-B1b H100 训练资格 smoke             │
-        ↓                              │
+        ├──────────────┐               │
+        ↓              ↓               │
+M3-B1b / Plan 060    Plan 064           │
+训练资格 smoke       正式训练数据扩充      │
+        └───────┬──────┘               │
+                ↓                      │
 M3-B1c 正式分阶段训练与工件回收          │
         └──────────────┬───────────────┘
                        ↓
@@ -113,8 +137,8 @@ M3-C1 继续等待 M3-B1c 提供至少一个训练候选。
 其余 review 只在模型可见输入逐字节相等后复用。group closure、Plan 054 reference 隔离、文本与 exact-token 长度 shortcut、50,073-token
 census、manifest、factory-only consumer 和 train-only smoke bundle 均通过；最终结论为数据 GO，`remaining_findings=[]`。
 
-**交接**：M3-B1b 的数据前置已经解锁，但本结论不是训练或模型质量证据，也不授权付费运行。M3-B1b 仍须独立 ExecPlan 与
-RunPod/H100、训练、上传和预算授权，并只执行有界资格 smoke。
+**交接**：M3-B1b 的数据前置已经解锁，但本结论不是训练或模型质量证据，也不授权付费运行。Plan 060 已据此进入有界
+资格 smoke 执行；其当前停止态和后续付费批准边界见 M3-B1b 当前状态。
 
 #### M3-B1b：H100 训练资格 smoke（独立 go/no-go 门）
 
@@ -126,13 +150,26 @@ RunPod/H100、训练、上传和预算授权，并只执行有界资格 smoke。
 **宏观验收**：模型、数据、环境、显存、吞吐、保存/恢复和预算余量形成明确 go/no-go 结论。no-go 时停止训练链并更新 WBS，
 不得自动消耗剩余预算继续训练或静默更换未授权路线。
 
+**当前状态**：Plan 060 本地设施和最终候选已达到 `LOCAL_READY`；远端尚未完成有效训练 commissioning/formal、checkpoint
+恢复和最终结算，整体仍为 `REMOTE_INCOMPLETE`。唯一 Pod 当前停止并等待下一次付费重启批准；这不是训练资格 GO/NO-GO，
+已保留但尚未合并的远端资产和中间结果也不冒充完成证据。
+
+#### Plan 064：正式训练数据扩充（M3-B1c 数据前置）
+
+**目标**：在不改变 Plan 059 v7 与 Plan 060 smoke 输入的前提下，形成具有新版本身份、可由现有训练消费路径直接读取的
+正式扩充数据，并给出独立的数据 GO/NO-GO 或证据不足结论。
+
+**当前状态**：ExecPlan 已形成，验收状态为 `NOT_STARTED`；尚无 data-design lock、扩充候选、正式 freeze 或数据资格结论。
+Plan 064 不启动训练，其数据 GO 只构成 M3-B1c 的一个前置，不能替代 Plan 060 训练资格 GO。
+
 #### M3-B1c：正式分阶段训练与工件回收
 
-**目标**：在 M3-B1b 给出 go 结论并另行授权后，沿同一 lineage 连续完成研究设计中的 C1→C2→C3 训练，回收各阶段候选与
-必要运行结果。这里的 C1/C2/C3 是训练 checkpoint 名称，不是 M3-C1/M3-C2 工作包编号。
+**目标**：只有 Plan 060 / M3-B1b 经独立验收给出训练资格 GO，且 Plan 064 正式训练数据扩充经独立验收给出数据 GO 后，
+才另行规划和授权本包；随后沿同一 lineage 连续完成研究设计中的 C1→C2→C3 训练，回收各阶段候选与必要运行结果。
+这里的 C1/C2/C3 是训练 checkpoint 名称，不是 M3-C1/M3-C2 工作包编号。
 
 **边界**：三个训练 checkpoint 留在同一 ExecPlan 内，不拆成行政任务；不扩展候选底模池、不建设通用训练平台、不追加
-论文式大规模消融。M3-B1b 与本包共用 23 USD 总硬上限。
+论文式大规模消融。Plan 060 GO 与 Plan 064 数据 GO 缺一不可；当前两项均未成立。M3-B1b 与本包共用 23 USD 总硬上限。
 
 **宏观验收**：正式训练在预算内完成或按门禁诚实停止；各阶段候选、必要恢复工件和同口径指标安全回收，至少一个候选可进入
 M3-C1。最后一个 checkpoint 不自动获得产品资格。
@@ -206,14 +243,16 @@ active cycle，每次阻断反馈轮换 continuation，Team State 专用 history
 
 ## 串并行与资源关系
 
-- M3-A1、M3-A2 已完成共同前置。数据/训练链当前按 `M3-B1a → M3-B1b → M3-B1c` 串行；产品链的 M3-B2a、M3-B2b 均已完成。
-  两链彼此并行，产品链等待模型链完成后再进入 M3-C1。
-- M3-B1b 是独立付费资格门，M3-B1c 只有在 go 结论和新的正式训练授权后才能开始；no-go 不自动继续消费预算。
+- M3-A1、M3-A2 已完成共同前置。模型侧当前由 Plan 060 / M3-B1b 与 Plan 064 分别推进训练资格和扩充数据；两者可并行，
+  但 M3-B1c 同时等待 Plan 060 训练资格 GO、Plan 064 数据 GO 和新的正式训练授权。任一缺失都不得启动 M3-B1c。
+- 产品链的 M3-B2a、M3-B2b 均已完成；它等待模型侧完成后再与 M3-B1c 在 M3-C1 汇合。
 - M3-C1 等待 M3-B1c 与 M3-B2b，M3-C2 等待 M3-C1，M3-D 最后串行收口。
-- RunPod 云端 smoke/训练可以与不占用本地重型资源的产品代码、数据整理和受控替身测试并行；真实本地模型、Docker 与
-  重型 Cargo 仍按根 `AGENTS.md` 全局串行。
+- RunPod 云端 smoke/训练不占本地 Cargo build lock，可与产品代码、数据整理和四期非冲突开发并行；真实本地模型、
+  Docker 与重型 Cargo 仍按根 `AGENTS.md` 全局串行。
 - 三期与已经正式收口的方向 1 没有产品依赖。如果未来重新启动方向 1，普通工作仍可并行安排，但共享 API 预算、
   本地 GPU、Docker、构建锁和磁盘时必须显式错峰。
+- 四期与三期没有固定产品依赖，可按四期子 WBS 有界并行；若同时修改 `multidev/` 公共面，分别在独立 worktree 开发并
+  串行进入主线。跨期资源竞争和 M3-D/M4-Z(core) 兼容回归以四期子 WBS 为准，不在本页复制完整关系图或资源表。
 - M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、M3-C2、M3-D 各自对应一个任务级 plan；
   阶段叙事不单独创建总 plan，长程 WBS 也不替执行者冻结模块布局、API schema、训练超参数或部署技术路线。
 
@@ -276,6 +315,13 @@ active cycle，每次阻断反馈轮换 continuation，Team State 专用 history
 21. 复用 Codex 原生执行与通信机制；不另建 Agent-to-Agent 协议、调度器、全局订阅或 workspace 协调层。
     Event 是否值得发布、Root 如何 route 和 resolve，仍由 Agent 作语义判断。
 
+以上是四期实施完成前的现行产品事实。四期对第 21 条只保留一个可选、受价值门约束的目标演进：原生 thread、spawn、通信、
+执行和 shared workspace 继续复用，shared workspace 继续作为默认；若 W 线获得 binding GO，只为 Root 明确声明的 writer 增加对
+调用者已准备且授权的 worktree 的不可绕过 binding，并仅在 handoff GO 时附加 minimal structured Git-native handoff。
+最小 binding 状态复用既有 Session/thread 持久接缝，不建立 canonical workspace index、ChangeSet registry 或 Git 资产生命周期，
+不改变 Team State 的团队语义所有权，
+也不引入 Agent-to-Agent 协议、任务 scheduler 或自动路由。只有对应能力完成正式验收后，才把其目标状态改写为现行产品事实。
+
 ## 持续产品约束
 
 - Multi 能力默认关闭；关闭态不应改变冻结 Codex 的常规行为。继承的 evidence capture 与 Guardian provider
@@ -285,7 +331,8 @@ active cycle，每次阻断反馈轮换 continuation，Team State 专用 history
   `doc/eval-data-layout.md`。
 - 历史 binary、receipt、trace 与结果保持不可变，只作为对应阶段的完成证据，不冒充三期运行身份。
 - Team Lens 是本地离线 reducer/viewer，不参与 runtime 调度，不保存正文，不建立第二套 tracing facility。
-- 重型 Cargo、Docker、真实本地模型和付费 API 继续按项目全局资源门禁串行。
+- 重型 Cargo、Docker 和真实本地模型继续按项目全局资源门禁串行；付费 API 服从对应任务的范围、预算和授权，
+  在不争用本地重型资源时可以与四期开发并行。
 - 不引入合规/取证平台、PKI/签名链、trust score、在线学习路由器、judge 集群、全量 transcript/CoT 广播、
   自由群聊、固定大 swarm 或通用副作用缓存。
 
@@ -293,6 +340,11 @@ active cycle，每次阻断反馈轮换 continuation，Team State 专用 history
 
 - M3-A1 产品合同与 Plan 054 / M3-A2 已完成；M3-B2a 已按 Plan 055 完成实现、独立验收与主线整合；M3-B2b 已按 Plan 057 完成实现、
   审查整改、最终独立验收与主线整合。其余后续工作包启动时仍须按 `plan/plan-example.md` 建立任务合同并取得授权。
+- Plan 060 下一次付费重启尚未获批；Plan 064 当前只有 ExecPlan、尚未开始执行。两者的并行 worktree 状态只作为当前交接，
+  不得写成已进入主线或已完成。
+- 四期当前仅完成长程规划，没有实施授权；M4-A 是唯一实施入口。后续工作包及控制面拆包以
+  [`doc/WBS/durable-team-runtime.md`](durable-team-runtime.md) 为准，并分别建立 ExecPlan；不得从本次规划推定代码、
+  本地 Git 生命周期操作或正式验证已获授权。
 - RunPod 创建或计费、模型与数据上传、云端训练、权重下载、真实本地模型加载/推理、Docker 和付费 API 均须在对应任务
   开始前取得明确授权；23 USD 是三期训练的总预算上限，不等于已经授权消费。
 - 训练数据、权重、逐样本输出与私有运行材料留在 `eval-data/` 或仓库外；`training/` 只保存体积合规的轻量合同与数据。
