@@ -108,6 +108,21 @@ class PublicationCriticTrainingIdentityTests(unittest.TestCase):
         self.assertEqual(len(evaluation_consumer.evaluation_split("validation")), 2)
         self.assertEqual(len(evaluation_consumer.evaluation_split("unseen_test")), 2)
 
+    def test_direct_consumer_construction_cannot_bypass_factories(self) -> None:
+        packets, supervision, pairs, membership = self._rows()
+        packet_map = {row["candidate_id"]: row for row in packets}
+        supervision_map = {row["candidate_id"]: row for row in supervision}
+        pair_map = {row["pair_id"]: row for row in pairs}
+        with self.assertRaisesRegex(TypeError, "must be created by"):
+            DatasetConsumer(
+                packets=packet_map,
+                supervision=supervision_map,
+                pairs=pair_map,
+                membership=membership,
+                _fixed_rubric="WRONG RUBRIC",
+                allow_evaluation=False,
+            )
+
     def test_model_inputs_have_no_free_rubric_parameter(self) -> None:
         packets, supervision, pairs, membership = self._rows()
         consumer = DatasetConsumer.from_rows(

@@ -29,9 +29,9 @@ from rondo_eval.publication_critic.training_data import (  # noqa: E402
 from rondo_eval.publication_critic.identity import sha256_file  # noqa: E402
 
 
-LOCK_PATH = REPO_ROOT / "eval/templates/publication-critic/training-data-design-lock-v6.json"
+LOCK_PATH = REPO_ROOT / "eval/templates/publication-critic/training-data-design-lock-v7.json"
 GENERATOR_PROMPT_PATH = (
-    REPO_ROOT / "eval/templates/publication-critic/training-data-generator-prompt-v6.md"
+    REPO_ROOT / "eval/templates/publication-critic/training-data-generator-prompt-v7.md"
 )
 
 QUALIFICATION = {
@@ -327,7 +327,7 @@ BOUNDARY_SPECS = (
         "completed",
         "root",
         "JSON 导出字段顺序不稳定",
-        "导出器先统一字段别名，再按 schema 固定顺序写入；正向、逆向和随机三种输入得到相同字节序列。数值与 Unicode 内容保持原样，重复运行 hash 一致；空字段、嵌套数组和组合字符对照也稳定，未改变 schema 外内容，事项已完成。",
+        "导出器先把 name、id 与 tags 等输入别名映射到固定 schema 字段，再只按 id/name/tags 的 schema 顺序写入。正向、逆向以及种子 7、19、23、41 的随机键序输入都得到相同字节序列和 hash；数值精度、Unicode 原文、空字段、三层嵌套数组及组合字符在导出前后逐项相同。验证还逐字段核对编码起止偏移与缺省值落点，别名输入不再影响序列化结果；重复运行没有改变 schema 外内容，事项已完成。",
         None,
         "该事项首次公开。",
         "formal",
@@ -339,7 +339,7 @@ BOUNDARY_SPECS = (
         "incomplete",
         "member",
         "搜索预算在符号链接环中耗尽",
-        "普通目录与受控深度目录的预算计数稳定；符号链接环会重复计入同一 inode，修复尚未验证。差异只出现在环路径，非环对照保持通过；现有日志保留已访问 inode、预算消耗和停止原因，可复算差异。先按 inode 去重后复跑两组用例。",
+        "普通目录的 12、26、38 项增量和受控深度目录的预算计数都稳定；只有 root/a 经 link-to-a 回到 b/c 时，同一 inode 会再次消耗预算，修复尚未验证。环入口与普通目录使用相同的初始预算，首次回访前的访问顺序和余额完全一致，差异从重复 inode 入队开始。日志保留每次入队的 inode、深度、剩余队列、预算余额与停止原因，非环和达到深度上限的对照均通过，可按同一口径复算差异。先按 inode 去重后复跑环与普通目录用例。",
         "先按 inode 去重目录，再复跑环与普通目录用例。",
         "搜索上限已经生效，但环路径仍过早耗尽预算。",
         "conversational",
@@ -353,7 +353,7 @@ BOUNDARY_SPECS = (
         "incomplete",
         "member",
         "日志轮换后首条记录丢失",
-        "日志只在轮换与写入落入同一毫秒时丢首条记录，常规写入和单独轮换都稳定。已把触发条件缩到文件句柄交换窗口；复现矩阵保留轮换前后文件编号与首条序号，已排除常规写入路径。下一步固定边界时钟并核对交换顺序。",
+        "常规写入、单独 flush、只改文件名和只换句柄的对照都保留首条记录；只有轮换与写入落在同一毫秒且同时换名、交换句柄时会丢首条，事项未完成。每个分支都写入相同的 20 条序列并核对新旧文件的连续编号；五次常规写入和三次单独轮换没有缺口。复现矩阵记录 4/8 KiB 缓冲、七个边界时点、轮换前后文件编号、flush 次数和首条序号，已经把失败边界缩到句柄交换窗口并排除普通写入路径。下一步固定边界时钟并核对交换顺序。",
         "固定轮换边界时钟并检查文件句柄交换顺序。",
         "该事项首次公开。",
         "formal",
@@ -365,7 +365,7 @@ BOUNDARY_SPECS = (
         "completed",
         "root",
         "状态面板重复显示已关闭事件",
-        "活动谓词已统一按 producer 与 Root 双生命周期计算，面板不再拼接两份独立结果。关闭但仍待 Root 处理的事件只显示一次，普通活动与已 resolved 对照也通过；测试覆盖 producer 关闭、Root pending 与 resolved 三个组合，事件身份保持不变，事项已完成。",
+        "活动谓词已统一按 producer 与 Root 双生命周期计算，面板不再拼接两份独立查询。producer 活动、producer 已关闭但 Root pending、Root 已 resolved 三个组合都沿用同一事件身份；前两种各显示一次，resolved 状态不再显示。转换矩阵还覆盖 Root 先完成、producer 后关闭以及关闭后再次刷新，显示计数依次保持 1、1、0；同一 stable event id 贯穿转换且没有重新插入。普通活动、重复刷新和状态切换对照均通过，没有新增可见副本，事项已完成。",
         None,
         "面板分别按 producer 与 Root 状态拼接，导致同一事件重复。",
         "conversational",
@@ -381,7 +381,7 @@ BOUNDARY_SPECS = (
         "completed",
         "member",
         "CLI 帮助中的默认端口过期",
-        "CLI 帮助、示例配置与运行时默认端口已统一为 4317；显式覆盖值仍优先，环境变量路径没有变化。快照分别覆盖默认调用、显式参数和环境变量覆盖，输出差异只剩预期端口值；三种入口的帮助与配置解析测试均通过，事项已完成。",
+        "CLI 顶层与子命令帮助、三个示例配置、配置注释和运行时默认端口都已统一为 4317；显式参数仍覆盖环境变量，环境变量仍覆盖默认值，host、timeout、format 与 color 没有变化。默认调用解析为 4317，环境变量 4318 能覆盖默认值，显式参数 4319 又能覆盖环境变量；三条路径都把相同端口传给运行时连接配置。快照分别覆盖帮助文本、示例配置、默认调用、显式参数和环境变量入口，输出差异只剩预期端口值；配置解析与连接参数测试均通过，事项已完成。",
         None,
         "该事项首次公开。",
         "formal",
@@ -393,7 +393,7 @@ BOUNDARY_SPECS = (
         "incomplete",
         "root",
         "大目录扫描的取消响应慢",
-        "取消标志能够跨扫描层级传播，但当前只在每个目录结束后检查；单个大目录仍可延迟数秒。普通小目录保持稳定；测量已记录目录规模、批次大小和取消到返回的时间，便于调整后同口径比较。下一步把检查移到每批条目后并测量一万文件目录。",
+        "取消标志能够跨扫描层级传播，但当前只在每个目录结束后读取一次；含一万文件的单目录从取消到返回仍延迟 2.8 秒，事项未完成。基线按 128 文件一批记录累计条目数、队列长度、标志读取点和返回耗时：一千文件目录延迟 0.3 秒，一万文件目录延迟 2.8 秒；跨多个小目录时会在目录边界立即返回。未取消扫描的文件总数与遍历顺序保持一致，24 组小目录对照也没有新增延迟，可在调整前后按同一口径比较。下一步把检查移到每批条目后，并以同一批次大小重测一万文件目录。",
         "把取消检查移到每批条目后，并测量一万文件目录。",
         "已确认取消标志能传播，但检查粒度过粗。",
         "conversational",

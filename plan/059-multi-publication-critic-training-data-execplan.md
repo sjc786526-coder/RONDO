@@ -280,12 +280,13 @@ linked worktree 不共享主根的 ignored `eval-data/`，因此下列执行期�
 
 ### 当前工作
 
-- revision v6 已从冻结 teacher/输入/实现身份生成，正式机械冻结、focused tests、执行者自检、staged/敏感/体积/状态检查与 059 本地提交均已
-  收口。v6 只在 v19 已独立确认的语义上修复一个表面短语；用户临时取消本轮新的独立子智能体复审，因此不把执行者自检冒充独立终审。
+- revision v7 已从冻结 teacher/输入/实现身份生成并完成正式机械冻结、62 项 focused tests 与执行者全量自检。v7 关闭公开 consumer 构造
+  旁路和 Scope candidate-token 长度标签信号；当前只剩 staged/敏感/体积/状态检查、本地提交与本轮独立功能预审。
 
 ### 本任务剩余步骤
 
-- 执行者范围内无剩余实现步骤。计划制定者最终验收、获批主线整合与任何 M3-B1b 授权在本任务外。
+- 完成本轮独立功能预审；普通 finding 继续在同一 v7 工作树修复并重新冻结受影响集合。计划制定者最终验收、获批主线整合与任何 M3-B1b
+  授权在本任务外。
 
 ### 阻塞项
 
@@ -316,6 +317,17 @@ linked worktree 不共享主根的 ignored `eval-data/`，因此下列执行期�
 - 严格 manifest、C1/C2/C3（42 Binary / +18 Boundary / +3 Within-PASS）、默认 consumer 物理仅保留 42/42/21 个 train
   packet/supervision/pair、显式 evaluation 72/72/36、train-only smoke bundle 和 60 项 focused Python test 均通过。计划制定者最终验收、
   主线整合与 M3-B1b 解锁均不在本任务内。
+- 计划制定者对 v6 的独立验收又确认两个真实阻断：公开 `DatasetConsumer(...)` 可绕过 factory 的 holdout 裁剪/固定 rubric，六个 Scope Q−
+  形成显著 candidate-token 长度标签信号。revision v7 把 consumer 改为 factory-only；首轮压缩 Scope Q− 的 rehearsal-v21 被独立 reviewer
+  正确拒绝，未强行放行。rehearsal-v23 恢复六类已确认的过程 dump，并用有用、结构化的 Q+ 状态让 exact candidate-token 交错；独立 reviewer
+  接受 12/12 Scope endpoint、6/6 Boundary 和受影响的 1/1 Within-PASS。
+- revision v7 `formal-v12` 对 60 个未变 candidate 和 29 个未变 pair 先验证模型可见内容相等，再复用既有 review；正式冻结仍为 36 scenario
+  group、42/16/14 split、39 PASS / 33 REWRITE、30 Boundary / 6 Within-PASS。12 条 near-duplicate edge 全部进入 group closure，Plan 054
+  reference match、文本 shortcut 与双向 exact-token threshold shortcut 均为 0；Scope Q+/Q− candidate tokens 分别为
+  `150/179/182/144/176/186` 与 `138/175/204/124/166/196`，4 组 Q− 更短、2 组更长。
+- v7 全量 exact-token census 为 50,073 tokens，单条 553–1,367；tracked `publication-critic-v7` 与 `formal-v12-final` 12/12 字节一致。
+  factory-only 默认/evaluation consumer 分别保留 42/42/21 与 72/72/36，C1/C2/C3 pair 为 0/18/21，train-only bundle、manifest/hash 与
+  62 项 focused Python test 均通过。执行者 provisional 数据建议为 GO；最终 M3-B1b 数据 GO、主线整合与解锁仍由计划制定者决定。
 
 ### 交接边界
 
@@ -357,3 +369,5 @@ linked worktree 不共享主根的 ignored `eval-data/`，因此下列执行期�
 | 023 | v4 独立预审发现 continuity Q- 仍可行动且 scope Q- 共享 desktop/UI 过程模板，继续判定 NO-GO；v5 以逐场景产品状态缺口与六类自然过程噪声完成 v19 独立语义复核 | 缺少可选 handoff 本身不是缺陷，Q- 必须真实破坏目标 qualification；跨 split 共享过程主题仍可成为标签捷径 | teacher review、pair、shortcut、revision | 已执行 |
 | 024 | v5 formal-v10 的 terminal review 全部接受后仍因跨 split REWRITE-only `没有收口` char-4 fragment 判定 NO-GO；v6 只做一个不改语义的表面短语替换并全量重新冻结 | 正式机械门禁优先于 teacher accept，表面修复也必须升级 revision 并重新计算全部内容身份 | shortcut、revision、freeze | 已执行 |
 | 025 | 用户临时取消本轮 v6 独立子智能体复审；复用 v19 的独立语义决定，由执行者对表面修复重新运行全量机械门禁并如实保留终审边界 | 避免对单个不改语义短语重复消耗审查，同时不伪造新的独立验收结论 | review identity、handoff、acceptance boundary | 已执行 |
+| 026 | v6 独立验收确认公开 consumer 构造旁路与 Scope 长度标签信号，判定 v6 数据 NO-GO；v7 封闭直接构造并以有用 Q+ 状态和既有完整 Q− 形成自然交错 | factory 才能落实固定 input/holdout 合同；长度不能替代 scope qualification，压缩 Q− 又会破坏 hard defect | consumer、data revision、scope、token | 已执行 |
+| 027 | rehearsal-v21 的压缩 Q− 被 reviewer 判为 PASS 后停止该路线；v23 新审 12 个 Scope endpoint、6 个 Boundary 和受影响的 Within-PASS，其余 formal review 只在模型可见输入相等后复用 | 不通过追问强迫 reviewer 接受标签，并覆盖 Q+ 扩写对软 pair 的联动影响 | review、pair、repair、freeze | 已执行 |

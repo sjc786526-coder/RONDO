@@ -74,7 +74,7 @@ def validate_memberships(
         raise TrainingDataError("C1/C2/C3 membership is not the required cumulative train-only set")
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, init=False)
 class DatasetConsumer:
     packets: Mapping[str, Mapping[str, Any]]
     supervision: Mapping[str, Mapping[str, Any]]
@@ -82,6 +82,12 @@ class DatasetConsumer:
     membership: Mapping[str, Any]
     _fixed_rubric: str = field(repr=False)
     allow_evaluation: bool = False
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        del args, kwargs
+        raise TypeError(
+            "DatasetConsumer must be created by from_rows() or from_frozen_directory()"
+        )
 
     @classmethod
     def from_rows(
@@ -135,27 +141,39 @@ class DatasetConsumer:
             for candidate_id, row in all_supervision.items()
             if allow_evaluation or row["proposed_split"] == "train"
         }
-        return cls(
-            packets={
+        consumer = object.__new__(cls)
+        object.__setattr__(
+            consumer,
+            "packets",
+            {
                 str(row["candidate_id"]): row
                 for row in packet_rows
                 if str(row["candidate_id"]) in visible_ids
             },
-            supervision={
+        )
+        object.__setattr__(
+            consumer,
+            "supervision",
+            {
                 candidate_id: row
                 for candidate_id, row in all_supervision.items()
                 if candidate_id in visible_ids
             },
-            pairs={
+        )
+        object.__setattr__(
+            consumer,
+            "pairs",
+            {
                 str(row["pair_id"]): row
                 for row in pair_rows
                 if str(row["preferred_candidate_id"]) in visible_ids
                 and str(row["dispreferred_candidate_id"]) in visible_ids
             },
-            membership=membership,
-            _fixed_rubric=verified_input.rubric,
-            allow_evaluation=allow_evaluation,
         )
+        object.__setattr__(consumer, "membership", membership)
+        object.__setattr__(consumer, "_fixed_rubric", verified_input.rubric)
+        object.__setattr__(consumer, "allow_evaluation", allow_evaluation)
+        return consumer
 
     @classmethod
     def from_frozen_directory(

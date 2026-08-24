@@ -1,7 +1,7 @@
 {
-  "dataset_revision": "v6",
+  "dataset_revision": "v7",
   "membership": {
-    "dataset_revision": "v6",
+    "dataset_revision": "v7",
     "schema_version": 1,
     "stages": {
       "C1": {
@@ -268,10 +268,10 @@
   ],
   "schema_version": 1,
   "source_hashes": {
-    "membership.json": "2fff00afd90586d55e9675714b765980ad974902a6ad9dcb4cf659e517b57993",
-    "packets.jsonl": "9bb5fd1381c604899461d05326c290526d6518ee9760e1b8e305570f715606da",
+    "membership.json": "170d586f578def0a69a01816860c60755ba41ce189de618970ea07b3720a0b0d",
+    "packets.jsonl": "1f7b33e435ab795b5e8d236a9ab6dcb56ce42e96e945f7d7e56d31ee6fa7a871",
     "pairs.jsonl": "6efe20ad3cadccf63a5b0e1920ee62f3ef2f5c2aa5352503da81c3ac8cd38f86",
-    "supervision.jsonl": "6afb302fb8b3e7479134e75e9fa1d78e1f5e1ba24a8a9772cd3d12b48444bf16"
+    "supervision.jsonl": "6b7b49ea09520272a38deda17510d3da9388a536c2f782e4b1ff240735472db5"
   },
   "supervision": [
     {
@@ -285,7 +285,7 @@
       "generator_identity": {
         "date": "2026-08-23",
         "model": "gpt-5.6-sol",
-        "prompt_sha256": "c40aac8f9aca869dfdc05d5731fa29c42a498b99829314eb3554a8a289e0d1d9",
+        "prompt_sha256": "a37213453e87c4b4d61dcdd2514b197bd4493f75dea242fee6edbc9b5ed191bf",
         "reasoning_effort": "runtime_not_exposed",
         "role": "direct_plan059_generator",
         "session_identity": "01a02ec2-6085-73a1-95bf-dee63931a3c1"
@@ -327,7 +327,7 @@
       "generator_identity": {
         "date": "2026-08-23",
         "model": "gpt-5.6-sol",
-        "prompt_sha256": "c40aac8f9aca869dfdc05d5731fa29c42a498b99829314eb3554a8a289e0d1d9",
+        "prompt_sha256": "a37213453e87c4b4d61dcdd2514b197bd4493f75dea242fee6edbc9b5ed191bf",
         "reasoning_effort": "runtime_not_exposed",
         "role": "direct_plan059_generator",
         "session_identity": "01a02ec2-6085-73a1-95bf-dee63931a3c1"
@@ -370,7 +370,7 @@
       "generator_identity": {
         "date": "2026-08-23",
         "model": "gpt-5.6-sol",
-        "prompt_sha256": "c40aac8f9aca869dfdc05d5731fa29c42a498b99829314eb3554a8a289e0d1d9",
+        "prompt_sha256": "a37213453e87c4b4d61dcdd2514b197bd4493f75dea242fee6edbc9b5ed191bf",
         "reasoning_effort": "runtime_not_exposed",
         "role": "direct_plan059_generator",
         "session_identity": "01a02ec2-6085-73a1-95bf-dee63931a3c1"
@@ -412,7 +412,7 @@
       "generator_identity": {
         "date": "2026-08-23",
         "model": "gpt-5.6-sol",
-        "prompt_sha256": "c40aac8f9aca869dfdc05d5731fa29c42a498b99829314eb3554a8a289e0d1d9",
+        "prompt_sha256": "a37213453e87c4b4d61dcdd2514b197bd4493f75dea242fee6edbc9b5ed191bf",
         "reasoning_effort": "runtime_not_exposed",
         "role": "direct_plan059_generator",
         "session_identity": "01a02ec2-6085-73a1-95bf-dee63931a3c1"
@@ -454,7 +454,7 @@
       "generator_identity": {
         "date": "2026-08-23",
         "model": "gpt-5.6-sol",
-        "prompt_sha256": "c40aac8f9aca869dfdc05d5731fa29c42a498b99829314eb3554a8a289e0d1d9",
+        "prompt_sha256": "a37213453e87c4b4d61dcdd2514b197bd4493f75dea242fee6edbc9b5ed191bf",
         "reasoning_effort": "runtime_not_exposed",
         "role": "direct_plan059_generator",
         "session_identity": "01a02ec2-6085-73a1-95bf-dee63931a3c1"
@@ -497,7 +497,7 @@
       "generator_identity": {
         "date": "2026-08-23",
         "model": "gpt-5.6-sol",
-        "prompt_sha256": "c40aac8f9aca869dfdc05d5731fa29c42a498b99829314eb3554a8a289e0d1d9",
+        "prompt_sha256": "a37213453e87c4b4d61dcdd2514b197bd4493f75dea242fee6edbc9b5ed191bf",
         "reasoning_effort": "runtime_not_exposed",
         "role": "direct_plan059_generator",
         "session_identity": "01a02ec2-6085-73a1-95bf-dee63931a3c1"

@@ -1,7 +1,7 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
 最后更新：2026-08-23 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
-状态：**第一期、第二期、M3-A1 与 M3-A2 已完成；Plan 055 / M3-B2a 与 Plan 057 / M3-B2b 已主线整合；Plan 059 / M3-B1a revision v6 已在 059 worktree 完成正式冻结与执行者自检**
+状态：**第一期、第二期、M3-A1 与 M3-A2 已完成；Plan 055 / M3-B2a 与 Plan 057 / M3-B2b 已主线整合；Plan 059 / M3-B1a revision v7 已在 059 worktree 完成正式冻结与执行者自检**
 
 ## 当前定位
 
@@ -107,15 +107,15 @@ M3-C1 继续等待 M3-B1c 提供至少一个训练候选。
 **宏观验收**：数据覆盖核心质量边界，没有明显模板、标签或近重复捷径；训练输入规模、split 和各阶段监督范围明确，能够独立
 交给 M3-B1b，而不需要在付费 smoke 中继续改数据合同。
 
-**当前状态**：Plan 059 的 v1/v2 shortcut、revision v3 独立验收 6 项 finding、revision v4 预审的 continuity/scope finding 与 revision v5
-正式文本 shortcut 均判定数据 NO-GO。revision v6 已在 059 worktree 正式冻结：36 scenario group、72 candidate（train / validation /
-unseen-test 为 42/16/14，39 PASS / 33 REWRITE）、30 Boundary 与 6 Within-PASS；C1/C2/C3 为 42 Binary、再加 18 Boundary、再加 3
-Within-PASS。72/72 candidate 与 36/36 pair 均有 terminal accept；12 条 near-duplicate edge 均由 group closure 约束，Plan 054 reference
-match、跨 split 文本 shortcut 与 exact-token 长度 threshold shortcut 均为 0。全量 exact-tokenizer census 为 49,634 tokens，单条
-553–1,367，三 split 各有两个真实 long endpoint，continuity omission 为 0；manifest、默认 consumer 物理只保留 42/42/21 个 train
-packet/supervision/pair、显式 evaluation 才保留 72/72/36，以及 train-only smoke bundle 均通过。v19 独立 reviewer 已确认当前数据语义；
-v6 仅修复一个不改变语义的表面短语，并按用户对本轮的临时豁免由执行者完成全量 shortcut/token/consumer/freeze 复验，未另行运行 v6
-独立终审。计划制定者最终验收仍未完成。这不是训练或模型质量证据，M3-B1b 仍未解锁。
+**当前状态**：Plan 059 的 v1/v2 shortcut、revision v3 独立验收 6 项 finding、revision v4 预审的 continuity/scope finding、revision v5
+正式文本 shortcut 与 revision v6 独立验收的 consumer 构造旁路/Scope 长度信号均判定数据 NO-GO。revision v7 已在 059 worktree 正式
+冻结：36 scenario group、72 candidate（train / validation / unseen-test 为 42/16/14，39 PASS / 33 REWRITE）、30 Boundary 与 6
+Within-PASS；C1/C2/C3 为 42 Binary、再加 18 Boundary、再加 3 Within-PASS。受影响的 12 个 Scope endpoint、6 个 Boundary 与 1 个
+Within-PASS 已独立复核；其余 review 只在模型可见 packet 与 pair endpoint 相等后复用。12 条 near-duplicate edge 均由 group closure 约束，
+Plan 054 reference match、跨 split 文本 shortcut 与 exact-token 长度 threshold shortcut 均为 0。全量 exact-tokenizer census 为 50,073
+tokens，单条 553–1,367，三 split 各有两个真实 long endpoint，continuity omission 为 0；manifest、factory-only 默认 consumer 物理只保留
+42/42/21 个 train packet/supervision/pair、显式 evaluation 才保留 72/72/36，以及 train-only smoke bundle 均通过。计划制定者最终验收仍未
+完成。这不是训练或模型质量证据，M3-B1b 仍未解锁。
 
 #### M3-B1b：H100 训练资格 smoke（独立 go/no-go 门）
 

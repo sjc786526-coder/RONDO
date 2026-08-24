@@ -56,24 +56,24 @@ IGNORED_NAMESPACE = Path(
     "/home/sjc/desktop/RONDO/eval-data/publication-critic/plan059"
 ).resolve()
 DESIGN_LOCK_PATH = (
-    REPO_ROOT / "eval/templates/publication-critic/training-data-design-lock-v6.json"
+    REPO_ROOT / "eval/templates/publication-critic/training-data-design-lock-v7.json"
 )
 BASE_DESIGN_LOCK_PATH = (
     REPO_ROOT / "eval/templates/publication-critic/training-data-design-lock-v1.json"
 )
 SUPERSEDED_DESIGN_LOCK_PATH = (
-    REPO_ROOT / "eval/templates/publication-critic/training-data-design-lock-v5.json"
+    REPO_ROOT / "eval/templates/publication-critic/training-data-design-lock-v6.json"
 )
 SCHEMA_PATH = REPO_ROOT / "eval/templates/publication-critic/training-data-schema-v1.json"
 GENERATOR_PROMPT_PATH = (
-    REPO_ROOT / "eval/templates/publication-critic/training-data-generator-prompt-v6.md"
+    REPO_ROOT / "eval/templates/publication-critic/training-data-generator-prompt-v7.md"
 )
 REVIEWER_PROMPT_PATH = (
     REPO_ROOT / "eval/templates/publication-critic/training-data-reviewer-prompt-v1.md"
 )
 REFERENCE_PACKETS_PATH = REPO_ROOT / "eval/fixtures/publication-critic-v1/packets.jsonl"
 TEACHER_FREEZE_PATH = (
-    REPO_ROOT / "eval/manifests/publication-critic/training-data-teacher-freeze-v6.json"
+    REPO_ROOT / "eval/manifests/publication-critic/training-data-teacher-freeze-v7.json"
 )
 
 
@@ -90,24 +90,24 @@ def _load_json(path: Path, *, secure_ignored: bool = False) -> dict[str, Any]:
 
 def _load_design_lock() -> dict[str, Any]:
     overlay = _load_json(DESIGN_LOCK_PATH)
-    if overlay.get("schema") != "rondo-publication-critic-training-data-design-lock-v6":
-        raise TrainingDataError("training-data design lock v6 identity drifted")
+    if overlay.get("schema") != "rondo-publication-critic-training-data-design-lock-v7":
+        raise TrainingDataError("training-data design lock v7 identity drifted")
     base_identity = overlay.get("base_lock")
     overrides = overlay.get("overrides")
     if not isinstance(base_identity, dict) or not isinstance(overrides, dict):
-        raise TrainingDataError("training-data design lock v6 overlay is invalid")
+        raise TrainingDataError("training-data design lock v7 overlay is invalid")
     expected_base = {
         "relative_path": BASE_DESIGN_LOCK_PATH.relative_to(REPO_ROOT).as_posix(),
         "sha256": sha256_file(BASE_DESIGN_LOCK_PATH),
     }
     if base_identity != expected_base:
-        raise TrainingDataError("training-data design lock v6 base identity drifted")
+        raise TrainingDataError("training-data design lock v7 base identity drifted")
     expected_superseded = {
         "relative_path": SUPERSEDED_DESIGN_LOCK_PATH.relative_to(REPO_ROOT).as_posix(),
         "sha256": sha256_file(SUPERSEDED_DESIGN_LOCK_PATH),
     }
     if overlay.get("supersedes") != expected_superseded:
-        raise TrainingDataError("training-data design lock v6 superseded identity drifted")
+        raise TrainingDataError("training-data design lock v7 superseded identity drifted")
     base = _load_json(BASE_DESIGN_LOCK_PATH)
     merged = copy.deepcopy(base)
     merged["schema"] = overlay["schema"]
@@ -121,7 +121,7 @@ def _load_design_lock() -> dict[str, Any]:
     merged["template_group_rule"] = overrides["template_group_rule"]
     merged["length_bucket_contract"] = overrides["length_bucket_contract"]
     if overrides["generator_prompt_relative_path"] != GENERATOR_PROMPT_PATH.relative_to(REPO_ROOT).as_posix():
-        raise TrainingDataError("training-data generator prompt v6 path drifted")
+        raise TrainingDataError("training-data generator prompt v7 path drifted")
     return merged
 
 
@@ -403,12 +403,15 @@ def _expected_review_input_identity(
         "design_lock_v4_sha256": sha256_file(
             REPO_ROOT / "eval/templates/publication-critic/training-data-design-lock-v4.json"
         ),
-        "design_lock_v5_sha256": sha256_file(SUPERSEDED_DESIGN_LOCK_PATH),
-        "design_lock_v6_sha256": sha256_file(DESIGN_LOCK_PATH),
-        "generator_prompt_v6_sha256": sha256_file(GENERATOR_PROMPT_PATH),
+        "design_lock_v5_sha256": sha256_file(
+            REPO_ROOT / "eval/templates/publication-critic/training-data-design-lock-v5.json"
+        ),
+        "design_lock_v6_sha256": sha256_file(SUPERSEDED_DESIGN_LOCK_PATH),
+        "design_lock_v7_sha256": sha256_file(DESIGN_LOCK_PATH),
+        "generator_prompt_v7_sha256": sha256_file(GENERATOR_PROMPT_PATH),
         "schema_sha256": sha256_file(SCHEMA_PATH),
         "reviewer_prompt_sha256": sha256_file(REVIEWER_PROMPT_PATH),
-        "teacher_freeze_v6_sha256": sha256_file(teacher_freeze),
+        "teacher_freeze_v7_sha256": sha256_file(teacher_freeze),
     }
 
 
@@ -448,7 +451,7 @@ def _verify_formal_teacher_freeze(
     generation_commit: str,
 ) -> None:
     if teacher_freeze_path != TEACHER_FREEZE_PATH or teacher_freeze_path.is_symlink():
-        raise TrainingDataError("formal finalization requires the exact tracked v6 teacher freeze")
+        raise TrainingDataError("formal finalization requires the exact tracked v7 teacher freeze")
     required = {
         "schema",
         "plan",
@@ -467,16 +470,16 @@ def _verify_formal_teacher_freeze(
     if set(teacher_freeze) != required:
         raise TrainingDataError("teacher freeze keys drifted")
     if (
-        teacher_freeze.get("schema") != "rondo-publication-critic-plan059-teacher-freeze-v6"
+        teacher_freeze.get("schema") != "rondo-publication-critic-plan059-teacher-freeze-v7"
         or teacher_freeze.get("plan") != "059"
-        or teacher_freeze.get("dataset_revision") != "v6"
+        or teacher_freeze.get("dataset_revision") != "v7"
         or teacher_freeze.get("formal_generation_allowed") is not True
     ):
         raise TrainingDataError("teacher freeze identity or authorization drifted")
     expected_superseded = {
-        "relative_path": "eval/manifests/publication-critic/training-data-teacher-freeze-v5.json",
+        "relative_path": "eval/manifests/publication-critic/training-data-teacher-freeze-v6.json",
         "sha256": sha256_file(
-            REPO_ROOT / "eval/manifests/publication-critic/training-data-teacher-freeze-v5.json"
+            REPO_ROOT / "eval/manifests/publication-critic/training-data-teacher-freeze-v6.json"
         ),
     }
     if teacher_freeze.get("supersedes") != expected_superseded:
@@ -512,7 +515,7 @@ def _verify_formal_teacher_freeze(
         != rehearsal.get("pair_count")
     ):
         raise TrainingDataError("teacher freeze rehearsal did not close every finding")
-    if reviewer_run.get("data_revision") != "v6":
+    if reviewer_run.get("data_revision") != "v7":
         raise TrainingDataError("reviewer run dataset revision drifted")
     if reviewer_run.get("input_identity") != _expected_review_input_identity(
         generation_commit,
@@ -658,7 +661,7 @@ def finalize(args: argparse.Namespace) -> dict[str, Any]:
     )
     if args.mode == "formal":
         if args.teacher_freeze is None:
-            raise TrainingDataError("formal finalization requires the v6 teacher freeze")
+            raise TrainingDataError("formal finalization requires the v7 teacher freeze")
         teacher_freeze = _load_json(args.teacher_freeze)
         _verify_formal_teacher_freeze(
             args.teacher_freeze,

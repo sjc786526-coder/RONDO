@@ -2,13 +2,13 @@
   "generator": {
     "date": "2026-08-23",
     "model": "gpt-5.6-sol",
-    "prompt_sha256": "c40aac8f9aca869dfdc05d5731fa29c42a498b99829314eb3554a8a289e0d1d9",
+    "prompt_sha256": "a37213453e87c4b4d61dcdd2514b197bd4493f75dea242fee6edbc9b5ed191bf",
     "reasoning_effort": "runtime_not_exposed",
     "role": "direct_plan059_generator",
     "session_identity": "01a02ec2-6085-73a1-95bf-dee63931a3c1"
   },
-  "generator_run_id": "plan059-formal-v11",
-  "review_run_kind": "independent_teacher_semantic_review_reuse_with_executor_shortcut_recheck",
+  "generator_run_id": "plan059-formal-v12",
+  "review_run_kind": "independent_teacher_scope_review_with_byte_equal_unaffected_reuse",
   "reviewer": {
     "date": "2026-08-23",
     "model": "gpt-5.6-sol",

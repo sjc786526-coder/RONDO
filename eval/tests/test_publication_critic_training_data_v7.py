@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -30,20 +31,20 @@ def _load_script(name: str, relative: str):
 
 
 generator = _load_script(
-    "plan059_generator_v6_test_module",
+    "plan059_generator_v7_test_module",
     "eval/tools/generate_publication_critic_training_data.py",
 )
 finalizer = _load_script(
-    "plan059_finalizer_v6_test_module",
+    "plan059_finalizer_v7_test_module",
     "eval/tools/finalize_publication_critic_training_data.py",
 )
 
 
-class PublicationCriticTrainingV6Tests(unittest.TestCase):
+class PublicationCriticTrainingV7Tests(unittest.TestCase):
     def test_design_lock_input_identity_is_verified_plan054_identity(self) -> None:
         lock = finalizer._load_design_lock()
         verified = load_plan054_training_input(REPO_ROOT)
-        self.assertEqual(lock["dataset_revision"], "v6")
+        self.assertEqual(lock["dataset_revision"], "v7")
         self.assertEqual(lock["input_identity"], dict(verified.input_identity))
 
     def test_continuity_negatives_do_not_treat_optional_handoff_as_the_defect(self) -> None:
@@ -125,6 +126,45 @@ class PublicationCriticTrainingV6Tests(unittest.TestCase):
             for index in range(1, 7)
         ]
         self.assertTrue(all(sum(term in summary for term in desktop_ui_terms) < 3 for summary in summaries))
+
+    def test_frozen_scope_exact_candidate_lengths_are_interleaved(self) -> None:
+        frozen = REPO_ROOT / "training/publication-critic-v7"
+        census = {
+            row["candidate_id"]: row["buckets"]["candidate"]
+            for row in (
+                json.loads(line)
+                for line in (frozen / "token-census.jsonl").read_text(encoding="utf-8").splitlines()
+            )
+        }
+        pairs = [
+            row
+            for row in (
+                json.loads(line)
+                for line in (frozen / "pairs.jsonl").read_text(encoding="utf-8").splitlines()
+            )
+            if row["kind"] == "boundary" and row["target_dimension"] == "scope_and_signal"
+        ]
+        self.assertEqual(len(pairs), 6)
+        preferred = [census[row["preferred_candidate_id"]] for row in pairs]
+        dispreferred = [census[row["dispreferred_candidate_id"]] for row in pairs]
+        overlap_low = max(min(preferred), min(dispreferred))
+        overlap_high = min(max(preferred), max(dispreferred))
+        self.assertLessEqual(overlap_low, overlap_high)
+        self.assertGreaterEqual(sum(overlap_low <= value <= overlap_high for value in preferred), 2)
+        self.assertGreaterEqual(sum(overlap_low <= value <= overlap_high for value in dispreferred), 2)
+        self.assertGreaterEqual(sum(bad <= good for good, bad in zip(preferred, dispreferred)), 2)
+        self.assertGreaterEqual(sum(bad >= good for good, bad in zip(preferred, dispreferred)), 2)
+
+        rows = [(value, "PASS") for value in preferred] + [
+            (value, "REWRITE") for value in dispreferred
+        ]
+        for threshold in {value for value, _label in rows}:
+            for selected in (
+                [label for value, label in rows if value <= threshold],
+                [label for value, label in rows if value >= threshold],
+            ):
+                if 5 <= len(selected) < len(rows):
+                    self.assertGreater(len(set(selected)), 1, (threshold, selected))
 
     def test_authored_candidate_character_length_is_not_a_global_label_proxy(self) -> None:
         identity = {
@@ -239,7 +279,7 @@ class PublicationCriticTrainingV6Tests(unittest.TestCase):
 
     def test_data_card_rejects_human_ground_truth_claim(self) -> None:
         card = finalizer._data_card(
-            "v6",
+            "v7",
             "formal",
             {
                 "candidate_count": 72,

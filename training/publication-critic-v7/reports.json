@@ -60,18 +60,18 @@
     "pc059-b-honest-06-qminus": "22619c989356b51bd04a65fe2dea1f9329228a364905bc4b17f75866846bf62f",
     "pc059-b-honest-06-qplus": "a146ab6f4b852787ce5db4595188f9339adf04c1204923008e190be92f4bfd28",
     "pc059-b-scope-01-qminus": "9e18e9abedacdf69d62240ef7a353287647ab2371b87d3a81efa7aefc8510517",
-    "pc059-b-scope-01-qplus": "5181c85045b965c8e7574a31e1f8a30f03169fa3cbc5c31b534db60f0e1b9c99",
+    "pc059-b-scope-01-qplus": "f1daa427f74c86bbae9cdad018edd484fd200c6a6654f98a7b84e59a4d33bf89",
     "pc059-b-scope-02-qminus": "7a8ba2ce880b71155fbe111057a48a294225a48f1af1b0f5cad2907569d38493",
-    "pc059-b-scope-02-qplus": "738ba7eabfbff36ded7691e3159d5dd855cee4429948aa6bd12add8ded936da9",
+    "pc059-b-scope-02-qplus": "b645cb36b438363b4554a3c4c962499e2631af20bb75ba27cb092efdb793f3ec",
     "pc059-b-scope-03-qminus": "2b567841f59017ab060623870c25df62f550a568536b742b4ec0d403aa0d0f6c",
-    "pc059-b-scope-03-qplus": "b5fe52f314ddd9ed80dce8ac082e2c3bfe3fba6230e896de113a45f03bf7bf04",
+    "pc059-b-scope-03-qplus": "f18f8d23dc62309fcaa3c12e9c7c3aa046c4d29ed5757738339a4b1becbbbb0c",
     "pc059-b-scope-04-pass-soft": "8ddbee3fe666c9ef94634dba7af1ffda02b8808b8846a81aee66ea3f6c839244",
     "pc059-b-scope-04-qminus": "7119a957d34cfedf19d0492e32d4539d2bafab0646f8303409a8c85e69b5fd1b",
-    "pc059-b-scope-04-qplus": "52bd5fdfb3ee2567568836fed11019b7a9e084db5895252deda82f65b452c058",
+    "pc059-b-scope-04-qplus": "1ccb0778f8d2de55cc9d814f4d031b28c2b355e8f652d0575384fa1dfaecb404",
     "pc059-b-scope-05-qminus": "26be49c493e8b24c4522ea6eeaee01bd61a55013147b47707369c7dc680b3da5",
-    "pc059-b-scope-05-qplus": "36eba346597c789077ff796d23370d746a596b4ab3483348b4544becd15c42c2",
+    "pc059-b-scope-05-qplus": "0b910976b8657acc95b2da3cddfb87ba2ba0cb1e6f1694cc5407efe3cfe678ce",
     "pc059-b-scope-06-qminus": "ec377970c5d1c0e9bf125c0f1bb2c563231911c6b790a784b0e6a7c46336c1a1",
-    "pc059-b-scope-06-qplus": "410d8076ffa6599fdc0ed8fd537c30af0587a5a62bf3485ad56604b8f71548e2",
+    "pc059-b-scope-06-qplus": "1e9a4880d5e1f50ded0e2fd81d3ae16ba4cc4767c8463ec191e7523e5ed42dc2",
     "pc059-b-useful-01-pass-soft": "ae4f77ce5a6bc02675b664d57d6e93175d4315c669c4b0c6bf60dc27fe313902",
     "pc059-b-useful-01-qminus": "64b5324c654382b558f48b264b93db2bf4a4095da028d06fab9bba0f7381cd00",
     "pc059-b-useful-01-qplus": "ece914f6fa8d46c93919470c7f9678cfee5b79af1c1a4c3f3a2b78100755bedb",
@@ -572,7 +572,7 @@
   },
   "token_summary": {
     "bucket_totals": {
-      "candidate": 4767,
+      "candidate": 5206,
       "continuity": 7715,
       "cross_segment_framing": 8064,
       "evidence_v1": 1296,
@@ -585,6 +585,6 @@
     "schema_version": 1,
     "token_max": 1367,
     "token_min": 553,
-    "token_total": 49634
+    "token_total": 50073
   }
 }

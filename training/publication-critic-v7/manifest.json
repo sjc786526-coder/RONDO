@@ -1,9 +1,9 @@
 {
-  "content_sha256": "9c44fa1239e2190254ef983fb825a4bff6bbf20b8a18be7aaaf7b3fc848a6900",
+  "content_sha256": "07666936706786c456e83a7130c211013ff95cfb3e494154e62fca1e3bc528eb",
   "contracts": {
-    "eval/manifests/publication-critic/training-data-teacher-freeze-v6.json": "921e9fc1d94867120887491b1a24fb51e80963fb613ea9cf12013da5d562ea4f",
+    "eval/manifests/publication-critic/training-data-teacher-freeze-v7.json": "07075d1736e38e600ebd0e6361b3a7ec1d518744b0f96ced7edaaed2e645a6ab",
     "eval/rondo_eval/publication_critic/training_data/__init__.py": "ee834503a2f7ea76ca056e0099b253ffd8a345b465b962fb0f94685e4acec8b2",
-    "eval/rondo_eval/publication_critic/training_data/consumer.py": "bd56b703e85b9796928e803bddc38b7bb37a5bcd84f743b7c7b31d8de8c9a2a8",
+    "eval/rondo_eval/publication_critic/training_data/consumer.py": "04175cafc49f43305a421a8274f0fec341e80e21a916f9b914ea3ef1542a7f50",
     "eval/rondo_eval/publication_critic/training_data/contract.py": "2050e408d6db3dfaee0eb834daf862769864049c5ec7844b3f9a14562189717a",
     "eval/rondo_eval/publication_critic/training_data/dedup.py": "b3b868dc7ca7e5a0416f1eadc2f00f03bde59c8f6fbc1f4a979baf9259b87e0d",
     "eval/rondo_eval/publication_critic/training_data/freeze.py": "a3d1d189c0288d2f750260a6bf7295c0592c22b03d41c7624a93d68ba601cacb",
@@ -16,29 +16,29 @@
     "eval/templates/publication-critic/qualification-rubric-v1.md": "cc15207b3c6e2482e56710f735d01893f8c8c020df35a18918e1a0a1be7f02e4",
     "eval/templates/publication-critic/render-contract-v3.json": "8bd5449956f20f26c6d68fe410f22fc2925540eb07d63050ddad70ef87cfef2c",
     "eval/templates/publication-critic/training-data-design-lock-v1.json": "cc56ba61778d84bddce468070333deaafce2f888507e2ea2f52fe1be1dd7843b",
-    "eval/templates/publication-critic/training-data-design-lock-v5.json": "2318f805326c3fb653f3e7ebd01c48fdd521764a18fef74b53f22fba9cb3361c",
     "eval/templates/publication-critic/training-data-design-lock-v6.json": "6b177962b202156990c3a63e14e928fc64550f73c78ac0fd2e3ace49e9f8047f",
-    "eval/templates/publication-critic/training-data-generator-prompt-v6.md": "c40aac8f9aca869dfdc05d5731fa29c42a498b99829314eb3554a8a289e0d1d9",
+    "eval/templates/publication-critic/training-data-design-lock-v7.json": "b7f41133c4f62ebbe392b76e4e75add7348157571fe974d85831eba0fb8709d6",
+    "eval/templates/publication-critic/training-data-generator-prompt-v7.md": "a37213453e87c4b4d61dcdd2514b197bd4493f75dea242fee6edbc9b5ed191bf",
     "eval/templates/publication-critic/training-data-reviewer-prompt-v1.md": "38235f56bcb3a0a29ce39dd90b6ca1d32dda4e6c9866c430bf9f72db25878d2c",
     "eval/templates/publication-critic/training-data-schema-v1.json": "4cdd069d8e2ed7ee3ba9b008bb1fab567da113f387f6f7e222e6bb3359bc484c",
-    "eval/tools/finalize_publication_critic_training_data.py": "28e86a51705638c1d58f69ce9433319a74c63401d13df68117bc833cc1b267a2",
-    "eval/tools/generate_publication_critic_training_data.py": "efbd1cb4e6823d875e91b5c8bd5b7571c1bc14d2c4a8b351139e1911dfba4ff4"
+    "eval/tools/finalize_publication_critic_training_data.py": "9a1f3d77193e475268aac5e300a98054067b0c20ebe1a7d6b14e87a4f9a80e2c",
+    "eval/tools/generate_publication_critic_training_data.py": "74a52a9acbab0abd7ec3ba446e49464c4bb430caafa2fdb3baae6e54cf28d575"
   },
   "dataset_name": "rondo-publication-critic-training",
-  "dataset_revision": "v6",
-  "design_lock_sha256": "6b177962b202156990c3a63e14e928fc64550f73c78ac0fd2e3ace49e9f8047f",
+  "dataset_revision": "v7",
+  "design_lock_sha256": "b7f41133c4f62ebbe392b76e4e75add7348157571fe974d85831eba0fb8709d6",
   "files": {
     "DATA_CARD.md": {
       "bytes": 2321,
-      "sha256": "9b5c5b3d5b6263c864d3c2240c4d7b0ea54f0a50cadfff5659ee7e9546a8c5df"
+      "sha256": "ed2ffa849a52ade4c3f92b8d0835adde68283865779bcedb31b3ec4de904e66f"
     },
     "membership.json": {
       "bytes": 6517,
-      "sha256": "2fff00afd90586d55e9675714b765980ad974902a6ad9dcb4cf659e517b57993"
+      "sha256": "170d586f578def0a69a01816860c60755ba41ce189de618970ea07b3720a0b0d"
     },
     "packets.jsonl": {
-      "bytes": 79020,
-      "sha256": "9bb5fd1381c604899461d05326c290526d6518ee9760e1b8e305570f715606da"
+      "bytes": 80606,
+      "sha256": "1f7b33e435ab795b5e8d236a9ab6dcb56ce42e96e945f7d7e56d31ee6fa7a871"
     },
     "pairs.jsonl": {
       "bytes": 11162,
@@ -46,34 +46,34 @@
     },
     "reports.json": {
       "bytes": 22908,
-      "sha256": "9202f8364ddc7c0f65fd157c107f84edaf0368a2854b47fffe89431d91c05c72"
+      "sha256": "a592561b28f4301907cd76f5107f9cb48bc242e4db57704a4b5e9696d80edfeb"
     },
     "scenarios.jsonl": {
-      "bytes": 32715,
-      "sha256": "b58d0021e37174827cc05503e3e6f7b001b586da922a42c4c414a3c2c4dd5b1a"
+      "bytes": 34301,
+      "sha256": "d4665f46320b13a6b20b862709d85dcafc1c79e9e953f18cd5f7038a8f14a6db"
     },
     "split-index.json": {
       "bytes": 2668,
-      "sha256": "72b9241a720dc41925f7db947c0d8ccd2c5f05aff7b48b88e2ca321da983a4d8"
+      "sha256": "239871cd9b2801446e899a2f11a7abb093b15377ff64b000b4d7629fa50c2572"
     },
     "supervision.jsonl": {
       "bytes": 85405,
-      "sha256": "6afb302fb8b3e7479134e75e9fa1d78e1f5e1ba24a8a9772cd3d12b48444bf16"
+      "sha256": "6b7b49ea09520272a38deda17510d3da9388a536c2f782e4b1ff240735472db5"
     },
     "teacher-identity.json": {
-      "bytes": 820,
-      "sha256": "c74224f7482fbd465a059d12278fa281428d033ac8f1ae7b5e3e7197147fff4e"
+      "bytes": 813,
+      "sha256": "65fe6d48f177a1a6480a8d6f99ed9050e1300f0f30595bd6097e33e162490190"
     },
     "token-census.jsonl": {
-      "bytes": 24807,
-      "sha256": "af7d186109cd2373811efbd622065c797b7efc46f2ef8e111e02ff8f27b5a22c"
+      "bytes": 24811,
+      "sha256": "d568c9e6d26bbb0fb7bef48a4208e4899f7d7d9001a8254ab67e5af32738a10e"
     },
     "train-only-smoke-bundle.json": {
       "bytes": 17966,
-      "sha256": "1d3dc5e82defd825f2185a95ff3b7015fd8c206bcc45d203ad150425f72c5879"
+      "sha256": "5aba49c0eb0cb01df02ff3eecbe527234c3af884331742507c56852ccd0e9839"
     }
   },
-  "generation_commit": "fbe00cd6980f1e627554efb116b9d7e5de348a22",
+  "generation_commit": "62982ee35920ceff6e3dd6c5a2e296f81b25d031",
   "input_identity": {
     "adopted_window_tokens": 16384,
     "candidate_truncation": "forbidden",
@@ -139,7 +139,7 @@
     },
     "token_census": {
       "bucket_totals": {
-        "candidate": 4767,
+        "candidate": 5206,
         "continuity": 7715,
         "cross_segment_framing": 8064,
         "evidence_v1": 1296,
@@ -152,7 +152,7 @@
       "schema_version": 1,
       "token_max": 1367,
       "token_min": 553,
-      "token_total": 49634
+      "token_total": 50073
     }
   }
 }
