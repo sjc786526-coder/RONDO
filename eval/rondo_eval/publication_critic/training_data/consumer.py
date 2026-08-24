@@ -1,5 +1,6 @@
 """Strict cumulative C1/C2/C3 consumer and train-only smoke bundle."""
 
+import copy
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 import json
@@ -81,6 +82,7 @@ class DatasetConsumer:
     pairs: Mapping[str, Mapping[str, Any]]
     membership: Mapping[str, Any]
     _fixed_rubric: str = field(repr=False)
+    _dropped_oldest_publications: Mapping[str, int] = field(repr=False)
     allow_evaluation: bool = False
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -99,6 +101,7 @@ class DatasetConsumer:
         *,
         repo_root: Path | str = REPO_ROOT,
         allow_evaluation: bool = False,
+        dropped_oldest_publications: Mapping[str, int] | None = None,
     ) -> "DatasetConsumer":
         verified_input = load_plan054_training_input(repo_root)
         return cls._from_rows_with_verified_input(
@@ -109,6 +112,7 @@ class DatasetConsumer:
             verified_input=verified_input,
             repo_root=repo_root,
             allow_evaluation=allow_evaluation,
+            dropped_oldest_publications=dropped_oldest_publications,
         )
 
     @classmethod
@@ -122,6 +126,7 @@ class DatasetConsumer:
         verified_input: Plan054TrainingInput,
         repo_root: Path | str,
         allow_evaluation: bool,
+        dropped_oldest_publications: Mapping[str, int] | None,
     ) -> "DatasetConsumer":
         validate_dataset(
             packet_rows,
@@ -141,6 +146,10 @@ class DatasetConsumer:
             for candidate_id, row in all_supervision.items()
             if allow_evaluation or row["proposed_split"] == "train"
         }
+        omissions = _validate_omission_counts(
+            packet_rows,
+            dropped_oldest_publications,
+        )
         consumer = object.__new__(cls)
         object.__setattr__(
             consumer,
@@ -172,6 +181,14 @@ class DatasetConsumer:
         )
         object.__setattr__(consumer, "membership", membership)
         object.__setattr__(consumer, "_fixed_rubric", verified_input.rubric)
+        object.__setattr__(
+            consumer,
+            "_dropped_oldest_publications",
+            {
+                candidate_id: omissions[candidate_id]
+                for candidate_id in visible_ids
+            },
+        )
         object.__setattr__(consumer, "allow_evaluation", allow_evaluation)
         return consumer
 
@@ -185,6 +202,7 @@ class DatasetConsumer:
         supervision_relative: str = "supervision.jsonl",
         pairs_relative: str = "pairs.jsonl",
         membership_relative: str = "membership.json",
+        token_census_relative: str = "token-census.jsonl",
         repo_root: Path | str = REPO_ROOT,
         allow_evaluation: bool = False,
     ) -> "DatasetConsumer":
@@ -198,14 +216,21 @@ class DatasetConsumer:
         required = {packets_relative, supervision_relative, pairs_relative, membership_relative}
         if not required <= set(manifest["files"]):
             raise TrainingDataError("freeze manifest does not bind every consumer input")
+        packet_rows = _load_jsonl(root, packets_relative)
+        omission_counts: Mapping[str, int] | None = None
+        if token_census_relative in manifest["files"]:
+            omission_counts = _omission_counts_from_census(
+                _load_jsonl(root, token_census_relative)
+            )
         consumer = cls._from_rows_with_verified_input(
-            _load_jsonl(root, packets_relative),
+            packet_rows,
             _load_jsonl(root, supervision_relative),
             _load_jsonl(root, pairs_relative),
             _load_json_object(root, membership_relative),
             verified_input=verified_input,
             repo_root=repo_root,
             allow_evaluation=allow_evaluation,
+            dropped_oldest_publications=omission_counts,
         )
         if consumer.membership["dataset_revision"] != manifest["dataset_revision"]:
             raise TrainingDataError("membership dataset revision differs from freeze manifest")
@@ -227,8 +252,14 @@ class DatasetConsumer:
             {
                 "candidate_id": row["candidate_id"],
                 "messages": build_messages(
-                    self.packets[row["candidate_id"]]["packet"],
+                    _packet_after_whole_oldest_omission(
+                        self.packets[row["candidate_id"]]["packet"],
+                        self._dropped_oldest_publications[row["candidate_id"]],
+                    ),
                     self._fixed_rubric,
+                    dropped_oldest_publications=self._dropped_oldest_publications[
+                        row["candidate_id"]
+                    ],
                 ),
             }
             for row in stage["binary"]
@@ -345,6 +376,64 @@ def validate_train_only_smoke_bundle(
     kinds_c3 = {row["kind"] for row in c3["pairs"]}
     if labels != {"PASS", "REWRITE"} or "boundary" not in kinds_c2 or "within_pass" not in kinds_c3:
         raise TrainingDataError("train-only smoke bundle does not cover Binary/Boundary/Within-PASS")
+
+
+def _validate_omission_counts(
+    packet_rows: Sequence[Mapping[str, Any]],
+    supplied: Mapping[str, int] | None,
+) -> dict[str, int]:
+    packet_ids = {str(row["candidate_id"]) for row in packet_rows}
+    if supplied is None:
+        return {candidate_id: 0 for candidate_id in packet_ids}
+    if set(supplied) != packet_ids:
+        raise TrainingDataError("consumer omission census candidate IDs differ")
+    result: dict[str, int] = {}
+    packets = {str(row["candidate_id"]): row["packet"] for row in packet_rows}
+    for candidate_id, value in supplied.items():
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            raise TrainingDataError("consumer omission census contains an invalid count")
+        _packet_after_whole_oldest_omission(packets[candidate_id], value)
+        result[candidate_id] = value
+    return result
+
+
+def _omission_counts_from_census(
+    rows: Sequence[Mapping[str, Any]],
+) -> dict[str, int]:
+    result: dict[str, int] = {}
+    for row in rows:
+        candidate_id = row.get("candidate_id")
+        value = row.get("dropped_oldest_publications")
+        if not isinstance(candidate_id, str) or not candidate_id or candidate_id in result:
+            raise TrainingDataError("consumer token census candidate identity is invalid")
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            raise TrainingDataError("consumer token census omission count is invalid")
+        result[candidate_id] = value
+    return result
+
+
+def _packet_after_whole_oldest_omission(
+    packet: Mapping[str, Any],
+    dropped: int,
+) -> Mapping[str, Any]:
+    if dropped == 0:
+        return packet
+    copied = copy.deepcopy(dict(packet))
+    continuity = copied.get("continuity")
+    publications = (
+        continuity.get("prior_publications")
+        if isinstance(continuity, Mapping)
+        else None
+    )
+    if (
+        not isinstance(continuity, dict)
+        or continuity.get("state") != "available"
+        or not isinstance(publications, list)
+        or dropped > len(publications)
+    ):
+        raise TrainingDataError("consumer omission count exceeds available prior publications")
+    del publications[:dropped]
+    return copied
 
 
 def _safe_relative_file(root: Path, relative: str) -> Path:

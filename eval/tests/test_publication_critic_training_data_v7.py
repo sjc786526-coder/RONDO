@@ -254,6 +254,35 @@ class PublicationCriticTrainingV7Tests(unittest.TestCase):
                 repo_root=REPO_ROOT,
             )
 
+    def test_generation_contract_rejects_packet_slice_projection_drift(self) -> None:
+        identity = {
+            "model": "gpt-5.6-sol",
+            "reasoning_effort": "xhigh",
+            "role": "test",
+            "prompt_sha256": "a" * 64,
+            "date": "2026-08-23",
+            "session_identity": "test",
+        }
+        spec = next(
+            row
+            for row in generator.BOUNDARY_SPECS
+            if "stale" in row.continuity_variant
+        )
+        packets, supervision, pairs, scenario = generator._boundary_records(
+            spec,
+            identity,
+        )
+        supervision[0]["slices"].remove("freshness_known_stale")
+        with self.assertRaisesRegex(TrainingDataError, "freshness slice"):
+            validate_generation_batch(
+                [scenario],
+                packets,
+                supervision,
+                pairs,
+                allowed_source_ids={generator.SYNTHETIC_SOURCE},
+                repo_root=REPO_ROOT,
+            )
+
     def test_exact_length_bucket_contract_is_fail_closed(self) -> None:
         contract = {
             "long_exact_input_min_tokens": 1000,

@@ -1,6 +1,6 @@
 # RONDO 长程规划（WBS）
 
-最后更新：2026-08-24（Plan 060 / M3-B1b 正式 smoke 已执行完成，等待获批资源清理、最终结算与独立验收）
+最后更新：2026-08-24（Plan 060 技术 GO、Plan 064 v8 DATA_GO；M3-B1c / Plan 066 已解锁并开始执行）
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段指针、跨方向关系、
 稳定工程边界和授权门；已完成成果与验收见 `doc/WBS-COMPLETED.md`，单次任务合同见 `plan/`，执行细节见
@@ -18,9 +18,9 @@
 | 方向 | 当前状态 | 当前规划边界 |
 |---|---|---|
 | 0：量化测评基准 | 既有设施与首次 schema v7 正式 canary 已完成，当前无 active campaign | 保留设施；历史结果见 COMPLETED，新 campaign 须重新立项与授权 |
-| 1：Harness 优化 | **Plan 058 已完成并进入主线，当前无 active 工作包** | 保留 root-only、UnderDevelopment、默认关闭的 C2 repeat guidance；本轮不规划方向 1 后继 |
+| 1：Harness 优化 | **正式收口；当前无 active 工作包** | 当前不继续新增观测或内核/热路径优化；既有实现、设施与历史结果保留。未来可由用户另行决定是否重新立项，本次收口不作永久禁止 |
 | 2：本地审批模型 | **已收口，今后不再开启** | 最终结论为“保留为实验”；不改生产默认，不再规划后续工作包 |
-| 3：RONDO Multi | 第一、二期及其收口案例、**三期 M3-A1、M3-A2、M3-B1a、M3-B2a、M3-B2b 已完成**；Plan 060 正式 smoke 已完成 | M3-B1b 等待用户批准释放保留中的计算 Pod、最终账单与独立验收；M3-B1c 仍锁定 |
+| 3：RONDO Multi | 第一、二期及其收口案例、**三期 M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B2a、M3-B2b 与 Plan 064 已完成**；M3-B1c / Plan 066 执行中；四期已规划、尚未实施 | Plan 060 技术 GO、Plan 064 v8 DATA_GO；Plan 066 复用当前热 Pod/胜者卷并按连续 23 USD 总账正式训练；M4-A 尚未立项或取得实施授权 |
 
 ### 方向命名口径
 
@@ -35,45 +35,51 @@
 
 ## 2. 下一工作包与顺序
 
-方向 1 与方向 3 是两套产品源码上的独立推进面，不互为默认前置。
-
-### 方向 1：Plan 058 已收口
-
-- Plan 058 完成单一 C2 行为优化及同一冻结十题、两个 round 的 `formal-v6`：20/20 completed、
-  8 pass/12 fail、225 upstream attempts、campaign `4.985650 USD`，任务全生命周期 `20.379152 USD`、
-  reservation 0。
-- raw C2 为 7 次/4 slot/3 task/9,693 ms；按预冻规则复核后 harmful/reasonable/insufficient 为
-  `0/7/0`，四项无害门通过，结论为 `retain`。最终产品能力收窄为 root-only、UnderDevelopment、
-  默认关闭的 opt-in guidance，不改变工具可执行性、Guardian、审批或 sandbox。
-- 最终 root-only 文案是验收后的有界收窄，没有被 `formal-v6` 原样重测；受环境阻断的 model-visible
-  integration 只作编译与对照证据，不冒充运行通过。详细结果、失效 campaign、资源清理与验收见
-  `doc/WBS-COMPLETED.md`、Plan 058 及其最终日志。
-- 方向 1 当前无 active campaign 或工作包；按用户当前决策，本轮不规划其后继任务。
+方向 3 是当前唯一已经明确下一工作包的产品推进面。方向 1 已正式收口，不作为方向 3 的前置或旁支。
 
 ### 方向 3：Publication Critic 三期
 
-- M3-A1 产品合同、M3-B2a / Plan 055 本地 Critic 服务与 M3-B2b / Plan 057 发布流程接入均已完成并进入主线。三期分为
-  `M3-A2 → M3-B1a → M3-B1b → M3-B1c` 数据/训练链与 `M3-B2a → M3-B2b` 产品链，两链在
+- M3-A1 产品合同、M3-B2a / Plan 055 本地 Critic 服务与 M3-B2b / Plan 057 发布流程接入均已完成并进入主线。Plan 060 训练资格
+  `TECHNICAL_GO`、冻结 v8 `DATA_GO` 与 Plan 066 正式训练授权已经同时成立；M3-B1c 正复用当前热 H100/胜者卷执行。产品链与模型链在
   `M3-C1 → M3-C2` 汇合，最后由 M3-D 收口。
 - M3-A2 / Plan 054 与 M3-B1a / Plan 059 均已完成并进入主线。Plan 059 revision v7 冻结 72 candidate、30 Boundary 与
   6 Within-PASS，三 split 为 42/16/14；独立最终验收确认输入隔离、group/split、review、50,073-token census、manifest、
   factory-only consumer 与 train-only smoke bundle 闭环，`remaining_findings=[]`，数据结论 GO。详细历史见
   `doc/WBS-COMPLETED.md` 与 Plan 059 最终验收日志。
-- M3-B1b 是数据链当前工作包。Plan 060 已在 Secure 单卡 H100 PCIe 80GB 上完成 BF16 全参数 FlashAdamW commissioning 与 final-19
+- Plan 064 已独立验收完成并冻结 `publication-critic-v8`：228 candidate、104 pair、三 split 为 128/55/45，训练 consumer 默认
+  只暴露 train。覆盖、质量与消费合同通过；冻结时的预算适配证据不足已由 Plan 060 正式吞吐、费用和 23 USD 连续总账的有界复核闭合，
+  当前结论为 `DATA_GO`。v7 与 Plan 060 smoke 输入保持不变，Plan 066 只消费 v8 train，validation 不进梯度，unseen-test 默认封存。
+- M3-B1b / Plan 060 已在 Secure 单卡 H100 PCIe 80GB 上完成 BF16 全参数 FlashAdamW commissioning 与 final-19
   干净 formal start/resume，C1→C2→C3、完整 checkpoint、新进程恢复和继续更新均形成有效证据；独立代码/archive 复核
-  `remaining_findings=[]`。按用户最新指令，replacement Pod 与胜者 Standard 卷暂时保留，final-19 checkpoint 留待验收；终态清理、settled billing、
-  final receipt 与最终 GO/NO-GO 等获批释放后收口。M3-B1c 在此之前不启动。
+  `remaining_findings=[]`，最终验收通过，结论为 `TECHNICAL_GO`。用户决定不为任务切换释放当前 Pod/胜者卷，Plan 060 与 Plan 066 从原
+  Plan 060 基线连续计入 23 USD 总账；资源终态与 settled billing 由 Plan 066 完成正式训练后统一收口。
+- M3-B1c / Plan 066 是当前执行包：先把最新 main 与 v8 合入现有 Plan 060 worktree，再在当前唯一 H100 PCIe 80GB 上从 exact base 干净执行
+  C1→C2→C3，保存阶段候选、至少一个恢复点和同口径 validation 事实。它不授权 M3-C1 或产品资格结论。
 
-方向 1 与方向 3 的只读研究、轻量代码和数据工作可以并行；本地重型 Cargo、Docker、真实本地模型加载/推理继续
-全局串行，并由实际进入实施的工作包协调共享资源。
+### 方向 3：Durable Team Runtime 四期
+
+- 四期必成主线是 Team Session 跨进程持久化/恢复及其 app-server v2 / TUI 控制面；Writer Workspace Binding 降为可选增强，
+  只绑定调用者已准备且授权的 worktree，价值门证明需要时才附加 minimal handoff，不建设 workspace registry、ChangeSet
+  生命周期或 Git 资产平台。
+- 四期详细 WBS 见 [`doc/WBS/durable-team-runtime.md`](WBS/durable-team-runtime.md)。M4-A 是共同前置，之后 Session、控制面原型
+  和 M4-W0 价值原型可有界并行；S/C 可以独立完成 M4-Z(core)，正式 W 实现须先获得 binding GO。M4-A 尚未建立 ExecPlan 或取得实施授权。
+- 四期不依赖 Publication Critic 训练、真实模型、真实 API 或性能测评，可以与三期模型链并行；它保持 shared workspace
+  为默认，不建设通用 scheduler、自动路由、自动 merge/push、第二套 Team State/trace 或审计/可信平台。
+- 三期云计算不占本地 Cargo build lock，可与四期有界并行开发；bundle/checkpoint/结果传输仍竞争本地网络与磁盘，
+  四期重型 Cargo 与三期本地模型、Docker 等重型任务按根 `AGENTS.md` 串行错峰。详细资源关系见四期子 WBS。
+
+如果未来重新启动方向 1，它仍与方向 3 保持产品源码和任务合同独立；本地重型 Cargo、Docker、真实本地模型
+加载/推理继续全局串行，并由实际进入实施的工作包协调共享资源。
 
 - 方向 0 的设施保持可用，但不自行创建新 campaign；任何真实 API、Docker 或新预算均需针对新任务重新授权。
+- 方向 1 当前正式收口，不排期观测或内核/Harness 优化；未来是否重新启动由用户另行决定。
 - 方向 2 永久收口，不作为方向 1 或方向 3 的前置、旁支或待恢复项目。
 - 上游 Codex 基线升级继续保留为独立、不排期任务；只有用户明确启动时才进入规划。
 
 ## 3. 方向关系
 
-- 方向 1 在 `mydev/` 推进 Harness 优化；方向 3 在 `multidev/` 推进多智能体与 Publication Critic，不互相夹带实现。
+- 方向 1 的既有产品源码位于 `mydev/`，当前正式收口；方向 3 在 `multidev/` 推进多智能体与 Publication Critic。
+  如果方向 1 未来重新启动，两者仍不互相夹带实现。
 - 方向 0 是可复用设施，不再作为解锁其他方向的总闸门；只在具体任务需要时提供相称测评。
 - 方向 2 已永久收口，不参与后续路线，也不阻塞其他方向。
 - 所有方向只共享排期、API 预算、Docker、构建和本地模型等全局资源约束，重型操作保持串行。
@@ -84,7 +90,7 @@
 
 ```text
 RONDO/
-├── mydev/        # 方向 1 当前产品源码（目录名沿用现状）
+├── mydev/        # 方向 1 产品源码（当前收口，目录名沿用现状）
 ├── multidev/     # 方向 3 产品源码
 ├── eval/         # 两套产品可复用的通用测评设施
 ├── scripts/      # 共享构建锁与资源看门狗入口
@@ -149,7 +155,8 @@ RONDO/
 
 ## 7. 子 WBS 索引
 
-- `doc/WBS/eval-benchmark.md` —— 方向 0：现行测评设施与方向 1 观测投影边界
-- `doc/WBS/teacher-harness-study.md` —— 方向 1：Plan 052/056 观测与 Plan 058 C2 收口结论
+- `doc/WBS/eval-benchmark.md` —— 方向 0：现行测评设施与新任务授权边界
+- `doc/WBS/teacher-harness-study.md` —— 方向 1：正式收口状态与历史归档入口
 - `doc/WBS/local-approval-model.md` —— 方向 2：已永久收口
 - `doc/WBS/multi-agent-trusted-evidence.md` —— 方向 3：现行产品语义与三期 Publication Critic 长程路线
+- `doc/WBS/durable-team-runtime.md` —— 方向 3 四期：Durable Team Session、Session 控制面与可选 Writer Workspace Binding/Minimal Handoff

@@ -305,26 +305,22 @@ replacement，并取消逐窗口人工批准。外置 `budget-policy.json` 是�
 
 ### 当前工作
 
-- 训练与证据回收已完成；正在收口本地测试、文档、agent log 与提交。按用户最新明确指令，replacement Pod `oe6gbptvq5yhja` 暂时保持 RUNNING，
-  未经再次批准不得停止或删除；胜者卷 `hi3iaz8rsr` 与 final-19 checkpoint 同样保留。终态 provider facts、settled billing 与最终 receipt 必须等计算 Pod
-  获准释放后生成，当前不得伪造为已清理终态。
+- `COMPLETE / TECHNICAL_GO`：final-19 核心训练资格目标已完成并通过独立验收，`remaining correctness/functionality findings=[]`。
+  用户决定把当前 RUNNING Pod、胜者卷、final-19 checkpoint 与连续费用总账直接交给 Plan 066，不为 Plan 边界先释放资源。
 
 ### 本任务剩余步骤
 
-- 完成本地 focused 门禁、自检、精炼日志、WBS 状态同步与 worktree 提交。
-- 等用户批准后停止/终止 task compute，按当时授权处理旧源 Pod 与败者卷，等待账单结算，生成 provider terminal facts/final receipt，并把远端终态交给独立验收。
-- 由计划制定者独立复核代码、focused tests、正式 receipt/billing、远端终态和结论；整改普通 finding 后完成最终 GO/NO-GO。
+- 无。资源终态、settled billing 和连续总账的最终收口属于已授权的 Plan 066，不再阻塞 Plan 060 技术结论。
 
 ### 阻塞项
 
-- 没有训练代码或训练路线阻塞。唯一未闭合项是用户主动保留 RUNNING Pod，因此 stage D 终态清理、settled billing 和 final receipt 等待后续释放批准；
-  这不是技术 NO-GO。
+- 无。
 
 ### 当前验收状态
 
-- `FORMAL_SMOKE_COMPLETE / TERMINAL_CLEANUP_DEFERRED_BY_USER`：H100 BF16 全参数 FlashAdamW commissioning 与 final-19 干净正式
-  start/resume 均已通过，正式 pending receipt 和 final-19 checkpoint 已保留；三项审查整改及新 archive 身份复核均为 `remaining_findings=[]`。
-  因计算 Pod 按用户要求继续 RUNNING，尚无有效终态清理/settled billing/final receipt，不提前写最终 GO/NO-GO 或解锁 M3-B1c。
+- `PASS / COMPLETE / TECHNICAL_GO`：H100 BF16 全参数 FlashAdamW commissioning 与 final-19 干净正式 start/resume 均通过；正式 receipt、
+  checkpoint、源码/archive 身份和新进程恢复证据闭合，两路独立复核均为 `remaining=[]`。Plan 064 有界预算适配转为 `DATA_GO`，M3-B1c 已解锁。
+  资源终态与最终账单按用户决定延后到 Plan 066 连续任务统一收口，不冒充已归零。
 
 ### 交接边界
 
@@ -366,3 +362,4 @@ replacement，并取消逐窗口人工批准。外置 `budget-policy.json` 是�
 | 024 | replacement controller 抢到精确 Pod 后只核对 ID/name/RUNNING 即交接；完整 provider/SSH/资产验收由 agent 在显式 300 秒看门狗内完成 | Low 库存下前置全量 provider 投影会制造竞态；交接后验收失败仍可安全停止同一 Pod | controller、运行 | 已采纳 |
 | 025 | final-18 成功训练后发现的 finalizer 时序/胜者卷绑定与 runner winner-lock shape finding 必须进入新 bundle；final-18 降为诊断证据，final-19 从空训练状态重跑 formal | formal identity 应代表当前完整源码；不能以“只影响 finalizer”为由让正式 bundle 与交付源码漂移 | bundle、runner、finalizer、formal | 已采纳 |
 | 026 | 独立验收前保留 final-19 checkpoint；只删除 superseded checkpoint。按用户最新指令，计算 Pod 在再次批准前保持 RUNNING，终态清理与 final receipt 延后 | Standard 卷按配置容量计费，删除最新 checkpoint 不降时薪；保留恢复现场更有利于验收，且不得违背最新资源保留指令 | checkpoint、Pod、清理、交付 | 已采纳 |
+| 027 | 独立验收接受 Plan 060 `TECHNICAL_GO`，当前热 Pod/胜者卷/final-19 checkpoint 与原基线连续总账直接交给 Plan 066 | H100 稀缺且训练设施已验证；不为行政任务边界中断热资源，同时由 Plan 066 统一承担最终清理和 settled billing | 验收、预算、资源交接 | 已采纳 |

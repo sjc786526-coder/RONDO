@@ -74,6 +74,17 @@ const MEMORY_PROMPT_PHRASE: &str =
 const REALTIME_CONVERSATION_TEST_SUBPROCESS_ENV_VAR: &str =
     "CODEX_REALTIME_CONVERSATION_TEST_SUBPROCESS";
 
+async fn start_resetting_realtime_server() -> Result<(String, tokio::task::JoinHandle<()>)> {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let base_url = format!("ws://{}", listener.local_addr()?);
+    let task = tokio::spawn(async move {
+        while let Ok((stream, _)) = listener.accept().await {
+            drop(stream);
+        }
+    });
+    Ok((base_url, task))
+}
+
 #[derive(Debug, Clone)]
 struct RealtimeCallRequestCapture {
     requests: Arc<Mutex<Vec<WiremockRequest>>>,
@@ -1305,6 +1316,7 @@ async fn conversation_webrtc_sideband_connect_failure_closes_with_error() -> Res
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
+    let (realtime_ws_base_url, _resetting_server) = start_resetting_realtime_server().await?;
     Mock::given(method("POST"))
         .and(path_regex(".*/realtime/calls$"))
         .respond_with(
@@ -1314,13 +1326,13 @@ async fn conversation_webrtc_sideband_connect_failure_closes_with_error() -> Res
         )
         .mount(&server)
         .await;
-    let mut builder = test_codex().with_config(|config| {
+    let mut builder = test_codex().with_config(move |config| {
         config.experimental_realtime_ws_backend_prompt = Some("backend prompt".to_string());
         config.experimental_realtime_ws_model = Some("realtime-test-model".to_string());
         config.experimental_realtime_ws_startup_context = Some(String::new());
-        config.experimental_realtime_ws_base_url = Some("http://127.0.0.1:1".to_string());
-        // Keep the failure-path test inside wait_for_event's timeout on Windows,
-        // where refused localhost websocket connects can take around two seconds.
+        config.experimental_realtime_ws_base_url = Some(realtime_ws_base_url);
+        // Keep the reset-path test inside wait_for_event's timeout by disabling
+        // sideband reconnect attempts.
         config.model_provider.request_max_retries = Some(0);
         config.realtime.version = RealtimeWsVersion::V1;
     });
@@ -1699,8 +1711,9 @@ async fn conversation_start_connect_failure_emits_realtime_error_only() -> Resul
     skip_if_no_network!(Ok(()));
 
     let server = start_websocket_server(vec![]).await;
-    let mut builder = test_codex().with_config(|config| {
-        config.experimental_realtime_ws_base_url = Some("http://127.0.0.1:1".to_string());
+    let (realtime_ws_base_url, _resetting_server) = start_resetting_realtime_server().await?;
+    let mut builder = test_codex().with_config(move |config| {
+        config.experimental_realtime_ws_base_url = Some(realtime_ws_base_url);
         config.realtime.version = RealtimeWsVersion::V1;
     });
     let test = builder.build_with_websocket_server(&server).await?;

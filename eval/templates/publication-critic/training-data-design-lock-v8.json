@@ -1,0 +1,410 @@
+{
+  "schema": "rondo-publication-critic-training-data-design-lock-v8",
+  "dataset_revision": "v8",
+  "purpose": "Plan 064 coverage-led expansion of the immutable publication-critic-v7 base into a directly consumable full logical release",
+  "base_release": {
+    "relative_path": "training/publication-critic-v7",
+    "git_tree_oid": "435c06fba3196bee21d59d88b9e6d6b1a1e1999a",
+    "manifest_content_sha256": "07666936706786c456e83a7130c211013ff95cfb3e494154e62fca1e3bc528eb",
+    "file_count": 12,
+    "candidate_count": 72,
+    "pair_counts": {
+      "boundary": 30,
+      "within_pass": 6
+    },
+    "split_counts": {
+      "train": 42,
+      "validation": 16,
+      "unseen_test": 14
+    },
+    "exact_input_tokens": 50073,
+    "lineage_rule": "Every inherited v7 scenario, packet, supervision row, pair and candidate split remains canonically identical; the v7 directory itself is never rewritten.",
+    "v8_membership_projection": {
+      "policy": "plan064_exact_v7_membership_projection_v1",
+      "finding": "HONEST-V3-001B",
+      "reason": "Retire six grammatically ambiguous v7 honesty negatives and their Boundary relations from v8 without changing the physical v7 release; their valid positive endpoints and Scenario rows remain inherited.",
+      "retained_candidate_count": 66,
+      "retained_pair_count": 30,
+      "retired_candidate_ids": [
+        "pc059-b-honest-01-qminus",
+        "pc059-b-honest-02-qminus",
+        "pc059-b-honest-03-qminus",
+        "pc059-b-honest-04-qminus",
+        "pc059-b-honest-05-qminus",
+        "pc059-b-honest-06-qminus"
+      ],
+      "retired_pair_ids": [
+        "pair-b-honest-01-boundary",
+        "pair-b-honest-02-boundary",
+        "pair-b-honest-03-boundary",
+        "pair-b-honest-04-boundary",
+        "pair-b-honest-05-boundary",
+        "pair-b-honest-06-boundary"
+      ]
+    }
+  },
+  "plan054_input_contract": {
+    "plan054_freeze_sha256": "2a8081d3700f4209f5ac3cd7dabb7f6d31d0cb0b0ea0e9e8c639c8f10dbebfeb",
+    "packet": "rondo-publication-packet@v1",
+    "qualification_rubric": "rondo-publication-qualification@v1",
+    "render_contract": "rondo-publication-critic-render@v3",
+    "input_template_revision": "v3-sha256-dc3209af0d284dfe4be57403873717ba5f2790e2257cd4a39a2376de5696044c",
+    "tokenizer_name": "skywork-reward-v2-qwen3-1.7b-tokenizer",
+    "tokenizer_revision": "e51ea3e08fb81326c3b812a7ff0cb9cee83e59cc",
+    "candidate_truncation": "forbidden",
+    "messages": [
+      "current_task_and_prior_publications",
+      "candidate_to_judge"
+    ],
+    "token_window": 16384,
+    "overflow_policy": "drop_whole_oldest_prior_publications_then_explicitly_encode_additional_omission",
+    "scalar_direction": "higher_is_better",
+    "source_allowlist": [
+      "request.context",
+      "request.developer_instructions",
+      "request.user_instructions",
+      "prior_publications",
+      "public_candidate"
+    ],
+    "forbidden_sources": [
+      "private_reasoning",
+      "hidden_transcript",
+      "raw_tool_output",
+      "private_fact_body",
+      "credentials"
+    ]
+  },
+  "source_allowlist": [
+    {
+      "source_id": "plan064-synthetic-product-shaped-v1",
+      "membership": "primary",
+      "allowed_projection": "author-created public Scenario blueprints and PublicationPacket fields only"
+    },
+    {
+      "source_id": "plan059-synthetic-product-shaped-v1",
+      "membership": "inherited_v7_only"
+    },
+    {
+      "source_id": "plan050-c01-public-completed-collaboration",
+      "membership": "inherited_v7_only"
+    },
+    {
+      "source_id": "plan050-c03-public-incomplete-collaboration",
+      "membership": "inherited_v7_only"
+    },
+    {
+      "source_id": "plan054-v4-cohort-dedup-reference-only",
+      "membership": "forbidden",
+      "relative_path": "eval/fixtures/publication-critic-v1/packets.jsonl"
+    }
+  ],
+  "release_layout": {
+    "strategy": "full_materialization",
+    "prefreeze_location": "/home/sjc/desktop/RONDO/eval-data/publication-critic/plan064/",
+    "formal_release_relative_path": "training/publication-critic-v8",
+    "formal_release_gate": "The formal directory and manifest may be created only after explicit plan-author freeze approval for the exact prefreeze universe identity."
+  },
+  "v7_coverage_baseline": {
+    "scenario_group_count": 36,
+    "publication_class_candidate_counts": {
+      "existing_event_completed": 11,
+      "existing_event_incomplete": 25,
+      "new_event_completed": 19,
+      "new_event_incomplete": 17
+    },
+    "length_candidate_counts": {
+      "short": 6,
+      "medium": 60,
+      "long": 6
+    },
+    "continuity_candidate_counts": {
+      "available": 28,
+      "unavailable": 8,
+      "not_applicable": 36
+    },
+    "notable_gaps": [
+      "No short Boundary scenario exists.",
+      "Long scenarios cover only internal_consistency and honest_uncertainty and only existing-event classes.",
+      "Unseen-test has no unavailable-continuity scenario and only one conversational and one Unicode scenario.",
+      "Neither holdout contains an Evidence-present-without-omission scenario.",
+      "All 72 candidate summaries are Chinese; English and natural mixed-language expression are absent.",
+      "Only six mixed singletons and six Within-PASS pairs exist; every v7 Within-PASS pair uses directness_and_lower_repetition.",
+      "Several hard-focus-conditioned surface forms are repeated even though the global shortcut checks pass."
+    ]
+  },
+  "coverage_contract": {
+    "dimensions": [
+      "publication_class",
+      "hard_focus",
+      "difficulty",
+      "actor_role",
+      "style",
+      "length_bucket",
+      "continuity_state",
+      "evidence_appearance",
+      "unicode",
+      "natural_language_surface"
+    ],
+    "sparse_requirements": [
+      "Every meaningful hard-focus by publication-class cell reaches at least four scenario groups and at least two distinct defect or success manifestations; conditional_continuity applies only to incomplete classes.",
+      "Each split contains at least two Boundary scenario groups for every hard dimension.",
+      "Every hard dimension gains both short and long Boundary examples without making length predictive of label.",
+      "Validation and unseen-test each gain conversational and formal, Unicode and non-Unicode, continuity-unavailable, Evidence present, omitted and none where semantically applicable, and PASS/REWRITE natural mixed examples.",
+      "New scope, uncertainty, continuity, consistency and usefulness examples deliberately break v7-conditioned surface cues instead of reusing a negative template.",
+      "Within-PASS adds at least four truthful soft-preference families beyond directness_and_lower_repetition."
+    ],
+    "anti_cartesian_rule": "Use sparse product-shaped cases that close real gaps; do not manufacture a full Cartesian matrix or cosmetic equality."
+  },
+  "bounded_scale": {
+    "unit": "candidate",
+    "logical_release_floor": 204,
+    "working_target": 237,
+    "hard_cap": 270,
+    "floor_derivation": "v7 72 plus at least 48 new Boundary scenarios (96 endpoints), 24 natural mixed singletons and 12 Within-PASS third endpoints",
+    "target_derivation": "v7 72 plus a working envelope of 60 new Boundary scenarios, 30 mixed singletons and 15 Within-PASS third endpoints",
+    "hard_cap_derivation": "v7 72 plus at most 72 new Boundary scenarios, 36 mixed singletons and 18 Within-PASS third endpoints",
+    "quality_attrition_rule": "Quality exclusions do not have to be replaced verbatim. Stop at or above the floor as soon as all coverage and quality gates pass; never generate merely to fill the target or cap.",
+    "plan060_formal_facts": {
+      "status": "unavailable",
+      "accepted_sources": "Only results merged to main or a formal user/reviewer handoff.",
+      "planning_contract_is_evidence": false
+    },
+    "budget_qualification": "Until formal Plan 060 throughput and cost facts arrive, the scale is coverage-bounded only and training-budget suitability remains evidence-insufficient."
+  },
+  "split_contract": {
+    "names": [
+      "train",
+      "validation",
+      "unseen_test"
+    ],
+    "target_candidate_ratios": {
+      "train": 0.6,
+      "validation": 0.22,
+      "unseen_test": 0.18
+    },
+    "candidate_ratio_tolerance": 0.04,
+    "algorithm": "deterministic_grouped_stratified_search_v1_with_fixed_assignments",
+    "seed": "plan064-publication-critic-split-v1",
+    "search_attempts": 30000,
+    "base_assignments": "Pin the 66 inherited v7 candidates to their frozen splits; the six explicitly retired HONEST-V3-001B negatives have no v8 membership or split.",
+    "closure_fields": [
+      "source_group",
+      "scenario_group",
+      "template_group",
+      "pair",
+      "near_duplicate"
+    ],
+    "new_to_base_rule": "A new component touching exactly one v7 component inherits that component's split. A component touching multiple distinct v7 components or multiple frozen splits is rejected or repaired.",
+    "holdout_purpose": {
+      "validation": "Stable development-time threshold and slice comparison without training membership.",
+      "unseen_test": "Final unseen coverage across hard dimensions and natural surfaces without training or tuning membership."
+    },
+    "consumer_default": "Physically materialize train membership only; holdout access requires an explicit evaluation path."
+  },
+  "coverage_minimums": {
+    "formal_total_candidates": 204,
+    "split_candidates": {
+      "train": 116,
+      "validation": 40,
+      "unseen_test": 34
+    },
+    "split_binary_labels": {
+      "train": {
+        "PASS": 50,
+        "REWRITE": 45
+      },
+      "validation": {
+        "PASS": 18,
+        "REWRITE": 16
+      },
+      "unseen_test": {
+        "PASS": 15,
+        "REWRITE": 14
+      }
+    },
+    "publication_classes": {
+      "values": [
+        "new_event_completed",
+        "new_event_incomplete",
+        "existing_event_completed",
+        "existing_event_incomplete"
+      ],
+      "minimum_scenario_groups_per_value_global": 16,
+      "minimum_scenario_groups_per_value_per_split": 3
+    },
+    "boundary_hard_dimensions": {
+      "values": [
+        "useful_state_transfer",
+        "honest_uncertainty",
+        "conditional_continuity",
+        "scope_and_signal",
+        "internal_consistency"
+      ],
+      "minimum_pairs_per_value_global": 14,
+      "minimum_pairs_per_value_per_split": 3
+    },
+    "hard_focus_publication_class_cells": {
+      "minimum_scenario_groups_per_cell": 4,
+      "conditional_continuity_publication_classes": [
+        "new_event_incomplete",
+        "existing_event_incomplete"
+      ],
+      "semantic_manifestation_check": "The direct batch reviews and final stratified audit verify at least two genuinely distinct success/failure manifestations per meaningful cell; this semantic distinction is not inferred from labels alone."
+    },
+    "required_boundary_length_buckets_per_hard_dimension": [
+      "short",
+      "long"
+    ],
+    "natural_mixed_binary_candidates_per_split": 6,
+    "within_pass_pairs_per_split": 3,
+    "minimum_distinct_soft_preferences": 5,
+    "roles_per_split": [
+      "root",
+      "member"
+    ],
+    "styles_per_split": [
+      "formal",
+      "conversational"
+    ],
+    "unicode_scenario_groups_global": 24,
+    "long_input_candidates_per_split": 8,
+    "holdout_feature_requirements": {
+      "splits": [
+        "validation",
+        "unseen_test"
+      ],
+      "unicode_values": [
+        true,
+        false
+      ],
+      "continuity_slices": [
+        "continuity_unavailable"
+      ],
+      "evidence_slices": [
+        "evidence_present",
+        "evidence_count_omitted",
+        "evidence_none"
+      ],
+      "natural_mixed_labels": [
+        "PASS",
+        "REWRITE"
+      ]
+    },
+    "priority_slices": {
+      "internal_consistency_rewrite": 14,
+      "new_completed_useful_state_boundary_pairs": 5,
+      "new_completed_scope_signal_boundary_pairs": 5,
+      "threshold_near_handoff_boundary_pairs": 6,
+      "continuity_available_label_each": 8,
+      "continuity_unavailable_label_each": 6,
+      "continuity_known_stale_label_each": 4,
+      "evidence_none_label_each": 6,
+      "evidence_present_label_each": 6,
+      "evidence_count_omitted_label_each": 6
+    }
+  },
+  "length_bucket_contract": {
+    "responsibility": "Scenario-scoped; every candidate endpoint must exactly inherit its Scenario length_bucket",
+    "long_exact_input_min_tokens": 1000,
+    "non_long_exact_input_max_tokens": 999,
+    "coverage_source": "exact-tokenizer total token_count after overflow handling",
+    "long_content_rule": "four distinct product-shaped prior publications; repeated mechanical filler is forbidden"
+  },
+  "dedup_contract": {
+    "exact_rule": "sha256_canonical_model_visible_packet_v1",
+    "near_duplicate_rule": "nfkc_variable_text_char_5gram_max_jaccard_containment_v1",
+    "near_duplicate_threshold": 0.88,
+    "plan054_reference_threshold": 0.82,
+    "automatic_similarity_role": "candidate screening and group closure only",
+    "cross_split_detected_component": "fail_closed"
+  },
+  "shortcut_checks": {
+    "dimensions": [
+      "split",
+      "hard_focus",
+      "publication_class",
+      "actor_role",
+      "length_bucket",
+      "style",
+      "unicode",
+      "continuity_state",
+      "evidence_appearance",
+      "template_group"
+    ],
+    "metadata_minimum_support": 4,
+    "visible_text_minimum_candidate_support_floor": 8,
+    "visible_text_minimum_candidate_support_fraction": 0.04,
+    "visible_text_minimum_split_support": 2,
+    "visible_text_support_policy": "Use the larger of eight candidates and four percent of the complete release. This keeps the v7-era support proportion at Plan 064 scale while avoiding release blockers from ordinary English character fragments shared by a small cross-author minority.",
+    "conditioned_text_dimensions": [
+      "hard_focus"
+    ],
+    "conditioned_text_minimum_candidate_support_floor": 8,
+    "conditioned_text_minimum_candidate_support_fraction": 0.15,
+    "candidate_length_minimum_support": 6,
+    "candidate_length_minimum_split_support": 2
+  },
+  "review_contract": {
+    "admission_strategy": "direct_review_all_new",
+    "inherited_v7": "Retain terminal review evidence for the exact v8 projection of canonically unchanged v7 rows; do not relabel inherited rows as newly reviewed and do not create dispositions for retired rows.",
+    "new_candidates": "Every Plan 064 candidate is directly reviewed independently from generation before admission.",
+    "new_pairs": "Every Plan 064 Boundary and Within-PASS pair is directly reviewed for direction, context, omission and atomicity or soft-only semantics.",
+    "audit_sampling": {
+      "purpose": "Additional risk-stratified quality audit only; it never admits an otherwise unreviewed row.",
+      "seed": "plan064-publication-critic-audit-v1",
+      "strata": [
+        "split",
+        "publication_class",
+        "hard_focus",
+        "difficulty",
+        "style",
+        "length_bucket",
+        "continuity_state",
+        "unicode",
+        "generator_batch"
+      ],
+      "minimum": "All new high-risk, holdout and pair rows are already direct-reviewed; the audit additionally samples every inherited/new release stratum represented in the final universe."
+    },
+    "finding_rule": "A systemic finding is repaired, replaced, downgraded or excluded across the complete affected set and then re-reviewed; do not delete only the sampled example."
+  },
+  "mechanical_gates": {
+    "scope": "complete logical v7 plus Plan 064 release",
+    "required": [
+      "strict schema and Plan 054 packet validation",
+      "v7 lineage and fixed split",
+      "group closure and reference closure",
+      "exact and near duplicate checks including Plan 054 references",
+      "global and hard-focus-conditioned text, metadata and exact-token length shortcut checks",
+      "exact tokenizer census with no overflow or truncation",
+      "membership and consumer smoke with default holdout denial",
+      "prefreeze universe identity binding rows, review records, design, Plan 054 input identity and reports"
+    ]
+  },
+  "stop_conditions": [
+    "The logical release contains at least 204 candidates.",
+    "Every sparse coverage requirement passes after quality exclusions.",
+    "All new candidates and pairs have direct terminal review and the stratified audit has no unresolved systemic finding.",
+    "All complete-release mechanical gates pass.",
+    "A reproducible prefreeze checkpoint exists and the worktree is clean."
+  ],
+  "no_go_conditions": [
+    "The hard cap of 270 is reached while a required coverage cell or systemic quality finding remains unresolved.",
+    "v7 lineage or fixed holdout identity cannot be preserved.",
+    "Known group leakage, reference failure, duplicate/shortcut blocker, token overflow or consumer failure remains.",
+    "Direct review does not converge without weakening qualification or pair semantics."
+  ],
+  "evidence_insufficient_conditions": [
+    "Formal Plan 060 throughput, cost or training-budget facts remain unavailable for scale qualification.",
+    "The data gates pass but a required external training-budget conclusion is requested before formal Plan 060 evidence arrives."
+  ],
+  "phase_gate": {
+    "prefreeze_status": "PREFREEZE_WAITING_APPROVAL",
+    "prefreeze_forbidden_outputs": [
+      "training/publication-critic-v8",
+      "formal manifest",
+      "DATA_CARD.md",
+      "data GO"
+    ],
+    "approval_binding": "Explicit plan-author approval must name the exact prefreeze universe identity. Any semantic, label, pair, group/split, set, scale or Plan 054 input identity change invalidates approval."
+  }
+}

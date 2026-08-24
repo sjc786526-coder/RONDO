@@ -1,0 +1,389 @@
+{
+  "baseline": {
+    "commit": "d5535fc0b2c354533497fc8be40bb1395fab35a6",
+    "dirty": false,
+    "environment": {
+      "arch": "x86_64",
+      "cargo": "cargo 1.95.0 (f2d3ce0bd 2026-03-21)",
+      "divan": "0.1.21",
+      "os": "Linux",
+      "profile": "bench",
+      "release": "6.6.87.2-microsoft-standard-WSL2",
+      "rustc": "rustc 1.95.0 (59807616e 2026-04-14)",
+      "timer": "os"
+    },
+    "resources": {
+      "cgroup_psi_full_avg10_peak_bp": 252,
+      "cleanup_reason": "none",
+      "final_rc": 0,
+      "host_psi_full_avg10_peak_bp": 231,
+      "memory_high": "19G",
+      "memory_max": "21G",
+      "memory_nonreclaimable_peak_sampled_bytes": 5973757952,
+      "memory_peak_sampled_bytes": 6286381056,
+      "project_after_bytes": 157874601984,
+      "project_before_bytes": 157874614272,
+      "project_max_bytes": 200000000000,
+      "project_peak_sampled_bytes": 157981724672,
+      "project_stop_bytes": 195000000000,
+      "stop_reason": "none",
+      "swap_max": "5G",
+      "swap_peak_sampled_bytes": 0,
+      "target_after_bytes": 38333501440,
+      "target_peak_sampled_bytes": 38513410048,
+      "windows_c_available_after_bytes": 194493018112,
+      "windows_c_available_before_bytes": 194594508800,
+      "wrapper_status": "complete"
+    },
+    "wall_time_seconds": 134.078568
+  },
+  "benchmark": {
+    "divan_version": "0.1.21",
+    "harness_sha256": "ef8364c8a225226fa1085355ae447f55b9a0aabb3fab6d2f8f264703c77fd5f2",
+    "name": "plan062_hotpaths",
+    "profile": "bench",
+    "requested_sample_count": 20,
+    "requested_sample_size": 10,
+    "timer": "os",
+    "version": "plan062-hotpaths-v1"
+  },
+  "body_free": true,
+  "candidate": {
+    "commit": "22b8766b803575aaf6582befaa4898a8bc849d25",
+    "dirty": false,
+    "environment": {
+      "arch": "x86_64",
+      "cargo": "cargo 1.95.0 (f2d3ce0bd 2026-03-21)",
+      "divan": "0.1.21",
+      "os": "Linux",
+      "profile": "bench",
+      "release": "6.6.87.2-microsoft-standard-WSL2",
+      "rustc": "rustc 1.95.0 (59807616e 2026-04-14)",
+      "timer": "os"
+    },
+    "resources": {
+      "cgroup_psi_full_avg10_peak_bp": 0,
+      "cleanup_reason": "none",
+      "final_rc": 0,
+      "host_psi_full_avg10_peak_bp": 0,
+      "memory_high": "19G",
+      "memory_max": "21G",
+      "memory_nonreclaimable_peak_sampled_bytes": 188293120,
+      "memory_peak_sampled_bytes": 192274432,
+      "project_after_bytes": 157796085760,
+      "project_before_bytes": 157796069376,
+      "project_max_bytes": 200000000000,
+      "project_peak_sampled_bytes": 157796085760,
+      "project_stop_bytes": 195000000000,
+      "stop_reason": "none",
+      "swap_max": "5G",
+      "swap_peak_sampled_bytes": 0,
+      "target_after_bytes": 38253961216,
+      "target_peak_sampled_bytes": 38253961216,
+      "windows_c_available_after_bytes": 193873047552,
+      "windows_c_available_before_bytes": 193873047552,
+      "wrapper_status": "complete"
+    },
+    "wall_time_seconds": 2.761318
+  },
+  "cases": [
+    {
+      "baseline": {
+        "alloc_bytes_median": 860.0,
+        "alloc_count_median": 11.0,
+        "iterations": 200,
+        "mean_ns": 551.6,
+        "median_ns": 528.6,
+        "samples": 20
+      },
+      "candidate": {
+        "alloc_bytes_median": 524.0,
+        "alloc_count_median": 3.0,
+        "iterations": 200,
+        "mean_ns": 375.6,
+        "median_ns": 331.7,
+        "samples": 20
+      },
+      "case_id": "history_turns_8",
+      "delta": {
+        "alloc_bytes_absolute": -336.0,
+        "alloc_bytes_percent": -39.069767,
+        "alloc_count_absolute": -8.0,
+        "alloc_count_percent": -72.727273,
+        "mean_ns_percent": -31.907179,
+        "median_ns_percent": -37.249338
+      },
+      "parameters": {
+        "turns": 8
+      },
+      "workload": "history_orphan_normalization"
+    },
+    {
+      "baseline": {
+        "alloc_bytes_median": 3650.0,
+        "alloc_count_median": 37.0,
+        "iterations": 200,
+        "mean_ns": 2640.0,
+        "median_ns": 2512.0,
+        "samples": 20
+      },
+      "candidate": {
+        "alloc_bytes_median": 2188.0,
+        "alloc_count_median": 5.0,
+        "iterations": 200,
+        "mean_ns": 1809.0,
+        "median_ns": 1737.0,
+        "samples": 20
+      },
+      "case_id": "history_turns_32",
+      "delta": {
+        "alloc_bytes_absolute": -1462.0,
+        "alloc_bytes_percent": -40.054795,
+        "alloc_count_absolute": -32.0,
+        "alloc_count_percent": -86.486486,
+        "mean_ns_percent": -31.477273,
+        "median_ns_percent": -30.851911
+      },
+      "parameters": {
+        "turns": 32
+      },
+      "workload": "history_orphan_normalization"
+    },
+    {
+      "baseline": {
+        "alloc_bytes_median": 14750.0,
+        "alloc_count_median": 135.0,
+        "iterations": 200,
+        "mean_ns": 12080.0,
+        "median_ns": 11720.0,
+        "samples": 20
+      },
+      "candidate": {
+        "alloc_bytes_median": 8748.0,
+        "alloc_count_median": 7.0,
+        "iterations": 200,
+        "mean_ns": 7020.0,
+        "median_ns": 6978.0,
+        "samples": 20
+      },
+      "case_id": "history_turns_128",
+      "delta": {
+        "alloc_bytes_absolute": -6002.0,
+        "alloc_bytes_percent": -40.691525,
+        "alloc_count_absolute": -128.0,
+        "alloc_count_percent": -94.814815,
+        "mean_ns_percent": -41.887417,
+        "median_ns_percent": -40.460751
+      },
+      "parameters": {
+        "turns": 128
+      },
+      "workload": "history_orphan_normalization"
+    },
+    {
+      "baseline": {
+        "alloc_bytes_median": 565200.0,
+        "alloc_count_median": 1296.0,
+        "iterations": 200,
+        "mean_ns": 29200.0,
+        "median_ns": 29000.0,
+        "samples": 20
+      },
+      "candidate": {
+        "alloc_bytes_median": 0.0,
+        "alloc_count_median": 0.0,
+        "iterations": 200,
+        "mean_ns": 137.9,
+        "median_ns": 137.6,
+        "samples": 20
+      },
+      "case_id": "tool_specs_8",
+      "delta": {
+        "alloc_bytes_absolute": -565200.0,
+        "alloc_bytes_percent": -100.0,
+        "alloc_count_absolute": -1296.0,
+        "alloc_count_percent": -100.0,
+        "mean_ns_percent": -99.52774,
+        "median_ns_percent": -99.525517
+      },
+      "parameters": {
+        "repeats": 16,
+        "spec_count": 8
+      },
+      "workload": "model_visible_tool_specs"
+    },
+    {
+      "baseline": {
+        "alloc_bytes_median": 2261000.0,
+        "alloc_count_median": 5136.0,
+        "iterations": 200,
+        "mean_ns": 132000.0,
+        "median_ns": 131100.0,
+        "samples": 20
+      },
+      "candidate": {
+        "alloc_bytes_median": 0.0,
+        "alloc_count_median": 0.0,
+        "iterations": 200,
+        "mean_ns": 137.5,
+        "median_ns": 137.5,
+        "samples": 20
+      },
+      "case_id": "tool_specs_32",
+      "delta": {
+        "alloc_bytes_absolute": -2261000.0,
+        "alloc_bytes_percent": -100.0,
+        "alloc_count_absolute": -5136.0,
+        "alloc_count_percent": -100.0,
+        "mean_ns_percent": -99.895833,
+        "median_ns_percent": -99.895118
+      },
+      "parameters": {
+        "repeats": 16,
+        "spec_count": 32
+      },
+      "workload": "model_visible_tool_specs"
+    },
+    {
+      "baseline": {
+        "alloc_bytes_median": 4523000.0,
+        "alloc_count_median": 10256.0,
+        "iterations": 200,
+        "mean_ns": 271900.0,
+        "median_ns": 269200.0,
+        "samples": 20
+      },
+      "candidate": {
+        "alloc_bytes_median": 0.0,
+        "alloc_count_median": 0.0,
+        "iterations": 200,
+        "mean_ns": 144.5,
+        "median_ns": 137.7,
+        "samples": 20
+      },
+      "case_id": "tool_specs_64",
+      "delta": {
+        "alloc_bytes_absolute": -4523000.0,
+        "alloc_bytes_percent": -100.0,
+        "alloc_count_absolute": -10256.0,
+        "alloc_count_percent": -100.0,
+        "mean_ns_percent": -99.946855,
+        "median_ns_percent": -99.948848
+      },
+      "parameters": {
+        "repeats": 16,
+        "spec_count": 64
+      },
+      "workload": "model_visible_tool_specs"
+    },
+    {
+      "baseline": {
+        "alloc_bytes_median": 8240.0,
+        "alloc_count_median": 3.0,
+        "iterations": 200,
+        "mean_ns": 170.5,
+        "median_ns": 114.7,
+        "samples": 20
+      },
+      "candidate": {
+        "alloc_bytes_median": 4096.0,
+        "alloc_count_median": 1.0,
+        "iterations": 200,
+        "mean_ns": 62.13,
+        "median_ns": 59.44,
+        "samples": 20
+      },
+      "case_id": "unified_exec_bytes_4096",
+      "delta": {
+        "alloc_bytes_absolute": -4144.0,
+        "alloc_bytes_percent": -50.291262,
+        "alloc_count_absolute": -2.0,
+        "alloc_count_percent": -66.666667,
+        "mean_ns_percent": -63.560117,
+        "median_ns_percent": -48.177855
+      },
+      "parameters": {
+        "input_bytes": 4096,
+        "max_bytes": 1048576
+      },
+      "workload": "unified_exec_snapshot"
+    },
+    {
+      "baseline": {
+        "alloc_bytes_median": 524300.0,
+        "alloc_count_median": 3.0,
+        "iterations": 200,
+        "mean_ns": 22900.0,
+        "median_ns": 18710.0,
+        "samples": 20
+      },
+      "candidate": {
+        "alloc_bytes_median": 262100.00000000003,
+        "alloc_count_median": 1.0,
+        "iterations": 200,
+        "mean_ns": 9668.0,
+        "median_ns": 5933.0,
+        "samples": 20
+      },
+      "case_id": "unified_exec_bytes_262144",
+      "delta": {
+        "alloc_bytes_absolute": -262200.0,
+        "alloc_bytes_percent": -50.009537,
+        "alloc_count_absolute": -2.0,
+        "alloc_count_percent": -66.666667,
+        "mean_ns_percent": -57.781659,
+        "median_ns_percent": -68.289685
+      },
+      "parameters": {
+        "input_bytes": 262144,
+        "max_bytes": 1048576
+      },
+      "workload": "unified_exec_snapshot"
+    },
+    {
+      "baseline": {
+        "alloc_bytes_median": 1572000.0,
+        "alloc_count_median": 4.0,
+        "iterations": 200,
+        "mean_ns": 134300.0,
+        "median_ns": 121500.0,
+        "samples": 20
+      },
+      "candidate": {
+        "alloc_bytes_median": 1048000.0,
+        "alloc_count_median": 1.0,
+        "iterations": 200,
+        "mean_ns": 40360.0,
+        "median_ns": 36070.0,
+        "samples": 20
+      },
+      "case_id": "unified_exec_bytes_1048576",
+      "delta": {
+        "alloc_bytes_absolute": -524000.0,
+        "alloc_bytes_percent": -33.333333,
+        "alloc_count_absolute": -3.0,
+        "alloc_count_percent": -75.0,
+        "mean_ns_percent": -69.947878,
+        "median_ns_percent": -70.312757
+      },
+      "parameters": {
+        "input_bytes": 1048576,
+        "max_bytes": 1048576
+      },
+      "workload": "unified_exec_snapshot"
+    }
+  ],
+  "interpretation": {
+    "api_latency_claim": false,
+    "model_quality_claim": false,
+    "scope": "only the named local synchronous hot paths",
+    "task_success_claim": false
+  },
+  "kind": "rondo_direction1_teacher_hotpath_benchmark",
+  "privacy": {
+    "body_free": true,
+    "raw_tracked": false
+  },
+  "result_id": "plan062-direction1-teacher-hotpath-optimizations",
+  "schema_version": 1
+}

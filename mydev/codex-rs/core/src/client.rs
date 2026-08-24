@@ -861,9 +861,9 @@ impl ModelClient {
         }
         let (instructions, tools) = if model_info.use_responses_lite {
             let tools = if self.state.provider.capabilities().namespace_tools {
-                create_tools_json_for_responses_lite(&prompt.tools)?
+                create_tools_json_for_responses_lite(prompt.tools.as_ref())?
             } else {
-                create_tools_json_for_responses_api(&prompt.tools)?
+                create_tools_json_for_responses_api(prompt.tools.as_ref())?
             };
             let mut prefix = vec![ResponseItem::AdditionalTools {
                 id: None,
@@ -886,7 +886,7 @@ impl ModelClient {
         } else {
             (
                 prompt.base_instructions.text.clone(),
-                Some(create_tools_raw_json_for_responses_api(&prompt.tools)?.into()),
+                Some(create_tools_raw_json_for_responses_api(prompt.tools.as_ref())?.into()),
             )
         };
         let reasoning = Self::build_reasoning(model_info, effort, summary);

@@ -4,6 +4,9 @@
 //! We prefer this to using a crate feature to avoid building multiple
 //! permutations of the crate.
 
+#[doc(hidden)]
+pub mod plan062_hotpaths;
+
 use std::path::PathBuf;
 use std::sync::Arc;
 

@@ -34,9 +34,11 @@ from .grouping import (
     reject_perfect_shortcuts,
     shortcut_contingencies,
     validate_group_closure,
+    validate_new_to_base_component_closure,
 )
 from .token_census import census_packets
 from .shortcuts import (
+    conditioned_model_visible_text_shortcut_findings,
     model_visible_candidate_length_shortcut_findings,
     model_visible_text_shortcut_findings,
     reject_model_visible_candidate_length_shortcuts,
@@ -53,6 +55,7 @@ __all__ = [
     "build_memberships",
     "build_train_only_smoke_bundle",
     "census_packets",
+    "conditioned_model_visible_text_shortcut_findings",
     "coverage_failures",
     "deterministic_grouped_stratified_split",
     "exact_packet_digest",
@@ -69,6 +72,7 @@ __all__ = [
     "validate_dataset",
     "validate_generation_batch",
     "validate_group_closure",
+    "validate_new_to_base_component_closure",
     "validate_packet_row",
     "validate_pair_review",
     "validate_pair_row",
