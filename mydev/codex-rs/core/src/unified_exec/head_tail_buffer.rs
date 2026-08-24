@@ -98,6 +98,17 @@ impl HeadTailBuffer {
         out
     }
 
+    /// Snapshot the retained output as the continuous byte buffer consumed by
+    /// sandbox-denial checks.
+    pub(crate) fn snapshot_retained_bytes(&self) -> Vec<u8> {
+        let chunks = self.snapshot_chunks();
+        let mut aggregated = Vec::new();
+        for chunk in chunks {
+            aggregated.extend_from_slice(&chunk);
+        }
+        aggregated
+    }
+
     /// Return the retained output as a single byte vector.
     ///
     /// The output is formed by concatenating head chunks, then tail chunks.

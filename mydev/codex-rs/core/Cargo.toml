@@ -147,6 +147,7 @@ codex-utils-cargo-bin = { workspace = true }
 codex-web-search-extension = { workspace = true }
 core_test_support = { workspace = true }
 ctor = { workspace = true }
+divan = { workspace = true }
 insta = { workspace = true }
 maplit = { workspace = true }
 opentelemetry = { workspace = true }
@@ -170,3 +171,7 @@ zstd = { workspace = true }
 [package.metadata.cargo-shear]
 ignored = ["openssl-sys"]
 ignored-paths = ["tests/remote_env_windows/*.rs"]
+
+[[bench]]
+name = "plan062_hotpaths"
+harness = false
