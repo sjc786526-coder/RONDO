@@ -1771,3 +1771,18 @@ rehearsal/全新正式 campaign 中继续，本节只冻结 v1 历史事实。
   未重建已清理 target，未重跑 API、Docker、正式实验、全 workspace、CI、本地模型或训练。
 - 最终报告见 `agent_log/2026-08-23-plan058-final.md`，外部复验见
   `agent_log/2026-08-23-plan058-reviewer-reacceptance.md`。任务完成不自动授权方向 1 后继 campaign。
+
+## 构建资源固定门线调整（Plan 061，2026-08-23）
+
+**状态**：固定门线修改、聚焦测试和真实 scope 验收均已完成；没有引入动态策略或资产迁移。
+
+- 共享 wrapper 默认内存从 `19G/21G/5G` 调整为 `21G/22G/5G`，项目十进制告警/主动停止/绝对线
+  从 `180/195/200GB` 调整为 `240/255/260GB`。Windows `C:`、Docker、宿主内存/swap/PSI、
+  不可回收内存、并发和锁语义保持不变。
+- `runtime_bridge.py` 同步 high/max 精确字节，现有 drift 测试覆盖 high/max/swap；override 仍直接覆盖，
+  未覆盖维度继承新默认，因此部分旧单变量组合不再有效。
+- Shell/diff 门禁、runtime bridge 6/6 和 Plan 054 v4 旧证据 1/1 通过。最终约两秒真实 scope 的
+  production lease 前后有效，cgroup 精确为 `22548578304/23622320128/5368709120 B`，summary 与 unit
+  收尾门禁通过。
+- Plan 054 v4 历史 evidence/result/summary 保持不变并继续可验证，但不再接受新 wrapper summary；
+  未来新 campaign 另行升级证据版本。未运行 Cargo、Docker、模型、API 或全量测试。

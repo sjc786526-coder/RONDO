@@ -36,8 +36,8 @@
 一次执行授权后，可以在 RONDO 项目目录及其项目专用工作树内自由修改和验证，但没有明确授权时，必须遵守：
 
 - （重要）重型 Cargo 构建与测试必须走仓库根的共享 `scripts/with-build-lock.sh`（优先使用已接入的 `just` 配方），
-  主工作区与任何 worktree 不得同时构建。默认看门狗采用 `MemoryHigh=19G`、`MemoryMax=21G`、
-  `MemorySwapMax=5G`，项目存储在 180/195/200GB 告警/主动停/绝对停；宿主容量以 Windows `C:`
+  主工作区与任何 worktree 不得同时构建。默认看门狗采用 `MemoryHigh=21G`、`MemoryMax=22G`、
+  `MemorySwapMax=5G`，项目存储在 240/255/260GB 告警/主动停/绝对停；宿主容量以 Windows `C:`
   盘实际剩余空间为准，低于 50GB 停止。WSL 文件系统显示的约 1TB 虚拟容量/余量不得用于满足该门禁。
   `CARGO_TARGET_DIR` 必须位于受监控的 RONDO 项目根内。拿不到锁、cgroup、Windows `C:` 盘实际余量
   或其他资源计数器时必须 fail-closed；直接 Cargo 入口不具备单构建与资源看门狗保证，不得用于正式重型任务。

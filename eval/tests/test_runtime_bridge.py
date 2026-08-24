@@ -93,8 +93,8 @@ def _write_counter_tree(
             "full avg10=0.00 avg60=0.00 avg300=0.00 total=0\n"
         ),
         "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\n",
-        "memory.high": f"{19 * 1024**3}\n",
-        "memory.max": f"{21 * 1024**3}\n",
+        "memory.high": f"{21 * 1024**3}\n",
+        "memory.max": f"{22 * 1024**3}\n",
         "memory.swap.max": f"{5 * 1024**3}\n",
     }
     for name, value in values.items():
@@ -201,16 +201,23 @@ class WatchdogBridgeTests(unittest.TestCase):
                 lock_path, lock_handle = self._held_lock(root)
                 self.addCleanup(lock_handle.close)
                 directory = cgroup_root / relative.lstrip("/")
-                (directory / "memory.max").write_text("1\n", encoding="ascii")
-                with self.assertRaises(RuntimeBridgeError):
-                    lease_from_watchdog(
-                        proc_cgroup_path=proc,
-                        cgroup_fs_root=cgroup_root,
-                        **watcher_kwargs,
-                    )
-                (directory / "memory.max").write_text(
-                    f"{21 * 1024**3}\n", encoding="ascii"
-                )
+                expected_limits = {
+                    "memory.high": 21 * 1024**3,
+                    "memory.max": 22 * 1024**3,
+                    "memory.swap.max": 5 * 1024**3,
+                }
+                for counter, expected in expected_limits.items():
+                    with self.subTest(counter=counter):
+                        (directory / counter).write_text("1\n", encoding="ascii")
+                        with self.assertRaises(RuntimeBridgeError):
+                            lease_from_watchdog(
+                                proc_cgroup_path=proc,
+                                cgroup_fs_root=cgroup_root,
+                                **watcher_kwargs,
+                            )
+                        (directory / counter).write_text(
+                            f"{expected}\n", encoding="ascii"
+                        )
                 with mock.patch.dict(os.environ, {"RONDO_BUILD_LOCK": "0"}):
                     with self.assertRaises(RuntimeBridgeError):
                         lease_from_watchdog(

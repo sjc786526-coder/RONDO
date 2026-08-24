@@ -9,20 +9,20 @@
 #
 # Usage: with-build-lock.sh <command> [args...]
 #
-# Normal defaults are calibrated from the Codex 0.147.0 full-workspace run on a
-# 26 GiB RAM / 10 GiB swap WSL2 host. They retain headroom below the one-off
-# 22 GiB / 6 GiB pressure-probe settings without treating small peaks as faults.
+# Normal defaults are fixed for the current 28 GB RAM / 10 GB swap WSL2 host.
+# Independent host-memory, swap, PSI, and non-reclaimable-memory stops retain
+# machine-wide headroom while the scope can use reclaimable file cache.
 #
 # Explicit overrides:
 #   RONDO_PROJECT_ROOT=<path>
 #   RONDO_BUILD_LOCK=<path>                 (0 disables only the lock)
 #   RONDO_BUILD_WATCHDOG=0                  (disables cgroup/watchdog explicitly)
-#   RONDO_BUILD_MEMORY_HIGH=<size>          (default 19G)
-#   RONDO_BUILD_MEMORY_MAX=<size>           (default 21G)
+#   RONDO_BUILD_MEMORY_HIGH=<size>          (default 21G)
+#   RONDO_BUILD_MEMORY_MAX=<size>           (default 22G)
 #   RONDO_BUILD_SWAP_MAX=<size>             (default 5G)
-#   RONDO_BUILD_PROJECT_WARN_BYTES=<bytes>  (default 180 GB decimal)
-#   RONDO_BUILD_PROJECT_STOP_BYTES=<bytes>  (default 195 GB decimal)
-#   RONDO_BUILD_PROJECT_MAX_BYTES=<bytes>   (default 200 GB decimal)
+#   RONDO_BUILD_PROJECT_WARN_BYTES=<bytes>  (default 240 GB decimal)
+#   RONDO_BUILD_PROJECT_STOP_BYTES=<bytes>  (default 255 GB decimal)
+#   RONDO_BUILD_PROJECT_MAX_BYTES=<bytes>   (default 260 GB decimal)
 #   RONDO_BUILD_WINDOWS_C_FREE_STOP_BYTES=<bytes> (default 50 GB decimal)
 #   RONDO_BUILD_RESIDUAL_GRACE_SECONDS=<s>  (default 5)
 #   RONDO_BUILD_METRICS_DIR=<path>
@@ -114,12 +114,12 @@ for proc_name in cargo rustc rust-lld cargo-nextest nextest; do
   fi
 done
 
-memory_high="${RONDO_BUILD_MEMORY_HIGH:-19G}"
-memory_max="${RONDO_BUILD_MEMORY_MAX:-21G}"
+memory_high="${RONDO_BUILD_MEMORY_HIGH:-21G}"
+memory_max="${RONDO_BUILD_MEMORY_MAX:-22G}"
 swap_max="${RONDO_BUILD_SWAP_MAX:-5G}"
-project_warn_bytes="${RONDO_BUILD_PROJECT_WARN_BYTES:-180000000000}"
-project_stop_bytes="${RONDO_BUILD_PROJECT_STOP_BYTES:-195000000000}"
-project_max_bytes="${RONDO_BUILD_PROJECT_MAX_BYTES:-200000000000}"
+project_warn_bytes="${RONDO_BUILD_PROJECT_WARN_BYTES:-240000000000}"
+project_stop_bytes="${RONDO_BUILD_PROJECT_STOP_BYTES:-255000000000}"
+project_max_bytes="${RONDO_BUILD_PROJECT_MAX_BYTES:-260000000000}"
 windows_c_free_stop_bytes="${RONDO_BUILD_WINDOWS_C_FREE_STOP_BYTES:-50000000000}"
 nonreclaimable_stop_bytes="${RONDO_BUILD_NONRECLAIMABLE_STOP_BYTES:-20401094656}"
 swap_sustained_stop_bytes="${RONDO_BUILD_SWAP_SUSTAINED_STOP_BYTES:-4294967296}"
