@@ -1,0 +1,52 @@
+{
+  "schema": "rondo-publication-critic-training-data-release-schema-v2",
+  "revision": 2,
+  "base_row_contract": "Scenario, packet, supervision and pair rows retain rondo-publication-critic-training-data-schema-v1; v7 rows remain byte-identical and Plan 064 rows use the same strict packet and supervision semantics.",
+  "lineage_contract": {
+    "base_release": "training/publication-critic-v7",
+    "requirements": [
+      "Every base scenario, packet, supervision and pair is present and canonically identical.",
+      "Every base candidate retains its frozen split.",
+      "New IDs never collide with base IDs.",
+      "The complete logical release is checked as one set."
+    ]
+  },
+  "review_disposition_contract": {
+    "one_row_per_candidate": true,
+    "methods": [
+      "inherited_v7",
+      "direct_accept"
+    ],
+    "inherited_v7": "Allowed only for a canonically identical candidate in the immutable v7 base.",
+    "direct_accept": "Requires a terminal independent candidate review bound to the current candidate content and label.",
+    "plan064_policy": "Plan 064 v8 uses direct_accept for every new candidate. Risk-stratified sampling is an additional audit and never an admission mechanism."
+  },
+  "pair_review_contract": {
+    "inherited_v7": "Allowed only for a canonically identical v7 pair.",
+    "direct_accept": "Required for every new Boundary or Within-PASS pair."
+  },
+  "prefreeze_identity_contract": {
+    "semantic_inputs": [
+      "complete scenario rows",
+      "complete packet rows",
+      "complete supervision rows including labels and proposed splits",
+      "complete pair rows",
+      "review records and dispositions",
+      "v7 lineage",
+      "quality-audit evidence bound to the complete candidate, label, defect, pair content and final split assignment",
+      "design lock",
+      "Plan 054 input identity"
+    ],
+    "approval_invalidation": "Any semantic input change invalidates freeze approval.",
+    "runner_replay": "A runner-only repair may replay the mechanical chain only when the semantic universe identity is unchanged."
+  },
+  "phase_contract": {
+    "prefreeze": "Ignored checkpoint and reports only; no formal training directory, manifest, data card or GO claim.",
+    "freeze": "Requires explicit approval for the exact prefreeze identity and a new empty output directory, then reruns the complete final chain."
+  },
+  "authoritative_validation": [
+    "eval/rondo_eval/publication_critic/training_data/contract.py",
+    "eval/rondo_eval/publication_critic/training_data/lineage.py",
+    "eval/rondo_eval/publication_critic/training_data/review_policy.py"
+  ]
+}
