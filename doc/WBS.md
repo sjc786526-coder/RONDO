@@ -1,6 +1,6 @@
 # RONDO 长程规划（WBS）
 
-最后更新：2026-08-24（Plan 066 执行与终态 receipt 完成，待独立验收）
+最后更新：2026-08-24（Plan 066 已完成并通过独立验收）
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段指针、跨方向关系、
 稳定工程边界和授权门；已完成成果与验收见 `doc/WBS-COMPLETED.md`，单次任务合同见 `plan/`，执行细节见
@@ -20,7 +20,7 @@
 | 0：量化测评基准 | 既有设施与首次 schema v7 正式 canary 已完成，当前无 active campaign | 保留设施；历史结果见 COMPLETED，新 campaign 须重新立项与授权 |
 | 1：Harness 优化 | **正式收口；当前无 active 工作包** | 当前不继续新增观测或内核/热路径优化；既有实现、设施与历史结果保留。未来可由用户另行决定是否重新立项，本次收口不作永久禁止 |
 | 2：本地审批模型 | **已收口，今后不再开启** | 最终结论为“保留为实验”；不改生产默认，不再规划后续工作包 |
-| 3：RONDO Multi | 第一、二期及其收口案例、**三期 M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B2a、M3-B2b 与 Plan 064 已完成**；M3-B1c / Plan 066 执行完成、待独立验收；四期已规划、尚未实施 | Plan 066 已形成 C1/C2/C3 候选、正式恢复与 final-02 receipt，计算 Pod 已删除、胜者卷保留；验收前 M3-C1 继续等待；M4-A 尚未立项或取得实施授权 |
+| 3：RONDO Multi | 第一、二期及其收口案例、**三期 M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b 与 Plan 064 已完成**；四期已规划、尚未实施 | Plan 066 已形成合格的 C1/C2/C3 候选与恢复工件，计算 Pod 已删除、胜者卷保留；M3-C1 可另行规划和授权；M4-A 尚未立项或取得实施授权 |
 
 ### 方向命名口径
 
@@ -41,7 +41,7 @@
 
 - M3-A1 产品合同、M3-B2a / Plan 055 本地 Critic 服务与 M3-B2b / Plan 057 发布流程接入均已完成并进入主线。Plan 060 训练资格
   `TECHNICAL_GO`、冻结 v8 `DATA_GO` 与 Plan 066 正式训练授权已经同时成立；M3-B1c 已完成正式训练、候选保存、恢复验证、计算终态与
-  final receipt，正等待独立验收。产品链与模型链在
+  独立验收。产品链与模型链在
   `M3-C1 → M3-C2` 汇合，最后由 M3-D 收口。
 - M3-A2 / Plan 054 与 M3-B1a / Plan 059 均已完成并进入主线。Plan 059 revision v7 冻结 72 candidate、30 Boundary 与
   6 Within-PASS，三 split 为 42/16/14；独立最终验收确认输入隔离、group/split、review、50,073-token census、manifest、
@@ -53,12 +53,12 @@
 - M3-B1b / Plan 060 已在 Secure 单卡 H100 PCIe 80GB 上完成 BF16 全参数 FlashAdamW commissioning 与 final-19
   干净 formal start/resume，C1→C2→C3、完整 checkpoint、新进程恢复和继续更新均形成有效证据；独立代码/archive 复核
   `remaining_findings=[]`，最终验收通过，结论为 `TECHNICAL_GO`。Plan 060 与 Plan 066 从原 Plan 060 基线连续计入 23 USD 总账；
-  Plan 066 已统一收口计算资源终态；final-01 terminal receipt 因延迟追账 superseded，final-02 改以用户确认的控制台任务期账单为权威费用口径。
+  Plan 066 已统一收口计算资源终态；final-01 terminal receipt 因延迟追账 superseded，final-02 保留生成时的控制台费用快照，最终费用口径见下项。
 - M3-B1c / Plan 066 已在当前唯一 H100 PCIe 80GB 上从 exact base 干净执行 C1→C2→C3，实际消费 128 Binary、50 Boundary 与 8
   Within-PASS，保存并复验三个阶段候选、固定 validation 与完整恢复点，新进程 step 3→4 继续更新通过。计算 Pod 已永久删除，winner 卷保留
-  formal checkpoint、三个候选、exact 模型与可复用环境；控制台任务期总费用 `$10.476`（GPU `$10.207`、存储 `$0.269`），final-02 receipt 建议
-  `GO_RECOMMENDED`。独立验收仍待完成，
-  因此尚不解锁 M3-C1 或授予产品资格。
+  formal checkpoint、三个候选、exact 模型与可复用环境。独立验收按用户指定冻结终审最新 provider 快照总费用 `$10.9647715263`，距 `$23`
+  硬上限 `$12.0352284737`；correctness/functionality `remaining_findings=[]`，结论为 `GO`。M3-C1 的前置阻塞已解除，但仍须另行规划和授权，
+  本结论不授予模型质量、threshold、部署或产品资格。
 
 ### 方向 3：Durable Team Runtime 四期
 

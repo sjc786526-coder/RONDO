@@ -1,7 +1,7 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
 最后更新：2026-08-24 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
-状态：**第一期、第二期、M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B2a、M3-B2b 与 Plan 064 已完成；Plan 060 技术 GO、Plan 064 DATA_GO；M3-B1c / Plan 066 执行与终态 receipt 完成、待独立验收；四期已规划、尚未实施**
+状态：**第一期、第二期、M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b 与 Plan 064 已完成；Plan 060 技术 GO、Plan 064 DATA_GO、Plan 066 正式训练 GO；四期已规划、尚未实施**
 
 ## 当前定位
 
@@ -118,7 +118,7 @@ error slice 均存在。tracked v4 同时保留 8 条 calibration 投影、conte
 **交接**：基座工程路径与 M3-B1a 数据建设 GO，未微调模型直接产品使用 NO-GO。M3-B1a 应复用 v4 输入/评价合同并建立独立
 train/validation/unseen-test split，优先补足 `internal_consistency` 精致 hard negative、new/completed useful-state 边界、
 threshold-near handoff 与 continuity/evidence omission 对照，并避免长度、角色和模板捷径。M3-A2 cohort 不得冒充未来 unseen test；
-M3-C1 继续等待 M3-B1c 提供至少一个训练候选。
+M3-B1c 已提供通过独立验收的训练候选；M3-C1 可另行规划和授权。
 
 ### B 阶段：模型链与产品链并行
 
@@ -191,9 +191,9 @@ M3-C1。最后一个 checkpoint 不自动获得产品资格。
 Within-PASS，共 451,743 tokens；三阶段均完成 1,720,577,024 个 BF16 参数和 311/311 optimizer tensors 的 FlashAdamW 有限更新。
 C1/C2/C3 三个 model-only safetensors 候选、55-candidate 固定 validation、正式 C3 full checkpoint 和新进程 step 3→4 恢复继续均已形成并复验；
 validation 不进入梯度或训练决策，unseen-test 未导出、未运行。计算 Pod 已停止并永久删除，winner 卷保留 formal checkpoint、三个候选、exact 模型、
-venv 与 cache；final-01 terminal receipt 已 superseded，final-02 绑定控制台总费用 `$10.476`（GPU `$10.207`、存储 `$0.269`）并建议
-`GO_RECOMMENDED`。执行者已完成，独立验收尚未收口，因此 M3-B1c 不提前标记完成，
-M3-C1 继续等待。
+venv 与 cache；final-01 terminal receipt 已 superseded，final-02 保留生成时的控制台费用快照。独立终审按用户指定冻结最新 provider 快照总费用
+`$10.9647715263`，距 `$23` 上限 `$12.0352284737`；correctness/functionality `remaining_findings=[]`，M3-B1c 完成并验收通过。
+M3-C1 可另行规划和授权，但不自动获得实施授权或产品资格。
 
 #### M3-B2a：本地 Critic 服务（已完成并通过独立验收）
 

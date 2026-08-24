@@ -136,12 +136,11 @@
 
 ### 当前工作
 
-- `EXECUTION_COMPLETE / PENDING_INDEPENDENT_ACCEPTANCE`：训练、候选、恢复、计算资源终态和控制台权威账单均已闭合；final-02 formal receipt
-  已生成并验证，winner 卷按用户决定保留。执行者工作已完成，等待独立验收收口。
+- `COMPLETE / ACCEPTED`：训练、候选、恢复、计算资源终态与独立验收均已闭合；winner 卷按用户决定保留。
 
 ### 本任务剩余步骤
 
-- 独立验收核对 console-billing v2 合同、Pod/卷终态、final-01 supersession 与 final-02 receipt；验收前不提前写 M3-B1c 完成或解锁 M3-C1。
+- 无。本计划冻结并交回 WBS；M3-C1 由独立任务另行规划和授权。
 
 ### 阻塞项
 
@@ -149,8 +148,8 @@
 
 ### 当前验收状态
 
-- `EXECUTION COMPLETE / INDEPENDENT ACCEPTANCE PENDING`。final-02 receipt 状态为 `execution_complete_pending_independent_acceptance`，建议结论
-  `GO_RECOMMENDED`；最终独立验收前不声明任务 `COMPLETE`、模型产品资格或 M3-C1 解锁。
+- `COMPLETE / ACCEPTED / GO`。终审按用户指定冻结最新 provider 快照总费用 `$10.9647715263`，距 `$23` 上限 `$12.0352284737`；
+  correctness/functionality `remaining_findings=[]`。该结论只解除 M3-C1 的前置阻塞，不代表模型产品资格或自动授权 M3-C1。
 
 ### 交接边界
 
@@ -169,3 +168,4 @@
 | 007 | 正式训练和候选复验完成后暂不释放当前 Pod/卷，等待用户另行批准 | 用户要求保留难抢计算资源与可复用设施；terminal receipt 因此顺延 | 资源终态、账单、验收 | 已采纳 |
 | 008 | 预验收后删除计算 Pod、保留 winner 卷及正式候选/checkpoint | 训练正确性证据已闭合，GPU 空转无收益；固定容量卷保留 M3-C1 工件 | 资源终态、工件交接 | 已执行 |
 | 009 | final-01 terminal receipt 因 provider 延迟追账降级；final-02 以用户确认的控制台任务期总额及 GPU/存储分项为权威费用来源，余额仅作账户上下文 | 账户余额并非从任务基线单独扣减，不能用余额差替代任务账单；控制台分项精确闭合且用户指定为最终口径 | 账单、receipt、预算 | 已执行 |
+| 010 | 独立终审冻结最新 provider 快照 `$10.9647715263` 并停止追逐后续延迟入账 | 用户明确指定该快照为验收事实；总额仍远低于 `$23`，继续生成 receipt 版本不能改变训练正确性或 GO 判断 | 终验、费用、交接 | 已执行 |
