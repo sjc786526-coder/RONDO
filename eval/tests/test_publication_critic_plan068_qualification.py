@@ -97,6 +97,7 @@ def _freeze() -> dict[str, object]:
             },
         },
         "gates": {
+            "max_raw_logit_absolute_drift": 0.25,
             "max_projected_absolute_drift": 0.02,
             "min_ranking_concordance": 1.0,
             "reference_obvious_margin_floor": 0.1,
@@ -108,6 +109,7 @@ def _freeze() -> dict[str, object]:
             "max_peak_vram_bytes": 7_500_000_000,
             "max_warm_p95_latency_ms": 1000.0,
             "max_service_score_absolute_drift": 0.001,
+            "max_service_raw_logit_absolute_drift": 0.25,
             "max_service_verdict_mismatches": 0,
             "min_stress_success_rate": 1.0,
             "max_stress_p95_latency_ms": 2000.0,
@@ -182,6 +184,7 @@ def _fake_backend_observation(
         "latency": _success("observed", warm_ms=[25.0, 26.0, 27.0, 28.0]),
         "service": _success(
             "observed",
+            raw_logit_absolute_differences=[0.0, 0.0],
             score_absolute_differences=[0.0, 0.0],
             verdict_mismatch_count=0,
             bounded_call_count=2,
@@ -297,6 +300,29 @@ class QualificationDecisionTests(unittest.TestCase):
         self.assertEqual(score_metrics["reference_pair_direction_agreement"], 0.0)
         self.assertEqual(score_metrics["deployment_pair_direction_agreement"], 0.0)
         self.assertEqual(score_metrics["pair_direction_preservation"], 1.0)
+
+    def test_service_raw_logit_drift_is_an_independent_gate(self) -> None:
+        freeze = validate_freeze(_freeze())
+        digest = freeze_sha256(freeze)
+        observation = _fake_backend_observation("c1", digest, mode="commissioning")
+        observation["service"]["raw_logit_absolute_differences"] = [0.3]
+
+        result = evaluate_run(
+            _run_input(freeze, [observation], mode="commissioning"),
+            freeze,
+            mode="commissioning",
+            run_id="plan068-commissioning-20260824T120006Z-service-raw-drift",
+        )
+
+        decision = result["objects"][0]
+        self.assertEqual(decision["conclusion"], "NOT_QUALIFIED")
+        self.assertEqual(decision["reasons"], ["service_parity_gate_failed"])
+        self.assertEqual(
+            decision["metrics"]["service"]["value"][
+                "max_raw_logit_absolute_drift"
+            ],
+            0.3,
+        )
 
     def test_infrastructure_gap_is_inconclusive_with_na_reason(self) -> None:
         freeze = validate_freeze(_freeze())

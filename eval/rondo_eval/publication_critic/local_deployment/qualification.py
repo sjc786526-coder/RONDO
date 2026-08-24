@@ -31,6 +31,7 @@ _GIT_COMMIT = re.compile(r"[0-9a-f]{40}\Z")
 _BODY_FREE_REASON = re.compile(r"[a-z0-9][a-z0-9_:-]{0,127}\Z")
 
 _GATE_KEYS = {
+    "max_raw_logit_absolute_drift",
     "max_projected_absolute_drift",
     "min_ranking_concordance",
     "reference_obvious_margin_floor",
@@ -42,6 +43,7 @@ _GATE_KEYS = {
     "max_peak_vram_bytes",
     "max_warm_p95_latency_ms",
     "max_service_score_absolute_drift",
+    "max_service_raw_logit_absolute_drift",
     "max_service_verdict_mismatches",
     "min_stress_success_rate",
     "max_stress_p95_latency_ms",
@@ -424,6 +426,10 @@ def _score_metrics(
 ) -> dict[str, Any]:
     reference_scores = [reference[sample_id]["score"] for sample_id in sample_ids]
     deployed_scores = [deployed[sample_id]["score"] for sample_id in sample_ids]
+    raw_drift = [
+        abs(reference[sample_id]["raw_logit"] - deployed[sample_id]["raw_logit"])
+        for sample_id in sample_ids
+    ]
     drift = [abs(left - right) for left, right in zip(reference_scores, deployed_scores)]
     obvious = [
         (left, right, deployed_scores[left_index], deployed_scores[right_index])
@@ -442,6 +448,8 @@ def _score_metrics(
         else None
     )
     return {
+        "max_raw_logit_absolute_drift": max(raw_drift),
+        "mean_raw_logit_absolute_drift": statistics.fmean(raw_drift),
         "max_projected_absolute_drift": max(drift),
         "mean_projected_absolute_drift": statistics.fmean(drift),
         "ranking_concordance": _ranking_concordance(reference_scores, deployed_scores),
@@ -587,6 +595,11 @@ def evaluate_object(
         name
         for name, failed in (
             (
+                "raw_logit_drift_gate_failed",
+                score_metrics["max_raw_logit_absolute_drift"]
+                > gates["max_raw_logit_absolute_drift"],
+            ),
+            (
                 "projected_drift_gate_failed",
                 score_metrics["max_projected_absolute_drift"]
                 > gates["max_projected_absolute_drift"],
@@ -662,7 +675,12 @@ def evaluate_object(
     service = _dimension(
         observation["service"],
         "qualification service",
-        {"score_absolute_differences", "verdict_mismatch_count", "bounded_call_count"},
+        {
+            "raw_logit_absolute_differences",
+            "score_absolute_differences",
+            "verdict_mismatch_count",
+            "bounded_call_count",
+        },
         success_state="observed",
     )
     conclusion, reason = _check_state(service, "qualification service", success_state="observed")
@@ -673,7 +691,11 @@ def evaluate_object(
         _finite(item, "qualification service drift", minimum=0.0)
         for item in service.get("score_absolute_differences", [])
     ]
-    if not service_drift:
+    service_raw_drift = [
+        _finite(item, "qualification service raw logit drift", minimum=0.0)
+        for item in service.get("raw_logit_absolute_differences", [])
+    ]
+    if not service_drift or not service_raw_drift:
         raise QualificationError("qualification service parity is empty")
     service_verdict_mismatches = _count(
         service.get("verdict_mismatch_count"), "qualification service verdict mismatches"
@@ -683,6 +705,7 @@ def evaluate_object(
     )
     metrics["service"] = _observed(
         {
+            "max_raw_logit_absolute_drift": max(service_raw_drift),
             "max_score_absolute_drift": max(service_drift),
             "verdict_mismatch_count": service_verdict_mismatches,
             "bounded_call_count": bounded_calls,
@@ -690,6 +713,7 @@ def evaluate_object(
     )
     if (
         bounded_calls == 0
+        or max(service_raw_drift) > gates["max_service_raw_logit_absolute_drift"]
         or max(service_drift) > gates["max_service_score_absolute_drift"]
         or service_verdict_mismatches > gates["max_service_verdict_mismatches"]
     ):

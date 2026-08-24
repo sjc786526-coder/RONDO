@@ -170,6 +170,7 @@ class Fixture:
                 },
             },
             "gates": {
+                "max_raw_logit_absolute_drift": 1.0,
                 "max_projected_absolute_drift": 1.0,
                 "min_ranking_concordance": 0.0,
                 "reference_obvious_margin_floor": 0.1,
@@ -181,6 +182,7 @@ class Fixture:
                 "max_peak_vram_bytes": 7_500_000_000,
                 "max_warm_p95_latency_ms": 1_000.0,
                 "max_service_score_absolute_drift": 1.0,
+                "max_service_raw_logit_absolute_drift": 1.0,
                 "max_service_verdict_mismatches": 4,
                 "min_stress_success_rate": 0.0,
                 "max_stress_p95_latency_ms": 2_000.0,
