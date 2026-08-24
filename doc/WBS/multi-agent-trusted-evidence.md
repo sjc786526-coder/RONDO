@@ -1,7 +1,7 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
-最后更新：2026-08-23 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
-状态：**第一期、第二期及 M3-A1、M3-A2、M3-B1a、M3-B2a、M3-B2b 已完成并主线整合；Plan 060 / M3-B1b 已完成规划、待执行**
+最后更新：2026-08-24 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
+状态：**第一期、第二期及 M3-A1、M3-A2、M3-B1a、M3-B2a、M3-B2b 已完成并主线整合；Plan 060 / M3-B1b 正式 smoke 已执行完成，待终态清理、结算与独立验收**
 
 ## 当前定位
 
@@ -123,9 +123,11 @@ RunPod/H100、训练、上传和预算授权，并只执行有界资格 smoke。
 
 **边界**：只运行有界资格 smoke，不顺带启动正式训练；本包需要单独的付费授权，并与 M3-B1c 的正式训练授权分离。
 
-**当前状态**：Plan 060 已在专用 worktree 建立任务合同，采用本地 readiness→单 Pod commissioning→冻结身份后的干净正式 smoke→止费验收；
-资格执行尚未开始，也没有产生 H100、FlashAdamW、checkpoint、费用或清理证据。进入执行仍须用户一次性授权唯一 H100 PCIe 80GB Pod、
-train-only 上传、6 USD 任务硬上限和完整资源回收；M3-B1c 保持锁定。
+**当前状态**：Plan 060 已在 Secure 单卡 `NVIDIA H100 PCIe` 80GB、US-KS-2 上完成 BF16 全参数 FlashAdamW commissioning 和
+final-19 干净 formal start/resume。C1→C2→C3、1,720,577,024 个 trainable 参数/311 个 optimizer tensor 覆盖、约 10.56GB 完整
+checkpoint、新 OS 进程恢复与 step 3→4 继续更新均通过；最终 archive 与三项审查整改独立复核 `remaining_findings=[]`。
+正式 receipts 已回收，final-19 checkpoint、exact 模型、venv、FlashOptim 与 cache 保留在胜者 Standard 卷。按用户最新指令，当前
+replacement Pod 暂不释放，因此终态 provider facts、settled billing、final receipt 和最终 GO/NO-GO 等获批清理后收口；M3-B1c 继续锁定。
 
 **宏观验收**：模型、数据、环境、显存、吞吐、保存/恢复和预算余量形成明确 go/no-go 结论。no-go 时停止训练链并更新 WBS，
 不得自动消耗剩余预算继续训练或静默更换未授权路线。

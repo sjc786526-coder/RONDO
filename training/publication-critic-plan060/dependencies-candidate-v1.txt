@@ -1,0 +1,8 @@
+# Direct candidate pins. The Pod commissioning run freezes the complete
+# environment before the formal run; no dependency may change afterwards.
+# Torch 2.8.0+cu128 and its matching Triton are supplied by the frozen RunPod
+# image and must be observed in place; pip must not replace either package.
+flashoptim==0.1.4
+huggingface-hub[cli]==0.36.2
+safetensors==0.5.3
+transformers==4.52.3

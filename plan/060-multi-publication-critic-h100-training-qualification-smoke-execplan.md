@@ -10,7 +10,8 @@
 
 ### 最终目标
 
-在整个任务唯一一个 RunPod H100 PCIe 80GB Pod 上，对
+在 RunPod Secure Cloud 单卡 80GB 候选集合
+`NVIDIA H100 PCIe` 与 `NVIDIA H100 80GB HBM3`（H100 SXM）中，按预先冻结的机械规则选定并锁住一个实际胜者，对
 `Skywork/Skywork-Reward-V2-Qwen3-1.7B@e51ea3e08fb81326c3b812a7ff0cb9cee83e59cc`
 完成一次有界、可复算的训练资格 smoke，给出 M3-B1b 的 GO/NO-GO：证明 Plan 054 的冻结输入合同与 Plan 059 v7
 train-only smoke bundle 能组成 BF16 全参数、FlashOptim/FlashAdamW、C1→C2→C3、完整 checkpoint 和新进程恢复的真实训练链，
@@ -24,20 +25,22 @@ train-only smoke bundle 能组成 BF16 全参数、FlashOptim/FlashAdamW、C1→
 任务按下列四阶段连续执行：
 
 1. **阶段 A——本地零费用准备。** 落地专用 objective/collator、阶段消费、full checkpoint/reload、receipt 与 focused tests；生成
-   verified upload bundle；只读核对 RunPod 余额、实时 H100 PCIe 80GB 容量/价格、镜像、磁盘和费用上界。不得下载或加载本地完整模型，
-   不运行 Docker、重型 Cargo 或本地训练。readiness 不通过则不创建 Pod。
-2. **阶段 B——Commissioning。** 创建整个任务唯一的 task-only Pod，上传 verified code 与 train-only bundle；Pod 内下载 exact public
-   model/tokenizer 和候选依赖，先打通 load、forward/backward、FlashAdamW、save/reload。普通设施问题在授权和预算内自主窄修、局部重验；
-   commissioning 工件不作为正式 GO 证据。
+   verified upload bundle；只读核对 RunPod 余额、两个候选的实时型号/中心/CUDA/库存/价格、Standard 网络卷能力、镜像、磁盘和费用上界。
+   不得下载或加载本地完整模型，不运行 Docker、重型 Cargo 或本地训练。readiness 不通过则不创建外部对象。
+2. **阶段 B——资产迁移、机械选择与 Commissioning。** 最多创建两个 task-only 60GB Standard 网络卷，分别服务 PCIe 与 SXM 候选；在不并发运行
+   两个 GPU Pod 的前提下迁移或重建已验证 exact 模型、venv、依赖与有价值 cache。按 High > Medium > Low、同级优先 PCIe 的固定规则顺序尝试候选，
+   第一个成功进入 RUNNING 且硬件身份核验通过者在 trainer 启动前写入 `selected-gpu` 记录并锁定。上传 verified code 与 train-only bundle，先打通
+   load、forward/backward、FlashAdamW、save/reload；commissioning 工件不作为正式 GO 证据。
 3. **阶段 C——干净正式资格 smoke。** 设施打通后冻结实际 source、bundle、依赖、image/runtime 和 recipe 身份，使用新的 run/output/checkpoint
    namespace 与新训练进程从初始模型状态完整执行一轮 C1→C2→C3，并完成一次原进程终止后的新进程恢复和继续更新。已验证且身份未变的
-   模型/依赖 cache 可以复用，不要求重建 Pod、重新下载或重复安装。
-4. **阶段 D——止费、验收与交接。** 回收必要的小型日志、receipt、配置、manifest/hash 和聚合资源事实；完成恢复证明后可删除 smoke
-   checkpoint；删除本任务 Pod 和它明确创建的附属对象，确认 task-scoped 活跃计费为零并记录账户级当前运行费事实；执行者自检、同步文档并提交 worktree，交回计划制定者
-   独立验收。
+   模型/依赖 cache 可以复用；胜者锁定后，commissioning、formal、恢复和合理 replacement/retry 均只能使用同一型号。
+4. **阶段 D——止费、验收与交接。** 回收必要的小型日志、receipt、配置、manifest/hash 和聚合资源事实；完成恢复证明后删除不再需要的大 checkpoint；
+   终止全部计算 Pod，删除败者网络卷与冗余旧本机资产，保留胜者 Standard 网络卷中的 exact 模型、venv、依赖和有价值 cache。确认 GPU/CPU 持续费用
+   为零，记录保留卷持续费、账户级当前运行费与最终任务费用；执行者自检、同步文档并提交 worktree，交回计划制定者独立验收。
 
-本文件的制定与提交不授权外部或付费操作。用户把包含明确一次性授权的执行提示词交给执行者后，该授权同时覆盖阶段 A—D；阶段 A readiness
-是技术门，不是要求执行者再停下等待第二次常规批准。只有任务意外需要越过本计划的原则边界、第二个 Pod 或 6 USD 上限时，才重新请求授权。
+用户最初的一次性执行提示词授权阶段 A—D；2026-08-24 的追加授权把 GPU 候选扩为 PCIe/SXM，允许最多两个 task-only Standard 网络卷与受控
+replacement，并取消逐窗口人工批准。外置 `budget-policy.json` 是唯一预算权威，所有外部动作前重新读取；在预算内可自主 start/create/stop/delete
+本任务对象。任意时刻最多一个 GPU Pod 运行，create 超时必须先按 task name 查询，禁止盲目重发或创建候选集合外对象。
 
 ### 完成/验收标准
 
@@ -45,10 +48,10 @@ train-only smoke bundle 能组成 BF16 全参数、FlashOptim/FlashAdamW、C1→
       full checkpoint/new-process resume 和主要失败语义正确；训练入口和 upload allowlist 均不能触达 validation/unseen-test。
 - [ ] verified upload bundle 只含 exact source/配置/依赖合同与 Plan 059 v7 train-only smoke bundle；本地先核对 v7 manifest 和全量冻结源 hash，
       Pod 端再核对传输 hash 与 bundle validator。整个仓库、validation、unseen-test、秘密、模型 cache 和其他 ignored 资产均未上传。
-- [ ] 付费前 readiness review 记录实时余额、账户级当前运行费、H100 PCIe 80GB 容量与单价、镜像/runtime、GPU 与临时存储费率、磁盘需求、预计/最坏时长、
-      最坏费用和止费余量；结论不满足单 Pod/6 USD 边界时没有创建 Pod。
+- [ ] 付费前 readiness review 记录实时余额、账户级当前运行费、两种候选的型号/中心/CUDA/库存/单价、Standard 卷能力与费率、镜像/runtime、磁盘需求、
+      预计/最坏时长、最坏费用和止费余量；不满足候选集合、单 GPU 并发或外置预算策略时不创建外部对象。
 - [ ] 正式 smoke 身份闭合：模型/tokenizer exact revision 与已核对文件、Plan 054 v4 input/render/window/raw scalar、Plan 059 v7 bundle、正式 source、
-      dependency、image/CUDA/PyTorch/FlashOptim、recipe 和 H100 PCIe 80GB 实物均可复算。
+      dependency、image/CUDA/PyTorch/FlashOptim、recipe、`selected-gpu` 锁和实际胜者实物均可复算；未实测候选不声明吞吐、显存或成本结论。
 - [ ] 模型以 BF16 全参数方式驻留并训练；预期模型参数全部 `requires_grad` 且由 FlashAdamW optimizer 完整覆盖，没有 PEFT/LoRA/QLoRA、量化、
       CPU/NVMe offload、普通 AdamW fallback、静默冻结或只训练 head。FlashOptim 合法的内部 master weight / optimizer state 精度不属于 fallback。
 - [ ] `logits[:, 0]` 是 Binary 与两种 Pair 唯一共享的 raw scalar，higher-is-better；PASS/REWRITE 映射和 preferred/dispreferred 方向正确。方向验收基于
@@ -63,10 +66,10 @@ train-only smoke bundle 能组成 BF16 全参数、FlashOptim/FlashAdamW、C1→
       体积、远端磁盘峰值、实际单价与结算费用；commissioning 与 superseded attempt 不冒充正式结果，但费用全部计入。
 - [ ] 基于正式实测与明确的 M3-B1c 规模假设给出可复算成本区间、剩余可承受 GPU 小时/步骤上限和风险余量；可用预算严格为
       `23 USD - Plan 060 实际结算费用`，不机械写成 17 USD，也不替未来 M3-B1c ExecPlan 预先冻结 epoch/step。
-- [ ] Plan 060 全部 RunPod 费用（GPU、临时/持久存储、下载等待、commissioning、正式 smoke、重试和删除延迟）不超过 6 USD；整个任务只创建
-      一个 task-only Pod 对象且 GPU 并发为 1。
-- [ ] 无论 GO、NO-GO 或未形成资格结论，必要小型证据回收后都停止并删除本任务 Pod、临时卷和明确创建的附属对象；不触碰既有/来源不明资源，
-      并以控制面/账单事实确认 task-scoped 活跃计费为零，同时记录账户级当前运行费及相对基线变化。无法确认时不得写成已清理或已完成；若账户因
+- [ ] Plan 060 全部 RunPod 费用（GPU、旧本机卷、两个候选网络卷、下载等待、commissioning、正式 smoke、重试和删除延迟）不超过运行期外置预算策略的
+      生效硬上限；整个任务任意时刻 GPU 运行并发为 1，网络卷最多两个且均为 task-only Standard 60GB。
+- [ ] 无论 GO、NO-GO 或未形成资格结论，必要小型证据回收后都终止本任务全部计算 Pod，删除败者卷与冗余旧本机资产，保留至多一个已验证规范资产卷；
+      不触碰既有/来源不明资源，并以控制面/账单事实确认 GPU/CPU 活跃计费为零，同时记录保留卷费率、账户级当前运行费及相对基线变化。无法确认时不得写成已清理或已完成；若账户因
       既有无关资源非零，只读归因并如实报告，不得擅自清理。
 - [ ] 任务终态明确为 GO、NO-GO 或 BLOCKED/INCONCLUSIVE；只有前两者是资格结论，纯容量、凭据、网络、平台、账单未结算或清理阻断不得
       伪装成训练路线 NO-GO，BLOCKED 也不解锁 M3-B1c。GO 的独立验收必须达到 `remaining correctness/functionality findings=[]`；普通非阻断观测
@@ -90,8 +93,9 @@ train-only smoke bundle 能组成 BF16 全参数、FlashOptim/FlashAdamW、C1→
   `doc/WBS-COMPLETED.md` 与最终 WBS 结论。
 - 主物理根 `/home/sjc/desktop/RONDO/eval-data/publication-critic/plan060/` 下的 task-only ignored 资产，以及既有 Plan 054 exact tokenizer/cache 的
   必要只读使用。新目录用于 bundle staging、commissioning/formal receipt、日志、下载清单和小型回收证据，不得混入其他任务目录。
-- 一次执行授权后的 RunPod 只读账户/价格/容量/账单查询，以及整个任务唯一一个 task-only H100 PCIe 80GB Pod 的 create/start/restart/monitor/
-  stop/delete、明确的临时磁盘/卷、verified 上传、exact public model/tokenizer 与依赖下载、有界 smoke、checkpoint/reload 和必要小型工件下载。
+- 一次执行授权后的 RunPod 只读账户/价格/容量/账单查询；两个候选型号内 task-only 单 GPU Pod 的顺序 create/start/restart/monitor/stop/delete；最多
+  两个 task-only 60GB Standard 网络卷；受控迁移/replacement；verified 上传、exact public model/tokenizer 与依赖下载、有界 smoke、checkpoint/reload
+  和必要小型工件下载。任意时刻最多一个 GPU Pod 运行，胜者锁定后 replacement 只能保持同型号。
 - Hugging Face 只作为 exact public revision 的匿名或既有安全只读下载来源；普通公开文档与源码查询也在范围内。
 
 ### 允许只读核对
@@ -107,8 +111,8 @@ train-only smoke bundle 能组成 BF16 全参数、FlashOptim/FlashAdamW、C1→
   window 或 scalar 语义；若发现上游冻结合同本身错误，暂停而不是在 Plan 060 静默修订。
 - M3-B1c 规模的正式 C1→C2→C3 训练、validation/unseen-test 上传/训练/调参/recipe 选择/GO 判定、threshold 或质量评价、checkpoint 选择、第二个质量 recipe、
   M3-B1c/M3-C1/方向 1、部署/量化/转换或产品启用。
-- 第二个或 replacement Pod、其他 GPU、H100 SXM、其他云后端、多 GPU/并发、RunPod Serverless/cluster、长期 volume/service、HF Jobs/Endpoint/Space、
-  HF repo/bucket 创建或任何 HF/model/data 写入。
+- 候选集合外 GPU、Community Cloud、多 GPU 或两个 GPU Pod 并发、第三个或 High Performance 网络卷、RunPod Serverless/cluster、HF Jobs/Endpoint/Space、
+  HF repo/bucket 创建或任何 HF/model/data 写入；不得为迁移新建 CPU Pod。
 - LoRA/QLoRA/PEFT、4/8-bit 或其他量化训练、CPU/NVMe offload、部分冻结、只训 head、普通 AdamW/其他 optimizer fallback；也不得改变底模或数据来修绿。
 - 本地完整模型下载、加载、forward 或训练，Docker、重型 Cargo/Bazel、真实 API、批量测评、宿主/全局工具链修改、CI/PR，以及清理来源不明的
   本地/远端资产。
@@ -162,7 +166,7 @@ train-only smoke bundle 能组成 BF16 全参数、FlashOptim/FlashAdamW、C1→
    不要求每个参数在每一步都出现非零梯度或不同数值，也不建立逐 tensor hash/审计链。
 7. **允许技术收敛，不允许换路线。** micro-batch、gradient accumulation、loader、padding、attention backend、gradient clipping 和 scheduler
    等由执行者按兼容性决定；OOM 时按证据收敛这些参数，确有必要可启用 activation checkpointing。不得用 PEFT、量化、offload、其他 optimizer/
-   hardware/cloud 或删减训练参数集合换取通过。
+   候选集合外 hardware/cloud 或删减训练参数集合换取通过；胜者锁定后不得因普通技术失败切换型号修绿。
 8. **full checkpoint 必须由新进程继续。** checkpoint 至少持久化完整 model、FlashAdamW optimizer（含恢复其参数语义所需状态）、scheduler、Python/
    NumPy（如使用）/Torch CPU/CUDA RNG、stage/global step、数据游标或等强继续状态及 frozen identity。保存后原训练进程正常退出，由不同 OS 进程加载，
    核对恢复点并继续至少一个新 optimizer update。checkpoint 是否压缩、文件布局和保存库由实证决定，不要求 bitwise replay；但不得只保存 model、
@@ -176,21 +180,28 @@ train-only smoke bundle 能组成 BF16 全参数、FlashOptim/FlashAdamW、C1→
 10. **正式运行暴露窄设施 bug 可以整改。** 修复后重新执行必要 commissioning、重新冻结变化身份，并从干净训练状态完整重跑正式 smoke；无需把
     已验证且未变化的公开模型/依赖 cache 人为报废。若合理收敛后仍是 FlashAdamW 根本不兼容/持续非有限、80GB 无法 BF16 全参数更新、目标方向或
     参数更新错误、full checkpoint/new-process continue 不可靠，才形成有效路线 NO-GO，不得换路线或反复重跑掩盖。
-11. **没有有效正式证据就没有资格结论。** RunPod capacity、凭据、网络、平台、账单未结算、清理失败或 6 USD 内未完成正式 run 只形成
+11. **没有有效正式证据就没有资格结论。** RunPod capacity、凭据、网络、平台、账单未结算、清理失败或生效预算内未完成正式 run 只形成
     BLOCKED/INCONCLUSIVE；它既不是 GO，也不是“训练路线已证伪”的 NO-GO，M3-B1c 保持锁定。
 
 ### 3.4 单 Pod、费用与外部边界
 
-12. **整个任务只创建一个 Pod 对象。** 必须是 RunPod 上 task-only、单张 H100 PCIe 80GB、GPU 并发 1；创建前核对 returned GPU 型号/显存、价格、
-    image/runtime、磁盘和终止保护。允许 stop/start/restart 同一 Pod；create 超时先按 task name/控制面查明是否已创建，禁止直接重发 create。
-    该 Pod 不可恢复而需要 replacement 时，先止费并请求新授权；不碰账户中既有或来源不明对象。
-13. **6 USD 是全生命周期硬上限。** GPU、container/volume/network storage、下载/编译/JIT 等等待、commissioning、正式 smoke、所有重试和删除延迟
-    全部累计。创建前以实时余额/费率和保守最长时长确认可行，运行中持续查看 Pod 状态、日志和 billing，并为回收/删除预留余量；不得等实际越线或
-    余额耗尽才停。不得通过新建通用预算服务增加复杂度，简单可复算记录与 provider 账单即可。
+12. **候选机械选择、卷与 replacement 边界。** 候选仅为 Secure Cloud 单卡 80GB 的 `NVIDIA H100 PCIe` 与 `NVIDIA H100 80GB HBM3`。每次选择按
+    实时库存 High > Medium > Low，同等级优先 PCIe；同型号中心同级时优先已授权默认中心（PCIe=`US-KS-2`、SXM=`US-NE-1`），除非支持 Standard 卷的
+    其他中心有更高库存证据。第一个成功进入 RUNNING 且 GPU/显存/中心/CUDA/价格核验通过的候选在 trainer 前原子写入 `selected-gpu` 并锁定；此后不得
+    切型号。最多两个 task-only Standard 网络卷、各 60GB；任意时刻最多一个 GPU Pod 运行。create 超时先按 task name 查询，容量不足可等待，其他 provider
+    错误立即失败并回收证据；允许顺序删除无效/零 GPU/失去容量的 task-only Pod并以同一胜者型号和卷 replacement，禁止并行竞速。旧 Pod/本机卷仅在两个
+    候选卷分别完成文件集、关键 hash、model revision 与 import 验证后删除；若平台不支持同 Pod CPU-only 启动，可预算内短启旧 H100 搬迁，不得新建 CPU Pod。
+13. **外置策略是预算唯一权威。** 主物理根 ignored 文件
+    `eval-data/publication-critic/plan060/controller/budget-policy.json` 只记录可实时调整的 `hard_cap_usd`；GPU、container/volume/network storage、
+    下载/编译/JIT 等等待、commissioning、正式 smoke、所有重试和删除延迟全部累计。controller 每次采样重新读取该文件，按固定清理余量自动推导
+    正常工作、停机回收和立即删除线；缺失或非法时 fail-closed。训练 bundle、Plan、runbook 与 cloud candidate 不复制当前金额，改预算不触发重冻。
+    创建前以实时余额/费率和保守最长时长确认可行，运行中持续查看 Pod 状态、日志和 billing，并为回收/删除预留余量；不得等实际越线或余额耗尽才停。
+    不得通过新建预算服务增加复杂度，简单 JSON、可复算记录与 provider 账单即可。finalizer 必须绑定生效值与策略文件 SHA-256。
 14. **Hugging Face 只读。** Pod 只从公开 Hub 读取 exact model/tokenizer revision 与已冻结文件；不得使用浮动 `main`，不得登录、转发 token、创建/
     修改 repo、上传 code/data/model/checkpoint，亦不得使用 HF Jobs/Endpoint/Space/Bucket。普通公开源码/文档和依赖下载允许，但正式依赖必须冻结身份。
-15. **finally-style 止费。** 成功、NO-GO、异常或 blocked 都先尽力回收必要小型证据，再 stop/delete 本任务 Pod、临时卷和明确创建的附属对象，并复核
-    task-scoped active cost 为零。只下载 receipt/log/config/manifest/hash/聚合资源事实；full smoke checkpoint 在证明恢复后可删，不要求长期回收本地。
+15. **finally-style 止费与资产保留。** 成功、NO-GO、异常或 blocked 都先尽力回收必要小型证据，再终止全部 task-only 计算 Pod，删除败者卷与冗余旧本机
+    资产，保留胜者 Standard 网络卷中的 exact 模型、venv、依赖和有价值 cache，并复核 GPU/CPU active cost 为零、记录持续卷费。只下载 receipt/log/
+    config/manifest/hash/聚合资源事实；full smoke checkpoint 在证明恢复后删除，不要求长期回收本地。
     若控制面暂不可达，持续安全重试清理而不是宣布完成；不得删除任何非本任务对象。用于扣减共享 23 USD 的 `actual_plan060_cost` 必须来自删除后
     最终账单/费用事实，不能用训练结束时的中间 receipt 或按小时估算替代。清理后同时记录账户级当前运行费；若既有无关资源使其非零，只读归因并
     报告相对基线变化，不得擅自清理或谎报全账户归零。
@@ -247,29 +258,73 @@ train-only smoke bundle 能组成 BF16 全参数、FlashOptim/FlashAdamW、C1→
   相关测试/日志；并行只读审阅对范围、复用 seam、失败/费用/ignored 边界的结论已纳入本计划。
 - 已用 Hugging Face 公开只读 metadata 核对 exact revision 仍解析为同一 commit，safetensors 参数为 1,720,577,024 BF16；没有下载权重、登录或修改
   Hub 状态。
-- 已建立本 ExecPlan 与 WBS 规划指针；本规划阶段没有创建/修改 RunPod 资源、上传数据、下载/加载完整模型、训练、运行 Docker/重型构建或产生
-  Plan 060 云费用。
+- 本地 full-model trainer 当前包含 objective/collator、FlashOptim 全参数/有效 master 与压缩状态、optimizer/scheduler LR finite、C1/C2/C3 游标、
+  完整 checkpoint/new-process、bundle/launcher 和 final receipt 合同；仓库级 `scripts/wait-runpod-readiness.py` 提供可参数化的 Pod/GPU/机房/价格/预算/
+  deadline 轮询能力，不属于 Plan 060 bundle 或 direction 私有资产。最新独立复核的 correctness findings 为 `remaining=[]`。
+- final-07 已上传、hash 与严格解包验证通过，但 `bootstrap-final-07` 在目标脚本启动前暴露 launcher 内嵌 `bash -c` 单引号破坏；未开始模型下载或训练，
+  Pod 已在 `2026-08-24T07:18:59Z` 停止，该 attempt 只作 superseded commissioning 证据。现以专用 argv-preserving worker 消除嵌套 shell source，
+  动态覆盖 tricky argv、target-owned status、fallback、退出码与 active lock。
+- final-08 后已完成匿名 exact-revision 模型下载、关键 hash 与可导入验证，旧 PCIe Pod 的本机 `/workspace` 保留 exact 模型、venv、FlashOptim、
+  HF/Triton cache 与依赖身份。final-10 首次真实进入 `FlashAdamW.step()` 后暴露 fused update 失败；必要小型日志已回收，Pod 停止且没有 checkpoint。
+  后续窄修补齐 optimizer/scheduler 诊断、winner-lock、双候选 controller 与终态 provider-chain/卷费合同，未改变模型、objective、optimizer 或训练路线。
+- final-12 因 source drift、final-13 因 Standard 卷 mode、final-14/final-15 因实测 FlashOptim numerics 分辨率门已明确 superseded，均禁止再次
+  上传或据此重启。final-15 的 `2e-4` 越过首个 maxabs=68 参数后，在下一 maxabs=136 参数处由同一真实门以
+  `2e-5 < 3.114e-5` fail-closed；Pod 已立即停止，未产生 checkpoint 或训练更新。当前源码 focused tests 为 97/97；不关闭门禁、不改变
+  optimizer/master/state 路线的最小下一倍增 `4e-4` 曾严格重冻为 final-16，但独立复核指出逐参数 lazy gate 仍可能按更大 maxabs 继续暴露，故该 bundle
+  已在上传前 superseded。当前新增一次性全参数 numerics preflight：复用 pinned optimizer 的 `recompute_param_stats()` 与同一逐参数 checker，在任何
+  objective/update 前检查完整 coverage；失败时用同一 checker 报告全组参数所需的最小二倍增候选。focused tests 为 100/100；新候选
+  final-17 经独立复核发现 exact exception class 与 receipt coverage/LR 交叉绑定仍不足，故同样在上传前 superseded。当前以 pinned public/defining
+  export 的同一 `NumericsError` 类对象做 exact-type 捕获，拒绝同名同 module spoof；start/resume receipt 同时要求 preflight checked tensor count 等于
+  optimizer full coverage，且 configured LR 等于所有 post-update optimizer/scheduler LR。focused tests 为 102/102；新候选
+  `bundle-final-18.tar` 已从本地定向门禁后严格冻结：757,760 bytes、archive SHA-256
+  `99844cd386e2e1219a268032c98a0dfe2e652d95a6f4e6c6b7e07e76dbc2cfdb`、manifest SHA-256
+  `8a86db9913d3d8a6497cd682a677e91092fe76d54143e84813855cebf9440543`、content SHA-256
+  `19a95858ea5b320151c8e7ba9ec7e9a15d994f7f5c005943cd96a594e49edd4e`；外部干净 cwd 严格解包与 55 个 regular file 身份验证通过；最终独立
+  restart-readiness 复核 `remaining_findings=[]`。它随后完成 commissioning 与一轮正式 start/resume，但并行审查在本地 finalizer/runner
+  发现 provider 时序、胜者卷绑定与 winner-lock shape 三项实质缺口，因此 final-18 正式结果只保留为 superseded 诊断证据。
+- 已按 High > Medium > Low、同级 PCIe 优先的冻结规则完成首次 RUNNING 身份核验并锁定 `NVIDIA H100 PCIe`；规范 winner lock 位于主物理根
+  `eval-data/publication-critic/plan060/controller/winner-lock.json`。胜者 Pod `8vdahxbulczvza` 与旧资产源 Pod `b0fazq4ueaii2k` 当前均为 stopped，
+  没有 GPU/CPU active cost；胜者 60GB Standard 卷 `hi3iaz8rsr` 与败者 SXM 60GB Standard 卷 `bbfxl15nqr` 均保留，胜者卷中的 exact
+  model/tokenizer、venv、FlashOptim、依赖身份与 cache 已完成 hash/import/hardware 验证。
+- 外置 `budget-policy.json` 是唯一预算权威；通用 readiness/start waiter 与 Plan 060 双候选纯决策 controller 已落地。最后一次胜者 Pod 仅用于
+  RUNNING/硬件/SSH 身份核验，按用户要求在本地合同收敛前停止，没有上传 bundle 或启动训练。独立 readiness 通过后的一次付费启动已把 final-13、
+  exact model/tokenizer、venv、FlashOptim、依赖与 cache 固化并验证到胜者卷；首次 commissioning 在加载模型前因 Standard 卷把已 chmod 0600 的
+  winner-lock 副本呈现为 0666 而 fail-closed。final-14 已跨过该门，但 FlashOptim `check_numerics` 实测 `1e-4` 的预测最小步长 `1e-5` 低于
+  当前 BF16 权重分辨率 `1.557e-5`，同样在更新前 fail-closed；两次均立即停止 Pod，未产生 checkpoint 或训练更新。
+- replacement controller 在完整本地复核后以约 5 秒周期等待，创建并接管 replacement Pod `oe6gbptvq5yhja`；agent 在 300 秒交接保护内完成
+  Secure 单卡 H100 PCIe 80GB、US-KS-2、CUDA 13.0、`2.89 USD/h`、胜者 Standard 卷与 exact model/venv/FlashOptim/cache 的 provider/SSH/资产验收。
+  controller 只在 RUNNING 后交接，不再因 provider 投影延迟错失库存。
+- final-18 commissioning 已证明 C1→C2→C3、311/311 全参数 FlashAdamW、约 10.56GB 完整 checkpoint、新 OS 进程恢复与 step 3→4 继续更新可行。
+  审查整改后重新冻结的正式身份为 `bundle-final-19.tar`：768,000 bytes、archive SHA-256
+  `066a9f60eb308312bd99f25008ddb66f3fd893e2ea082e920a4e725d3df67a61`、manifest SHA-256
+  `735e928ce733e08742f0e03c55497ac1f94f53674ec2855df37ca843e1f43a8d`、content SHA-256
+  `699e355e550f17b2efe158b66d4bf50619b7fa3d55194b42c378fefe6b4cb9a1`；独立逐文件复核 `remaining_findings=[]`。
+- final-19 已从新目录/新进程完成干净 formal start/resume：C1/C2/C3 与恢复后 C3 各一次真实更新，1,720,577,024 个 BF16 参数及 311 个
+  optimizer tensor 完整覆盖，FlashAdamW 压缩 state/有效 master/有限性/LR/阶段消费/新进程证据均通过。正式 start/pending receipts 已回收到主物理根；
+  final-19 checkpoint 保留供独立验收，final-18 commissioning/formal checkpoint 已删除。
 
 ### 当前工作
 
-- ExecPlan 已冻结，等待用户把含阶段 A—D 一次性授权的执行提示词交给执行者，在现有 task worktree 内实施。
+- 训练与证据回收已完成；正在收口本地测试、文档、agent log 与提交。按用户最新明确指令，replacement Pod `oe6gbptvq5yhja` 暂时保持 RUNNING，
+  未经再次批准不得停止或删除；胜者卷 `hi3iaz8rsr` 与 final-19 checkpoint 同样保留。终态 provider facts、settled billing 与最终 receipt 必须等计算 Pod
+  获准释放后生成，当前不得伪造为已清理终态。
 
 ### 本任务剩余步骤
 
-- 完成阶段 A 本地设施、focused tests、verified bundle、实时只读 readiness review；不通过则不购买。
-- 在一次授权内完成阶段 B commissioning，保留有效进度并修复普通设施问题。
-- 冻结最终身份，从干净训练状态完成阶段 C 正式 smoke、full checkpoint 与新进程继续。
-- 完成阶段 D 证据回收、止费/删除、费用与 B1c 余量复算、执行者自检、文档/日志和 worktree 提交。
+- 完成本地 focused 门禁、自检、精炼日志、WBS 状态同步与 worktree 提交。
+- 等用户批准后停止/终止 task compute，按当时授权处理旧源 Pod 与败者卷，等待账单结算，生成 provider terminal facts/final receipt，并把远端终态交给独立验收。
 - 由计划制定者独立复核代码、focused tests、正式 receipt/billing、远端终态和结论；整改普通 finding 后完成最终 GO/NO-GO。
 
 ### 阻塞项
 
-- 当前无代码阻塞。付费执行尚未由本规划会话启动；执行者只有收到用户明确的一次性授权提示词后才能进入任何 RunPod create/upload/train 动作。
+- 没有训练代码或训练路线阻塞。唯一未闭合项是用户主动保留 RUNNING Pod，因此 stage D 终态清理、settled billing 和 final receipt 等待后续释放批准；
+  这不是技术 NO-GO。
 
 ### 当前验收状态
 
-- `NOT_STARTED`：当前只有规划与公开只读 metadata 事实，没有 H100 BF16 全参数、FlashAdamW、C1/C2/C3、checkpoint/new-process、资源、费用或清理证据，
-  不构成 M3-B1b GO/NO-GO。
+- `FORMAL_SMOKE_COMPLETE / TERMINAL_CLEANUP_DEFERRED_BY_USER`：H100 BF16 全参数 FlashAdamW commissioning 与 final-19 干净正式
+  start/resume 均已通过，正式 pending receipt 和 final-19 checkpoint 已保留；三项审查整改及新 archive 身份复核均为 `remaining_findings=[]`。
+  因计算 Pod 按用户要求继续 RUNNING，尚无有效终态清理/settled billing/final receipt，不提前写最终 GO/NO-GO 或解锁 M3-B1c。
 
 ### 交接边界
 
@@ -287,10 +342,27 @@ train-only smoke bundle 能组成 BF16 全参数、FlashOptim/FlashAdamW、C1→
 |---|---|---|---|---|
 | 001 | Plan 060 使用现有专用 worktree；ignored 运行资产统一落主物理根 `eval-data/publication-critic/plan060/` | tracked 交付与 ignored 重资产物理分离，避免 worktree 各建一份私有树 | Git、运行资产 | 已采纳 |
 | 002 | 用户交给执行者的提示词一次授权阶段 A—D；阶段 A readiness 是技术门而非第二人工授权门 | 降低重复确认，同时保证准备不足时不创建付费资源 | 授权、阶段 | 已采纳 |
-| 003 | 整个任务只创建一个 RunPod H100 PCIe 80GB Pod 对象，允许重启同一对象但不允许 replacement | 与本任务单 Pod、单 GPU、无并发边界一致，消除 create 超时后的重复创建风险 | 云生命周期 | 已采纳 |
+| 003 | 初始合同只允许一个 H100 PCIe Pod；追加授权改为 PCIe/SXM 双候选、最多两个 Standard 卷及同胜者型号的受控 replacement，始终保持 GPU 运行并发 1 | 在稀缺主机库存下把数据与宿主解耦，同时保留可复用资产和单 GPU 费用边界 | 云生命周期 | 已被 017 取代 |
 | 004 | 复用 Plan 054/059 输入与数据 seam，新建职责明确的 Publication Critic full-model trainer；不复用 L6 QLoRA/adapter 训练语义 | 输入合同契合而训练目标不契合，专用能力比扭曲旧设施更干净 | 架构、训练 | 已采纳 |
 | 005 | Binary 与两类 Pair 共享 `logits[:,0]` raw scalar；具体稳定 loss、权重和 batch 混合留给执行者冻结 | 锁住正确语义，保留依据 H100 实测选择实现的空间 | objective、recipe | 已采纳 |
 | 006 | Commissioning 后才冻结正式身份，并从新训练状态完整重跑；允许复用身份未变的 cache | 保留调试进度、减少付费浪费，同时隔离正式证据 | 运行、证据 | 已采纳 |
-| 007 | Plan 060 硬上限 6 USD；M3-B1c 可用额始终按 `23 - actual_plan060_cost` 计算 | 让重试与等待如实计费，不预先虚构固定 17 USD | 预算、结论 | 已采纳 |
+| 007 | Plan 060 硬上限以外置运行期策略为准；M3-B1c 可用额始终按 `23 - actual_plan060_cost` 计算 | 用户需要在不中断训练身份或重冻 bundle 的前提下灵活调整预算；重试与等待仍如实计费 | 预算、结论 | 已采纳 |
 | 008 | 资格终态为 GO/NO-GO；纯设施/账单/清理阻断单列 BLOCKED/INCONCLUSIVE 且不解锁 B1c | 避免把缺失证据误报为路线失败或通过 | 失败、交接 | 已采纳 |
 | 009 | 执行者只提交 task worktree；合并、推送、分支归档与 worktree 删除等待用户批准 | 遵守本轮最新交付要求并保留独立验收现场 | Git、交付 | 已采纳 |
+| 010 | 首次 Pod 停止后曾要求每个后续付费窗口单独批准；追加授权改为仅受动态预算策略约束 | 当前可在预算内自主断点重试，但付费前本地收敛原则不变 | 运行、预算 | 已被 018 取代 |
+| 011 | final-07 将 post-update model/effective-master/optimizer moment/optimizer-scheduler LR finite、阶段与恢复证据 cardinality、固定 C3 cursor 和 provider Pod/window 绑定纳入同一 receipt 合同 | 防止 NaN/Inf、空/缩小 coverage、错误 resume 与 receipt 错绑仍可绿，同时不建设第二套审计体系 | trainer、checkpoint、receipt、bundle | 已采纳 |
+| 012 | 本地新增 CPU Torch tiny objective→update→checkpoint save/verify/load→model/optimizer/scheduler/RNG restore→continue seam；它不替代 FlashAdamW/H100 commissioning | 让付费前真实覆盖关键组合路径，同时保持无模型、无 GPU 的轻量边界 | tests、readiness | 已采纳 |
+| 013 | detached launcher 改为调用专用 argv-preserving worker，不再把状态 fallback 拼入嵌套 `bash -c` source | final-07 在付费启动后证明内嵌单引号会拆坏 worker 命令；专用 worker 可直接测试 exact argv、status owner 与退出码 | launcher、bundle | 已采纳 |
+| 014 | RunPod 容量/费用等待器作为仓库级通用脚本维护，并通过参数绑定现有 Pod、machine GPU/机房、catalog、价格、预算与统一 deadline | 后续同类训练可复用同一 fail-closed 轮询设施，同时不把 Plan 060 私有常量固化为第二套 controller | scripts、tests、运行 | 已采纳 |
+| 015 | final-08 HF 网络失败后停止 GPU 计费并保留当时 Pod/本机资产，从首个未完成 seam 继续 | 这是追加网络卷与同型号 replacement 授权前的保护资产决策；当前仍保留其“先保护已验证进度”原则，资源拓扑和清理以 017/018 为准 | 远端生命周期、预算 | 已被 017/018 取代 |
+| 016 | 取消固定付费运行窗口，仅由外置 `hard_cap_usd` 控制；正常工作/停机回收/立即删除线按固定清理余量自动推导并逐次重载 | 用户明确允许自主断点重试并延长时间，同时要求预算可实时调整且保留清理与账单延迟余量 | 预算、运行、清理 | 已采纳 |
+| 017 | 候选固定为 Secure 单卡 80GB PCIe/SXM；High > Medium > Low、同级 PCIe 优先，第一个 RUNNING 且身份核验通过者写入 `selected-gpu` 后锁定 | 选择不依赖训练结果，允许在稀缺库存中机械决策且防止事后换卡修绿 | GPU 选择、receipt、重试 | 已采纳 |
+| 018 | 最多创建两个 task-only 60GB Standard 卷；终态终止全部计算 Pod、删除败者卷和冗余旧本机资产、保留一份规范胜者资产卷；所有动作仅受外置预算策略约束 | 降低后续冷启动和重复下载成本，同时让持续费用可见且可控 | 存储、预算、清理 | 已采纳 |
+| 019 | 控制端 winner-lock authority 继续要求 regular 0600；Standard 卷远端副本改以 no-follow regular、大小/读取稳定、严格 schema、启动前 exact SHA 和 receipt hash 绑定，不依赖卷不保真的 POSIX mode | 实测卷把已 chmod 0600 文件呈现为 0666；mode 不是该卷可执行的安全合同，而 task-private replica 的字节/身份绑定仍可完整验证 | winner-lock、远端卷、receipt | 已采纳 |
+| 020 | FlashAdamW commissioning candidate LR 由 `1e-4` 调为 `2e-4`，继续启用 `check_numerics=true`，不改 optimizer/master/state/模型路线 | H100 首次实测 numerics gate 给出 `1e-5 < 1.557e-5`；后续更大张量门限由 021 收口 | recipe、commissioning | 已被 021 取代 |
+| 021 | FlashAdamW commissioning candidate LR 由 `2e-4` 调为 `4e-4`，仍保留同一 numerics/master/optimizer 合同 | pinned FlashAdamW 对 Adam 逐参数按 `0.1 * LR` 估算；final-15 越过 maxabs=68 后在 maxabs=136 实测 `2e-5 < 3.114e-5`，`4e-4` 是跨过该最新门限的最小下一简单倍增 | recipe、commissioning | 已采纳 |
+| 022 | 在 optimizer 构造并完成 exact full-parameter coverage 后、任何 objective/update 前，以 pinned `recompute_param_stats()` 和 `_check_param_numerics` 一次扫描全部参数；仅捕获 public/defining export 同一 exact `NumericsError` 类，失败时继续只读二倍增试探并汇总所需候选；receipt 将 checked count/LR 与 coverage/真实 stage LR 绑定 | FlashOptim 默认 lazy gate 会在首个失败参数终止，final-14/15 已证明可能逐档重复付费；复用 exact dependency 语义可在一次模型加载内收敛，同时不复制公式、不关闭门禁、不修改 optimizer state | runner、model contract、receipt、tests | 已采纳 |
+| 023 | stopped 旧 winner compute 在胜者卷/资产再次核验后终止；由通用 replacement controller 约每 5 秒查询 US-KS-2 exact PCIe 容量，并以固定名称、同镜像、同卷顺序创建一个 replacement；create 不确定先 exact-name 查重，RUNNING 后 180 秒无接管即 stop | fixed-Pod waiter 不能把已解耦网络卷调度到机房其他可用主机；保持 winner 型号、机房、单运行 GPU、动态预算和交接看门狗不变即可消除该容量竞态，无需改训练身份或建设第二套调度体系 | scripts、tests、云生命周期 | 已采纳 |
+| 024 | replacement controller 抢到精确 Pod 后只核对 ID/name/RUNNING 即交接；完整 provider/SSH/资产验收由 agent 在显式 300 秒看门狗内完成 | Low 库存下前置全量 provider 投影会制造竞态；交接后验收失败仍可安全停止同一 Pod | controller、运行 | 已采纳 |
+| 025 | final-18 成功训练后发现的 finalizer 时序/胜者卷绑定与 runner winner-lock shape finding 必须进入新 bundle；final-18 降为诊断证据，final-19 从空训练状态重跑 formal | formal identity 应代表当前完整源码；不能以“只影响 finalizer”为由让正式 bundle 与交付源码漂移 | bundle、runner、finalizer、formal | 已采纳 |
+| 026 | 独立验收前保留 final-19 checkpoint；只删除 superseded checkpoint。按用户最新指令，计算 Pod 在再次批准前保持 RUNNING，终态清理与 final receipt 延后 | Standard 卷按配置容量计费，删除最新 checkpoint 不降时薪；保留恢复现场更有利于验收，且不得违背最新资源保留指令 | checkpoint、Pod、清理、交付 | 已采纳 |

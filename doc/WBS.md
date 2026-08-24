@@ -1,6 +1,6 @@
 # RONDO 长程规划（WBS）
 
-最后更新：2026-08-23（Plan 058 与 Plan 059 均已完成验收并进入主线；Plan 060 / M3-B1b 已完成规划、待执行）
+最后更新：2026-08-24（Plan 060 / M3-B1b 正式 smoke 已执行完成，等待获批资源清理、最终结算与独立验收）
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段指针、跨方向关系、
 稳定工程边界和授权门；已完成成果与验收见 `doc/WBS-COMPLETED.md`，单次任务合同见 `plan/`，执行细节见
@@ -20,7 +20,7 @@
 | 0：量化测评基准 | 既有设施与首次 schema v7 正式 canary 已完成，当前无 active campaign | 保留设施；历史结果见 COMPLETED，新 campaign 须重新立项与授权 |
 | 1：Harness 优化 | **Plan 058 已完成并进入主线，当前无 active 工作包** | 保留 root-only、UnderDevelopment、默认关闭的 C2 repeat guidance；本轮不规划方向 1 后继 |
 | 2：本地审批模型 | **已收口，今后不再开启** | 最终结论为“保留为实验”；不改生产默认，不再规划后续工作包 |
-| 3：RONDO Multi | 第一、二期及其收口案例、**三期 M3-A1、M3-A2、M3-B1a、M3-B2a、M3-B2b 已完成** | Plan 060 / M3-B1b 已在专用 worktree 完成规划；资格 smoke 尚未执行，RunPod/H100、上传、训练与费用须由其一次性执行授权覆盖 |
+| 3：RONDO Multi | 第一、二期及其收口案例、**三期 M3-A1、M3-A2、M3-B1a、M3-B2a、M3-B2b 已完成**；Plan 060 正式 smoke 已完成 | M3-B1b 等待用户批准释放保留中的计算 Pod、最终账单与独立验收；M3-B1c 仍锁定 |
 
 ### 方向命名口径
 
@@ -59,9 +59,10 @@
   6 Within-PASS，三 split 为 42/16/14；独立最终验收确认输入隔离、group/split、review、50,073-token census、manifest、
   factory-only consumer 与 train-only smoke bundle 闭环，`remaining_findings=[]`，数据结论 GO。详细历史见
   `doc/WBS-COMPLETED.md` 与 Plan 059 最终验收日志。
-- M3-B1b 是数据链当前工作包。Plan 060 已在专用 worktree 建立 ExecPlan，等待用户向执行者给出覆盖本地准备、唯一 H100 PCIe 80GB Pod、
-  train-only 上传、资格 smoke、6 USD 硬上限和资源清理的一次性执行授权；当前尚无付费运行或训练证据。Plan 059 的完成和 Plan 060 的规划
-  都不自动授权任何外部或付费操作。
+- M3-B1b 是数据链当前工作包。Plan 060 已在 Secure 单卡 H100 PCIe 80GB 上完成 BF16 全参数 FlashAdamW commissioning 与 final-19
+  干净 formal start/resume，C1→C2→C3、完整 checkpoint、新进程恢复和继续更新均形成有效证据；独立代码/archive 复核
+  `remaining_findings=[]`。按用户最新指令，replacement Pod 与胜者 Standard 卷暂时保留，final-19 checkpoint 留待验收；终态清理、settled billing、
+  final receipt 与最终 GO/NO-GO 等获批释放后收口。M3-B1c 在此之前不启动。
 
 方向 1 与方向 3 的只读研究、轻量代码和数据工作可以并行；本地重型 Cargo、Docker、真实本地模型加载/推理继续
 全局串行，并由实际进入实施的工作包协调共享资源。
