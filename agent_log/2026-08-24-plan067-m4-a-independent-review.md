@@ -1,8 +1,9 @@
 # Plan 067：M4-A 独立验收审查
 
 日期：2026-08-24
-审查对象：`c9a6f8795a2e55f7d358a57ab558350158a5f505`
-结论：**不通过；`M4_A_GO` 暂不接受，修复下列中等级合同缺口后复审。**
+首轮审查对象：`c9a6f8795a2e55f7d358a57ab558350158a5f505`
+整改复审对象：`304510dcf16055bb69a9086f227e0ded132a9a8e`
+最终结论：**PASS；接受 `M4_A_GO`，无未关闭的高/中等级 correctness finding。**
 
 ## 审查范围与方法
 
@@ -12,7 +13,7 @@
 - 只读复核四项官方上游 PR 的主题、合并状态和消费语义。未运行 Cargo、Docker、真实 API/模型、训练、测评或全 workspace 测试；
   本次是合同与源码事实审查，静态证据足够。
 
-## Findings
+## 首轮 Findings（均已关闭）
 
 ### [M1] Root close/idle unload 未禁止仍存活 descendant 跨 authority 继续写入
 
@@ -64,7 +65,16 @@ Plan 068 未提交内容，也不要在本任务改顶层 WBS、COMPLETED 或三
 - S1/C0/W0 交接保持实现自由，没有预选存储、锁、字段、API 或测试机制，也没有建设第二套 Team State/authority/lifecycle/control。
 - 未发现要求 `REPLAN_REQUIRED` 的架构性阻塞；修复 M1/M2 后仍预期可以给出 `M4_A_GO`。
 
-## 复审入口
+## 最终复审结果
 
-执行者修复 M1/M2、顺手同步 L1，更新本执行日志或其精炼执行摘要，完成工作树本地提交后再通知审查者。复审重点只检查上述边界及
-是否造成身份、close、启用矩阵、S1/C0/W0 交接或当前 WBS 的局部回归。
+- M1 已关闭：共同合同、生命周期矩阵、S1/S2 回归交接、C0 展示边界与第四期核心 PASS 均明确 mutation-capable descendant
+  存活时不得完成 Root/Team close 或释放 authority；下游仍可自主选择阻止 close，或在同一 barrier 内安全 quiesce/close
+  descendants，没有预选锁、permit、状态机或调用顺序。
+- M2 已关闭：第四期 WBS 已仅依据已提交 main 同步 Plan 060 `TECHNICAL_GO`、Plan 064 `DATA_GO`、Plan 066/M3-B1c 完成、计算
+  Pod 已删除且当前无活跃云训练；未吸收 Plan 068 未提交状态，也未修改共享顶层 WBS、COMPLETED 或三期方向 WBS。
+- L1 已关闭：ExecPlan 已把执行者侧内容、整改提交与外部独立复审所有权区分清楚，不再声称正在执行首次提交。
+- 整改提交精确修改五个获准路径，067 worktree 在复审开始时 clean，`git diff --check` 通过；静态复核未发现身份、authority、
+  durable/read/close、启用矩阵、上游消费边或 S1/C0/W0 交接回归。合同任务无需 Cargo、Docker 或其他重型验证。
+
+最终接受 `M4_A_GO`：共同边界已经足以让 M4-S1、M4-C0、M4-W0 分别建立 ExecPlan，同时其存储、API、锁、状态机、测试 fixture
+与原型内部路线仍保持开放。未发现 `REPLAN_REQUIRED` 级架构阻塞。
