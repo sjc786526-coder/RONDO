@@ -23,21 +23,23 @@
 
 ## 预算与资源
 
-- 连续余额基线为 `$23.5953643966`，唯一预算政策硬上限为 `$23`。终态余额 `$11.9072265969`，Plan 060+066 连续实际/保守费用均为
-  `$11.6881377997`，距硬上限 `$11.3118622003`。
+- 唯一预算政策硬上限为 `$23`。final-01 曾误用账户余额差作为任务费用，并因 provider 延迟追账被终审降级为 superseded；账户余额还包含非任务历史，
+  不再用于任务费用。用户确认控制台 2026-08-24 任务期账单为最终权威口径：总额 `$10.476`、GPU `$10.207`、存储 `$0.269`，距硬上限 `$12.524`。
 - stopped legacy Pod `b0fazq4ueaii2k`、loser 卷 `bbfxl15nqr` 与最终计算 Pod `oe6gbptvq5yhja` 均已永久删除，账户 Pod 数为零、计算持续费为零。
   winner Standard 60GB 卷 `hi3iaz8rsr` 保留三个候选、正式 checkpoint、exact 模型、venv 与 cache，持续卷费约 `$0.005833/h`。
-- terminal provider facts SHA-256 为 `c3834efc78010d7dffe82aa9aaebea02114933f81ee5b60b535c493edc840f0d`；Plan 066 final receipt
-  SHA-256 为 `6d90468b8f16cd4e986750a5c6c5450cf7cf3156b6edb33892bc28542dfe6def`，状态
+- final-02 terminal provider facts SHA-256 为 `4b1f95be70f39ed52effaad44223924b8f1293bb1d63dffcf112b17287c537eb`；Plan 066 final-02 receipt
+  SHA-256 为 `2b58396b857e327c1da6d8cda514cc9bc2f9c7cbe2ca5b6307bbcb2d3588a9e4`，状态
   `execution_complete_pending_independent_acceptance`，建议 `GO_RECOMMENDED`。
 
 ## 本地证据与验证
 
 - ignored 证据根：`eval-data/publication-critic/plan066/`，当前约 5.6MB；其中 bundle archive 1,761,280 bytes、commissioning 小型证据
-  50,774 bytes、formal（含 final receipt）100,152 bytes、provider 证据 3,851 bytes。未下载模型权重或 checkpoint。
+  50,774 bytes、formal（含两次 terminal receipt）129,076 bytes、provider 证据 8,279 bytes。未下载模型权重或 checkpoint。
 - actual formal start/pending receipt validator：通过。独立预验收指出 Plan 066 resume validator 未自行比较 process identity；已复用现有严格
   process contract，要求 start/resume 的 PID 与 instance ID 均不同，并补同 PID、同 instance、畸形 PID 负例。
 - Plan 066 focused：11 项通过；Plan 060+066 相邻 focused：62 项通过，1 项既知可选本地 real-Torch seam skip。
+- finalizer 新增窄 v2 console-billing 合同：严格绑定任务期日期、总额与 GPU/存储/其他分项相加、费用来源及 `$23` 门，同时保留 superseded v1
+  receipt 的历史可验证性；账户余额只记录为上下文。
 - 三个 launcher `bash -n`、bundle 独立解包验证、实际候选/checkpoint 远端复验和 `git diff --check`：通过。
 - 训练主体独立预验收 `PASS`，无训练证据 blocker；candidate 真实加载验证按决定留给 M3-C1 或删除唯一卷副本前完成。
 

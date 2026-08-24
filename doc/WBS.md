@@ -20,7 +20,7 @@
 | 0：量化测评基准 | 既有设施与首次 schema v7 正式 canary 已完成，当前无 active campaign | 保留设施；历史结果见 COMPLETED，新 campaign 须重新立项与授权 |
 | 1：Harness 优化 | **正式收口；当前无 active 工作包** | 当前不继续新增观测或内核/热路径优化；既有实现、设施与历史结果保留。未来可由用户另行决定是否重新立项，本次收口不作永久禁止 |
 | 2：本地审批模型 | **已收口，今后不再开启** | 最终结论为“保留为实验”；不改生产默认，不再规划后续工作包 |
-| 3：RONDO Multi | 第一、二期及其收口案例、**三期 M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B2a、M3-B2b 与 Plan 064 已完成**；M3-B1c / Plan 066 执行完成、待独立验收；四期已规划、尚未实施 | Plan 066 已形成 C1/C2/C3 候选、正式恢复与终态 receipt，计算 Pod 已删除、胜者卷保留；验收前 M3-C1 继续等待；M4-A 尚未立项或取得实施授权 |
+| 3：RONDO Multi | 第一、二期及其收口案例、**三期 M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B2a、M3-B2b 与 Plan 064 已完成**；M3-B1c / Plan 066 执行完成、待独立验收；四期已规划、尚未实施 | Plan 066 已形成 C1/C2/C3 候选、正式恢复与 final-02 receipt，计算 Pod 已删除、胜者卷保留；验收前 M3-C1 继续等待；M4-A 尚未立项或取得实施授权 |
 
 ### 方向命名口径
 
@@ -53,10 +53,11 @@
 - M3-B1b / Plan 060 已在 Secure 单卡 H100 PCIe 80GB 上完成 BF16 全参数 FlashAdamW commissioning 与 final-19
   干净 formal start/resume，C1→C2→C3、完整 checkpoint、新进程恢复和继续更新均形成有效证据；独立代码/archive 复核
   `remaining_findings=[]`，最终验收通过，结论为 `TECHNICAL_GO`。Plan 060 与 Plan 066 从原 Plan 060 基线连续计入 23 USD 总账；
-  Plan 066 已统一收口计算资源终态与 settled billing。
+  Plan 066 已统一收口计算资源终态；final-01 terminal receipt 因延迟追账 superseded，final-02 改以用户确认的控制台任务期账单为权威费用口径。
 - M3-B1c / Plan 066 已在当前唯一 H100 PCIe 80GB 上从 exact base 干净执行 C1→C2→C3，实际消费 128 Binary、50 Boundary 与 8
   Within-PASS，保存并复验三个阶段候选、固定 validation 与完整恢复点，新进程 step 3→4 继续更新通过。计算 Pod 已永久删除，winner 卷保留
-  formal checkpoint、三个候选、exact 模型与可复用环境；连续总费用 `$11.6881377997`，final receipt 建议 `GO_RECOMMENDED`。独立验收仍待完成，
+  formal checkpoint、三个候选、exact 模型与可复用环境；控制台任务期总费用 `$10.476`（GPU `$10.207`、存储 `$0.269`），final-02 receipt 建议
+  `GO_RECOMMENDED`。独立验收仍待完成，
   因此尚不解锁 M3-C1 或授予产品资格。
 
 ### 方向 3：Durable Team Runtime 四期

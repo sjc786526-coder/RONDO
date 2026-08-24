@@ -26,7 +26,11 @@ from .plan066_contract import (
 
 
 PROVIDER_FACTS_SCHEMA = "rondo-publication-critic-plan066-provider-terminal-facts-v1"
+PROVIDER_FACTS_CONSOLE_SCHEMA = (
+    "rondo-publication-critic-plan066-provider-terminal-facts-v2"
+)
 FINAL_RECEIPT_SCHEMA = "rondo-publication-critic-plan066-final-receipt-v1"
+FINAL_RECEIPT_CONSOLE_SCHEMA = "rondo-publication-critic-plan066-final-receipt-v2"
 PLAN060_BASELINE_BALANCE_USD = 23.5953643966
 PLAN066_POD_ID = "oe6gbptvq5yhja"
 PLAN066_POD_NAME = "rondo-plan060-pcie-replacement-01"
@@ -68,8 +72,35 @@ def finalize_plan066_receipt(
         <= _parse_utc(facts["captured_at"])
     ):
         raise FullModelTrainingError("plan066_final_time_binding_invalid")
+    console_billing = facts["schema"] == PROVIDER_FACTS_CONSOLE_SCHEMA
+    budget = {
+        "runtime_policy": policy.as_receipt(),
+        "actual_plan060_plan066_cost_usd": facts["billing"][
+            "actual_plan060_plan066_cost_usd"
+        ],
+        "conservative_continuous_cost_usd": facts["billing"][
+            "conservative_continuous_cost_usd"
+        ],
+        "remaining_to_hard_cap_usd": policy.hard_cap_usd
+        - facts["billing"]["conservative_continuous_cost_usd"],
+    }
+    if console_billing:
+        budget.update(
+            {
+                "authoritative_cost_source": facts["billing"][
+                    "authoritative_cost_source"
+                ],
+                "provider_console_period_date": facts["billing"][
+                    "provider_console_breakdown"
+                ]["date"],
+            }
+        )
+    else:
+        budget["continuous_baseline_balance_usd"] = PLAN060_BASELINE_BALANCE_USD
     receipt = {
-        "schema": FINAL_RECEIPT_SCHEMA,
+        "schema": (
+            FINAL_RECEIPT_CONSOLE_SCHEMA if console_billing else FINAL_RECEIPT_SCHEMA
+        ),
         "status": "execution_complete_pending_independent_acceptance",
         "created_at": utc_now(),
         "identity": start["identity"],
@@ -89,18 +120,7 @@ def finalize_plan066_receipt(
             "start_timing": start["timing"],
             "resume_timing": pending["timing"],
         },
-        "budget": {
-            "runtime_policy": policy.as_receipt(),
-            "continuous_baseline_balance_usd": PLAN060_BASELINE_BALANCE_USD,
-            "actual_plan060_plan066_cost_usd": facts["billing"][
-                "actual_plan060_plan066_cost_usd"
-            ],
-            "conservative_continuous_cost_usd": facts["billing"][
-                "conservative_continuous_cost_usd"
-            ],
-            "remaining_to_hard_cap_usd": policy.hard_cap_usd
-            - facts["billing"]["conservative_continuous_cost_usd"],
-        },
+        "budget": budget,
         "provider": facts["provider"],
         "billing": facts["billing"],
         "resources": facts["resources"],
@@ -121,7 +141,8 @@ def validate_plan066_provider_facts(
     if (
         not isinstance(value, Mapping)
         or set(value) != expected
-        or value.get("schema") != PROVIDER_FACTS_SCHEMA
+        or value.get("schema")
+        not in {PROVIDER_FACTS_SCHEMA, PROVIDER_FACTS_CONSOLE_SCHEMA}
     ):
         raise FullModelTrainingError("plan066_provider_facts_invalid")
     try:
@@ -140,7 +161,11 @@ def validate_plan066_provider_facts(
             winner_lock_sha256=identity.get("winner_lock_sha256"),
             selected_gpu=identity.get("selected_gpu"),
         )
-        or not _valid_billing(billing, hard_cap_usd=hard_cap_usd)
+        or not _valid_billing(
+            billing,
+            hard_cap_usd=hard_cap_usd,
+            provider_facts_schema=value.get("schema"),
+        )
         or not _valid_resources(
             resources,
             winner_volume_id=(
@@ -187,8 +212,10 @@ def _valid_provider(
     )
 
 
-def _valid_billing(value: Any, *, hard_cap_usd: float) -> bool:
-    if not isinstance(value, Mapping) or set(value) != {
+def _valid_billing(
+    value: Any, *, hard_cap_usd: float, provider_facts_schema: Any
+) -> bool:
+    legacy_keys = {
         "provider_bill_settled",
         "continuous_baseline_balance_usd",
         "captured_balance_usd",
@@ -196,7 +223,12 @@ def _valid_billing(value: Any, *, hard_cap_usd: float) -> bool:
         "actual_plan060_plan066_cost_usd",
         "conservative_continuous_cost_usd",
         "account_current_spend_per_hr_usd",
-    }:
+    }
+    if not isinstance(value, Mapping):
+        return False
+    if provider_facts_schema == PROVIDER_FACTS_CONSOLE_SCHEMA:
+        return _valid_console_billing(value, hard_cap_usd=hard_cap_usd)
+    if provider_facts_schema != PROVIDER_FACTS_SCHEMA or set(value) != legacy_keys:
         return False
     if value.get("provider_bill_settled") is not True:
         return False
@@ -218,6 +250,57 @@ def _valid_billing(value: Any, *, hard_cap_usd: float) -> bool:
         == PLAN060_BASELINE_BALANCE_USD
         and abs(float(value["balance_delta_cost_usd"]) - balance_delta) <= 0.01
         and abs(conservative - max(balance_delta, actual)) <= 0.01
+        and conservative <= float(hard_cap_usd)
+    )
+
+
+def _valid_console_billing(value: Mapping[str, Any], *, hard_cap_usd: float) -> bool:
+    expected = {
+        "provider_bill_settled",
+        "authoritative_cost_source",
+        "provider_console_breakdown",
+        "captured_balance_usd",
+        "account_balance_context_only",
+        "actual_plan060_plan066_cost_usd",
+        "conservative_continuous_cost_usd",
+        "account_current_spend_per_hr_usd",
+    }
+    breakdown = value.get("provider_console_breakdown")
+    if (
+        set(value) != expected
+        or value.get("provider_bill_settled") is not True
+        or value.get("authoritative_cost_source")
+        != "provider_console_task_period_total"
+        or value.get("account_balance_context_only") is not True
+        or not isinstance(breakdown, Mapping)
+        or set(breakdown)
+        != {"date", "total_usd", "cloud_gpu_usd", "storage_usd", "other_usd"}
+        or breakdown.get("date") != "2026-08-24"
+    ):
+        return False
+    numbers = [
+        value.get("captured_balance_usd"),
+        value.get("actual_plan060_plan066_cost_usd"),
+        value.get("conservative_continuous_cost_usd"),
+        value.get("account_current_spend_per_hr_usd"),
+        breakdown.get("total_usd"),
+        breakdown.get("cloud_gpu_usd"),
+        breakdown.get("storage_usd"),
+        breakdown.get("other_usd"),
+    ]
+    if any(not _finite_nonnegative(item) for item in numbers):
+        return False
+    total = float(breakdown["total_usd"])
+    component_total = sum(
+        float(breakdown[key])
+        for key in ("cloud_gpu_usd", "storage_usd", "other_usd")
+    )
+    actual = float(value["actual_plan060_plan066_cost_usd"])
+    conservative = float(value["conservative_continuous_cost_usd"])
+    return (
+        abs(total - component_total) <= 1e-9
+        and abs(actual - total) <= 1e-9
+        and abs(conservative - total) <= 1e-9
         and conservative <= float(hard_cap_usd)
     )
 

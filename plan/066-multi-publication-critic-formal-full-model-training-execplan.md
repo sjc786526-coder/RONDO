@@ -36,8 +36,8 @@
       不冒充正式结果，身份稳定后不因普通窄故障报废已验证下载/cache。
 - [ ] receipt 绑定模型/代码/依赖/recipe/v8 manifest、训练与 holdout 隔离、阶段 lineage、候选/checkpoint hash、资源与费用；使用普通 JSON/日志/hash 即可，
       不建设签名链、数据库、审计平台或通用训练系统。
-- [ ] Plan 060 与 Plan 066 从原 Plan 060 余额基线计得的全部 GPU/卷/等待/重试/清理费用合计不超过 23 USD；执行期间持续保留安全收口余量，不能把
-      provider 延迟账单当成可继续消费的余额。
+- [ ] Plan 060 与 Plan 066 任务期内的全部 GPU/卷/等待/重试/清理费用合计不超过 23 USD；执行期间持续保留安全收口余量，不能把
+      provider 延迟账单当成可继续消费的空间。最终任务费用以用户确认的控制台任务期分项为准，账户余额只作上下文。
 - [ ] 正式训练前先核实并删除 Plan 060 已停止的 legacy Pod `b0fazq4ueaii2k` 与败者卷 `bbfxl15nqr`；保持当前运行 Pod
       `oe6gbptvq5yhja`、胜者卷 `hi3iaz8rsr` 和 final-19 checkpoint 不动，直到 Plan 066 产生并验证新的恢复点。
 - [ ] 成功、原则性失败或预算止损后，回收必要小型 receipt/日志/manifest/hash；下载或明确安全保留 M3-C1 所需候选后，停止并删除 task-only Pod，删除
@@ -85,8 +85,8 @@
 2. **热资源原地交接。** 用户明确要求因 H100 难抢而保留当前 Pod/卷。只要资源身份、价格、共享预算投影和安全性仍满足，本任务不为行政分界先停 Pod；
    但不得因此跳过新的 M3-B1c 正式 namespace、数据/recipe 身份冻结或预算门。若出现需较长本地修复的问题，优先保留卷并依据剩余预算决定短停 Pod，
    不得擅自创建第二个/replacement Pod。
-3. **预算是连续总账。** 共享 23 USD 从 Plan 060 原始基线连续计费，不能在 Plan 066 重新归零。开始前用 latest conservative balance delta、provider
-   running rate、v8 token/pair 规模、final-19 吞吐/save/reload 实测和清理余量形成简单可复算投影；硬上限前必须自动停止工作、保存可用状态并回收资源。
+3. **预算是连续总账。** 共享 23 USD 覆盖 Plan 060+066 整个任务期，不能在 Plan 066 重新归零。运行期可用余额与实时费率做止损投影；终态费用以用户确认的
+   provider 控制台任务期总额及 GPU/存储分项为权威来源，账户余额不充当任务账单。硬上限前必须自动停止工作、保存可用状态并回收资源。
 4. **冻结身份闭合。** 正式 run 绑定 exact model/revision/weight、Plan 054 input identity、v8 manifest/content/contract hash、合入后的 source commit、dependency、
    FlashAdamW runtime、recipe、Pod/GPU/卷与输出 namespace。普通 hash/manifest 足够；不得以形式审计替代训练事实。
 5. **train-only 梯度。** 任何产生 gradient、optimizer/scheduler 状态或训练选择的 sampler/batch 都只能从 v8 train split 构造。Binary 与 pair 共享
@@ -114,7 +114,7 @@
   直接充当训练选择，不要强行扭曲，可只记录稳定的 loss/ranking 聚合，把产品资格留给 M3-C1。
 - 模型候选宜用标准可加载的 model-only safetensors/config/tokenizer 工件；full checkpoint 用于恢复，不要求长期下载三份 10GB optimizer 状态。
 - 保留 Plan 060 cache 和已校验依赖能显著节省费用；只清理 superseded checkpoint、旧 bundle 和明确无用 cache，不为整洁重下模型或重建 venv。
-- 预算记录保持简单：基线余额、当前余额/费率、累计保守费用、工作停止线、清理余量和最终 provider 事实即可。
+- 预算记录保持简单：运行期余额/费率、任务期控制台费用分项、工作停止线、清理余量和最终 provider 事实即可。
 
 ## 5. 当前状态
 
@@ -131,16 +131,17 @@
 - 独立预验收确认训练主体 `PASS`；其窄 finding 已闭合：Plan 066 resume receipt validator 现在独立要求 start/resume process identity
   结构合法且 PID、instance ID 均不同，实际 final-01 receipt 与相邻 Plan 060 回归继续通过。
 - 当前计算 Pod `oe6gbptvq5yhja` 已停止并永久删除，账户 Pod 数为零；winner Standard 卷 `hi3iaz8rsr`、三个候选、正式 checkpoint、
-  exact 模型、venv 与 cache 保留。终态连续费用为 `$11.6881377997`，只剩约 `$0.005833/h` 卷费；final receipt 已生成并验证。
+  exact 模型、venv 与 cache 保留。首次 terminal receipt 因 provider 延迟追账而 superseded；用户确认以控制台任务期账单为权威口径，
+  final-02 记录总费用 `$10.476`（GPU `$10.207`、存储 `$0.269`），距 `$23` 上限 `$12.524`，只剩约 `$0.005833/h` 卷费。
 
 ### 当前工作
 
-- `EXECUTION_COMPLETE / PENDING_INDEPENDENT_ACCEPTANCE`：训练、候选、恢复、计算资源终态、settled billing 和 formal final receipt 均已闭合；
-  winner 卷按用户决定保留。执行者工作已完成，等待独立验收收口。
+- `EXECUTION_COMPLETE / PENDING_INDEPENDENT_ACCEPTANCE`：训练、候选、恢复、计算资源终态和控制台权威账单均已闭合；final-02 formal receipt
+  已生成并验证，winner 卷按用户决定保留。执行者工作已完成，等待独立验收收口。
 
 ### 本任务剩余步骤
 
-- 独立验收核对窄 validator 修复、Pod/卷终态、费用与 final receipt；验收前不提前写 M3-B1c 完成或解锁 M3-C1。
+- 独立验收核对 console-billing v2 合同、Pod/卷终态、final-01 supersession 与 final-02 receipt；验收前不提前写 M3-B1c 完成或解锁 M3-C1。
 
 ### 阻塞项
 
@@ -148,7 +149,7 @@
 
 ### 当前验收状态
 
-- `EXECUTION COMPLETE / INDEPENDENT ACCEPTANCE PENDING`。final receipt 状态为 `execution_complete_pending_independent_acceptance`，建议结论
+- `EXECUTION COMPLETE / INDEPENDENT ACCEPTANCE PENDING`。final-02 receipt 状态为 `execution_complete_pending_independent_acceptance`，建议结论
   `GO_RECOMMENDED`；最终独立验收前不声明任务 `COMPLETE`、模型产品资格或 M3-C1 解锁。
 
 ### 交接边界
@@ -161,9 +162,10 @@
 |---|---|---|---|---|
 | 001 | 继续使用当前 Plan 060 worktree，先合入最新 main/Plan 064，不新建 worktree | 用户要求节省热资源等待和 Git 切换成本，同时保留两项已验收成果 | Git、实施起点 | 已采纳 |
 | 002 | 当前唯一 Pod/卷直接交接给 Plan 066，不为 Plan 边界先释放 | H100 难以重新获取，当前环境和 exact 资产已验证 | RunPod、费用 | 已采纳 |
-| 003 | Plan 060+066 从原基线按 23 USD 连续总账，不等待 Plan 060 单独 settled billing | 资源不释放时无法形成独立终账，连续计费更保守且可复算 | 预算、验收 | 已采纳 |
+| 003 | Plan 060+066 从原基线按 23 USD 连续总账，不等待 Plan 060 单独 settled billing | 资源不释放时无法形成独立终账，连续计费更保守且可复算 | 预算、验收 | 已由 009 替代费用口径 |
 | 004 | v8 冻结实物不重做，只做一次有界预算适配 | Plan 064 覆盖、质量、consumer 已验收，唯一缺口是训练预算事实 | 数据、范围 | 已采纳 |
 | 005 | 各阶段保留模型候选，但只强制至少一个最新 full recovery checkpoint | 满足后续资格与故障恢复，同时避免三个 10GB optimizer checkpoint 挤占卷 | 工件、恢复 | 已采纳 |
 | 006 | validation 可做阶段同口径比较；unseen-test 默认封存，最多在 recipe/选择冻结后一次盲评 | 支持候选交接并防止 holdout 反向调参 | 评价、数据隔离 | 已采纳 |
 | 007 | 正式训练和候选复验完成后暂不释放当前 Pod/卷，等待用户另行批准 | 用户要求保留难抢计算资源与可复用设施；terminal receipt 因此顺延 | 资源终态、账单、验收 | 已采纳 |
 | 008 | 预验收后删除计算 Pod、保留 winner 卷及正式候选/checkpoint | 训练正确性证据已闭合，GPU 空转无收益；固定容量卷保留 M3-C1 工件 | 资源终态、工件交接 | 已执行 |
+| 009 | final-01 terminal receipt 因 provider 延迟追账降级；final-02 以用户确认的控制台任务期总额及 GPU/存储分项为权威费用来源，余额仅作账户上下文 | 账户余额并非从任务基线单独扣减，不能用余额差替代任务账单；控制台分项精确闭合且用户指定为最终口径 | 账单、receipt、预算 | 已执行 |

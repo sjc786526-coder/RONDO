@@ -299,6 +299,76 @@ class Plan066ContractTests(unittest.TestCase):
                 candidate_receipts=candidates,
                 hard_cap_usd=23.0,
             )
+
+        console_facts = copy.deepcopy(facts)
+        console_facts["schema"] = (
+            "rondo-publication-critic-plan066-provider-terminal-facts-v2"
+        )
+        console_facts["billing"] = {
+            "provider_bill_settled": True,
+            "authoritative_cost_source": "provider_console_task_period_total",
+            "provider_console_breakdown": {
+                "date": "2026-08-24",
+                "total_usd": 10.476,
+                "cloud_gpu_usd": 10.207,
+                "storage_usd": 0.269,
+                "other_usd": 0.0,
+            },
+            "captured_balance_usd": 11.839365383,
+            "account_balance_context_only": True,
+            "actual_plan060_plan066_cost_usd": 10.476,
+            "conservative_continuous_cost_usd": 10.476,
+            "account_current_spend_per_hr_usd": 0.006,
+        }
+        validated = validate_plan066_provider_facts(
+            console_facts,
+            identity=identity,
+            candidate_receipts=candidates,
+            hard_cap_usd=23.0,
+        )
+        self.assertEqual(
+            validated["billing"]["authoritative_cost_source"],
+            "provider_console_task_period_total",
+        )
+        changed = copy.deepcopy(console_facts)
+        changed["billing"]["captured_balance_usd"] = 0.0
+        validate_plan066_provider_facts(
+            changed,
+            identity=identity,
+            candidate_receipts=candidates,
+            hard_cap_usd=23.0,
+        )
+        changed = copy.deepcopy(console_facts)
+        changed["billing"]["provider_console_breakdown"]["storage_usd"] = 0.268
+        with self.assertRaisesRegex(FullModelTrainingError, "plan066_provider_facts_invalid"):
+            validate_plan066_provider_facts(
+                changed,
+                identity=identity,
+                candidate_receipts=candidates,
+                hard_cap_usd=23.0,
+            )
+        changed = copy.deepcopy(console_facts)
+        changed["billing"]["provider_console_breakdown"].update(
+            {"total_usd": 23.001, "cloud_gpu_usd": 22.732}
+        )
+        changed["billing"]["actual_plan060_plan066_cost_usd"] = 23.001
+        changed["billing"]["conservative_continuous_cost_usd"] = 23.001
+        with self.assertRaisesRegex(FullModelTrainingError, "plan066_provider_facts_invalid"):
+            validate_plan066_provider_facts(
+                changed,
+                identity=identity,
+                candidate_receipts=candidates,
+                hard_cap_usd=23.0,
+            )
+        changed = copy.deepcopy(console_facts)
+        changed["billing"]["conservative_continuous_cost_usd"] = 11.7559990136
+        with self.assertRaisesRegex(FullModelTrainingError, "plan066_provider_facts_invalid"):
+            validate_plan066_provider_facts(
+                changed,
+                identity=identity,
+                candidate_receipts=candidates,
+                hard_cap_usd=23.0,
+            )
         changed = copy.deepcopy(facts)
         changed["provider"]["pod_id"] = "other-pod"
         with self.assertRaisesRegex(FullModelTrainingError, "plan066_provider_facts_invalid"):
