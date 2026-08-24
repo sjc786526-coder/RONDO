@@ -156,7 +156,7 @@ def parse_divan_output(output: str) -> dict[str, dict[str, float | int]]:
     for raw_line in output.splitlines():
         line = ANSI_RE.sub("", raw_line)
         for group in ("history_turns", "tool_specs", "unified_exec_bytes"):
-            if group in line and "│" not in line:
+            if group in line:
                 current_group = group
                 current_case = None
                 allocation_mode = False

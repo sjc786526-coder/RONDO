@@ -11,7 +11,7 @@ def _fixture() -> str:
         ("tool_specs", (8, 32, 64)),
         ("unified_exec_bytes", (4096, 262144, 1048576)),
     ):
-        lines.append(group)
+        lines.append(f"├─ {group} │ │ │ │ │")
         for value in values:
             lines.extend(
                 [
