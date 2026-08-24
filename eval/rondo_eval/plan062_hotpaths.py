@@ -196,6 +196,10 @@ def parse_divan_output(output: str) -> dict[str, dict[str, float | int]]:
                 "mean_ns": _parse_time(columns[3]),
                 "samples": int(_parse_number(columns[4])),
                 "iterations": int(_parse_number(columns[5])),
+                # Divan omits the entire allocation block when the profiler
+                # observes no allocations for a benchmark case.
+                "alloc_count_median": 0.0,
+                "alloc_bytes_median": 0.0,
             }
             current_case = case_id
             allocation_mode = False

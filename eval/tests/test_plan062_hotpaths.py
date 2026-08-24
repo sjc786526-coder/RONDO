@@ -34,6 +34,19 @@ class Plan062DivanParserTests(unittest.TestCase):
             parsed["unified_exec_bytes_1048576"]["alloc_bytes_median"], 1024.0
         )
 
+    def test_treats_omitted_divan_allocation_block_as_zero(self) -> None:
+        zero_alloc_block = "\n".join(
+            [
+                "│  │  alloc:              │       │       │       │    │",
+                "│  │                      │       │ 3     │       │    │",
+                "│  │                      │       │ 1 KiB │       │    │",
+            ]
+        )
+        parsed = parse_divan_output(_fixture().replace(zero_alloc_block, "", 1))
+
+        self.assertEqual(parsed["history_turns_8"]["alloc_count_median"], 0.0)
+        self.assertEqual(parsed["history_turns_8"]["alloc_bytes_median"], 0.0)
+
     def test_rejects_partial_output(self) -> None:
         with self.assertRaisesRegex(Plan062BenchmarkError, "case mismatch"):
             parse_divan_output("history_turns\n├─ 8  1 ns │ 1 ns │ 1 ns │ 1 ns │ 1 │ 1")
