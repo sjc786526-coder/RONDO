@@ -20,15 +20,18 @@ from .archive import QualificationArchive
 from .inference import PublicationCriticInference
 
 
-FREEZE_SCHEMA = "rondo-publication-critic-plan068-qualification-freeze-v1"
-OBSERVATIONS_SCHEMA = "rondo-publication-critic-plan068-observations-v1"
-RESULT_SCHEMA = "rondo-publication-critic-plan068-qualification-result-v1"
-OFFLINE_SCHEMA = "rondo-publication-critic-plan068-offline-scores-v1"
+FREEZE_SCHEMA = "rondo-publication-critic-plan068-qualification-freeze-v2"
+OBSERVATIONS_SCHEMA = "rondo-publication-critic-plan068-observations-v2"
+RESULT_SCHEMA = "rondo-publication-critic-plan068-qualification-result-v2"
+OFFLINE_SCHEMA = "rondo-publication-critic-plan068-offline-scores-v2"
 QUALIFICATION_OBJECTS = ("base", "c1", "c2", "c3")
 CONCLUSIONS = ("QUALIFIED", "NOT_QUALIFIED", "INCONCLUSIVE")
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 _GIT_COMMIT = re.compile(r"[0-9a-f]{40}\Z")
 _BODY_FREE_REASON = re.compile(r"[a-z0-9][a-z0-9_:-]{0,127}\Z")
+_RUN_ID = re.compile(
+    r"plan068-(commissioning|formal)-[0-9]{8}T[0-9]{6}Z-[a-z0-9][a-z0-9-]{0,47}\Z"
+)
 
 _GATE_KEYS = {
     "max_raw_logit_absolute_drift",
@@ -107,8 +110,11 @@ def validate_freeze(value: Any) -> dict[str, Any]:
         freeze,
         {
             "schema",
+            "mode",
+            "run_id",
             "qualification_objects",
             "cohort",
+            "service_parity_input",
             "threshold",
             "reference_method",
             "source",
@@ -124,6 +130,11 @@ def validate_freeze(value: Any) -> dict[str, Any]:
         QUALIFICATION_OBJECTS
     ):
         raise QualificationError("qualification freeze identity is invalid")
+    run_match = _RUN_ID.fullmatch(freeze["run_id"]) if isinstance(freeze["run_id"], str) else None
+    if run_match is None or freeze["mode"] not in {"commissioning", "formal"} or run_match.group(
+        1
+    ) != freeze["mode"]:
+        raise QualificationError("qualification freeze run identity is invalid")
     cohort = _object(freeze["cohort"], "qualification cohort")
     _require_exact_keys(cohort, {"sample_ids", "future_unseen_test"}, "qualification cohort")
     sample_ids = cohort["sample_ids"]
@@ -138,6 +149,18 @@ def validate_freeze(value: Any) -> dict[str, Any]:
     known_ids = set(load_sample_corpus(REPO_ROOT).by_id)
     if not set(sample_ids).issubset(known_ids):
         raise QualificationError("qualification cohort contains an unknown sample")
+
+    service_input = _object(freeze["service_parity_input"], "service parity input")
+    _require_exact_keys(
+        service_input,
+        {"sample_id", "packet_sha256"},
+        "service parity input",
+    )
+    if (
+        service_input["sample_id"] not in sample_ids
+        or not _is_sha256(service_input["packet_sha256"])
+    ):
+        raise QualificationError("service parity input identity is invalid")
 
     threshold = _object(freeze["threshold"], "qualification threshold")
     _require_exact_keys(threshold, {"source", "projected_score"}, "qualification threshold")
@@ -492,8 +515,10 @@ def evaluate_object(
         {
             "schema",
             "mode",
+            "run_id",
             "qualification_freeze_sha256",
             "object_id",
+            "evidence",
             "identity",
             "artifact",
             "load",
@@ -509,10 +534,30 @@ def evaluate_object(
     object_id = observation["object_id"]
     if (
         observation["schema"] != OBSERVATIONS_SCHEMA
+        or observation["run_id"] != freeze["run_id"]
         or object_id not in QUALIFICATION_OBJECTS
         or observation["qualification_freeze_sha256"] != expected_freeze_sha256
     ):
         raise QualificationError("qualification observation identity is invalid")
+    evidence = _object(observation["evidence"], "qualification evidence binding")
+    _require_exact_keys(
+        evidence,
+        {
+            "reference_offline_sha256",
+            "deployment_offline_sha256",
+            "service_run_sha256",
+            "service_parity_sha256",
+            "service_packet_sha256",
+        },
+        "qualification evidence binding",
+    )
+    if any(
+        value is not None and not _is_sha256(value)
+        for value in evidence.values()
+    ) or evidence["service_packet_sha256"] != freeze["service_parity_input"][
+        "packet_sha256"
+    ]:
+        raise QualificationError("qualification evidence identity is invalid")
     metrics: dict[str, Any] = {}
     for label in ("identity", "artifact"):
         payload_keys = (
@@ -578,6 +623,10 @@ def evaluate_object(
     if conclusion is not None:
         metrics["scores"] = _not_available(reason or "offline scores were not observed")
         return _terminal(object_id, conclusion, [reason or "offline scoring failed"], metrics)
+    if not _is_sha256(evidence["reference_offline_sha256"]) or not _is_sha256(
+        evidence["deployment_offline_sha256"]
+    ):
+        raise QualificationError("qualification offline evidence is unbound")
     reference = _score_rows(scores.get("reference"), freeze["cohort"]["sample_ids"], "reference")
     deployed = _score_rows(scores.get("deployment"), freeze["cohort"]["sample_ids"], "deployment")
     score_metrics = _score_metrics(
@@ -687,6 +736,10 @@ def evaluate_object(
     if conclusion is not None:
         metrics["service"] = _not_available(reason or "service parity was not observed")
         return _terminal(object_id, conclusion, [reason or "service observation failed"], metrics)
+    if not _is_sha256(evidence["service_run_sha256"]) or not _is_sha256(
+        evidence["service_parity_sha256"]
+    ):
+        raise QualificationError("qualification service evidence is unbound")
     service_drift = [
         _finite(item, "qualification service drift", minimum=0.0)
         for item in service.get("score_absolute_differences", [])
@@ -833,16 +886,19 @@ def evaluate_run(
     if mode not in {"commissioning", "formal"}:
         raise QualificationError("qualification mode is invalid")
     freeze = validate_freeze(freeze_value)
+    if freeze["mode"] != mode or freeze["run_id"] != run_id:
+        raise QualificationError("qualification run does not match the freeze")
     digest = freeze_sha256(freeze)
     observations = _object(observations_value, "qualification observations")
     _require_exact_keys(
         observations,
-        {"schema", "mode", "qualification_freeze_sha256", "objects"},
+        {"schema", "mode", "run_id", "qualification_freeze_sha256", "objects"},
         "qualification observations",
     )
     if (
         observations["schema"] != OBSERVATIONS_SCHEMA
         or observations["mode"] != mode
+        or observations["run_id"] != run_id
         or observations["qualification_freeze_sha256"] != digest
         or not isinstance(observations["objects"], list)
         or not observations["objects"]
@@ -868,6 +924,7 @@ def evaluate_run(
         "mode": mode,
         "run_id": run_id,
         "qualification_freeze_sha256": digest,
+        "observations_sha256": sha256_bytes(canonical_json_bytes(dict(observations))),
         "objects": results,
         "m3_c2_prerequisite_satisfied": unlock,
         "scope_note": (
@@ -944,6 +1001,23 @@ def _write_json_exclusive(path: Path, value: Any) -> None:
 
 
 def _offline(args: argparse.Namespace) -> int:
+    freeze = validate_freeze(_load_json(args.freeze, "qualification freeze"))
+    digest = freeze_sha256(freeze)
+    snapshot_model_sha256 = sha256_file(args.snapshot / "model.safetensors")
+    if list(args.sample_id) != list(freeze["cohort"]["sample_ids"]):
+        raise QualificationError("offline cohort does not match the freeze")
+    if snapshot_model_sha256 != freeze["artifacts"][args.object_id][
+        "deployment_artifact_sha256"
+    ]:
+        raise QualificationError("offline artifact does not match the freeze")
+    runtime = freeze["runtime"]
+    expected_runtime = (
+        ("cpu", "float32", runtime["cpu_threads"])
+        if args.execution_role == "reference"
+        else (runtime["device"], runtime["dtype"], runtime["cpu_threads"])
+    )
+    if (args.device, args.dtype, args.cpu_threads) != expected_runtime:
+        raise QualificationError("offline runtime does not match its frozen role")
     inference = PublicationCriticInference(
         args.snapshot,
         repo_root=args.repo_root,
@@ -954,8 +1028,23 @@ def _offline(args: argparse.Namespace) -> int:
     inference.load()
     result = {
         "schema": OFFLINE_SCHEMA,
+        "mode": freeze["mode"],
+        "run_id": freeze["run_id"],
+        "qualification_freeze_sha256": digest,
+        "execution_role": args.execution_role,
         "object_id": args.object_id,
-        "snapshot_model_sha256": sha256_file(args.snapshot / "model.safetensors"),
+        "deployment_artifact_sha256": freeze["artifacts"][args.object_id][
+            "deployment_artifact_sha256"
+        ],
+        "snapshot_model_sha256": snapshot_model_sha256,
+        "cohort_sample_ids_sha256": sha256_bytes(
+            canonical_json_bytes(list(args.sample_id))
+        ),
+        "runtime": {
+            "device": args.device,
+            "dtype": args.dtype,
+            "cpu_threads": args.cpu_threads,
+        },
         "load_seconds": inference.load_seconds,
         "rows": inference.score_frozen_cohort(args.sample_id),
         "resources": inference.resource_snapshot(),
@@ -976,6 +1065,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     offline = subparsers.add_parser("offline")
     offline.add_argument("--object-id", choices=QUALIFICATION_OBJECTS, required=True)
+    offline.add_argument(
+        "--execution-role", choices=("reference", "deployment"), required=True
+    )
+    offline.add_argument("--freeze", type=Path, required=True)
     offline.add_argument("--snapshot", type=Path, required=True)
     offline.add_argument("--device", choices=("cpu", "cuda"), required=True)
     offline.add_argument("--dtype", choices=("float32", "bfloat16"), required=True)
@@ -993,14 +1086,19 @@ def main(argv: list[str] | None = None) -> int:
     freeze = validate_freeze(_load_json(args.freeze, "qualification freeze"))
     if args.mode == "formal":
         _verify_formal_source(REPO_ROOT, freeze)
+    observations = _load_json(args.observations, "qualification observations")
     result = evaluate_run(
-        _load_json(args.observations, "qualification observations"),
+        observations,
         freeze,
         mode=args.mode,
         run_id=args.run_id,
     )
     archive = QualificationArchive(args.runs_root, args.run_id, args.mode).create()
     archive.write_json("qualification-freeze.json", freeze)
+    archive.write_json(
+        "qualification-observations.json",
+        observations,
+    )
     archive.write_json("qualification-result.json", result)
     return 0
 

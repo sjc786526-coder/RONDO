@@ -8,6 +8,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -26,6 +27,7 @@ from rondo_eval.publication_critic.local_deployment.qualification import (  # no
 from rondo_eval.publication_critic.identity import (  # noqa: E402
     canonical_json_bytes,
     sha256_bytes,
+    sha256_file,
 )
 
 
@@ -46,6 +48,9 @@ parser.add_argument("--descriptor", required=True)
 args, _unknown = parser.parse_known_args()
 root = Path(__file__).resolve().parent
 (root / "service-pid").write_text(str(os.getpid()), encoding="ascii")
+(root / "service-environment-keys.json").write_text(
+    json.dumps(sorted(os.environ)), encoding="utf-8"
+)
 descriptor = json.loads(Path(args.descriptor).read_text(encoding="utf-8"))
 announced = copy.deepcopy(descriptor["service_descriptor"])
 if (root / "announcement-drift").exists():
@@ -105,7 +110,12 @@ class Fixture:
         self.service.chmod(0o700)
         self.probe.chmod(0o700)
         self.snapshot.mkdir()
+        (self.snapshot / "model.safetensors").write_bytes(b"fixture-model")
         (self.repo_root / "eval").mkdir(parents=True)
+        self.packet.write_text(
+            json.dumps({"candidate": BODY_SENTINEL}),
+            encoding="utf-8",
+        )
         service_descriptor = {
             "identity": {"frozen": "trusted-service-identity"},
             "limits": {
@@ -129,9 +139,13 @@ class Fixture:
             for object_id, character in zip(("base", "c1", "c2", "c3"), "fabc")
         }
         artifacts["c1"]["candidate_artifact_sha256"] = "a" * 64
-        artifacts["c1"]["deployment_artifact_sha256"] = "a" * 64
+        artifacts["c1"]["deployment_artifact_sha256"] = sha256_file(
+            self.snapshot / "model.safetensors"
+        )
         freeze = {
             "schema": FREEZE_SCHEMA,
+            "mode": "formal",
+            "run_id": "plan068-formal-20260824T120000Z-service-fixture",
             "qualification_objects": ["base", "c1", "c2", "c3"],
             "cohort": {
                 "sample_ids": [
@@ -141,6 +155,10 @@ class Fixture:
                     "pc-v1-cal-ni-rewrite",
                 ],
                 "future_unseen_test": False,
+            },
+            "service_parity_input": {
+                "sample_id": "pc-v1-cal-nc-pass",
+                "packet_sha256": sha256_file(self.packet),
             },
             "threshold": {"source": "fixture", "projected_score": 0.5},
             "reference_method": "fixture-float32",
@@ -196,15 +214,13 @@ class Fixture:
                 {
                     "worker_protocol": "rondo-publication-critic-worker-v1",
                     "object_id": "c1",
-                    "deployment_artifact_sha256": "a" * 64,
+                    "deployment_artifact_sha256": artifacts["c1"][
+                        "deployment_artifact_sha256"
+                    ],
                     "qualification_freeze_sha256": freeze_sha256(freeze),
                     "service_descriptor": service_descriptor,
                 }
             ),
-            encoding="utf-8",
-        )
-        self.packet.write_text(
-            json.dumps({"candidate": BODY_SENTINEL}),
             encoding="utf-8",
         )
 
@@ -294,6 +310,15 @@ class ServiceRunnerTests(unittest.TestCase):
             result = json.loads(fixture.output.read_text(encoding="utf-8"))
             self.assertEqual(result["status"], "COMPLETE")
             self.assertIsNone(result["failure_code"])
+            self.assertEqual(
+                result["run_id"],
+                "plan068-formal-20260824T120000Z-service-fixture",
+            )
+            self.assertEqual(result["packet_sha256"], sha256_file(fixture.packet))
+            self.assertEqual(
+                result["snapshot_model_sha256"],
+                sha256_file(fixture.snapshot / "model.safetensors"),
+            )
             self.assertEqual(result["ready"]["result"], "ready")
             self.assertEqual(len(result["warm_reviews"]), 3)
             self.assertEqual(
@@ -314,6 +339,27 @@ class ServiceRunnerTests(unittest.TestCase):
             self.assertEqual(fixture.output.stat().st_mode & 0o777, 0o600)
             self.assertNotIn(BODY_SENTINEL, fixture.output.read_text(encoding="utf-8"))
             self.assertFalse(_pid_exists(fixture.service_pid()))
+
+    def test_service_and_probe_receive_only_the_narrow_runtime_environment(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = Fixture(Path(temporary))
+            secret_name = "PLAN068_SECRET_ENV_SENTINEL"
+            watchdog_name = "RONDO_WATCHDOG_WRAPPER_PID"
+            with mock.patch.dict(
+                os.environ,
+                {secret_name: "must-not-cross", watchdog_name: "12345"},
+            ):
+                self.assertEqual(main(fixture.arguments()), 0)
+
+            keys = json.loads(
+                (fixture.root / "service-environment-keys.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertNotIn(secret_name, keys)
+            self.assertIn(watchdog_name, keys)
+            self.assertIn("PYTHONPATH", keys)
+            self.assertIn("HF_HUB_OFFLINE", keys)
 
     def test_untrusted_announcement_is_rejected_without_invoking_probe(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -379,6 +425,17 @@ class ServiceRunnerTests(unittest.TestCase):
                 result["failure_code"],
                 "freeze_runtime_arguments_mismatch",
             )
+            self.assertFalse((fixture.root / "service-pid").exists())
+
+    def test_frozen_packet_hash_mismatch_starts_no_service(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = Fixture(Path(temporary))
+            fixture.packet.write_text('{"candidate":"changed"}', encoding="utf-8")
+
+            self.assertEqual(main(fixture.arguments()), 1)
+
+            result = json.loads(fixture.output.read_text(encoding="utf-8"))
+            self.assertEqual(result["failure_code"], "packet_identity_mismatch")
             self.assertFalse((fixture.root / "service-pid").exists())
 
     def test_output_is_exclusive_and_second_run_starts_no_service(self) -> None:

@@ -7,6 +7,7 @@ from pathlib import Path
 import struct
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest import mock
 
@@ -25,8 +26,10 @@ from rondo_eval.publication_critic.local_deployment.inference import (  # noqa: 
 )
 from rondo_eval.publication_critic.local_deployment.qualification import (  # noqa: E402
     FREEZE_SCHEMA,
+    OFFLINE_SCHEMA,
     OBSERVATIONS_SCHEMA,
     QualificationError,
+    _offline,
     _verify_formal_source,
     evaluate_run,
     freeze_sha256,
@@ -49,11 +52,21 @@ SAMPLE_IDS = [
 ]
 
 
-def _freeze() -> dict[str, object]:
+def _freeze(
+    *,
+    mode: str = "formal",
+    run_id: str = "plan068-formal-20260824T120000Z-four-objects",
+) -> dict[str, object]:
     return {
         "schema": FREEZE_SCHEMA,
+        "mode": mode,
+        "run_id": run_id,
         "qualification_objects": ["base", "c1", "c2", "c3"],
         "cohort": {"sample_ids": SAMPLE_IDS, "future_unseen_test": False},
+        "service_parity_input": {
+            "sample_id": SAMPLE_IDS[0],
+            "packet_sha256": "1" * 64,
+        },
         "threshold": {
             "source": "plan054-calibration-threshold-v4",
             "projected_score": 0.5,
@@ -159,8 +172,20 @@ def _fake_backend_observation(
     return {
         "schema": OBSERVATIONS_SCHEMA,
         "mode": mode,
+        "run_id": (
+            "plan068-formal-20260824T120000Z-four-objects"
+            if mode == "formal"
+            else "plan068-commissioning-20260824T120005Z-pair-preservation"
+        ),
         "qualification_freeze_sha256": digest,
         "object_id": object_id,
+        "evidence": {
+            "reference_offline_sha256": "2" * 64,
+            "deployment_offline_sha256": "3" * 64,
+            "service_run_sha256": "4" * 64,
+            "service_parity_sha256": "5" * 64,
+            "service_packet_sha256": "1" * 64,
+        },
         "identity": _success(
             "passed",
             service_descriptor_sha256=artifact["service_descriptor_sha256"],
@@ -218,12 +243,71 @@ def _run_input(
     return {
         "schema": OBSERVATIONS_SCHEMA,
         "mode": mode,
+        "run_id": freeze["run_id"],
         "qualification_freeze_sha256": freeze_sha256(freeze),
-        "objects": objects,
+        "objects": [{**item, "run_id": freeze["run_id"]} for item in objects],
     }
 
 
 class QualificationDecisionTests(unittest.TestCase):
+    def test_offline_output_binds_freeze_run_artifact_cohort_and_runtime(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            snapshot = root / "snapshot"
+            snapshot.mkdir()
+            (snapshot / "model.safetensors").write_bytes(b"offline-fixture")
+            freeze = _freeze()
+            freeze["artifacts"]["base"]["deployment_artifact_sha256"] = sha256_file(
+                snapshot / "model.safetensors"
+            )
+            freeze_path = root / "freeze.json"
+            freeze_path.write_text(json.dumps(freeze), encoding="utf-8")
+            output = root / "offline.json"
+            inference = mock.Mock(
+                load_seconds=1.25,
+                score_frozen_cohort=mock.Mock(
+                    return_value=_score_rows([2.0, -2.0, 1.0, -1.0])
+                ),
+                resource_snapshot=mock.Mock(return_value={"peak": 123}),
+            )
+            with mock.patch(
+                "rondo_eval.publication_critic.local_deployment.qualification.PublicationCriticInference",
+                return_value=inference,
+            ):
+                self.assertEqual(
+                    _offline(
+                        SimpleNamespace(
+                            freeze=freeze_path,
+                            snapshot=snapshot,
+                            object_id="base",
+                            execution_role="reference",
+                            sample_id=SAMPLE_IDS,
+                            repo_root=REPO_ROOT,
+                            device="cpu",
+                            dtype="float32",
+                            cpu_threads=4,
+                            output=output,
+                        )
+                    ),
+                    0,
+                )
+
+            result = json.loads(output.read_text(encoding="utf-8"))
+            self.assertEqual(result["schema"], OFFLINE_SCHEMA)
+            self.assertEqual(result["run_id"], freeze["run_id"])
+            self.assertEqual(
+                result["qualification_freeze_sha256"], freeze_sha256(freeze)
+            )
+            self.assertEqual(result["execution_role"], "reference")
+            self.assertEqual(
+                result["snapshot_model_sha256"],
+                sha256_file(snapshot / "model.safetensors"),
+            )
+            self.assertEqual(
+                result["runtime"],
+                {"device": "cpu", "dtype": "float32", "cpu_threads": 4},
+            )
+
     def test_fake_backend_four_object_formal_run_qualifies_without_ranking(self) -> None:
         freeze = validate_freeze(_freeze())
         digest = freeze_sha256(freeze)
@@ -244,13 +328,15 @@ class QualificationDecisionTests(unittest.TestCase):
             ["QUALIFIED", "QUALIFIED", "QUALIFIED", "QUALIFIED"],
         )
         self.assertTrue(result["m3_c2_prerequisite_satisfied"])
+        self.assertRegex(result["observations_sha256"], r"[0-9a-f]{64}")
         self.assertEqual(
             result["scope_note"],
             "qualification_only_no_candidate_ranking_or_final_threshold",
         )
 
     def test_valid_candidate_score_drift_is_not_qualified(self) -> None:
-        freeze = validate_freeze(_freeze())
+        run_id = "plan068-formal-20260824T120001Z-score-drift"
+        freeze = validate_freeze(_freeze(run_id=run_id))
         digest = freeze_sha256(freeze)
         observations = [
             _fake_backend_observation("base", digest),
@@ -267,7 +353,7 @@ class QualificationDecisionTests(unittest.TestCase):
             _run_input(freeze, observations),
             freeze,
             mode="formal",
-            run_id="plan068-formal-20260824T120001Z-score-drift",
+            run_id=run_id,
         )
 
         c2 = result["objects"][2]
@@ -277,7 +363,8 @@ class QualificationDecisionTests(unittest.TestCase):
         self.assertTrue(result["m3_c2_prerequisite_satisfied"])
 
     def test_pair_gate_measures_deployment_preservation_not_label_quality(self) -> None:
-        freeze = validate_freeze(_freeze())
+        run_id = "plan068-commissioning-20260824T120005Z-pair-preservation"
+        freeze = validate_freeze(_freeze(mode="commissioning", run_id=run_id))
         digest = freeze_sha256(freeze)
         observation = _fake_backend_observation("c1", digest, mode="commissioning")
         reversed_but_preserved = [-2.0, 2.0, -1.0, 1.0]
@@ -291,7 +378,7 @@ class QualificationDecisionTests(unittest.TestCase):
             _run_input(freeze, [observation], mode="commissioning"),
             freeze,
             mode="commissioning",
-            run_id="plan068-commissioning-20260824T120005Z-pair-preservation",
+            run_id=run_id,
         )
 
         decision = result["objects"][0]
@@ -302,7 +389,8 @@ class QualificationDecisionTests(unittest.TestCase):
         self.assertEqual(score_metrics["pair_direction_preservation"], 1.0)
 
     def test_service_raw_logit_drift_is_an_independent_gate(self) -> None:
-        freeze = validate_freeze(_freeze())
+        run_id = "plan068-commissioning-20260824T120006Z-service-raw-drift"
+        freeze = validate_freeze(_freeze(mode="commissioning", run_id=run_id))
         digest = freeze_sha256(freeze)
         observation = _fake_backend_observation("c1", digest, mode="commissioning")
         observation["service"]["raw_logit_absolute_differences"] = [0.3]
@@ -311,7 +399,7 @@ class QualificationDecisionTests(unittest.TestCase):
             _run_input(freeze, [observation], mode="commissioning"),
             freeze,
             mode="commissioning",
-            run_id="plan068-commissioning-20260824T120006Z-service-raw-drift",
+            run_id=run_id,
         )
 
         decision = result["objects"][0]
@@ -325,7 +413,8 @@ class QualificationDecisionTests(unittest.TestCase):
         )
 
     def test_infrastructure_gap_is_inconclusive_with_na_reason(self) -> None:
-        freeze = validate_freeze(_freeze())
+        run_id = "plan068-commissioning-20260824T120002Z-missing-counter"
+        freeze = validate_freeze(_freeze(mode="commissioning", run_id=run_id))
         digest = freeze_sha256(freeze)
         observation = _fake_backend_observation("c1", digest, mode="commissioning")
         observation["resources"] = _unavailable(
@@ -337,7 +426,7 @@ class QualificationDecisionTests(unittest.TestCase):
             _run_input(freeze, [observation], mode="commissioning"),
             freeze,
             mode="commissioning",
-            run_id="plan068-commissioning-20260824T120002Z-missing-counter",
+            run_id=run_id,
         )
 
         decision = result["objects"][0]
@@ -349,7 +438,8 @@ class QualificationDecisionTests(unittest.TestCase):
         self.assertFalse(result["m3_c2_prerequisite_satisfied"])
 
     def test_formal_run_rejects_debug_mix_or_partial_object_set(self) -> None:
-        freeze = validate_freeze(_freeze())
+        mixed_run_id = "plan068-formal-20260824T120003Z-mixed-mode"
+        freeze = validate_freeze(_freeze(run_id=mixed_run_id))
         digest = freeze_sha256(freeze)
         commissioning = _fake_backend_observation("base", digest, mode="commissioning")
         with self.assertRaisesRegex(QualificationError, "mode drifted"):
@@ -357,16 +447,19 @@ class QualificationDecisionTests(unittest.TestCase):
                 _run_input(freeze, [commissioning]),
                 freeze,
                 mode="formal",
-                run_id="plan068-formal-20260824T120003Z-mixed-mode",
+                run_id=mixed_run_id,
             )
 
+        partial_run_id = "plan068-formal-20260824T120004Z-partial"
+        freeze = validate_freeze(_freeze(run_id=partial_run_id))
+        digest = freeze_sha256(freeze)
         base = _fake_backend_observation("base", digest)
         with self.assertRaisesRegex(QualificationError, "four-object order"):
             evaluate_run(
                 _run_input(freeze, [base]),
                 freeze,
                 mode="formal",
-                run_id="plan068-formal-20260824T120004Z-partial",
+                run_id=partial_run_id,
             )
 
     def test_freeze_requires_explicit_numeric_gate_and_excludes_unseen(self) -> None:
@@ -379,6 +472,19 @@ class QualificationDecisionTests(unittest.TestCase):
         unseen["cohort"]["future_unseen_test"] = True
         with self.assertRaisesRegex(QualificationError, "cohort is invalid"):
             validate_freeze(unseen)
+
+    def test_observations_require_the_frozen_packet_and_raw_evidence_hashes(self) -> None:
+        freeze = validate_freeze(_freeze())
+        digest = freeze_sha256(freeze)
+        observation = _fake_backend_observation("base", digest)
+        observation["evidence"]["service_packet_sha256"] = "9" * 64
+        with self.assertRaisesRegex(QualificationError, "evidence identity"):
+            evaluate_run(
+                _run_input(freeze, [observation]),
+                freeze,
+                mode="formal",
+                run_id=freeze["run_id"],
+            )
 
     def test_formal_source_requires_clean_exact_commit_and_environment_lock(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

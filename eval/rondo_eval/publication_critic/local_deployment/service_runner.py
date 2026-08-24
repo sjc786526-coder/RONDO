@@ -22,7 +22,7 @@ from ..identity import canonical_json_bytes, sha256_bytes, sha256_file
 from .qualification import QualificationError, freeze_sha256, validate_freeze
 
 
-RESULT_SCHEMA = "rondo-publication-critic-plan068-service-run-v1"
+RESULT_SCHEMA = "rondo-publication-critic-plan068-service-run-v2"
 _DESCRIPTOR_KEYS = {
     "worker_protocol",
     "object_id",
@@ -62,6 +62,20 @@ _TYPED_PROBE_FAILURES = {
 }
 _MAX_JSON_BYTES = 1024 * 1024
 _MAX_PROBE_BYTES = 16 * 1024
+_INHERITED_RUNTIME_ENVIRONMENT = {
+    "PATH",
+    "LD_LIBRARY_PATH",
+    "CUDA_HOME",
+    "CUDA_PATH",
+    "CUDA_VISIBLE_DEVICES",
+    "NVIDIA_VISIBLE_DEVICES",
+    "NVIDIA_DRIVER_CAPABILITIES",
+    "TMPDIR",
+    "RONDO_WATCHDOG_WRAPPER_PID",
+    "RONDO_WATCHDOG_WRAPPER_START_TICKS",
+    "RONDO_WATCHDOG_HEARTBEAT_PATH",
+    "RONDO_WATCHDOG_SCRIPT_PATH",
+}
 
 
 class ServiceRunnerError(RuntimeError):
@@ -173,7 +187,7 @@ def _announcement_matches(
 def _bind_frozen_runtime(
     args: argparse.Namespace,
     descriptor: Mapping[str, Any],
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], dict[str, Any]]:
     try:
         freeze = validate_freeze(_load_json(args.freeze, "freeze"))
     except (QualificationError, ServiceRunnerError):
@@ -182,7 +196,8 @@ def _bind_frozen_runtime(
     object_id = descriptor["object_id"]
     service_descriptor = descriptor["service_descriptor"]
     if (
-        descriptor["qualification_freeze_sha256"] != digest
+        freeze["mode"] != args.mode
+        or descriptor["qualification_freeze_sha256"] != digest
         or descriptor["deployment_artifact_sha256"]
         != freeze["artifacts"][object_id]["deployment_artifact_sha256"]
         or sha256_bytes(canonical_json_bytes(service_descriptor))
@@ -231,13 +246,40 @@ def _bind_frozen_runtime(
         or (not representative and args.cancel_after_ms is not None)
     ):
         raise ServiceRunnerError("freeze_cancel_scenario_mismatch")
-    return {
-        "device": args.device,
-        "dtype": args.dtype,
-        "cpu_threads": args.cpu_threads,
-        "deployment_format": runtime["deployment_format"],
-        "service_limits": dict(frozen_limits),
+    return (
+        {
+            "device": args.device,
+            "dtype": args.dtype,
+            "cpu_threads": args.cpu_threads,
+            "deployment_format": runtime["deployment_format"],
+            "service_limits": dict(frozen_limits),
+        },
+        freeze,
+    )
+
+
+def _runtime_environment(repo_root: Path, cpu_threads: int) -> dict[str, str]:
+    environment = {
+        name: value
+        for name in _INHERITED_RUNTIME_ENVIRONMENT
+        if (value := os.environ.get(name)) is not None
     }
+    environment.update(
+        {
+            "PYTHONPATH": str(repo_root / "eval"),
+            "PYTHONNOUSERSITE": "1",
+            "PYTHONUNBUFFERED": "1",
+            "HF_HUB_OFFLINE": "1",
+            "TRANSFORMERS_OFFLINE": "1",
+            "HF_HUB_DISABLE_TELEMETRY": "1",
+            "DO_NOT_TRACK": "1",
+            "TOKENIZERS_PARALLELISM": "false",
+            "OMP_NUM_THREADS": str(cpu_threads),
+            "MKL_NUM_THREADS": str(cpu_threads),
+            "OPENBLAS_NUM_THREADS": str(cpu_threads),
+        }
+    )
+    return environment
 
 
 def _require_path(
@@ -386,6 +428,7 @@ def _run_probe(
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        env=_runtime_environment(args.repo_root, args.cpu_threads),
         start_new_session=True,
     )
     try:
@@ -504,10 +547,19 @@ def _run(args: argparse.Namespace, evidence: dict[str, Any]) -> str | None:
     _require_path(args.snapshot, "snapshot", directory=True)
     _require_path(args.repo_root, "repo_root", directory=True)
     descriptor = _validate_descriptor(_load_json(args.descriptor, "descriptor"))
-    frozen_runtime = _bind_frozen_runtime(args, descriptor)
+    frozen_runtime, freeze = _bind_frozen_runtime(args, descriptor)
     _load_json(args.packet, "packet")
+    packet_sha256 = sha256_file(args.packet)
+    snapshot_model_sha256 = sha256_file(args.snapshot / "model.safetensors")
+    if packet_sha256 != freeze["service_parity_input"]["packet_sha256"]:
+        raise ServiceRunnerError("packet_identity_mismatch")
+    if snapshot_model_sha256 != freeze["artifacts"][descriptor["object_id"]][
+        "deployment_artifact_sha256"
+    ]:
+        raise ServiceRunnerError("snapshot_artifact_mismatch")
     evidence.update(
         {
+            "run_id": freeze["run_id"],
             "object_id": descriptor["object_id"],
             "descriptor_sha256": sha256_file(args.descriptor),
             "service_descriptor_sha256": sha256_bytes(
@@ -516,11 +568,13 @@ def _run(args: argparse.Namespace, evidence: dict[str, Any]) -> str | None:
             "qualification_freeze_sha256": descriptor[
                 "qualification_freeze_sha256"
             ],
+            "snapshot_model_sha256": snapshot_model_sha256,
+            "service_sample_id": freeze["service_parity_input"]["sample_id"],
+            "packet_sha256": packet_sha256,
             "frozen_runtime": frozen_runtime,
         }
     )
-    environment = os.environ.copy()
-    environment["PYTHONPATH"] = str(args.repo_root / "eval")
+    environment = _runtime_environment(args.repo_root, args.cpu_threads)
     service = subprocess.Popen(
         _service_command(args),
         stdin=subprocess.DEVNULL,
