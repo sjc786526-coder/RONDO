@@ -338,8 +338,9 @@ def _validate_progress(value: Any) -> None:
         or not isinstance(cursor, Mapping)
         or set(cursor) != {"stage_fully_consumed", "binary_candidate_ids", "pair_ids"}
         or cursor.get("stage_fully_consumed") is not True
-        or not _valid_consumed_ids(cursor.get("binary_candidate_ids"), expected_count=6)
-        or not _valid_consumed_ids(cursor.get("pair_ids"), expected_count=2)
+        or not _valid_progress_ids(
+            cursor.get("binary_candidate_ids"), cursor.get("pair_ids")
+        )
     ):
         raise FullModelTrainingError("checkpoint_progress_invalid")
 
@@ -351,6 +352,15 @@ def _valid_consumed_ids(value: Any, *, expected_count: int) -> bool:
         and all(isinstance(item, str) and bool(item) for item in value)
         and len(set(value)) == expected_count
     )
+
+
+def _valid_progress_ids(candidate_ids: Any, pair_ids: Any) -> bool:
+    if not isinstance(candidate_ids, list) or not isinstance(pair_ids, list):
+        return False
+    counts = (len(candidate_ids), len(pair_ids))
+    return counts in {(6, 2), (128, 58)} and _valid_consumed_ids(
+        candidate_ids, expected_count=counts[0]
+    ) and _valid_consumed_ids(pair_ids, expected_count=counts[1])
 
 
 def _tree_manifest(root: Path, *, exclude: set[str]) -> dict[str, dict[str, Any]]:

@@ -1202,14 +1202,49 @@ def _prepare_run(
     container_image: str,
     formal: bool,
     checkpoint_model_root: Path | None = None,
+    profile: str = "plan060",
+    data_role: str | None = None,
 ) -> _RunContext:
     startup_started = time.perf_counter()
     bundle_receipt = verify_bundle(bundle_root)
-    dataset = load_portable_dataset(bundle_root)
-    recipe = validate_recipe(read_json(recipe_path), require_frozen=formal)
-    model_contract = _validate_model_contract(
-        read_json(Path(bundle_root) / MODEL_CONTRACT_RELATIVE)
-    )
+    if profile == "plan060":
+        if data_role is not None:
+            raise FullModelTrainingError("plan060_data_role_invalid")
+        dataset = load_portable_dataset(bundle_root)
+        recipe = validate_recipe(read_json(recipe_path), require_frozen=formal)
+        model_contract_relative = MODEL_CONTRACT_RELATIVE
+        portable_relative = "contracts/portable-input-v1.json"
+        model_contract = _validate_model_contract(
+            read_json(Path(bundle_root) / model_contract_relative), profile=profile
+        )
+        dataset_revision = "v7"
+        run_schema = "rondo-publication-critic-formal-run-identity-v1"
+        data_export_sha256 = None
+        effective_data_role = "smoke"
+    elif profile == "plan066":
+        from .plan066_bundle import PLAN066_MODEL_CONTRACT_RELATIVE
+        from .plan066_contract import validate_plan066_recipe
+        from .plan066_data import PLAN066_PORTABLE_RELATIVE, load_plan066_datasets
+
+        datasets = load_plan066_datasets(Path(bundle_root))
+        effective_data_role = data_role or ("formal" if formal else "commissioning")
+        if effective_data_role == "formal":
+            dataset = datasets.train
+        elif effective_data_role == "commissioning":
+            dataset = datasets.commissioning
+        else:
+            raise FullModelTrainingError("plan066_data_role_invalid")
+        recipe = validate_plan066_recipe(read_json(recipe_path), require_frozen=formal)
+        model_contract_relative = PLAN066_MODEL_CONTRACT_RELATIVE
+        portable_relative = PLAN066_PORTABLE_RELATIVE
+        model_contract = _validate_model_contract(
+            read_json(Path(bundle_root) / model_contract_relative), profile=profile
+        )
+        dataset_revision = "v8"
+        run_schema = "rondo-publication-critic-plan066-run-identity-v1"
+        data_export_sha256 = datasets.export_sha256
+    else:
+        raise FullModelTrainingError("training_profile_invalid")
     winner_lock = _load_winner_lock(winner_lock_path, model_contract=model_contract)
     if formal:
         if dependency_identity_path is None:
@@ -1238,7 +1273,7 @@ def _prepare_run(
     )
     if dependency != observed:
         raise FullModelTrainingError("dependency_environment_mismatch")
-    portable = read_json(Path(bundle_root) / "contracts/portable-input-v1.json")
+    portable = read_json(Path(bundle_root) / portable_relative)
     _verify_model_snapshot(model_snapshot, portable)
     heavy_import_started = time.perf_counter()
     torch, transformers = _heavy_dependencies()
@@ -1309,13 +1344,13 @@ def _prepare_run(
         raise FullModelTrainingError("scheduler_not_supported")
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lambda _step: 1.0)
     identity = {
-        "schema": "rondo-publication-critic-formal-run-identity-v1",
+        "schema": run_schema,
         "bundle_manifest_sha256": bundle_receipt["bundle_manifest_sha256"],
         "portable_input_sha256": sha256_file(
-            Path(bundle_root) / "contracts/portable-input-v1.json"
+            Path(bundle_root) / portable_relative
         ),
         "model_contract_sha256": sha256_file(
-            Path(bundle_root) / MODEL_CONTRACT_RELATIVE
+            Path(bundle_root) / model_contract_relative
         ),
         "winner_lock_sha256": winner_lock["sha256"],
         "selected_gpu": winner_lock["selected_gpu"],
@@ -1327,7 +1362,7 @@ def _prepare_run(
         "model_revision": MODEL_REVISION,
         "model_weight_sha256": portable["model"]["weight_sha256"],
         "model_config_sha256": portable["model"]["config_sha256"],
-        "dataset_revision": "v7",
+        "dataset_revision": dataset_revision,
         "hardware": hardware,
         "parameter_order_sha256": coverage["parameter_order_sha256"],
         "optimizer_runtime_class": f"{type(optimizer).__module__}.{type(optimizer).__name__}",
@@ -1348,6 +1383,26 @@ def _prepare_run(
         "scheduler": "constant",
         "planned_total_updates_including_resume": total_steps,
     }
+    if profile == "plan066":
+        identity["source_commit"] = bundle_receipt["source_commit"]
+        identity["data_role"] = effective_data_role
+        identity["data_export_sha256"] = data_export_sha256
+        identity["holdout"] = {
+            "validation_gradient_access": False,
+            "unseen_test_exported": False,
+        }
+        probe_stage = datasets.commissioning.stage("C3")
+        identity["resume_probe"] = {
+            **dict(recipe["resume_probe"]),
+            "membership_sha256": sha256_bytes(
+                canonical_json_bytes(
+                    {
+                        "candidate_ids": list(probe_stage.binary_candidate_ids),
+                        "pair_ids": list(probe_stage.pair_ids),
+                    }
+                )
+            ),
+        }
     startup_timing = {
         "runtime_prepare_seconds": time.perf_counter() - startup_started,
         "heavy_import_seconds": heavy_import_seconds,
@@ -1864,10 +1919,17 @@ def _new_output_root(path: Path) -> Path:
     return output
 
 
-def _validate_model_contract(value: Any) -> Mapping[str, Any]:
+def _validate_model_contract(
+    value: Any, *, profile: str = "plan060"
+) -> Mapping[str, Any]:
+    expected_schema = {
+        "plan060": "rondo-publication-critic-plan060-model-contract-v1",
+        "plan066": "rondo-publication-critic-plan066-model-contract-v1",
+    }.get(profile)
     if (
         not isinstance(value, Mapping)
-        or value.get("schema") != "rondo-publication-critic-plan060-model-contract-v1"
+        or expected_schema is None
+        or value.get("schema") != expected_schema
         or not isinstance(value.get("model"), Mapping)
         or not isinstance(value.get("input"), Mapping)
         or not isinstance(value.get("training_data"), Mapping)
@@ -1876,6 +1938,7 @@ def _validate_model_contract(value: Any) -> Mapping[str, Any]:
     ):
         raise FullModelTrainingError("model_contract_invalid")
     model = value["model"]
+    training_data = value["training_data"]
     optimizer = value["optimizer"]
     route = value["route"]
     if (
@@ -1903,6 +1966,22 @@ def _validate_model_contract(value: Any) -> Mapping[str, Any]:
         or route.get("optimizer_fallback") is not False
     ):
         raise FullModelTrainingError("model_contract_identity_invalid")
+    if profile == "plan060":
+        if training_data.get("dataset_revision") != "v7":
+            raise FullModelTrainingError("model_contract_training_data_invalid")
+    elif (
+        training_data
+        != {
+            "dataset_revision": "v8",
+            "manifest_file_sha256": "70cbbbd1b754227b3c84f9117c1e74ee630713ae12d7041e48522bd751ea5661",
+            "manifest_content_sha256": "a9a31a61e0a1e070ee8d076dd313b7efabb5e01ffa42773a841b123a2686cb98",
+            "membership_sha256": "ce04c05eaab49ef04cc335062aefd31f31e7a89857c8321603d70e996661a15f",
+            "train_counts": {"binary": 128, "boundary": 50, "within_pass": 8},
+            "validation_counts": {"binary": 55, "boundary": 19, "within_pass": 7},
+            "unseen_test_exported": False,
+        }
+    ):
+        raise FullModelTrainingError("model_contract_training_data_invalid")
     return value
 
 

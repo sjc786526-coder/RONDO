@@ -33,6 +33,18 @@ from .runner import (
     run_formal_start,
     _validate_model_contract,
 )
+from .plan066_bundle import (
+    PLAN066_MODEL_CONTRACT_RELATIVE,
+    PLAN066_RECIPE_RELATIVE,
+    prepare_plan066_bundle,
+)
+from .plan066_runner import (
+    run_plan066_commissioning_resume,
+    run_plan066_commissioning_start,
+    run_plan066_formal_resume,
+    run_plan066_formal_start,
+)
+from .plan066_finalize import finalize_plan066_receipt
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -42,6 +54,10 @@ def _parser() -> argparse.ArgumentParser:
     prepare = commands.add_parser("prepare-bundle")
     prepare.add_argument("--repo", type=Path, required=True)
     prepare.add_argument("--output", type=Path, required=True)
+
+    prepare_plan066 = commands.add_parser("prepare-plan066-bundle")
+    prepare_plan066.add_argument("--repo", type=Path, required=True)
+    prepare_plan066.add_argument("--output", type=Path, required=True)
 
     verify = commands.add_parser("verify-bundle")
     verify.add_argument("--bundle", type=Path, required=True)
@@ -67,6 +83,9 @@ def _parser() -> argparse.ArgumentParser:
     )
     dependencies.add_argument("--complete-freeze", type=Path)
     dependencies.add_argument("--output", type=Path, required=True)
+    dependencies.add_argument(
+        "--profile", choices=("plan060", "plan066")
+    )
 
     finalize = commands.add_parser("finalize-formal")
     finalize.add_argument("--formal-start", type=Path, required=True)
@@ -75,11 +94,22 @@ def _parser() -> argparse.ArgumentParser:
     finalize.add_argument("--budget-policy", type=Path, required=True)
     finalize.add_argument("--output", type=Path, required=True)
 
+    finalize_plan066 = commands.add_parser("finalize-plan066-formal")
+    finalize_plan066.add_argument("--formal-start", type=Path, required=True)
+    finalize_plan066.add_argument("--formal-pending", type=Path, required=True)
+    finalize_plan066.add_argument("--provider-facts", type=Path, required=True)
+    finalize_plan066.add_argument("--budget-policy", type=Path, required=True)
+    finalize_plan066.add_argument("--output", type=Path, required=True)
+
     for name in (
         "commission-start",
         "commission-resume",
         "formal-start",
         "formal-resume",
+        "plan066-commission-start",
+        "plan066-commission-resume",
+        "plan066-formal-start",
+        "plan066-formal-resume",
     ):
         run = commands.add_parser(name)
         run.add_argument("--bundle", type=Path, required=True)
@@ -88,7 +118,7 @@ def _parser() -> argparse.ArgumentParser:
         run.add_argument("--recipe", type=Path)
         run.add_argument("--winner-lock", type=Path, required=True)
         run.add_argument("--container-image", required=True)
-        if name.startswith("formal-"):
+        if name.startswith("formal-") or name.startswith("plan066-formal-"):
             run.add_argument("--dependency-identity", type=Path, required=True)
             run.add_argument("--dependency-freeze", type=Path, required=True)
         if name.endswith("-resume"):
@@ -120,6 +150,8 @@ def main(argv: list[str] | None = None) -> int:
 def _dispatch(args: argparse.Namespace) -> Any:
     if args.command == "prepare-bundle":
         return prepare_bundle(args.repo, args.output)
+    if args.command == "prepare-plan066-bundle":
+        return prepare_plan066_bundle(args.repo, args.output)
     if args.command == "verify-bundle":
         return verify_bundle(args.bundle)
     if args.command == "create-archive":
@@ -137,9 +169,22 @@ def _dispatch(args: argparse.Namespace) -> Any:
             result = {**result, "resume_process": process.as_dict(), "new_process": True}
         return result
     if args.command == "capture-dependencies":
-        verify_bundle(args.bundle)
+        bundle_receipt = verify_bundle(args.bundle)
+        inferred_profile = (
+            "plan066"
+            if bundle_receipt.get("schema") == "rondo-publication-critic-plan066-bundle-v1"
+            else "plan060"
+        )
+        if args.profile is not None and args.profile != inferred_profile:
+            raise FullModelTrainingError("dependency_profile_bundle_mismatch")
+        profile = args.profile or inferred_profile
+        relative = (
+            PLAN066_MODEL_CONTRACT_RELATIVE
+            if profile == "plan066"
+            else MODEL_CONTRACT_RELATIVE
+        )
         contract = _validate_model_contract(
-            read_json(args.bundle / MODEL_CONTRACT_RELATIVE)
+            read_json(args.bundle / relative), profile=profile
         )
         identity = capture_dependency_identity(
             container_image=args.container_image,
@@ -161,7 +206,60 @@ def _dispatch(args: argparse.Namespace) -> Any:
             budget_policy_path=args.budget_policy,
             output_path=args.output,
         )
-    recipe = args.recipe or (args.bundle / RECIPE_RELATIVE)
+    if args.command == "finalize-plan066-formal":
+        return finalize_plan066_receipt(
+            formal_start_path=args.formal_start,
+            formal_pending_path=args.formal_pending,
+            provider_facts_path=args.provider_facts,
+            budget_policy_path=args.budget_policy,
+            output_path=args.output,
+        )
+    plan066 = args.command.startswith("plan066-")
+    recipe = args.recipe or (
+        args.bundle / (PLAN066_RECIPE_RELATIVE if plan066 else RECIPE_RELATIVE)
+    )
+    if args.command == "plan066-commission-start":
+        return run_plan066_commissioning_start(
+            bundle_root=args.bundle,
+            model_snapshot=args.model_snapshot,
+            output_root=args.output,
+            recipe_path=recipe,
+            winner_lock_path=args.winner_lock,
+            container_image=args.container_image,
+        )
+    if args.command == "plan066-commission-resume":
+        return run_plan066_commissioning_resume(
+            bundle_root=args.bundle,
+            model_snapshot=args.model_snapshot,
+            output_root=args.output,
+            checkpoint_root=args.checkpoint,
+            recipe_path=recipe,
+            winner_lock_path=args.winner_lock,
+            container_image=args.container_image,
+        )
+    if args.command == "plan066-formal-start":
+        return run_plan066_formal_start(
+            bundle_root=args.bundle,
+            model_snapshot=args.model_snapshot,
+            output_root=args.output,
+            recipe_path=recipe,
+            winner_lock_path=args.winner_lock,
+            dependency_identity_path=args.dependency_identity,
+            dependency_freeze_path=args.dependency_freeze,
+            container_image=args.container_image,
+        )
+    if args.command == "plan066-formal-resume":
+        return run_plan066_formal_resume(
+            bundle_root=args.bundle,
+            model_snapshot=args.model_snapshot,
+            output_root=args.output,
+            checkpoint_root=args.checkpoint,
+            recipe_path=recipe,
+            winner_lock_path=args.winner_lock,
+            dependency_identity_path=args.dependency_identity,
+            dependency_freeze_path=args.dependency_freeze,
+            container_image=args.container_image,
+        )
     if args.command == "commission-start":
         return run_commissioning_start(
             bundle_root=args.bundle,

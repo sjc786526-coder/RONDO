@@ -127,6 +127,12 @@ def verify_bundle(bundle_root: Path) -> dict[str, Any]:
     root = safe_directory(Path(bundle_root))
     manifest_path = root / MANIFEST_RELATIVE
     manifest = read_json(manifest_path)
+    if isinstance(manifest, Mapping) and manifest.get("schema") == (
+        "rondo-publication-critic-plan066-bundle-v1"
+    ):
+        from .plan066_bundle import verify_plan066_bundle
+
+        return verify_plan066_bundle(root)
     expected_keys = {
         "schema",
         "created_at",
