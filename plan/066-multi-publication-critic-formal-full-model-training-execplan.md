@@ -120,31 +120,35 @@
 
 ### 已完成
 
-- Plan 060 final-19 已在当前唯一 H100 PCIe 80GB 上证明 BF16 全参数、FlashAdamW、C1→C2→C3、约 10.56GB full checkpoint 和新进程
-  step 3→4 恢复继续；训练路径技术证据经初步独立核对无 correctness/functionality finding。
-- Plan 064 已独立验收并冻结 v8：123 scenarios、228 candidates、104 pairs，train/validation/unseen-test 为 128/55/45，exact tokens
-  178,646；数据覆盖、质量和消费合同通过，待 Plan 060 正式事实做有界预算适配。
-- 用户明确决定暂不释放难以重新获取的当前 Pod/卷，允许在同一热资源上优先衔接下一阶段；这不扩大共享 23 USD 总硬上限。
+- 最新本地 `main` 已合入当前 worktree；Plan 060、Plan 064 v8 与后续主线状态共存，Plan 066 focused 回归通过。
+- Plan 064 v8 的有界预算适配为 `DATA_GO`；Plan 060 stopped legacy Pod 与 loser 卷已按 exact identity 删除，唯一 H100 PCIe Pod 与 winner 卷保持不变。
+- `final-01` bundle 已冻结并严格验证；commissioning C1→C2→C3、10.56GB full checkpoint、新进程 step 3→4 恢复继续均通过。新恢复点成立后，
+  Plan 060 final-19 与 commissioning checkpoint 已删除，receipt/log 保留。
+- 干净正式 run 已从 exact base 消费 v8 train 的 C1=128 Binary、C2=128 Binary+50 Boundary、C3 再加 8 Within-PASS，共 451,743 tokens；
+  三阶段均完成 BF16 全参数 FlashAdamW 有限更新，1,720,577,024 参数及 311/311 optimizer tensors 全覆盖。
+- C1/C2/C3 三个 model-only safetensors 候选、固定 validation 事实和正式 C3 full checkpoint 已保存并复验；新 OS 进程从正式 checkpoint
+  step 3→4 恢复继续通过。validation 未产生梯度或改变 optimizer/scheduler，unseen-test 未导出、未运行。
 
 ### 当前工作
 
-- `READY_FOR_EXECUTION`：等待执行者先把最新 main/Plan 064 合入当前 worktree，完成 v8 预算适配和 M3-B1c 本地/远端准备后直接开始有界正式训练。
+- `TRAINING_EXECUTION_COMPLETE / RESOURCE_RELEASE_AWAITING_USER_APPROVAL`：训练、候选、恢复和小型证据回收已完成；按用户最新指令，当前 Pod
+  `oe6gbptvq5yhja` 与 winner 卷 `hi3iaz8rsr` 暂不停止、终止或删除。terminal provider facts、settled billing 与 formal final receipt
+  必须等用户批准资源释放后生成。
 
 ### 本任务剩余步骤
 
-- 合入最新 main 并跑窄回归；形成 v8 budget-adaptation `DATA_GO/NO-GO/INCONCLUSIVE`。
-- 清理已停止 legacy Pod 与败者卷，同时保留热 Pod、winner 卷和 final-19 恢复点。
-- 准备并验证 Plan 066 source/data/recipe bundle，在当前 Pod commissioning 后冻结正式身份。
-- 从 exact base 干净执行 C1→C2→C3，保存阶段候选、validation 聚合和恢复状态。
-- 回收工件与费用证据，清理 task-only 远端资源，提交当前 worktree并交独立验收。
+- 等待用户批准后停止并终止当前计算 Pod；按届时指令保留或清理 winner 卷中的候选、formal checkpoint、exact 模型、venv 与 cache。
+- 计算资源终态和 provider 账单结算后生成 terminal provider facts 与 formal final receipt，再交独立验收；不提前写 M3-B1c 完成或解锁 M3-C1。
 
 ### 阻塞项
 
-- 当前无已知原则性阻塞。若启动时连续总账投影已不能为正式训练和清理留出可信余量，则预算适配必须停止为 NO-GO/INCONCLUSIVE。
+- 无训练路线或工件阻塞。唯一未完成项是用户明确要求延后的资源释放；当前 GPU 仍按约 `$2.89/h`、winner Standard 卷按约 `$0.017/h`
+  持续计费，仍受 Plan 060+066 连续 23 USD 硬上限约束。
 
 ### 当前验收状态
 
-- `PLANNED / NOT YET EXECUTED`。Plan 060 技术资格证据和 Plan 064 冻结数据均已到位；M3-B1c 尚未产生正式训练候选。
+- `EXECUTION COMPLETE / TERMINAL RECEIPT AND INDEPENDENT ACCEPTANCE PENDING`。M3-B1c 已产生三个正式训练候选和有效恢复证据，但资源释放、
+  settled billing、formal final receipt 与最终独立验收尚未完成，当前不声明任务 `COMPLETE` 或模型产品资格。
 
 ### 交接边界
 
@@ -160,3 +164,4 @@
 | 004 | v8 冻结实物不重做，只做一次有界预算适配 | Plan 064 覆盖、质量、consumer 已验收，唯一缺口是训练预算事实 | 数据、范围 | 已采纳 |
 | 005 | 各阶段保留模型候选，但只强制至少一个最新 full recovery checkpoint | 满足后续资格与故障恢复，同时避免三个 10GB optimizer checkpoint 挤占卷 | 工件、恢复 | 已采纳 |
 | 006 | validation 可做阶段同口径比较；unseen-test 默认封存，最多在 recipe/选择冻结后一次盲评 | 支持候选交接并防止 holdout 反向调参 | 评价、数据隔离 | 已采纳 |
+| 007 | 正式训练和候选复验完成后暂不释放当前 Pod/卷，等待用户另行批准 | 用户要求保留难抢计算资源与可复用设施；terminal receipt 因此顺延 | 资源终态、账单、验收 | 已采纳 |

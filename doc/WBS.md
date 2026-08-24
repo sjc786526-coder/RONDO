@@ -1,6 +1,6 @@
 # RONDO 长程规划（WBS）
 
-最后更新：2026-08-24（Plan 060 技术 GO、Plan 064 v8 DATA_GO；M3-B1c / Plan 066 已解锁并开始执行）
+最后更新：2026-08-24（Plan 066 正式训练与恢复完成；资源释放、终态 receipt 和独立验收待完成）
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段指针、跨方向关系、
 稳定工程边界和授权门；已完成成果与验收见 `doc/WBS-COMPLETED.md`，单次任务合同见 `plan/`，执行细节见
@@ -20,7 +20,7 @@
 | 0：量化测评基准 | 既有设施与首次 schema v7 正式 canary 已完成，当前无 active campaign | 保留设施；历史结果见 COMPLETED，新 campaign 须重新立项与授权 |
 | 1：Harness 优化 | **正式收口；当前无 active 工作包** | 当前不继续新增观测或内核/热路径优化；既有实现、设施与历史结果保留。未来可由用户另行决定是否重新立项，本次收口不作永久禁止 |
 | 2：本地审批模型 | **已收口，今后不再开启** | 最终结论为“保留为实验”；不改生产默认，不再规划后续工作包 |
-| 3：RONDO Multi | 第一、二期及其收口案例、**三期 M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B2a、M3-B2b 与 Plan 064 已完成**；M3-B1c / Plan 066 执行中；四期已规划、尚未实施 | Plan 060 技术 GO、Plan 064 v8 DATA_GO；Plan 066 复用当前热 Pod/胜者卷并按连续 23 USD 总账正式训练；M4-A 尚未立项或取得实施授权 |
+| 3：RONDO Multi | 第一、二期及其收口案例、**三期 M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B2a、M3-B2b 与 Plan 064 已完成**；M3-B1c / Plan 066 训练执行完成，资源终态与独立验收待完成；四期已规划、尚未实施 | Plan 066 已形成 C1/C2/C3 候选和正式恢复证据；当前 Pod/胜者卷按用户指令保留，释放批准后收口 terminal receipt；M4-A 尚未立项或取得实施授权 |
 
 ### 方向命名口径
 
@@ -40,7 +40,8 @@
 ### 方向 3：Publication Critic 三期
 
 - M3-A1 产品合同、M3-B2a / Plan 055 本地 Critic 服务与 M3-B2b / Plan 057 发布流程接入均已完成并进入主线。Plan 060 训练资格
-  `TECHNICAL_GO`、冻结 v8 `DATA_GO` 与 Plan 066 正式训练授权已经同时成立；M3-B1c 正复用当前热 H100/胜者卷执行。产品链与模型链在
+  `TECHNICAL_GO`、冻结 v8 `DATA_GO` 与 Plan 066 正式训练授权已经同时成立；M3-B1c 已完成正式训练、候选保存和恢复验证，正等待用户批准
+  释放当前热 H100 后形成终态 receipt 并进入独立验收。产品链与模型链在
   `M3-C1 → M3-C2` 汇合，最后由 M3-D 收口。
 - M3-A2 / Plan 054 与 M3-B1a / Plan 059 均已完成并进入主线。Plan 059 revision v7 冻结 72 candidate、30 Boundary 与
   6 Within-PASS，三 split 为 42/16/14；独立最终验收确认输入隔离、group/split、review、50,073-token census、manifest、
@@ -53,8 +54,9 @@
   干净 formal start/resume，C1→C2→C3、完整 checkpoint、新进程恢复和继续更新均形成有效证据；独立代码/archive 复核
   `remaining_findings=[]`，最终验收通过，结论为 `TECHNICAL_GO`。用户决定不为任务切换释放当前 Pod/胜者卷，Plan 060 与 Plan 066 从原
   Plan 060 基线连续计入 23 USD 总账；资源终态与 settled billing 由 Plan 066 完成正式训练后统一收口。
-- M3-B1c / Plan 066 是当前执行包：先把最新 main 与 v8 合入现有 Plan 060 worktree，再在当前唯一 H100 PCIe 80GB 上从 exact base 干净执行
-  C1→C2→C3，保存阶段候选、至少一个恢复点和同口径 validation 事实。它不授权 M3-C1 或产品资格结论。
+- M3-B1c / Plan 066 已在当前唯一 H100 PCIe 80GB 上从 exact base 干净执行 C1→C2→C3，实际消费 128 Binary、50 Boundary 与 8
+  Within-PASS，保存并复验三个阶段候选、固定 validation 与完整恢复点，新进程 step 3→4 继续更新通过。当前 Pod/胜者卷、formal checkpoint、
+  exact 模型和 cache 按用户最新指令保留；资源终态、settled billing、final receipt 和独立验收仍待完成，因此尚不解锁 M3-C1 或授予产品资格。
 
 ### 方向 3：Durable Team Runtime 四期
 

@@ -1,7 +1,7 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
 最后更新：2026-08-24 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
-状态：**第一期、第二期、M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B2a、M3-B2b 与 Plan 064 已完成；Plan 060 技术 GO、Plan 064 DATA_GO；M3-B1c / Plan 066 执行中；四期已规划、尚未实施**
+状态：**第一期、第二期、M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B2a、M3-B2b 与 Plan 064 已完成；Plan 060 技术 GO、Plan 064 DATA_GO；M3-B1c / Plan 066 训练执行完成，资源终态与独立验收待完成；四期已规划、尚未实施**
 
 ## 当前定位
 
@@ -185,6 +185,12 @@ C1→C2→C3 训练，回收各阶段候选与必要运行结果。
 **宏观验收**：正式训练在预算内完成或按门禁诚实停止；各阶段候选、必要恢复工件和同口径指标安全回收，至少一个候选可进入
 M3-C1。最后一个 checkpoint 不自动获得产品资格。
 
+**当前状态**：Plan 066 `final-01` 已从 exact base 干净完成 C1→C2→C3，实际消费 128 Binary、C2 加 50 Boundary、C3 再加 8
+Within-PASS，共 451,743 tokens；三阶段均完成 1,720,577,024 个 BF16 参数和 311/311 optimizer tensors 的 FlashAdamW 有限更新。
+C1/C2/C3 三个 model-only safetensors 候选、55-candidate 固定 validation、正式 C3 full checkpoint 和新进程 step 3→4 恢复继续均已形成并复验；
+validation 不进入梯度或训练决策，unseen-test 未导出、未运行。当前 Pod、winner 卷、formal checkpoint、exact 模型、venv 与 cache 按用户最新指令
+保留，等待另行批准释放；terminal provider facts、settled billing、final receipt 与独立验收尚未完成，因此 M3-B1c 不提前标记完成，M3-C1 继续等待。
+
 #### M3-B2a：本地 Critic 服务（已完成并通过独立验收）
 
 **结果**：Plan 055 新建专用 `codex-publication-critic` crate，以 loopback framed JSON 提供版本化协议、调用方可信配置绑定的
@@ -256,8 +262,8 @@ active cycle，每次阻断反馈轮换 continuation，Team State 专用 history
 
 - M3-A1、M3-A2 与 M3-B1a 已完成共同前置。Plan 060 / M3-B1b 与已完成的 Plan 064 构成 M3-B1c 的并列资格门；产品链的
   M3-B2a、M3-B2b 均已完成，两链在 M3-C1 前汇合。
-- M3-B1b 是独立付费资格门；Plan 064 当前为预算适配证据不足。M3-B1c 只有在 Plan 060 训练资格 GO、冻结 v8 数据 GO 和新的
-  正式训练授权同时成立后才能开始；no-go 或证据不足都不自动继续消费预算。
+- M3-B1b 是独立付费资格门；Plan 060 `TECHNICAL_GO`、Plan 064 `DATA_GO` 与正式训练授权均已成立，Plan 066 已据此完成训练执行。
+  资源终态、final receipt 与独立验收未闭合前不自动启动 M3-C1，也不继续追加训练消费。
 - M3-C1 等待 M3-B1c 与 M3-B2b，M3-C2 等待 M3-C1，M3-D 最后串行收口。
 - RunPod 云端 smoke/训练不占本地 Cargo build lock，可与产品代码、数据整理和四期非冲突开发并行；真实本地模型、
   Docker 与重型 Cargo 仍按根 `AGENTS.md` 全局串行。
