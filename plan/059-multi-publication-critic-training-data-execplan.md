@@ -76,7 +76,7 @@ Within-PASS 软偏好对。任务同时交付轻量 consumer 与不含 validatio
 - [x] pure/focused tests 覆盖 schema、监督隔离、review 状态、pair 不变量、分组切分、重复/近重复、freeze/hash、C1/C2/C3 成员和 bundle 排除；
       exact-tokenizer-only 门禁覆盖全部正式 candidate。只运行受影响模块的必要测试，结果明确区分 pure、teacher reference、真实 tokenizer 和
       未运行的模型/训练证据。
-- [ ] 完成一次与 generator/reviewer 均分离的聚焦独立验收，审查数据正确性、split 泄漏、输入隔离、token census、冻结身份和 consumer 合同。
+- [x] 完成一次与 generator/reviewer 均分离的聚焦独立验收，审查数据正确性、split 泄漏、输入隔离、token census、冻结身份和 consumer 合同。
       普通 finding 在 059 范围内修复并重新冻结受影响完整集合；最终给出 M3-B1b 数据 GO/NO-GO，且没有剩余 correctness/functionality finding。
 - [x] 完成后只精炼更新顶层 WBS 的方向 3 指针、方向 3 子 WBS、本计划状态/决策和一份有实质内容的 Plan 059 `agent_log`。检查 diff、文件体积、敏感/ignored 边界、
       主工作区与所有 worktree 状态后，只提交 059 worktree 本地分支并保持 clean；不合并、不推送、不归档、不删除 worktree或重命名分支。
@@ -280,13 +280,12 @@ linked worktree 不共享主根的 ignored `eval-data/`，因此下列执行期�
 
 ### 当前工作
 
-- revision v7 已从冻结 teacher/输入/实现身份生成并完成正式机械冻结、62 项 focused tests 与执行者全量自检。v7 关闭公开 consumer 构造
-  旁路和 Scope candidate-token 长度标签信号；当前只剩 staged/敏感/体积/状态检查、本地提交与本轮独立功能预审。
+- revision v7 已从冻结 teacher/输入/实现身份生成并完成正式机械冻结、62 项 focused tests、执行者全量自检、本地实现提交与独立功能预审。
+  v7 关闭公开 consumer 构造旁路和 Scope candidate-token 长度标签信号；独立预审 remaining correctness/functionality finding 为 0。
 
 ### 本任务剩余步骤
 
-- 完成本轮独立功能预审；普通 finding 继续在同一 v7 工作树修复并重新冻结受影响集合。计划制定者最终验收、获批主线整合与任何 M3-B1b
-  授权在本任务外。
+- 执行者范围内无剩余实现步骤。计划制定者最终验收、获批主线整合与任何 M3-B1b 授权在本任务外。
 
 ### 阻塞项
 
@@ -328,6 +327,9 @@ linked worktree 不共享主根的 ignored `eval-data/`，因此下列执行期�
 - v7 全量 exact-token census 为 50,073 tokens，单条 553–1,367；tracked `publication-critic-v7` 与 `formal-v12-final` 12/12 字节一致。
   factory-only 默认/evaluation consumer 分别保留 42/42/21 与 72/72/36，C1/C2/C3 pair 为 0/18/21，train-only bundle、manifest/hash 与
   62 项 focused Python test 均通过。执行者 provisional 数据建议为 GO；最终 M3-B1b 数据 GO、主线整合与解锁仍由计划制定者决定。
+- 干净上下文独立预审对实现提交 `6b66e3d` 复跑 62/62 focused tests，并独立复算 consumer、Scope 语义/长度、review 复用、split/group/
+  dedup/shortcut、manifest/hash、C1/C2/C3、bundle 与 Plan 054 input isolation；结论 PASS，remaining correctness/functionality finding 为 0。
+  报告见 `agent_log/2026-08-23-plan059-v7-independent-preacceptance.md`，该预审不替代计划制定者最终数据 GO。
 
 ### 交接边界
 

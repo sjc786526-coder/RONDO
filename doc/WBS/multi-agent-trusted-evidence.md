@@ -1,7 +1,7 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
 最后更新：2026-08-23 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
-状态：**第一期、第二期、M3-A1 与 M3-A2 已完成；Plan 055 / M3-B2a 与 Plan 057 / M3-B2b 已主线整合；Plan 059 / M3-B1a revision v7 已在 059 worktree 完成正式冻结与执行者自检**
+状态：**第一期、第二期、M3-A1 与 M3-A2 已完成；Plan 055 / M3-B2a 与 Plan 057 / M3-B2b 已主线整合；Plan 059 / M3-B1a revision v7 已在 059 worktree 完成正式冻结与独立功能预审**
 
 ## 当前定位
 
@@ -114,8 +114,9 @@ Within-PASS；C1/C2/C3 为 42 Binary、再加 18 Boundary、再加 3 Within-PASS
 Within-PASS 已独立复核；其余 review 只在模型可见 packet 与 pair endpoint 相等后复用。12 条 near-duplicate edge 均由 group closure 约束，
 Plan 054 reference match、跨 split 文本 shortcut 与 exact-token 长度 threshold shortcut 均为 0。全量 exact-tokenizer census 为 50,073
 tokens，单条 553–1,367，三 split 各有两个真实 long endpoint，continuity omission 为 0；manifest、factory-only 默认 consumer 物理只保留
-42/42/21 个 train packet/supervision/pair、显式 evaluation 才保留 72/72/36，以及 train-only smoke bundle 均通过。计划制定者最终验收仍未
-完成。这不是训练或模型质量证据，M3-B1b 仍未解锁。
+42/42/21 个 train packet/supervision/pair、显式 evaluation 才保留 72/72/36，以及 train-only smoke bundle 均通过。干净上下文独立功能预审
+复算上述合同后 PASS，remaining correctness/functionality finding 为 0；计划制定者最终验收仍未完成。这不是训练或模型质量证据，M3-B1b
+仍未解锁。
 
 #### M3-B1b：H100 训练资格 smoke（独立 go/no-go 门）
 

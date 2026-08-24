@@ -1,6 +1,6 @@
 # RONDO 长程规划（WBS）
 
-最后更新：2026-08-23（Plan 058 正在独立 worktree 推进 C2；Plan 054 / M3-A2 已主线整合，Plan 059 / M3-B1a revision v7 已在 059 worktree 完成正式冻结与自检）
+最后更新：2026-08-23（Plan 058 正在独立 worktree 推进 C2；Plan 054 / M3-A2 已主线整合，Plan 059 / M3-B1a revision v7 已在 059 worktree 完成正式冻结与独立功能预审）
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段指针、跨方向关系、
 稳定工程边界和授权门；已完成成果与验收见 `doc/WBS-COMPLETED.md`，单次任务合同见 `plan/`，执行细节见
@@ -20,7 +20,7 @@
 | 0：量化测评基准 | 既有设施与首次 schema v7 正式 canary 已完成，当前无 active campaign | 保留设施；历史结果见 COMPLETED，新 campaign 须重新立项与授权 |
 | 1：Harness 优化 | **Plan 058 正在独立 worktree 推进 C2** | 正式 campaign 的冻结身份、账本、资产与最终结论仍由 Plan 058 独立负责，尚未主线整合 |
 | 2：本地审批模型 | **已收口，今后不再开启** | 最终结论为“保留为实验”；不改生产默认，不再规划后续工作包 |
-| 3：RONDO Multi | 第一、二期及其收口案例、**三期 M3-A1、M3-A2、M3-B2a、M3-B2b 已完成** | Plan 059 / M3-B1a revision v7 已在 059 worktree 正式冻结并完成执行者自检，待独立验收与主线整合；M3-B1b 尚未解锁 |
+| 3：RONDO Multi | 第一、二期及其收口案例、**三期 M3-A1、M3-A2、M3-B2a、M3-B2b 已完成** | Plan 059 / M3-B1a revision v7 已在 059 worktree 正式冻结并通过独立功能预审，待计划制定者最终验收与主线整合；M3-B1b 尚未解锁 |
 
 ### 方向命名口径
 
