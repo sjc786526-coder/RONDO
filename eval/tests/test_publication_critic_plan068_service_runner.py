@@ -15,6 +15,14 @@ if str(EVAL_ROOT) not in sys.path:
     sys.path.insert(0, str(EVAL_ROOT))
 
 from rondo_eval.publication_critic.local_deployment.service_runner import main  # noqa: E402
+from rondo_eval.publication_critic.local_deployment.qualification import (  # noqa: E402
+    FREEZE_SCHEMA,
+    freeze_sha256,
+)
+from rondo_eval.publication_critic.identity import (  # noqa: E402
+    canonical_json_bytes,
+    sha256_bytes,
+)
 
 
 BODY_SENTINEL = "PLAN068_PRIVATE_PACKET_BODY_SENTINEL"
@@ -85,6 +93,7 @@ class Fixture:
         self.snapshot = root / "snapshot"
         self.repo_root = root / "repo"
         self.descriptor = root / "descriptor.json"
+        self.freeze = root / "freeze.json"
         self.packet = root / "packet.json"
         self.output = root / "service-result.json"
         self.service.write_text(FAKE_SERVICE, encoding="utf-8")
@@ -93,17 +102,97 @@ class Fixture:
         self.probe.chmod(0o700)
         self.snapshot.mkdir()
         (self.repo_root / "eval").mkdir(parents=True)
+        service_descriptor = {
+            "identity": {"frozen": "trusted-service-identity"},
+            "limits": {
+                "request_bytes": 131_072,
+                "response_bytes": 16_384,
+                "max_concurrency": 1,
+                "queue_capacity": 4,
+                "job_timeout_ms": 25_000,
+                "io_timeout_ms": 2_000,
+            },
+        }
+        service_sha256 = sha256_bytes(canonical_json_bytes(service_descriptor))
+        artifacts = {
+            object_id: {
+                "candidate_artifact_sha256": character * 64,
+                "deployment_artifact_sha256": character * 64,
+                "service_descriptor_sha256": (
+                    service_sha256 if object_id == "c1" else character * 64
+                ),
+            }
+            for object_id, character in zip(("base", "c1", "c2", "c3"), "fabc")
+        }
+        artifacts["c1"]["candidate_artifact_sha256"] = "a" * 64
+        artifacts["c1"]["deployment_artifact_sha256"] = "a" * 64
+        freeze = {
+            "schema": FREEZE_SCHEMA,
+            "qualification_objects": ["base", "c1", "c2", "c3"],
+            "cohort": {
+                "sample_ids": [
+                    "pc-v1-cal-nc-pass",
+                    "pc-v1-cal-nc-rewrite",
+                    "pc-v1-cal-ni-pass",
+                    "pc-v1-cal-ni-rewrite",
+                ],
+                "future_unseen_test": False,
+            },
+            "threshold": {"source": "fixture", "projected_score": 0.5},
+            "reference_method": "fixture-float32",
+            "source": {
+                "git_commit": "d" * 40,
+                "tracked_source_clean": True,
+                "environment_lock_path": "eval/environment/uv.lock",
+                "environment_lock_sha256": "e" * 64,
+            },
+            "artifacts": artifacts,
+            "runtime": {
+                "device": "cuda",
+                "dtype": "bfloat16",
+                "cpu_threads": 4,
+                "deployment_format": "fixture-safetensors",
+                "service_limits": {
+                    **service_descriptor["limits"],
+                    "worker_startup_timeout_ms": 1_000,
+                    "worker_io_timeout_ms": 500,
+                    "worker_shutdown_timeout_ms": 500,
+                    "graceful_shutdown_ms": 500,
+                    "force_shutdown_ms": 500,
+                    "call_timeout_ms": 500,
+                    "startup_timeout_ms": 1_000,
+                    "process_timeout_ms": 300,
+                    "representative_cancel_after_ms": 10,
+                },
+            },
+            "gates": {
+                "max_projected_absolute_drift": 1.0,
+                "min_ranking_concordance": 0.0,
+                "reference_obvious_margin_floor": 0.1,
+                "min_obvious_margin_direction_agreement": 0.0,
+                "min_pair_direction_agreement": 0.0,
+                "max_verdict_mismatches": 4,
+                "max_load_seconds": 30.0,
+                "max_peak_rss_bytes": 8_000_000_000,
+                "max_peak_vram_bytes": 7_500_000_000,
+                "max_warm_p95_latency_ms": 1_000.0,
+                "max_service_score_absolute_drift": 1.0,
+                "max_service_verdict_mismatches": 4,
+                "min_stress_success_rate": 0.0,
+                "max_stress_p95_latency_ms": 2_000.0,
+            },
+            "stress_call_counts": [1, 2, 4, 8],
+            "representative_lifecycle_object": "c1",
+        }
+        self.freeze.write_text(json.dumps(freeze), encoding="utf-8")
         self.descriptor.write_text(
             json.dumps(
                 {
                     "worker_protocol": "rondo-publication-critic-worker-v1",
                     "object_id": "c1",
                     "deployment_artifact_sha256": "a" * 64,
-                    "qualification_freeze_sha256": "b" * 64,
-                    "service_descriptor": {
-                        "identity": {"frozen": "trusted-service-identity"},
-                        "limits": {"queue_capacity": 4},
-                    },
+                    "qualification_freeze_sha256": freeze_sha256(freeze),
+                    "service_descriptor": service_descriptor,
                 }
             ),
             encoding="utf-8",
@@ -127,6 +216,8 @@ class Fixture:
             str(self.snapshot),
             "--descriptor",
             str(self.descriptor),
+            "--freeze",
+            str(self.freeze),
             "--packet",
             str(self.packet),
             "--output",
@@ -222,7 +313,7 @@ class ServiceRunnerTests(unittest.TestCase):
             fixture = Fixture(Path(temporary))
             (fixture.root / "fail-ready-and-shutdown").write_text("1", encoding="ascii")
 
-            self.assertEqual(main(fixture.arguments(cancel=False)), 1)
+            self.assertEqual(main(fixture.arguments()), 1)
 
             result = json.loads(fixture.output.read_text(encoding="utf-8"))
             self.assertEqual(result["failure_code"], "ready_probe_failed")
@@ -240,7 +331,7 @@ class ServiceRunnerTests(unittest.TestCase):
             fixture = Fixture(Path(temporary))
             (fixture.root / "typed-review-failure").write_text("1", encoding="ascii")
 
-            self.assertEqual(main(fixture.arguments(cancel=False)), 0)
+            self.assertEqual(main(fixture.arguments()), 0)
 
             result = json.loads(fixture.output.read_text(encoding="utf-8"))
             self.assertEqual(result["status"], "COMPLETE")
@@ -248,9 +339,26 @@ class ServiceRunnerTests(unittest.TestCase):
             self.assertEqual(result["call_summary"]["stress_success_count"], 0)
             self.assertEqual(
                 result["call_summary"]["typed_failure_codes"],
-                ["queue_full"] * 18,
+                ["queue_full"] * 19,
             )
             self.assertTrue(result["service_exit"]["reaped"])
+
+    def test_frozen_runtime_mismatch_starts_no_service(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = Fixture(Path(temporary))
+            arguments = fixture.arguments()
+            value_index = arguments.index("--worker-io-timeout-ms") + 1
+            arguments[value_index] = "501"
+
+            self.assertEqual(main(arguments), 1)
+
+            result = json.loads(fixture.output.read_text(encoding="utf-8"))
+            self.assertEqual(result["status"], "FAILED")
+            self.assertEqual(
+                result["failure_code"],
+                "freeze_runtime_arguments_mismatch",
+            )
+            self.assertFalse((fixture.root / "service-pid").exists())
 
     def test_output_is_exclusive_and_second_run_starts_no_service(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

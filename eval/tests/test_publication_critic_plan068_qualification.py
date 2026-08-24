@@ -79,6 +79,8 @@ def _freeze() -> dict[str, object]:
             "cpu_threads": 4,
             "deployment_format": "transformers-safetensors",
             "service_limits": {
+                "request_bytes": 131_072,
+                "response_bytes": 16_384,
                 "max_concurrency": 1,
                 "queue_capacity": 8,
                 "job_timeout_ms": 25_000,
@@ -86,6 +88,12 @@ def _freeze() -> dict[str, object]:
                 "worker_startup_timeout_ms": 20_000,
                 "worker_io_timeout_ms": 5_000,
                 "worker_shutdown_timeout_ms": 5_000,
+                "graceful_shutdown_ms": 3_000,
+                "force_shutdown_ms": 2_000,
+                "call_timeout_ms": 30_000,
+                "startup_timeout_ms": 60_000,
+                "process_timeout_ms": 60_000,
+                "representative_cancel_after_ms": 1,
             },
         },
         "gates": {

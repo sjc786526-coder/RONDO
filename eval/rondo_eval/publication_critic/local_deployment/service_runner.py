@@ -17,6 +17,7 @@ import time
 from typing import Any, BinaryIO, Mapping, Sequence
 
 from ..identity import canonical_json_bytes, sha256_bytes, sha256_file
+from .qualification import QualificationError, freeze_sha256, validate_freeze
 
 
 RESULT_SCHEMA = "rondo-publication-critic-plan068-service-run-v1"
@@ -138,6 +139,76 @@ def _validate_descriptor(value: Mapping[str, Any]) -> dict[str, Any]:
     ):
         raise ServiceRunnerError("descriptor_identity_invalid")
     return dict(value)
+
+
+def _bind_frozen_runtime(
+    args: argparse.Namespace,
+    descriptor: Mapping[str, Any],
+) -> dict[str, Any]:
+    try:
+        freeze = validate_freeze(_load_json(args.freeze, "freeze"))
+    except (QualificationError, ServiceRunnerError):
+        raise ServiceRunnerError("freeze_identity_invalid") from None
+    digest = freeze_sha256(freeze)
+    object_id = descriptor["object_id"]
+    service_descriptor = descriptor["service_descriptor"]
+    if (
+        descriptor["qualification_freeze_sha256"] != digest
+        or descriptor["deployment_artifact_sha256"]
+        != freeze["artifacts"][object_id]["deployment_artifact_sha256"]
+        or sha256_bytes(canonical_json_bytes(service_descriptor))
+        != freeze["artifacts"][object_id]["service_descriptor_sha256"]
+        or set(service_descriptor) != {"identity", "limits"}
+        or not isinstance(service_descriptor["limits"], dict)
+    ):
+        raise ServiceRunnerError("freeze_descriptor_mismatch")
+    runtime = freeze["runtime"]
+    frozen_limits = runtime["service_limits"]
+    descriptor_limits = service_descriptor["limits"]
+    descriptor_limit_names = {
+        "request_bytes",
+        "response_bytes",
+        "max_concurrency",
+        "queue_capacity",
+        "job_timeout_ms",
+        "io_timeout_ms",
+    }
+    if set(descriptor_limits) != descriptor_limit_names or any(
+        descriptor_limits[name] != frozen_limits[name]
+        for name in descriptor_limit_names
+    ):
+        raise ServiceRunnerError("freeze_service_limits_mismatch")
+    argument_names = {
+        "worker_startup_timeout_ms",
+        "worker_io_timeout_ms",
+        "worker_shutdown_timeout_ms",
+        "graceful_shutdown_ms",
+        "force_shutdown_ms",
+        "call_timeout_ms",
+        "startup_timeout_ms",
+        "process_timeout_ms",
+    }
+    if (
+        args.device != runtime["device"]
+        or args.dtype != runtime["dtype"]
+        or args.cpu_threads != runtime["cpu_threads"]
+        or any(getattr(args, name) != frozen_limits[name] for name in argument_names)
+    ):
+        raise ServiceRunnerError("freeze_runtime_arguments_mismatch")
+    representative = object_id == freeze["representative_lifecycle_object"]
+    expected_cancel = frozen_limits["representative_cancel_after_ms"]
+    if args.mode == "formal" and (
+        (representative and args.cancel_after_ms != expected_cancel)
+        or (not representative and args.cancel_after_ms is not None)
+    ):
+        raise ServiceRunnerError("freeze_cancel_scenario_mismatch")
+    return {
+        "device": args.device,
+        "dtype": args.dtype,
+        "cpu_threads": args.cpu_threads,
+        "deployment_format": runtime["deployment_format"],
+        "service_limits": dict(frozen_limits),
+    }
 
 
 def _require_path(
@@ -397,12 +468,14 @@ def _run(args: argparse.Namespace, evidence: dict[str, Any]) -> str | None:
         (args.service, "service_program"),
         (args.probe, "probe_program"),
         (args.packet, "packet"),
+        (args.freeze, "freeze"),
     ):
         _require_path(path, label)
     _require_path(args.python, "python_program", allow_symlink=True)
     _require_path(args.snapshot, "snapshot", directory=True)
     _require_path(args.repo_root, "repo_root", directory=True)
     descriptor = _validate_descriptor(_load_json(args.descriptor, "descriptor"))
+    frozen_runtime = _bind_frozen_runtime(args, descriptor)
     _load_json(args.packet, "packet")
     evidence.update(
         {
@@ -411,6 +484,10 @@ def _run(args: argparse.Namespace, evidence: dict[str, Any]) -> str | None:
             "service_descriptor_sha256": sha256_bytes(
                 canonical_json_bytes(descriptor["service_descriptor"])
             ),
+            "qualification_freeze_sha256": descriptor[
+                "qualification_freeze_sha256"
+            ],
+            "frozen_runtime": frozen_runtime,
         }
     )
     environment = os.environ.copy()
@@ -587,6 +664,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--python", type=Path, required=True)
     parser.add_argument("--snapshot", type=Path, required=True)
     parser.add_argument("--descriptor", type=Path, required=True)
+    parser.add_argument("--freeze", type=Path, required=True)
     parser.add_argument("--packet", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--repo-root", type=Path, required=True)

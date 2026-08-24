@@ -47,6 +47,8 @@ _GATE_KEYS = {
     "max_stress_p95_latency_ms",
 }
 _SERVICE_LIMIT_KEYS = {
+    "request_bytes",
+    "response_bytes",
     "max_concurrency",
     "queue_capacity",
     "job_timeout_ms",
@@ -54,6 +56,12 @@ _SERVICE_LIMIT_KEYS = {
     "worker_startup_timeout_ms",
     "worker_io_timeout_ms",
     "worker_shutdown_timeout_ms",
+    "graceful_shutdown_ms",
+    "force_shutdown_ms",
+    "call_timeout_ms",
+    "startup_timeout_ms",
+    "process_timeout_ms",
+    "representative_cancel_after_ms",
 }
 
 
