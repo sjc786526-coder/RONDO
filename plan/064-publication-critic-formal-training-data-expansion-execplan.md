@@ -67,7 +67,7 @@
 - [x] 执行者只窄更新本计划状态/决策、职责相关说明和一份精炼 `agent_log`，并给出建议的 WBS delta；规划时的共享 WBS 已滞后，执行分支不得用它
       覆盖 Plan 060/062 并行成果。最终 WBS 同步留到独立验收通过、用户批准主线整合后，基于届时最新 clean `main` 窄完成。worktree 形成少量清晰
       提交并保持 clean，不合并、不推送、不归档、不删除 worktree或重命名分支。
-- [ ] 计划制定者对最终代码、数据、测试、ignored 交接和结论完成独立验收；数据 `GO` 要求无剩余 correctness/functionality 阻断 finding。普通非阻断
+- [x] 计划制定者对最终代码、数据、测试、ignored 交接和结论完成独立验收；数据 `GO` 要求无剩余 correctness/functionality 阻断 finding。普通非阻断
       限制可以诚实保留，不为凑 GO 建设复杂审计/可信体系或弱化已有门禁。
 
 ## 2. 范围
@@ -229,24 +229,22 @@ Plan 054 tokenizer/cache 与 Plan 059 retained namespace 只读，Plan 060/062 n
 
 ### 当前工作
 
-- `FINAL_REVIEW_READY`：计划制定者已批准 universe `3fdfc0ada4a67451e4f1fc7e66302067119172fea809802ff1d01576b3be40d9`；
-  `training/publication-critic-v8/` 已从 clean `d9225398c75f45a5c612a54d2d892f0e39e57b91` 完整冻结，manifest content SHA-256 为
-  `a9a31a61e0a1e070ee8d076dd313b7efabb5e01ffa42773a841b123a2686cb98`。阶段 D 执行者结论为“证据不足（训练预算适配未决）”，不是数据 GO。
+- `COMPLETE`：最终独立验收通过。`training/publication-critic-v8/` 已冻结并绑定获批 universe
+  `3fdfc0ada4a67451e4f1fc7e66302067119172fea809802ff1d01576b3be40d9`；最终数据资格为“证据不足（训练预算适配未决）”，不是数据 GO。
 
 ### 本任务剩余步骤
 
-- 执行者提交阶段 C/D 正式 release、窄文档和任务日志，保持 worktree clean，交计划制定者做最终独立验收。
-- 最终验收通过后的 WBS 窄同步与主线整合仍按用户边界留给后续整合者；本分支不修改 WBS、不合并、不推送、不归档。
+- 本任务内无剩余实施或验收步骤。WBS 窄同步与主线整合仍按用户边界留给后续整合者；本分支不修改 WBS、不合并、不推送、不归档。
 
 ### 阻塞项
 
-- 当前没有本地 correctness/functionality 阻塞。Plan 060 尚无本任务可使用的正式吞吐、最终费用或训练预算事实，因此阶段 D 只能建议
-  “证据不足（训练预算适配未决）”；这不推翻正式 freeze，但禁止数据 GO 或启动 M3-B1c。
+- Plan 064 无剩余阻塞。Plan 060 尚无可接受的正式吞吐、最终费用或训练预算事实，因此下游数据 GO 与 M3-B1c 仍被阻断；该外部条件不影响
+  Plan 064 以“证据不足”终态完成。
 
 ### 当前验收状态
 
-- `FROZEN / EXECUTOR_EVIDENCE_INSUFFICIENT / WAITING_FINAL_ACCEPTANCE`：阶段 A--D 执行者范围完成，正式 v8、manifest、DATA_CARD、tokenizer-only、
-  consumer 和 137 项 focused tests 通过；等待计划制定者最终独立验收。没有数据 GO，也未启动训练。
+- `FROZEN / ACCEPTED / EVIDENCE_INSUFFICIENT`：阶段 A--D 与最终独立验收全部完成，正式 v8、manifest、DATA_CARD、tokenizer-only、consumer 和
+  137 项 focused tests 通过。没有数据 GO，也未启动训练；后续预算适配复核与主线交付由 WBS 另行承接。
 
 ### 交接边界
 
@@ -276,3 +274,4 @@ Plan 054 tokenizer/cache 与 Plan 059 retained namespace 只读，Plan 060/062 n
 | 012 | direct review 是新行准入；release audit 只作为系统性风险监控，保留单条分歧但只由未解决系统性 finding 阻断 | 符合 design lock 与风险相称复核，避免反复追问 reviewer 制造一致 | review、质量 | 已采纳 |
 | 013 | grouped split 的确定性搜索预算由 20,000 调为 30,000，算法、seed、ratio、coverage 和 group 规则不变 | 固定候选首次可行分配在 attempt 23,429；这是有界机械搜索预算问题，不是数据语义问题 | split、配置 | 已采纳 |
 | 014 | 只冻结计划制定者批准的 `3fdfc0...40d9` universe；Plan 060 正式预算事实缺失时，阶段 D 结论固定为“证据不足” | 保持冻结身份精确，同时不把覆盖规模冒充训练预算资格 | freeze、结论 | 已采纳 |
+| 015 | 最终独立验收接受 v8 冻结并以“证据不足”完成 Plan 064；Plan 060 正式事实到达后仅做一次有界预算适配复核 | 合同允许证据不足终态，避免为取得 GO 机械扩量或重做已冻结数据 | 验收、交接 | 已采纳 |
