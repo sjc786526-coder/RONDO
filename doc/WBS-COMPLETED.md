@@ -1818,3 +1818,23 @@ rehearsal/全新正式 campaign 中继续，本节只冻结 v1 历史事实。
   状态；方向 1 子 WBS 精简为状态与归档入口，不再维护已完成任务流水。
 - 这是当前阶段的收口决定，不是永久禁止。未来如果用户决定重新启动方向 1，应按届时目标重新立项并建立新的
   任务合同；旧 campaign、预算与真实执行授权不自动继承。
+
+## Publication Critic 正式训练数据扩充与冻结（Plan 064，2026-08-24）
+
+**状态**：阶段 A--D、正式 v8 freeze 与最终独立验收均已完成；验收通过、任务目标完成，最终数据资格为
+“证据不足（训练预算适配未决）”，不是数据 GO。正式实现提交为 `5b9da6d070100504cfb15523e9bb3ef287137e7c`，
+最终验收提交为 `65ec14a541c7e4ae2a850d074c44eb66d028f155`，主线合并提交为
+`6a50168d59cd9ccb6c9097c73f3bf9ac48194c1f`。
+
+- `publication-critic-v8` 完整物化 123 scenarios、228 candidates、104 pairs，train/validation/unseen-test 为
+  128/55/45；exact-token 总量 178,646，单项 553--2,094，continuity omission 为 0。C1/C2/C3 为 128 Binary、
+  50 Boundary、再加 8 Within-PASS；默认 consumer 仅暴露 train，evaluation 模式才可访问完整 holdout。
+- 正式 manifest core identity 为 `a9a31a61e0a1e070ee8d076dd313b7efabb5e01ffa42773a841b123a2686cb98`，绑定获批
+  prefreeze universe `3fdfc0ada4a67451e4f1fc7e66302067119172fea809802ff1d01576b3be40d9`、Plan 054 输入、23 个实现合同、
+  review/disposition、lineage、split、token census、consumer 与 train-only bundle。
+- Plan 059 v7 物理 tree 保持 `435c06fba3196bee21d59d88b9e6d6b1a1e1999a`；v8 只按设计锁投影逐字节不变的继承成员，
+  v7 holdout 与 Plan 060 smoke 输入未迁移、未替换。104 个 pair 与 37 条 near-duplicate edge 均保持 split 闭合。
+- 最终独立验收复算 manifest/files/contracts/universe 与 consumer 边界，12 个 Publication Critic focused Python 模块
+  `137/137` 通过。未运行 Cargo、Docker、完整模型、真实 API、云任务、上传或训练，也未增加通用审计/可信设施。
+- Plan 060 尚无进入 main 或正式交接的吞吐、费用与预算事实，因此冻结数据不能宣称训练预算适配 GO。后续只在 Plan 060
+  正式结果到达后对冻结 v8 做一次有界预算适配复核；默认不生成新数据、不修改 split/label/review、不重新 freeze，M3-B1c 仍锁定。

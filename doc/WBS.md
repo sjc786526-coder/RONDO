@@ -20,7 +20,7 @@
 | 0：量化测评基准 | 既有设施与首次 schema v7 正式 canary 已完成，当前无 active campaign | 保留设施；历史结果见 COMPLETED，新 campaign 须重新立项与授权 |
 | 1：Harness 优化 | **正式收口；当前无 active 工作包** | 当前不继续新增观测或内核/热路径优化；既有实现、设施与历史结果保留。未来可由用户另行决定是否重新立项，本次收口不作永久禁止 |
 | 2：本地审批模型 | **已收口，今后不再开启** | 最终结论为“保留为实验”；不改生产默认，不再规划后续工作包 |
-| 3：RONDO Multi | 第一、二期及其收口案例、**三期 M3-A1、M3-A2、M3-B1a、M3-B2a、M3-B2b 已完成** | Plan 059 / M3-B1a revision v7 已完成最终验收与主线整合；M3-B1b 数据前置已解锁，但尚未立项或取得付费执行授权 |
+| 3：RONDO Multi | 第一、二期及其收口案例、**三期 M3-A1、M3-A2、M3-B1a、M3-B2a、M3-B2b 与 Plan 064 已完成** | Plan 060 / M3-B1b 已在专用 worktree 实施但尚无正式 GO；Plan 064 已冻结 v8，最终资格为预算适配证据不足，M3-B1c 仍锁定 |
 
 ### 方向命名口径
 
@@ -46,8 +46,12 @@
   6 Within-PASS，三 split 为 42/16/14；独立最终验收确认输入隔离、group/split、review、50,073-token census、manifest、
   factory-only consumer 与 train-only smoke bundle 闭环，`remaining_findings=[]`，数据结论 GO。详细历史见
   `doc/WBS-COMPLETED.md` 与 Plan 059 最终验收日志。
-- M3-B1b 是数据链下一工作包，数据前置已解锁但尚未启动。它必须另建 ExecPlan 并取得 RunPod/H100、训练、上传与付费预算授权；
-  Plan 059 的完成不自动授权任何外部或付费操作。
+- Plan 064 已独立验收完成并冻结 `publication-critic-v8`：228 candidate、104 pair、三 split 为 128/55/45，训练 consumer 默认
+  只暴露 train。覆盖、质量与消费合同通过，但 Plan 060 尚无可接受的正式吞吐、费用和预算事实，因此最终资格为“证据不足”，
+  不是数据 GO；v7 与 Plan 060 smoke 输入保持不变。
+- Plan 060 / M3-B1b 已立项并在专用 worktree 实施，但尚未形成进入 main 或正式交接的训练资格 GO。它仍须遵守独立的
+  RunPod/H100、训练、上传与付费授权。Plan 060 正式事实到达后，只对冻结 v8 做一次有界预算适配复核；只有 Plan 060 训练资格 GO、
+  v8 数据 GO 与新的正式训练授权同时成立，M3-B1c 才具备另行规划条件。
 
 如果未来重新启动方向 1，它仍与方向 3 保持产品源码和任务合同独立；本地重型 Cargo、Docker、真实本地模型
 加载/推理继续全局串行，并由实际进入实施的工作包协调共享资源。

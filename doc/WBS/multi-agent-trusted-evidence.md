@@ -1,7 +1,7 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
 最后更新：2026-08-24 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
-状态：**第一期、第二期、M3-A1、M3-A2 与 M3-B1a 已完成；Plan 055 / M3-B2a、Plan 057 / M3-B2b 与 Plan 059 / M3-B1a 已主线整合**
+状态：**第一期、第二期、M3-A1、M3-A2、M3-B1a、M3-B2a、M3-B2b 与 Plan 064 已完成；Plan 060 / M3-B1b 实施中，M3-B1c 仍锁定**
 
 ## 当前定位
 
@@ -47,9 +47,12 @@ M3-A1 产品合同与质量边界
         ↓                              ↓
 M3-A2 数据/评价设施与基座测评      M3-B2a 本地 Critic 服务
         ↓                              ↓
-M3-B1a 训练数据冻结               M3-B2b Multi 发布流程接入
-        ↓                              │
-M3-B1b H100 训练资格 smoke             │
+M3-B1a v7 数据冻结                M3-B2b Multi 发布流程接入
+   ┌────┴─────┐                        │
+   ↓          ↓                        │
+M3-B1b      Plan 064 v8 数据扩充         │
+资格 smoke   已冻结，预算适配证据不足      │
+   └────┬─────┘                        │
         ↓                              │
 M3-B1c 正式分阶段训练与工件回收          │
         └──────────────┬───────────────┘
@@ -116,7 +119,22 @@ census、manifest、factory-only consumer 和 train-only smoke bundle 均通过�
 **交接**：M3-B1b 的数据前置已经解锁，但本结论不是训练或模型质量证据，也不授权付费运行。M3-B1b 仍须独立 ExecPlan 与
 RunPod/H100、训练、上传和预算授权，并只执行有界资格 smoke。
 
+#### M3-B1c 数据规模前置：Plan 064（已完成，资格证据不足）
+
+**结果**：`publication-critic-v8` 已正式冻结并完成最终独立验收：123 scenarios、228 candidates、104 pairs，
+train/validation/unseen-test 为 128/55/45，exact-token 总量 178,646；C1/C2/C3 为 128 Binary、50 Boundary、
+再加 8 Within-PASS。默认 consumer 只暴露 train，显式 evaluation 模式才可访问完整 228 candidates。v7 物理 tree、继承成员与
+split 保持不变，Plan 060 继续使用原 smoke bundle。
+
+**资格结论**：覆盖、review、lineage、group/split、dedup/shortcut、tokenizer-only、manifest、bundle 和 consumer 门禁均通过，
+但 Plan 060 尚无正式吞吐、费用或训练预算事实，因此最终结论为“证据不足（训练预算适配未决）”，不是数据 GO。
+
+**交接**：Plan 060 正式结果到达后，对冻结 v8 做一次有界预算适配复核，不默认生成新数据或重做 freeze。只有 Plan 060 训练资格
+GO、v8 数据 GO 与新的正式训练授权同时成立，M3-B1c 才能另立 ExecPlan；任一条件缺失都不得启动训练。
+
 #### M3-B1b：H100 训练资格 smoke（独立 go/no-go 门）
+
+**状态**：Plan 060 已立项并在专用 worktree 实施；当前尚无进入 main 或正式交接的训练资格、吞吐、费用和预算结论。
 
 **目标**：在单张 RunPod H100 PCIe 80GB 上验证 Skywork 1.7B BF16 全参数训练、FlashOptim/FlashAdamW 主路径、阶段保存与恢复
 是否适合进入正式训练。
@@ -128,7 +146,7 @@ RunPod/H100、训练、上传和预算授权，并只执行有界资格 smoke。
 
 #### M3-B1c：正式分阶段训练与工件回收
 
-**目标**：在 M3-B1b 给出 go 结论并另行授权后，沿同一 lineage 连续完成研究设计中的 C1→C2→C3 训练，回收各阶段候选与
+**目标**：在 M3-B1b 给出 go、冻结 v8 完成数据 GO 复核并另行授权后，沿同一 lineage 连续完成研究设计中的 C1→C2→C3 训练，回收各阶段候选与
 必要运行结果。这里的 C1/C2/C3 是训练 checkpoint 名称，不是 M3-C1/M3-C2 工作包编号。
 
 **边界**：三个训练 checkpoint 留在同一 ExecPlan 内，不拆成行政任务；不扩展候选底模池、不建设通用训练平台、不追加
@@ -206,9 +224,10 @@ active cycle，每次阻断反馈轮换 continuation，Team State 专用 history
 
 ## 串并行与资源关系
 
-- M3-A1、M3-A2 已完成共同前置。数据/训练链当前按 `M3-B1a → M3-B1b → M3-B1c` 串行；产品链的 M3-B2a、M3-B2b 均已完成。
-  两链彼此并行，产品链等待模型链完成后再进入 M3-C1。
-- M3-B1b 是独立付费资格门，M3-B1c 只有在 go 结论和新的正式训练授权后才能开始；no-go 不自动继续消费预算。
+- M3-A1、M3-A2 与 M3-B1a 已完成共同前置。Plan 060 / M3-B1b 与已完成的 Plan 064 构成 M3-B1c 的并列资格门；产品链的
+  M3-B2a、M3-B2b 均已完成，两链在 M3-C1 前汇合。
+- M3-B1b 是独立付费资格门；Plan 064 当前为预算适配证据不足。M3-B1c 只有在 Plan 060 训练资格 GO、冻结 v8 数据 GO 和新的
+  正式训练授权同时成立后才能开始；no-go 或证据不足都不自动继续消费预算。
 - M3-C1 等待 M3-B1c 与 M3-B2b，M3-C2 等待 M3-C1，M3-D 最后串行收口。
 - RunPod 云端 smoke/训练可以与不占用本地重型资源的产品代码、数据整理和受控替身测试并行；真实本地模型、Docker 与
   重型 Cargo 仍按根 `AGENTS.md` 全局串行。
