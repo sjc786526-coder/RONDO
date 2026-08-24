@@ -1,6 +1,6 @@
 # 方向 1：Harness 优化
 
-最后更新：2026-08-23 ｜ 状态：**Plan 058 已完成、通过外部复验并进入主线；保留默认关闭的 root-only C2 guidance** ｜
+最后更新：2026-08-23 ｜ 状态：**Plan 062 已完成规划、等待执行；Plan 058 历史结论保持冻结** ｜
 源码位置：`mydev/` ｜ Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md`
 
 ## 当前状态
@@ -9,8 +9,13 @@
 opt-in、任务级安全离线投影、历史普查器与日期冻结证据继续复用；Plan 058 只新增默认关闭、显式 opt-in 的
 `exec_command` repeat guidance，不改变工具执行资格、Guardian、审批、sandbox 或方向 2/3。外部验收发现普通非 root
 agent 会继承该 feature 后，最终分支已把 recipient 收紧到 root agent，并补 model-visible integration regression；
-外部复验已通过并完成主线整合，feature 保持 UnderDevelopment、默认关闭。当前无 active 方向 1
-工作包；本轮不规划方向 1 后继。
+外部复验已通过并完成主线整合，feature 保持 UnderDevelopment、默认关闭。
+
+Plan 062 已在专用 worktree 完成任务规划：学习教师源码后，按 RONDO 当前架构自主实现 history orphan
+normalization、模型可见工具规格共享与 unified-exec 输出快照三项行为保持型热路径优化，并新增一条无真实 API 的
+轻量 benchmark。本包保持 `v0.147.0` 基线身份，不改变模型可见语义、工具资格、Guardian、审批或 sandbox，
+不恢复 E-A 或正式 Terminal-Bench campaign，也不重启开放式候选探索。当前等待用户把一次性授权提示词交给执行者；
+执行者只提交 062 worktree，独立验收、合并和推送另行处理。
 
 此前教师 harness 的只读研究 T1—T3 已完成。研究交付
 `doc/research/teacher-harness-performance-candidates.md` 保留为形成时点的证据与候选池；候选进入实现仍必须由

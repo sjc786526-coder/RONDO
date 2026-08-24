@@ -1,6 +1,6 @@
 # RONDO 长程规划（WBS）
 
-最后更新：2026-08-23（Plan 058 与 Plan 059 均已完成验收并进入主线；方向 3 下一包为 M3-B1b）
+最后更新：2026-08-23（Plan 062 已完成规划、等待执行；方向 3 下一包为 M3-B1b）
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段指针、跨方向关系、
 稳定工程边界和授权门；已完成成果与验收见 `doc/WBS-COMPLETED.md`，单次任务合同见 `plan/`，执行细节见
@@ -18,7 +18,7 @@
 | 方向 | 当前状态 | 当前规划边界 |
 |---|---|---|
 | 0：量化测评基准 | 既有设施与首次 schema v7 正式 canary 已完成，当前无 active campaign | 保留设施；历史结果见 COMPLETED，新 campaign 须重新立项与授权 |
-| 1：Harness 优化 | **Plan 058 已完成并进入主线，当前无 active 工作包** | 保留 root-only、UnderDevelopment、默认关闭的 C2 repeat guidance；本轮不规划方向 1 后继 |
+| 1：Harness 优化 | **Plan 062 已完成规划，等待执行者实施** | 学习教师源码后自主实现三项行为保持型热路径优化与轻量测评；不恢复开放式候选探索 |
 | 2：本地审批模型 | **已收口，今后不再开启** | 最终结论为“保留为实验”；不改生产默认，不再规划后续工作包 |
 | 3：RONDO Multi | 第一、二期及其收口案例、**三期 M3-A1、M3-A2、M3-B1a、M3-B2a、M3-B2b 已完成** | Plan 059 / M3-B1a revision v7 已完成最终验收与主线整合；M3-B1b 数据前置已解锁，但尚未立项或取得付费执行授权 |
 
@@ -37,7 +37,16 @@
 
 方向 1 与方向 3 是两套产品源码上的独立推进面，不互为默认前置。
 
-### 方向 1：Plan 058 已收口
+### 方向 1：Plan 062 教师源码热路径优化
+
+- Plan 062 已在专用 worktree 完成 ExecPlan，范围只含 history orphan normalization、模型可见工具规格共享、
+  unified-exec 输出快照三项行为保持型热路径优化，以及一条无真实 API 的轻量 benchmark。
+- 本包保持 Codex CLI `v0.147.0` 基线身份，不改变模型可见内容、工具执行资格、Guardian、审批、sandbox、
+  rollout/CLI/config/app-server 合同，也不恢复 E-A、Terminal-Bench 正式 campaign 或开放式候选探索。
+- 执行阶段尚未开始；实现、定向 Rust 门禁和轻量测评需由用户向执行者发出引用 Plan 062 的一次性授权提示词。
+  执行者最终只提交 062 worktree，独立验收、合并和推送均另行处理。
+
+### 方向 1：Plan 058 收口事实
 
 - Plan 058 完成单一 C2 行为优化及同一冻结十题、两个 round 的 `formal-v6`：20/20 completed、
   8 pass/12 fail、225 upstream attempts、campaign `4.985650 USD`，任务全生命周期 `20.379152 USD`、
@@ -48,7 +57,7 @@
 - 最终 root-only 文案是验收后的有界收窄，没有被 `formal-v6` 原样重测；受环境阻断的 model-visible
   integration 只作编译与对照证据，不冒充运行通过。详细结果、失效 campaign、资源清理与验收见
   `doc/WBS-COMPLETED.md`、Plan 058 及其最终日志。
-- 方向 1 当前无 active campaign 或工作包；按用户当前决策，本轮不规划其后继任务。
+- Plan 058 的产品、campaign 和历史结论保持冻结；Plan 062 不继承其身份、预算或正式结果。
 
 ### 方向 3：Publication Critic 三期
 
