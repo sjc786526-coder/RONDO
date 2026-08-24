@@ -280,7 +280,7 @@ impl UnifiedExecProcess {
         .await;
 
         let aggregated = self.snapshot_output().await;
-        let aggregated_text = String::from_utf8_lossy(&aggregated).to_string();
+        let aggregated_text = String::from_utf8_lossy(&aggregated);
         self.check_for_sandbox_denial_with_text(&aggregated_text)
             .await?;
 

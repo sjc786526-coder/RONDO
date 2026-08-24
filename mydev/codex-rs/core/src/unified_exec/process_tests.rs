@@ -210,3 +210,84 @@ async fn remote_process_preserves_executor_sandbox_type() {
         codex_sandboxing::SandboxType::LinuxSeccomp
     );
 }
+
+async fn check_denial_for_output(bytes: Vec<u8>) -> UnifiedExecError {
+    let process = remote_process(
+        WriteStatus::Accepted,
+        /*terminate_error*/ None,
+        codex_sandboxing::SandboxType::LinuxSeccomp,
+    )
+    .await;
+    process
+        .output_handles()
+        .output_buffer
+        .lock()
+        .await
+        .push_chunk(bytes);
+    process
+        .terminate_confirmed()
+        .await
+        .expect("terminate should succeed");
+    process
+        .check_for_sandbox_denial()
+        .await
+        .expect_err("expected sandbox denial")
+}
+
+#[tokio::test]
+async fn sandbox_denial_snapshot_preserves_utf8_diagnostics() {
+    let text = "permission denied while opening fixture";
+    let err = check_denial_for_output(text.as_bytes().to_vec()).await;
+
+    let UnifiedExecError::SandboxDenied {
+        message,
+        output,
+        original_token_count,
+        output_omitted_bytes,
+    } = err
+    else {
+        panic!("expected sandbox denial error");
+    };
+    assert_eq!(message, text);
+    assert_eq!(output.stderr.text, text);
+    assert_eq!(output.aggregated_output.text, text);
+    assert_eq!(output.stdout.text, "");
+    assert_eq!(original_token_count, None);
+    assert_eq!(output_omitted_bytes, None);
+}
+
+#[tokio::test]
+async fn sandbox_denial_snapshot_preserves_lossy_non_utf8_diagnostics() {
+    let mut bytes = b"permission denied ".to_vec();
+    bytes.push(0xff);
+    let err = check_denial_for_output(bytes).await;
+
+    let UnifiedExecError::SandboxDenied {
+        message, output, ..
+    } = err
+    else {
+        panic!("expected sandbox denial error");
+    };
+    assert_eq!(message, "permission denied �");
+    assert_eq!(output.stderr.text, "permission denied �");
+    assert_eq!(output.aggregated_output.text, "permission denied �");
+}
+
+#[tokio::test]
+async fn empty_snapshot_is_not_a_sandbox_denial() {
+    let process = remote_process(
+        WriteStatus::Accepted,
+        /*terminate_error*/ None,
+        codex_sandboxing::SandboxType::LinuxSeccomp,
+    )
+    .await;
+    process
+        .terminate_confirmed()
+        .await
+        .expect("terminate should succeed");
+
+    process
+        .check_for_sandbox_denial()
+        .await
+        .expect("empty output should not be classified as a sandbox denial");
+}

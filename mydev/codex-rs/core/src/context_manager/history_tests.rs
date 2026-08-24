@@ -1834,7 +1834,7 @@ fn normalize_adds_missing_output_for_local_shell_call_with_id_panics_in_debug() 
 
 #[cfg(debug_assertions)]
 #[test]
-#[should_panic]
+#[should_panic(expected = "Orphan function call output for call id: orphan-1")]
 fn normalize_removes_orphan_function_call_output_panics_in_debug() {
     let items = vec![ResponseItem::FunctionCallOutput {
         id: None,
@@ -1848,7 +1848,7 @@ fn normalize_removes_orphan_function_call_output_panics_in_debug() {
 
 #[cfg(debug_assertions)]
 #[test]
-#[should_panic]
+#[should_panic(expected = "Orphan custom tool call output for call id: orphan-2")]
 fn normalize_removes_orphan_custom_tool_call_output_panics_in_debug() {
     let items = vec![ResponseItem::CustomToolCallOutput {
         id: None,
@@ -1881,7 +1881,7 @@ fn normalize_removes_orphan_client_tool_search_output() {
 
 #[cfg(debug_assertions)]
 #[test]
-#[should_panic]
+#[should_panic(expected = "Orphan tool search output for call id: orphan-search")]
 fn normalize_removes_orphan_client_tool_search_output_panics_in_debug() {
     let items = vec![ResponseItem::ToolSearchOutput {
         id: None,
@@ -1920,6 +1920,78 @@ fn normalize_keeps_server_tool_search_output_without_matching_call() {
             internal_chat_message_metadata_passthrough: None,
         }]
     );
+}
+
+#[test]
+fn normalize_keeps_matching_and_idless_client_tool_search_outputs() {
+    let items = vec![
+        ResponseItem::ToolSearchCall {
+            id: None,
+            call_id: Some("client-search".to_string()),
+            status: Some("completed".to_string()),
+            execution: "client".to_string(),
+            arguments: "{}".into(),
+            internal_chat_message_metadata_passthrough: None,
+        },
+        ResponseItem::ToolSearchOutput {
+            id: None,
+            call_id: Some("client-search".to_string()),
+            status: "completed".to_string(),
+            execution: "client".to_string(),
+            tools: Vec::new(),
+            internal_chat_message_metadata_passthrough: None,
+        },
+        ResponseItem::ToolSearchOutput {
+            id: None,
+            call_id: None,
+            status: "completed".to_string(),
+            execution: "client".to_string(),
+            tools: Vec::new(),
+            internal_chat_message_metadata_passthrough: None,
+        },
+    ];
+    let mut h = create_history_with_items(items.clone());
+
+    h.normalize_history(&default_input_modalities());
+
+    assert_eq!(h.raw_items(), items);
+}
+
+#[cfg(not(debug_assertions))]
+#[test]
+fn normalize_removes_interleaved_orphans_without_reordering_survivors() {
+    let first = assistant_msg("first survivor");
+    let second = assistant_msg("second survivor");
+    let items = vec![
+        first.clone(),
+        ResponseItem::FunctionCallOutput {
+            id: None,
+            call_id: "orphan-function".to_string(),
+            output: FunctionCallOutputPayload::from_text("function".to_string()),
+            internal_chat_message_metadata_passthrough: None,
+        },
+        ResponseItem::CustomToolCallOutput {
+            id: None,
+            call_id: "orphan-custom".to_string(),
+            name: None,
+            output: FunctionCallOutputPayload::from_text("custom".to_string()),
+            internal_chat_message_metadata_passthrough: None,
+        },
+        second.clone(),
+        ResponseItem::ToolSearchOutput {
+            id: None,
+            call_id: Some("orphan-search".to_string()),
+            status: "completed".to_string(),
+            execution: "client".to_string(),
+            tools: Vec::new(),
+            internal_chat_message_metadata_passthrough: None,
+        },
+    ];
+    let mut h = create_history_with_items(items);
+
+    h.normalize_history(&default_input_modalities());
+
+    assert_eq!(h.raw_items(), vec![first, second]);
 }
 
 #[cfg(debug_assertions)]
