@@ -210,19 +210,24 @@ authority、耐久成功、自洽读取、失败责任、在线/冷态控制、�
   面留给后续获批整合批次基于最新 main 窄同步。
 - 已确认 git-ignored `codex-source-code/` 不随 linked worktree 出现；冻结 `v0.147.0` 快照可从主物理仓库根只读核对，本任务不需要
   直接修改主工作区或创建 ignored 资产。
-- 已冻结本 ExecPlan；M4-A 产品合同本体尚未开始执行。
+- 已冻结本 ExecPlan，并复核 Plan 038/043/047/048、Plan 065 验收记录、当前 Session/ThreadStore/V2/Team State/app-server/TUI/
+  config/Git 源码与现有测试；冻结 `v0.147.0` 快照保持只读 clean。
+- 已由四个只读子智能体分别完成 identity/authority、lifecycle/control、upstream candidates、history/enablement 调研；共享文档仅由
+  主集成者编辑。
+- 已核对四项官方上游 PR、exact head、diff、测试、依赖与 `rust-v0.149.1` 最终形状；未 fetch、checkout、回移或升级基线。
+- 已在 `doc/WBS/durable-team-runtime.md` 形成三类身份、Root authority、durable/read/close、完整生命周期、启用组合、设施责任、
+  四项上游决定及 S1/C0/W0 交接的最终 `M4_A_GO` 合同，并形成日期冻结证据快照。
+- 干净上下文独立终审发现并关闭 1 个中等级 lifecycle finding：即时 detach 与零订阅 deferred idle unload 已分离，后者统一服从
+  durable close barrier；复核者最终返回 `PASS`。
+- 链接/术语/允许写集检查及完整 staged `git diff --cached --check` 已通过；差异精确限于四个授权路径。
 
 ### 当前工作
 
-- 等待执行者按本计划完成 M4-A 共同合同、WBS 精炼同步、独立审查和本地提交。
+- 合同、验证与独立验收均已完成；正在执行唯一剩余的本地提交交付动作，提交后停止。
 
 ### 本任务剩余步骤
 
-1. 阶段 A：复核指定基线、Plan 068 元数据边界和资源状态，完成“保证/缺口/下游选择”源码事实矩阵。
-2. 阶段 B：有界并行完成身份/authority、生命周期/控制、上游增量/启用组合的只读调研。
-3. 阶段 C：由单一集成者形成共同合同，关闭所有跨子线决定并同步第四期 WBS。
-4. 阶段 D：按终局形成 S1/C0/W0 的可开工交接或阻塞交接，完成独立审查、范围内整改与复核。
-5. 从干净文档状态完成最终检查，给出 `M4_A_GO` 或 `REPLAN_REQUIRED`，更新精炼日志并只提交 067 本地分支。
+- 无内容步骤；本计划随当前精确 staged diff 一并冻结。本地提交是最后交付动作，不再修改合同内容。
 
 ### 阻塞项
 
@@ -230,7 +235,7 @@ authority、耐久成功、自洽读取、失败责任、在线/冷态控制、�
 
 ### 当前验收状态
 
-- ExecPlan 已建立；M4-A 尚未执行，未形成 `M4_A_GO` 或 `REPLAN_REQUIRED`。
+- `M4_A_GO`。共同合同、S1/C0/W0 交接、轻量门禁和干净上下文独立审查均已通过；无未关闭 correctness finding。
 
 ### 交接边界
 
@@ -252,3 +257,9 @@ authority、耐久成功、自洽读取、失败责任、在线/冷态控制、�
 | 006 | 普通调研/文档/审查失败允许自主窄修和有界重跑，原则冲突才暂停 | 给执行者合理排错余量，不弱化产品和授权边界 | 执行流程 | 已采纳 |
 | 007 | 默认只做静态与轻量验证；确需 Rust 验证时使用共享锁和资源看门狗 | M4-A 是合同任务，重型验证不是默认必要条件，但真实源码疑点可被窄验证 | 验证与资源 | 已采纳 |
 | 008 | 067 只本地提交，不因 main 并行前进而自行 rebase、合并或推送 | 用户要求本地验收后再批准整合，且后整合者应基于最新 main 窄同步 | Git 交付 | 已采纳 |
+| 009 | `SessionId`、canonical Root `ThreadId`、`TeamInstanceId` 分别拥有 lineage、生命周期/authority anchor、Team generation 职责；当前同值表示不升级为永久合同 | 现有身份足以复用，另建 Session 身份会重复体系；顶层 fork/new/clear 与 child spawn 的边界因此可无映射闭合 | 身份与 lifecycle | 已采纳 |
+| 010 | 以现有 Root Thread active-writer 为唯一排他基础并做架构内扩展，使 authority 连续覆盖 Team durable commit；child writer 和一次性资格检查均不足 | 当前 Team 仅检查 participant 与进程内 mutex，直接复用不能证明跨进程 durable single writer，另建 Team lock 又会产生竞争权威 | authority 与 persistence | 已采纳 |
+| 011 | Team State canonical 语义直接复用；新增与其集成的专用 durability/read 能力，并冻结 durable success、自洽 committed read、close barrier、partial/unknown/fail-closed 结果 | 当前 cold resume 会创建 fresh Team handle，且 shutdown/archive/delete 存在表面成功或部分结果，必须闭合但无需建设通用事务平台 | 耐久、读取与关闭 | 已采纳 |
+| 012 | Durable writable 依赖有效 V2 + Team State + durable backend + Root authority；Control 可独立只读历史 durable 数据；W1 依赖 W0 GO + Durable/S1；全部新能力默认关闭 | 保留现有关闭态并允许有价值的 headless/read-only 组合，同时防止内存 Team 或孤立 binding 冒充 durable | 启用组合 | 已采纳 |
+| 013 | `#37198`→S1 PASS、`#37847`→S2 PASS；`#39616` 仅在 W0 GO 且 W1 消费 trust 时于 W1 开始前适配；`#39153` 仅在 W0 GO 后按 fail-closed 权限语义适配并于采用它的 W1 PASS 前进入主线 | 四项都对应真实缺口，但消费者和产品语义不同；W-only 增量不得阻塞 S/C，permission fallback 不能破坏 durable binding | 上游候选与消费边 | 已采纳 |
+| 014 | `M4_A_GO`，分别解锁 M4-S1、M4-C0、M4-W0 建立 ExecPlan；正式 W1 仍等待价值门与 S1 | 当前架构可通过窄专用能力和既有设施扩展闭合，不需要修改第四期宏观边界；干净上下文独立终审已通过 | 最终方向 | 已采纳 |

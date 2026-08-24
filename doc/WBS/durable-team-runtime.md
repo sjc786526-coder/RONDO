@@ -1,6 +1,6 @@
 # 方向 3 四期：RONDO Multi Durable Team Runtime
 
-最后更新：2026-08-24 ｜ 产品线：RONDO Multi（`multidev/`）｜ 状态：**长程规划已形成，尚未启动实施**
+最后更新：2026-08-24 ｜ 产品线：RONDO Multi（`multidev/`）｜ 状态：**M4-A 已完成（`M4_A_GO`）；M4-S1、M4-C0、M4-W0 已按条件解锁**
 
 ## 1. 阶段定位
 
@@ -20,176 +20,121 @@ Session 控制面或第四期核心收口。
 
 ## 2. 现有基础、职责与产品边界
 
-### 2.1 冻结基线与复用边界
+### 2.1 冻结基线与设施责任
 
-冻结 Codex CLI `v0.147.0` 已具备 thread/Agent 生命周期、start/resume/fork 的 cwd 与 runtime workspace roots、权限与
-sandbox、Git repository/worktree 识别以及 status/diff 等 Git 观察原语。RONDO 继续复用这些设施和系统 Git，不复制一套
-Agent runtime 或 Git 实现。
+冻结 Codex CLI `v0.147.0` 与当前 RONDO Multi 已提供 thread/Agent 生命周期、V2 Agent graph、进程内 canonical Team State、
+Root Thread active-writer、app-server v2/TUI 生命周期入口、feature/config 解析及 Git/worktree 观察原语。共同调查确认没有需要修改
+第四期宏观边界的不可行项，但跨进程 Team persistence、Root writer 到 Team commit 的连续资格及 durable read model 尚不存在。
 
-本地 ThreadStore 还已具备按 ThreadId 生效的跨进程 active-writer ownership：create/resume 获得并在 live writer 生命周期内
-持有文件锁，竞争写者收到 conflict，成功 shutdown/discard 释放；进程崩溃后由操作系统释放锁，残留锁文件由既有协调清理处理。
-thread read/list 等只读路径不要求取得 active writer。这套既有职责是第四期实现 Team Session 单写者语义的优先复用基础，但本 WBS
-不预定具体锁、guard 或 permit 接缝。
-
-当前 Team capability 只按权威 participant/thread 身份解析，尚未把 mutation 资格连接到 canonical Root lineage 的写 authority。
-本期必须闭合的是“单一写 authority 持续覆盖成功 Team 提交”的产品边界；M4-A 根据真实提交和生命周期接缝决定直接复用、扩展
-既有能力，或增加与现有架构契合的专用能力，不建设相互竞争的第二套进程协调体系。
-
-Codex 桌面端的 managed worktree、Local/Worktree Handoff、快照和清理不是冻结 CLI 源码中可直接复用的 Team Workspace
-Runtime。第四期 V1 不把这些产品能力视为现有基线，也不移植完整 Project、queue dispatcher、agents dashboard 或 `/cd`
-子系统。
-
-| 领域 | 本阶段职责 | 不承担的职责 |
+| 设施 | M4-A 责任级结论 | 第四期消费边界 |
 |---|---|---|
-| 现有 Codex core | 继续拥有 thread、Agent、spawn/resume、Root Thread active-writer ownership、cwd、workspace roots、工具执行、sandbox 与审批 | 不复制 Team State，不自动提供 Team writer 的 worktree binding |
-| Team State | 继续作为 Event、Version、route、Fact 与团队协作语义的唯一 canonical 来源 | 不管理持久介质、Git 资产或 UI 状态 |
-| Durable Team Session | 管理 Team 状态的跨进程生命周期、定位、兼容和恢复结果 | 不接管 thread history、Agent graph、运行中的模型或工具执行 |
-| Writer Workspace Binding | 保存恢复 writer 执行上下文所需的最小 binding 语义，并在价值门要求时附加 minimal handoff；调用现有 thread/session/Git 能力验证 | 不拥有、创建、删除或调度 worktree，不形成独立 workspace registry |
-| app-server v2 / TUI | 投影权威 Session/Team 状态并提供显式生命周期操作；W 线落地时可按其实际范围增加窄的 binding/handoff 展示与修复入口 | 不成为另一份状态源，不建设通用 project/session/task dashboard |
+| Session/thread lineage | **直接复用** | Session、Root 与 child 关系继续由原生 metadata、fork 与 resume 语义拥有；不得另建 Session 身份 |
+| ThreadStore active-writer | **架构内扩展** | 复用 canonical Root 的排他生命周期；S1 让不可伪造的 Root authority 连续覆盖 Team durable commit，不另建 Team lock/lease/registry |
+| V2 Agent graph/residency | **直接复用并架构内扩展** | 保留 open member 身份与按需 reload；补足 durable Team identity 与所选 reload 上下文，不保存运行中的 child runtime |
+| Team State | **直接复用 canonical 语义并新建专用 durability/read 能力** | 新能力集成在同一权威域，只承载 Team State 的持久提交/恢复/读取，不复制第二套 Team State |
+| app-server v2 / TUI | **架构内扩展** | 只投影权威状态并调用领域能力；不成为状态源或通用 dashboard |
+| feature/config gate | **架构内扩展** | 增加连贯的 opt-in 组合和 fail-closed 依赖；具体配置形状由消费包决定 |
+| Git/worktree 观察 | **直接复用，正式 trust 按条件扩展** | W0 仅使用调用者预置 worktree 与系统 Git 做价值原型；W1 若获 GO，再补足正式 trust/binding 缺口 |
 
-职责契合时复用现有设施；强行复用会扭曲语义时，增加解决 Team 特有缺口所需的专用能力。新增能力的复杂度服从实际问题，并继续
-遵循现有配置、生命周期、错误、测试和观测方式，不建设第二套基础体系。
+Codex 桌面端 managed worktree、Local/Worktree Handoff、快照和清理不属于冻结 CLI 可复用基线。第四期不移植 Project、queue、
+dashboard 或 `/cd`，也不建设第二套 Team State、writer authority、Session 生命周期或控制面状态源。
 
-### 2.2 稳定产品合同
+### 2.2 身份、authority 与耐久结果合同
 
-- Team 生命周期直接跟随 Codex 已有的 resume、顶层 `thread/fork`、`/new`、`/clear`、detach、进程退出、archive/unarchive 与
-  delete；`spawn_agent fork_turns` 只控制新 child Thread 的上下文继承，不分叉 Session 或 Team；不新增含义不清的 Team `reset`。
-- Team State 继续拥有团队协作语义；Durable Team Session 只负责持久介质、定位、生命周期、兼容与恢复结果。
-- 每个 Team Session 首版只有一个有效写 authority，但 Team 内允许多个 writer Agent。只有该 authority 持续有效期间完成的
-  canonical Team mutation 才能成功提交；authority 交接不得与成功 Team commit 重叠。
-- Durable Team 写 authority 的权威归属由 canonical Root lineage 锚定。Root 或 child Agent 使用同一资格；单独持有 child Thread
-  writer 不授予 Team 写能力。无法证明当前写 authority 的进程只能读取权威 Team 状态，不能直接修改持久 Team 状态。
-- 在线 canonical Team mutation 由持有写 authority 的已加载 owner runtime 执行；未连接 owner 时返回 conflict/unavailable，V1
-  不建设跨进程 mutation 转发或强制接管。archive/unarchive/delete 等冷态 Root 生命周期通过 Codex 原生权威生命周期能力执行，
-  不要求为此先加载 Root，其 Team 结果必须跟随真实生命周期结果并诚实报告部分失败或结果未知。
-- shared workspace 继续是默认行为。研究、审查和只读 Agent 不被强制分配 worktree；只有 Root 明确声明且适合独立开发的
-  writer 才可以启用 W 线。
-- W 线只接受调用者已经准备、授权且可验证的本地 Git worktree。创建、删除、prune、合并和冲突处理继续属于用户、Root、
-  明确 integrator 与系统 Git 工作流。
-- RONDO 只保存 writer 恢复所需的最小 binding descriptor 与状态，并复用既有 Session/thread 持久接缝；仅在价值门选择 minimal
-  handoff 时保存其结果。
-  Git 与文件系统现场对 worktree 是否存在、归属哪个 repository 及实际内容具有权威性。不建立 canonical workspace index、
-  ChangeSet registry 或独立 workspace store。
-- 若启用 handoff，它是按需形成的一次结构化时点 Git 事实记录或既有 Git 资产引用，足以定位 writer、repository/worktree、
-  基线和当前修改状态；它不拥有修改、不管理冲突或清理生命周期，也不声称修改正确。
-- app-server 与 TUI 只读取权威领域状态并调用领域能力；断线、恢复中、冲突和结果未知必须如实展示。
-- Durable Team Runtime 默认关闭；关闭态不改变现有单 Agent、Team、thread resume、shared workspace、app-server 或 TUI 行为。
+- 一个 V1 Root Session 使用三类职责明确的身份：`SessionId` 标识 durable Session/root lineage，canonical Root `ThreadId` 锚定原生
+  生命周期与 writer authority，`TeamInstanceId` 标识该 lineage 上唯一的 canonical Team 实例；child 有自己的 `ThreadId`，但不
+  形成新 Session 或 Team。当前 root 上 `SessionId` 与 `ThreadId` 可同值转换只是实现事实，不是永久表示合同。
+- resume、V2 residency reload 与 member reload 恢复同一组三类身份。顶层 `thread/fork`、`/new` 与 slash `/clear` 创建新的
+  Session、Root 和空 TeamInstance；`spawn_agent fork_turns=none/all/N` 只改变 child conversation context，始终留在原
+  Session/root lineage 与 TeamInstance。旧 Team 引用跨实例 fail-closed，不 remint、不映射、不克隆 Team。
+- Team State 继续拥有 Event、Version、route、Fact 等 canonical coordination 语义。S1 的专用 durability/read 能力只负责其跨进程
+  定位、持久提交、兼容与恢复结果，不接管 thread history、Agent graph、模型、工具或 Git 资产。
+- canonical Root lineage 同时只有一个 Team 写 authority。Root/child mutation 都必须证明 participant 资格并使用同一个 Root
+  authority；Team 可以有多个 writer Agent，但它们共享这一进程级资格，child Thread writer 本身不授予 Team 写资格。现有 Root
+  active-writer 是唯一排他基础，但须在架构内扩展，使其从
+  mutation 开始连续覆盖 durable commit 和成功返回；一次性检查、锁文件探测或另一套 Team writer 体系均不合格。
+- canonical mutation 只有在对应结果已可恢复时才能返回成功。不推进 Team revision 的独立状态轴也必须有等价的成功边界；共同
+  合同不要求它们共享同一 revision。authority 丢失、提交结果无法判定或 durable 后端不具备排他能力时返回
+  conflict/unknown/unavailable/unsupported，不把内存成功冒充 durable 成功。
+- 查询只返回一个满足领域不变量的已提交视图；允许明确标记旧视图，或返回 stale/unknown/unavailable，不得把不同提交边界拼成
+  当前事实。只读不要求取得 writer authority，但不得绕过 canonical durable read model。
+- 正常 owner/Team close 完成必须同时证明应持久的 Team/thread 状态达到承诺边界且 Root authority 已释放。持久化或 session task
+  失败时保持 closing/failed 与可重试对象，不伪报完成；若下游复用显式 discard，它必须单独确认可能丢失未持久数据，不能冒充
+  正常关闭。完整进程退出由操作系统最终释放进程锁，但后续加载仍须验证 durable 状态。
+- durable marker 与后端不一致、数据缺失/损坏/版本不兼容、lineage 无法证明或 TeamInstance 不匹配时 fail-closed；只有可独立
+  验证的兼容部分可显式只读降级，绝不静默创建空 Team、换新 ID、退回内存状态或写另一份存储。
+- 在线 canonical mutation 只由持有 Root authority 的已加载 owner runtime 执行；未连接 owner 时控制面只读并报告 unavailable。
+  archive/unarchive/delete 走 Codex 原生冷态生命周期能力，不要求先加载 Root，不强制接管活跃 writer，不建设 relay、queue、
+  IPC router、补偿事务或 takeover。
 
-### 2.3 与 Codex 对齐的 Session 生命周期
+### 2.3 与 Codex 对齐的生命周期矩阵
 
-| Codex 操作 | Durable Team V1 语义 |
+| 操作/现场 | Durable Team V1 语义 |
 |---|---|
-| resume / member reload | 恢复原 TeamInstance 与原 canonical Team State。Root resume 恢复 V2 Agent graph 中仍为 open 的成员身份和 metadata，但不自动加载 child runtime；成员按现有 V2 residency/reload 规则按需加载，恢复本身不启动 model turn 或真实 API |
-| 顶层 `thread/fork`（latest 或指定历史位置） | 原生 conversation/thread history 继续按 Codex 的分叉点规则复制，但创建新 Root Thread/Session 与新的空 TeamInstance；来源 Team 保持不变，V1 不继承或克隆 Durable Team State |
-| `spawn_agent fork_turns=none/all/N` | 始终创建新的 child Thread；`fork_turns` 只决定不继承、完整继承或有界继承 parent conversation context。child 继续属于原 Session/root lineage 与原 TeamInstance，不复制或分叉 Durable Team State |
-| `/new`、slash `/clear` | 创建新 Root Thread/Session 与新的空 TeamInstance；原 Session/Team 保留并可 resume。纯终端/UI 清屏不改变 Session 或 Team |
-| TUI 切换、unsubscribe、客户端断开 | 只改变客户端附着与展示，不改变 Team 生命周期，也不据此把 Team 标记为 stopped/closed |
-| app-server 正常退出/完整进程终止 | 正常退出先持久化并关闭已加载 thread；完整进程终止最终由操作系统释放仍持有的 writer。所有已成功 Team mutation 仍可恢复，下次 resume 回到原 Team；存活进程内的单个 session/task 失败不等同于完整进程退出 |
-| archive Root | 复用 Codex 对 Root 与 spawned subtree 的原生 archive 流程；Team State 随 Root 进入保留但不可写的 archived 状态，不删除 TeamInstance |
-| unarchive Root | Root 回到可恢复状态并恢复原 TeamInstance/Team State；descendant 继续服从其原生 archive/Agent graph 状态，不另造批量复活语义 |
-| delete Root | 复用 Codex 的 Root/spawned-subtree delete，并永久删除对应 Team State；部分失败必须报告 error/degraded，不得把残留或缺失状态展示为正常可恢复 Team |
+| resume / member reload | 恢复原 Session、Root、TeamInstance 与自洽 committed Team；V2 只恢复 open member identity/metadata，child runtime 按需 reload，不自动开始 model turn/API |
+| 顶层 `thread/fork` | 原生 history 按分叉点复制到新 Session/Root 与新空 TeamInstance；来源 Team 不变，旧 Team 引用在新实例 fail-closed |
+| `spawn_agent fork_turns=none/all/N` | 新 child Thread 仍属原 Session/root/Team；参数只决定 conversation context 的无、全量或有界继承 |
+| `/new`、slash `/clear` | 新 Session/Root 与新空 Team；原 Session/Team 保留可 resume |
+| 纯终端/UI clear | 只清展示，不改变 Session、Team 或 authority |
+| TUI switch/unsubscribe、客户端断开（即时） | 只解除附着，不立即 close/unload Team，也不改变 authority |
+| 零订阅后的 deferred idle unload | 是独立生命周期动作，必须按对象走 member unload 或 owner/Team close barrier；只有成功才卸载，并仅在 owner/Root close 成功时释放 authority。submit failure/timeout 保持 loaded/closing 且不得交接 authority |
+| member residency unload | 只卸载满足既有安全条件的 child runtime，保留同一 Session/Team 身份与可恢复 metadata；不 close Team，也不释放 Root authority |
+| 正常 owner/Team close | durable Team/thread 边界与 Root authority 释放均成功后才完成；失败保持 closing/failed 并可重试 |
+| 存活进程内 session task/shutdown 失败 | 不等同进程退出，不移除唯一可重试 owner，不允许第二 writer 接管或伪报关闭 |
+| 完整进程退出 | OS 最终释放进程持有的 writer；所有已报告成功的 Team mutation 下次必须可恢复，未确认提交仍按 unknown/failure 处理 |
+| archive Root | 走原生 Root/subtree 路径；Root archive 成功后 Team 保留原 ID 并只读 archived。descendant 部分失败须逐项暴露 |
+| unarchive Root | 恢复原 Root 与 TeamInstance；不发明整棵 descendant 批量复活，部分结果按原生事实展示 |
+| delete Root | 只有 Root/subtree 与对应 Team durable 删除结果均可确认时才 terminal；部分完成或未知不得展示为正常删除/恢复，也不 re-ID |
+| 缺失、损坏、不兼容、lineage/instance mismatch | 显式 unavailable/unsupported 或仅对可验证部分只读降级；不创建空 Team、不重铸旧 ID、不切换状态源 |
+| 无 Durable Team marker 的 legacy Session | 保持既有 transcript/thread read/resume，明确为 legacy/non-durable；不冒充恢复 Durable Team，也不自动升级身份 |
 
-顶层 `thread/fork` 后的新 Team 从初始 revision 开始，只自动建立新 Root 的当前运行身份。它不复制来源 Team 的
-Event/Version/Fact、participants、routes/delivery、wake、committed retry、change log、Agent graph、writer binding 或 handoff，
-也不复制正在运行的 Agent、turn、lock、loaded/residency 或 child runtime。Codex 原生 fork 仍可按现有规则继承 conversation history、
-cwd、权限、模型配置并记录
-`forked_from_id`；这不构成 Team State 继承或新的 Team provenance registry。
+### 2.4 启用组合
 
-forked conversation history 中已经出现的旧 Event/Version/Route/Fact 引用仍带来源 TeamInstance tag，对新 Team 使用时必须按现有
-instance mismatch/`InstanceReset` 规则 fail-closed，不能解析到新对象、静默重铸 ID 或把空 Team 描述成继承成功。若未来真实使用
-证明需要复制团队世界状态，再把 ID remint/rewrite、历史 contributor、Fact availability 与 route/wake/retry 取舍作为独立的 Team
-clone/branch 能力立项，不塞入 M4-S2。
+所有第四期新能力默认关闭，关闭态不改变既有单 Agent、V1、V2、进程内 Team、shared workspace、app-server 或 TUI 行为。
 
-Codex 当前 archive 会尝试处理 spawned subtree，但既有实现允许个别 descendant 失败时其余对象完成 archive；unarchive 也没有
-“整棵树批量复活”的统一语义。archive/unarchive/delete 通过原生权威生命周期路径处理冷态 Root，RONDO 只让 Team State 跟随
-Root 的真实结果并如实投影 descendant 的原生结果，不要求预先加载 Root，也不把这处现状扩大为新的清理、补偿或事务平台。
-活跃写 authority 与生命周期操作冲突时不得强制接管；具体排序、幂等和失败恢复由 M4-A 与对应 ExecPlan 决定。
+| 有效组合 | 用户可观察结果 |
+|---|---|
+| MultiAgentV2 关闭，或 Team State 未有效启用 | 保持既有行为；不能创建或恢复为可写 Durable Team。若控制面能独立验证已有兼容 durable 数据，只可只读展示 |
+| MultiAgentV2 + Team State 开启，Durable 关闭 | 新的非 durable Session 保持当前进程内 Team State；已有 durable marker 的 lineage 只读或拒绝可写 resume，不能创建空内存 Team 覆盖原实例 |
+| MultiAgentV2 + Team State + Durable 开启，且 durable backend 与 canonical Root authority 可用 | 可创建/恢复可写 Durable Team；任一必要能力缺失即 activation/start fail-closed，不静默降为内存 Team |
+| Control Surface 开启或关闭 | 可独立开启作历史 durable Session 的只读发现/展示；在线 mutation 仍要求 owner 与上述依赖。关闭时 Durable runtime 仍可经既有领域入口工作 |
+| W 关闭 | shared workspace 与既有权限行为不变；已有兼容 binding 只能按消费包明确的只读语义展示，不影响 S/C |
+| W0 原型开启 | 仅以预置 worktree 和 deterministic/fake 验证价值，不获得生产 trust/binding 保证；正式 W1 还需要 binding GO、S1 接缝和所选 W-only 增量 |
+| 正式 W1 开启 | 仅在 W0 binding GO、MultiAgentV2 + Team State + Durable 与 S1 接缝均成立时合法；否则 fail-closed，不保存孤立 binding、不回退父 cwd |
 
-### 2.4 留给任务级方案决定的内容
-
-本 WBS 不冻结 crate/module 布局、Rust API、wire schema、持久格式、数据库选择、writer guard/permit/临界区、snapshot/view token、
-重试顺序、binding descriptor 或 handoff 的字段与载体、replacement binding 的具体 thread 实现、分页与通知细节、具体错误类型或
-测试 fixture。上述内容由各工作包在阅读当时主线、完成必要原型和调试后决定，不得反过来扩大本节的产品职责或削弱本 WBS 的
-产品正确性合同。
+具体配置 key、解析顺序、backend/格式、crate/module、API/wire、锁/permit、read token、snapshot、一致性标识、调用/重试顺序、
+分页、通知、binding/handoff 字段和测试 fixture 均由唯一消费包决定，不属于共同合同。
 
 ## 3. 工作包
 
 ### M4-A：共同产品合同、生命周期边界与上游增量决策
 
-**目标**：统一 Team Session、Team instance、Root thread lineage、控制操作和可选 writer binding 的身份、生命周期、启用边界、
-失败责任及共同验收口径。
+**结论：`M4_A_GO`。** 当前架构存在一条不重复建设权威体系的合理路线：直接复用 lineage 与 canonical Team State，架构内扩展
+Root active-writer、V2 reload、控制面和 gates，并为 canonical Team 增加窄的 durability/read 能力。M4-S1、M4-C0 与 M4-W0
+可分别建立 ExecPlan 并有界并行；正式 W1 仍等待 W0 binding GO 与 M4-S1 持久接缝。
 
-**边界**：只收敛跨子线必须共享的产品语义，不提前选择持久介质、公共 API、模块布局或 W 线的正式实现，不建设通用框架。
+**上游候选决定**（均只形成后续独立回移任务输入，不在 M4-A 实施）：
 
-**最小持久正确性合同**：
+| 候选 | 决定 | 消费包与进入主线条件 |
+|---|---|---|
+| `#37847` reload environment | **采用窄回移**；修复 V2 member eviction/reload 丢失 inherited environment 的当前缺口，不承担 Team durability | M4-S2 消费；须在 M4-S2 PASS 前进入主线，不阻塞 S1/C0/W0 |
+| `#37198` persisted cwd read consistency | **采用窄回移**；让 ThreadStore 按已持久事实投影 cwd，不替代 live binding 重验 | M4-S1 消费；须在 M4-S1 PASS 前进入主线。C0/W 后续只消费已进主线事实 |
+| `#39616` linked-worktree trust | **条件延期并按 RONDO 边界适配**；W0 可用临时 Git 只证明产品价值，不得声称生产 trust | 仅当 W0 给出 binding GO 且 W1 消费 linked-worktree project trust 时采用；须在 M4-W1 开始前进入主线，永不阻塞 S/C |
+| `#39153` permission restore | **条件适配，不直接照搬 fallback**；保留显式 override 优先，但 durable binding 的权限缺失/不兼容必须 unavailable/replacement | 仅在 W0 binding GO 后立项；若 W1 采用，须在 M4-W1 PASS 前进入主线，永不阻塞 S/C |
 
-- 对采用 Team revision 的 canonical mutation，返回成功时对应 revision 已经处于可恢复状态；不推进 Team revision 的独立
-  状态轴也须定义等价的耐久成功边界，不能先返回成功再依赖未承诺的后台落盘。
-- 查询必须返回满足领域不变量的、自洽的已提交视图；允许返回较旧视图，或明确报告 stale/unknown/unavailable，不得把不同一致性
-  边界的字段、分页或投影拼成当前事实。Team revision 只约束它实际版本化的 canonical coordination 轴；跨独立状态轴和分页采用
-  何种一致性标识由正式 query ExecPlan 根据真实 read model 决定。
-- 已有持久标记但后端缺失、损坏或版本不兼容时明确失败或降级，不得静默创建空 Team 冒充恢复。
-- Durable Team 归属复用 Codex 已持久化的 Session/root lineage；SessionId 标识 Session lineage，canonical Root ThreadId 锚定
-  Root 生命周期及写 authority 的权威归属，TeamInstanceId 标识该 lineage 上的 Team 实例，不另建第三套 Session 身份。具体解析与
-  ownership 接缝由 M4-A 决定。
-- 顶层 `thread/fork` 使用新的 Root Thread/Session 与新的空 TeamInstance；来源关系只复用 Codex 原生 thread lineage，不复制
-  Team revision，也不为来源 TeamInstance 或旧引用增加映射层。`spawn_agent fork_turns=none/all/N` 创建新的 child Thread，但保持
-  原 Session/root lineage 与 TeamInstance，只改变 conversation context 的继承方式。
-- “关闭/卸载完成”必须同时意味着应持久的 Team/thread 状态达到承诺边界，且对应写 authority 已经释放。持久化 shutdown
-  失败、session loop/task 异常退出或进程内 teardown 未完成时，状态保持 closing/failed 并允许重试，不能报告完成或移除唯一可重试
-  的运行对象。若任务级方案确需暴露已有 discard 能力，它是独立且显式确认的失败恢复动作，必须说明未持久数据可能丢失，不得
-  伪装成正常关闭；本 WBS 不要求新增通用 discard/cleanup 控制面。
+**M4-S1 可直接建计划的交接**：以第 2 节的三类身份、Root authority、durable success、自洽读取、关闭/失败与在线/冷态责任为
+冻结输入；S1 拥有 canonical Team durability/read 专用能力及 Root writer 的架构内扩展。S1 自主选择介质、格式、模块/API、
+capability 接缝、提交/读取/重试机制和测试 interleaving，但必须覆盖 Root/child 双进程竞争、authority 丢失、损坏 lineage/state、
+只读非 owner 与 shutdown 失败，且不得建立第二套 Team 或 writer authority。
 
-**写 authority 合同**：
+**M4-C0 可直接建计划的交接**：以同一身份与生命周期矩阵为实验语义，原型验证 Session/Team 只读发现、owner 在线操作边界、
+冷态 lifecycle 与 stale/unknown/unavailable 展示；不承诺正式 RPC/TUI 或复制 read model。C0 自主选择 experimental API、最小 UI 与
+测试形状；`#37198` 未进入主线前，不得把 persisted cwd consistency 写成现有保证。
 
-- canonical Root lineage 同时只能有一个有效 Team 写 authority；第二个进程不得取得重叠写 authority 或成功提交 Team mutation。
-  现有 Root Thread active-writer ownership 是优先复用基础，但具体证明、持有和释放接缝由 M4-A 决定。
-- 写 authority 必须持续覆盖 mutation 的成功提交边界，不能以一次性资格检查替代；authority 交接、关闭或生命周期切换不得与成功
-  Team commit 重叠。具体 guard、permit、锁顺序和提交临界区由对应 ExecPlan 决定。
-- 其他客户端可以只读定位和查看权威 Team Session；在线 mutation 必须交给持有写 authority 的 owner runtime，不能由只读控制端
-  绕过领域能力直接写 Team 持久介质。未连接 owner 时返回 conflict/unavailable，V1 不新增跨进程 relay、queue 或 IPC router。
-- archive/unarchive/delete 等冷态 Root 生命周期由 Codex 原生权威生命周期路径处理，不要求先加载 owner runtime；它们不得强制
-  接管活跃写 authority，并须让 Team durable state 跟随真实结果，部分失败或结果未知不得伪报成功。
-- Root 与 child 的 mutation 使用同一 Team 写 authority。另一个进程即使成功 resume 某个 child Thread，也不得据此加载第二份可写
-  Team runtime 或提交 Team mutation。
-- V1 不支持强制接管、抢锁或静默接管。正常关闭、完整进程终止和存活进程内 session/task 失败分别服从其真实 ownership 结果；
-  未实际释放写 authority 时必须报告失败并保留重试或显式 discard 路径。
-- 无法从所选 ThreadStore 后端和 Root lineage 可靠证明写 authority 时，Team mutation fail-closed 并报告 unavailable/unsupported。
-  M4-A 应先验证现有机制；直接复用会造成耦合、语义扭曲或无法覆盖提交边界时，可以扩展既有能力或增加遵循现有配置、生命周期、
-  错误、测试和观测方式的专用能力，但不得预建或静默回退到相互竞争的第二套写者体系。
-
-**启用与能力合同**：
-
-- 定义 Durable Session、Session 控制面、可选 writer binding 与现有 MultiAgentV2、`team_state_enabled` 的有效组合；非法组合
-  fail-closed，每种关闭态都保持既有行为。
-- 对外形成一套连贯的 opt-in 语义；具体配置形状和内部子开关由任务级方案按职责决定。
-- 首次创建 durable session 前验证所需持久能力和权威 lineage material。仅有内存能力且没有满足合同的 durable authority 时
-  报告 unavailable/unsupported，不能把进程内 Team 冒充 durable。
-- 首次加载可写 Team runtime 前还须验证 canonical Root lineage 的写 authority；只读打开不需要取得该写者资格。具体 ownership
-  接缝服从前述 M4-A 决策。
-
-**上游增量决策门**：
-
-- 产品基线仍是 `v0.147.0`；`v0.149.1` 只作为对照，只选择性吸收具体 PR，不视为完整基线升级。M4-A 只评估与本期缺口
-  直接相关的上游窄增量，不假定完整 `v0.149.1` 已存在。
-- `#37847` 的 Agent reload environment 与 `#37198` 的 persisted cwd read consistency 是 S/C 线候选；它们不能替代实际执行前的
-  binding 验证。
-- `#39616` 的 linked-worktree trust 是 W 线候选前置；`#39153` 的 permission restore 只有在 W 权限合同明确后才评估适配，
-  不接受失效权限静默回退默认值。
-- M4-A 对每项只形成复用、窄回移、按 RONDO 语义适配或不采用的结论。任何实际回移另建独立任务合同；完整 Project、queue、
-  dashboard、`/cd` 或整体基线升级不混入第四期。
-
-**条件消费边**：
-
-- S/C 选中的窄增量必须在首个实际消费它的 S/C 工作包达到 PASS 前进入主线；对应 ExecPlan 只消费已进入主线的实现与事实，
-  不把并行 backport worktree 当作已满足前置。
-- `#39616` 若被 M4-A 指定为 M4-W0 权威 trust 结论的基础，必须先于 M4-W0 进入主线；否则 M4-W0 不得借用该结论，且该增量
-  只有在 M4-W1 立项后确认为必要时才须在 M4-W1 开始前完成。
-- `#39153` 只在 M4-W0 形成 binding GO 后评估适配；若 M4-W1 采用它，适配实现必须在 M4-W1 PASS 前进入主线。
-- W 专属增量不阻塞 M4-S1、M4-C0 或后续 S/C 工作包启动和收口。
-
-**交接**：M4-A 是四期唯一共同实施入口。完成后 M4-S1、M4-C0 和 M4-W0 可以有界并行；正式 W 实现仍等待 binding GO 与
-M4-S1 的持久接缝。
+**M4-W0 可直接建计划的交接**：只用调用者预置、授权的本地 worktree 和系统 Git，以 deterministic/fake 比较自然语言流程与
+binding/replacement/minimal handoff 的产品价值；不依赖生产 S1，也不借用 `#39616` 作权威 trust。W0 自主选择可丢弃原型形状，最终
+只能给出 `BINDING_ONLY_GO`、`BINDING_HANDOFF_GO`、`NO_GO` 或 `INCONCLUSIVE_DEFER`；它不实施 W1、不预选正式字段/API，
+任一结果都不阻塞 S/C。
 
 ### 子线 S：Durable Team Session（必成主线）
 
@@ -202,6 +147,9 @@ M4-S1 的持久接缝。
 **边界**：只持久化恢复团队语义所需的状态；不保存完整 transcript、reasoning/CoT，不恢复运行中的模型请求、工具调用或
 外部副作用，也不把 Team State 塞入单个 thread 的历史充当第二份真相。职责契合时复用所选持久介质的正常提交/快照能力；若其
 不足以满足自洽读取合同，ExecPlan 可以选择与现有架构契合的必要读能力，但不形成第二份只读状态源。
+
+**PASS 前置**：`#37198` 的 RONDO 窄回移已进入主线，ThreadStore read/list 的 persisted cwd 与 live execution override 边界已用
+当前架构的聚焦回归闭合；该增量不替代 Team durable read model 或 W binding 重验。
 
 #### M4-S2：恢复与生命周期收口
 
@@ -220,6 +168,9 @@ shutdown/session-task 失败保持 closing/failed 且可重试，不实现强制
 恢复、archive/unarchive 与 delete 的生命周期可以稳定重复；失败关闭不伪报完成，恢复和 member reload 不自动触发模型/API，且
 功能关闭态无回归。
 
+**PASS 前置**：`#37847` 的 RONDO 窄回移已进入主线，V2 member residency reload 在显式 override 优先的前提下保留 inherited
+environment/tool context；该增量不承担 Team durability 或 W binding。
+
 ### 控制面子线 C：Session app-server v2 / TUI（必成主线）
 
 #### M4-C0：实验性 Session 协议与 TUI 原型
@@ -231,7 +182,8 @@ Team State 或 Durable Session，不把 Team Lens 离线结果变成在线状态
 queue dispatcher 或 daemon-wide agents 管理面。只读查询不要求取得写 authority；在线 canonical Team mutation 交给持有写
 authority 的 owner runtime，未连接 owner 时返回 conflict/unavailable。archive/unarchive/delete 等冷态生命周期调用权威领域能力，
 不要求先加载 Root。控制面不得绕过领域能力直接写持久介质、伪造成功或建设跨进程 mutation 转发平台；TUI unsubscribe、切换或
-断开不改变 Team 生命周期。
+断开的即时结果只解除附着，但零订阅后的 deferred idle unload 必须调用同一领域 close barrier，失败保持 loaded/closing 且不得交接
+Root authority。
 
 **后续工作包**：M4-C0 完成且 M4-S1 提供真实 Session read model 后，再按当时接缝建立少量可独立验收的 Session query M4-C*；
 M4-S2 的恢复行为收口后，再建立 Session control/TUI M4-C*。当前不预定具体 RPC、UI 布局或包数。
@@ -303,7 +255,7 @@ handoff 时投影其状态。该扩展不扩张为通用 workspace dashboard，�
 ## 4. 四期内部串并行关系
 
 ```text
-M4-A
+M4-A（M4_A_GO）
 ├─ M4-S1 → M4-S2
 └─ M4-C0
 
@@ -316,13 +268,14 @@ M4-W1 实现 + M4-S2 → M4-W1 PASS → 可选 Workspace 控制面扩展
 M4-W0 NO_GO/INCONCLUSIVE_DEFER ────────────────→ 不阻塞 M4-Z(core)
 
 条件增量边：
-selected S/C delta → 首个消费它的 S/C 工作包 PASS
-#39616 → M4-W0（仅当作为权威 trust 前置）；否则按需 → M4-W1 开始
-M4-W0 binding GO → #39153 按需适配 → M4-W1 PASS
+#37198 RONDO 窄回移 → M4-S1 PASS
+#37847 RONDO 窄回移 → M4-S2 PASS
+M4-W0 binding GO + W1 消费 linked-worktree trust → #39616 适配 → M4-W1 开始
+M4-W0 binding GO + W1 消费 permission continuity → #39153 fail-closed 适配 → M4-W1 PASS
 W-only delta ─/→ S/C
 ```
 
-- M4-A 先串行完成，避免 S/C/W 各自发明身份、生命周期或第二份状态。
+- M4-A 已以 `M4_A_GO` 串行完成，S/C/W 共同采用第 2 节身份、生命周期、authority 与启用合同。
 - M4-S1、M4-C0 与 M4-W0 在 M4-A 后可以并行；正式 Session query 等待 M4-S1，正式 Session control/TUI 再等待 M4-S2。
 - M4-W1 只在 binding GO 后开始，并等待 M4-S1 以复用持久接缝；开发可以与 M4-S2 并行，但最终 PASS 必须等待 M4-S2 并把
   resume/replacement binding 收口纳入自身出口，不存在无编号的后置收口包。
@@ -335,7 +288,7 @@ W-only delta ─/→ S/C
 ### 5.1 产品与工作包依赖
 
 - 四期不依赖 Publication Critic 模型、训练数据、真实权重、部署资格或横评结果；三期后续工作也不依赖第四期完成。
-- 三期 Plan 060/M3-B1b 的后续执行，以及其正式结果到达后对冻结 v8 的有界预算适配复核，都可以和四期 M4-A、M4-S*、
+- 三期 Plan 060/M3-B1b 的后续执行，以及其正式结果到达后对冻结 v8 的有界预算适配复核，都可以和四期 M4-S*、
   M4-C* 或可选 M4-W* 工作包有界并行。M3-B1c 只有在 Plan 060 训练资格 GO、冻结 v8 数据 GO 与新的正式训练授权同时成立后
   才具备另行规划条件；四期不参与或替代这些前置。
 - 三期 M3-C1/M3-C2/M3-D 若与四期同时修改 `multidev/` 公共协议、Team 生命周期、app-server/TUI 或共享配置，分别在独立
@@ -425,13 +378,14 @@ W-only delta ─/→ S/C
 - 浏览器后台、远程 SaaS、多用户账号、复杂鉴权、审计/可信平台、严格全局因果或数据资产审计；
 - 完整上游基线升级，或任何为第四期新增的真实 API/模型调用、训练、横评、benchmark 与 RONDO 推理成本。
 - 与 canonical Root lineage 写 authority 相互竞争的第二套 Team lock、租约、独立存储写入器或 writer registry，以及强制接管、
-  抢锁、跨进程 mutation relay/queue/IPC router。若现有设施无法干净承载正确性合同，M4-A 可以选择架构内专用能力，但不得形成
-  第二套权威或静默回退路径。
+  抢锁、跨进程 mutation relay/queue/IPC router。第 2 节已选择的专用能力必须集成在既有权威域内，不得形成第二套权威或静默
+  回退路径。
 
 ## 9. 实施与授权边界
 
-本文只是长程 WBS，不是实施授权。M4-A 是唯一实施入口；M4-A、M4-S1、M4-S2、M4-C0、M4-W0 和 M4-Z(core) 是独立工作包，
-各自启动时须按 `plan/plan-example.md` 建立 ExecPlan、确认当时主线和并行 worktree 状态并取得实施授权。
+本文只是长程 WBS，不是实施授权。M4-A 已完成共同入口；M4-S1、M4-C0 与 M4-W0 已可分别建立 ExecPlan，M4-S2、后续 C*、
+M4-W1 与 M4-Z(core) 继续服从本 WBS 的条件边。每项启动时须按 `plan/plan-example.md` 建立 ExecPlan、确认当时主线和并行
+worktree 状态并取得实施授权。
 
 后续正式 Session M4-C* 等真实 read model 后再更新本 WBS、编号并分别建立 ExecPlan；M4-W1 只有在 M4-W0 形成 binding GO 且
 M4-S1 接缝成立后才可立项，最终 PASS 等待 M4-S2；可选 Workspace 控制面扩展再等待 M4-W1 PASS。任何上游窄回移另建独立
