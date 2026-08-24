@@ -221,7 +221,14 @@ def validate_freeze(value: Any) -> dict[str, Any]:
     runtime = _object(freeze["runtime"], "qualification runtime")
     _require_exact_keys(
         runtime,
-        {"device", "dtype", "cpu_threads", "deployment_format", "service_limits"},
+        {
+            "device",
+            "dtype",
+            "cpu_threads",
+            "deployment_format",
+            "programs",
+            "service_limits",
+        },
         "qualification runtime",
     )
     if runtime["device"] not in {"cpu", "cuda"} or runtime["dtype"] not in {
@@ -235,6 +242,14 @@ def validate_freeze(value: Any) -> dict[str, Any]:
         "deployment_format"
     ].strip():
         raise QualificationError("qualification deployment format is invalid")
+    programs = _object(runtime["programs"], "qualification runtime programs")
+    _require_exact_keys(
+        programs,
+        {"service_sha256", "probe_sha256", "python_sha256"},
+        "qualification runtime programs",
+    )
+    if any(not _is_sha256(value) for value in programs.values()):
+        raise QualificationError("qualification runtime program identity is invalid")
     service_limits = _object(runtime["service_limits"], "qualification service limits")
     _require_exact_keys(
         service_limits,

@@ -207,6 +207,13 @@ def _bind_frozen_runtime(
     ):
         raise ServiceRunnerError("freeze_descriptor_mismatch")
     runtime = freeze["runtime"]
+    frozen_programs = runtime["programs"]
+    if (
+        sha256_file(args.service) != frozen_programs["service_sha256"]
+        or sha256_file(args.probe) != frozen_programs["probe_sha256"]
+        or sha256_file(args.python) != frozen_programs["python_sha256"]
+    ):
+        raise ServiceRunnerError("freeze_programs_mismatch")
     frozen_limits = runtime["service_limits"]
     descriptor_limits = service_descriptor["limits"]
     descriptor_limit_names = {
@@ -252,6 +259,7 @@ def _bind_frozen_runtime(
             "dtype": args.dtype,
             "cpu_threads": args.cpu_threads,
             "deployment_format": runtime["deployment_format"],
+            "programs": dict(frozen_programs),
             "service_limits": dict(frozen_limits),
         },
         freeze,

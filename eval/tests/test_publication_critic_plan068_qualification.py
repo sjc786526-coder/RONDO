@@ -91,6 +91,11 @@ def _freeze(
             "dtype": "bfloat16",
             "cpu_threads": 4,
             "deployment_format": "transformers-safetensors",
+            "programs": {
+                "service_sha256": "6" * 64,
+                "probe_sha256": "7" * 64,
+                "python_sha256": "8" * 64,
+            },
             "service_limits": {
                 "request_bytes": 131_072,
                 "response_bytes": 16_384,

@@ -174,6 +174,11 @@ class Fixture:
                 "dtype": "bfloat16",
                 "cpu_threads": 4,
                 "deployment_format": "fixture-safetensors",
+                "programs": {
+                    "service_sha256": sha256_file(self.service),
+                    "probe_sha256": sha256_file(self.probe),
+                    "python_sha256": sha256_file(Path(sys.executable)),
+                },
                 "service_limits": {
                     **service_descriptor["limits"],
                     "worker_startup_timeout_ms": 1_000,
@@ -436,6 +441,18 @@ class ServiceRunnerTests(unittest.TestCase):
 
             result = json.loads(fixture.output.read_text(encoding="utf-8"))
             self.assertEqual(result["failure_code"], "packet_identity_mismatch")
+            self.assertFalse((fixture.root / "service-pid").exists())
+
+    def test_frozen_program_hash_mismatch_starts_no_service(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = Fixture(Path(temporary))
+            fixture.service.write_text(FAKE_SERVICE + "\n# changed\n", encoding="utf-8")
+            fixture.service.chmod(0o700)
+
+            self.assertEqual(main(fixture.arguments()), 1)
+
+            result = json.loads(fixture.output.read_text(encoding="utf-8"))
+            self.assertEqual(result["failure_code"], "freeze_programs_mismatch")
             self.assertFalse((fixture.root / "service-pid").exists())
 
     def test_output_is_exclusive_and_second_run_starts_no_service(self) -> None:
