@@ -1,7 +1,7 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
 最后更新：2026-08-24 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
-状态：**第一期、第二期、M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b 与 Plan 064 已完成；Plan 060 技术 GO、Plan 064 DATA_GO、Plan 066 正式训练 GO；四期已规划、尚未实施**
+状态：**第一期、第二期、M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、Plan 064 与四期 M4-A 已完成；Plan 060 技术 GO、Plan 064 DATA_GO、Plan 066 正式训练 GO；M4-A 结论为 `M4_A_GO`**
 
 ## 当前定位
 
@@ -27,13 +27,14 @@ minimal handoff。完整路线见
 
 ## 四期目标与路线入口
 
-M4-A 先收敛 Durable Team Session、Session 控制面与可选 writer binding 必须共享的产品和生命周期边界，并决定是否采用
-候选上游窄增量及其条件消费边；之后 S/C 核心与 M4-W0 价值原型有界并行。M4-Z(core) 不被 W 线阻塞，只有 binding GO 后
+Plan 067 / M4-A 已收敛 Durable Team Session、Session 控制面与可选 writer binding 共享的产品和生命周期边界，结论为
+`M4_A_GO`。M4-S1、M4-C0 与 M4-W0 可分别建立 ExecPlan 并有界并行；M4-Z(core) 不被 W 线阻塞，只有 binding GO 后
 才立项正式 W1，其 handoff 范围服从价值门证据。
-Durable Team Session 的 V1 写 authority 归属于 canonical Root lineage，并持续覆盖成功 Team 提交；M4-A 根据真实接缝决定复用、
-扩展现有 Root active-writer 能力或增加架构内专用能力，但不建设相互竞争的第二套写者体系。其他客户端可只读，child Thread writer
-不能绕过 Root 归属；只读结果必须是自洽的已提交状态或明确 stale/unknown/unavailable，失败 shutdown 只有在写 authority 实际释放后
-才可报告关闭完成。
+Durable Team Session 的 V1 写 authority 归属于 canonical Root lineage，并持续覆盖成功 Team 提交；现有 Root active-writer
+作为唯一排他基础做架构内扩展，Team State 保持 canonical，并增加与其集成的专用 durability/read 能力，不建设相互竞争的第二套
+写者或状态体系。其他客户端可只读，child Thread writer 不能绕过 Root 归属；只读结果必须是自洽的已提交状态或明确
+stale/unknown/unavailable。失败 shutdown、未完成 teardown 或 mutation-capable descendant 存活时不得报告关闭完成或释放
+Root authority。
 生命周期直接跟随 Codex：resume 保留原 Team；顶层 `thread/fork` 创建新的 Root Thread/Session 与空 TeamInstance，不继承 Team
 State，旧 Team 引用按 instance mismatch fail-closed；`spawn_agent fork_turns=none/all/N` 创建新的 child Thread，但只改变对话上下文
 继承并继续属于原 Session/root lineage 与 TeamInstance。`/new` 与 slash `/clear` 创建空 Team，客户端 detach 不关闭 Team，冷态
@@ -364,9 +365,9 @@ active cycle，每次阻断反馈轮换 continuation，Team State 专用 history
 
 - M3-A1 产品合同与 Plan 054 / M3-A2 已完成；M3-B2a 已按 Plan 055 完成实现、独立验收与主线整合；M3-B2b 已按 Plan 057 完成实现、
   审查整改、最终独立验收与主线整合。其余后续工作包启动时仍须按 `plan/plan-example.md` 建立任务合同并取得授权。
-- 四期当前仅完成长程规划，没有实施授权；M4-A 是唯一实施入口。后续工作包及控制面拆包以
-  [`doc/WBS/durable-team-runtime.md`](durable-team-runtime.md) 为准，并分别建立 ExecPlan；不得从本次规划推定代码、
-  本地 Git 生命周期操作或正式验证已获授权。
+- 四期 M4-A / Plan 067 已完成共同合同并通过独立验收，结论为 `M4_A_GO`。后续工作包及控制面拆包以
+  [`doc/WBS/durable-team-runtime.md`](durable-team-runtime.md) 为准，并分别建立 ExecPlan；M4-A 完成不代表下游代码、
+  本地 Git 生命周期操作、外部资源或正式验证已获实施授权。
 - RunPod 创建或计费、模型与数据上传、云端训练、权重下载、真实本地模型加载/推理、Docker 和付费 API 均须在对应任务
   开始前取得明确授权；23 USD 是三期训练的总预算上限，不等于已经授权消费。
 - 训练数据、权重、逐样本输出与私有运行材料留在 `eval-data/` 或仓库外；`training/` 只保存体积合规的轻量合同与数据。

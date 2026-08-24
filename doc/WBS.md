@@ -1,6 +1,6 @@
 # RONDO 长程规划（WBS）
 
-最后更新：2026-08-24（Plan 066 已完成并通过独立验收）
+最后更新：2026-08-24（Plan 067 / M4-A 已完成并通过独立验收）
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段指针、跨方向关系、
 稳定工程边界和授权门；已完成成果与验收见 `doc/WBS-COMPLETED.md`，单次任务合同见 `plan/`，执行细节见
@@ -20,7 +20,7 @@
 | 0：量化测评基准 | 既有设施与首次 schema v7 正式 canary 已完成，当前无 active campaign | 保留设施；历史结果见 COMPLETED，新 campaign 须重新立项与授权 |
 | 1：Harness 优化 | **正式收口；当前无 active 工作包** | 当前不继续新增观测或内核/热路径优化；既有实现、设施与历史结果保留。未来可由用户另行决定是否重新立项，本次收口不作永久禁止 |
 | 2：本地审批模型 | **已收口，今后不再开启** | 最终结论为“保留为实验”；不改生产默认，不再规划后续工作包 |
-| 3：RONDO Multi | 第一、二期及其收口案例、**三期 M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b 与 Plan 064 已完成**；四期已规划、尚未实施 | Plan 066 已形成合格的 C1/C2/C3 候选与恢复工件，计算 Pod 已删除、胜者卷保留；M3-C1 可另行规划和授权；M4-A 尚未立项或取得实施授权 |
+| 3：RONDO Multi | 第一、二期及其收口案例、**三期 M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、Plan 064 与四期 M4-A 已完成** | Plan 066 已形成合格的 C1/C2/C3 候选与恢复工件，计算 Pod 已删除、胜者卷保留；M3-C1 可另行规划和授权；M4-A 结论为 `M4_A_GO`，M4-S1、M4-C0、M4-W0 可分别建立 ExecPlan |
 
 ### 方向命名口径
 
@@ -66,10 +66,11 @@
   只绑定调用者已准备且授权的 worktree，价值门证明需要时才附加 minimal handoff，不建设 workspace registry、ChangeSet
   生命周期或 Git 资产平台。
 - 四期详细 WBS 见 [`doc/WBS/durable-team-runtime.md`](WBS/durable-team-runtime.md)。M4-A 是共同前置，之后 Session、控制面原型
-  和 M4-W0 价值原型可有界并行；S/C 可以独立完成 M4-Z(core)，正式 W 实现须先获得 binding GO。M4-A 尚未建立 ExecPlan 或取得实施授权。
+  和 M4-W0 价值原型可有界并行；S/C 可以独立完成 M4-Z(core)，正式 W 实现须先获得 binding GO。Plan 067 已完成共同合同并经
+  独立验收接受 `M4_A_GO`；M4-S1、M4-C0、M4-W0 可分别建立 ExecPlan，但本结论不自动授予其实施或外部资源授权。
 - 四期不依赖 Publication Critic 训练、真实模型、真实 API 或性能测评，可以与三期模型链并行；它保持 shared workspace
   为默认，不建设通用 scheduler、自动路由、自动 merge/push、第二套 Team State/trace 或审计/可信平台。
-- 三期云计算不占本地 Cargo build lock，可与四期有界并行开发；bundle/checkpoint/结果传输仍竞争本地网络与磁盘，
+- 三期未来另行授权的云计算不占本地 Cargo build lock，可与四期有界并行开发；bundle/checkpoint/结果传输仍竞争本地网络与磁盘，
   四期重型 Cargo 与三期本地模型、Docker 等重型任务按根 `AGENTS.md` 串行错峰。详细资源关系见四期子 WBS。
 
 如果未来重新启动方向 1，它仍与方向 3 保持产品源码和任务合同独立；本地重型 Cargo、Docker、真实本地模型

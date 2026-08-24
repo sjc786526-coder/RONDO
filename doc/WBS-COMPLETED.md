@@ -1869,3 +1869,23 @@ correctness/functionality `remaining_findings=[]`，路线结论为 `GO`。
   独立终审按用户指定冻结最新 provider 快照总费用 `$10.9647715263`，距 `$23` 连续硬上限 `$12.0352284737`。
 - final-02 的 v1/v2 兼容、费用算术、哈希绑定与预算门正确；终审 focused 11/11、三个 launcher `bash -n` 和 diff 门禁通过。
   本结论只使候选具备进入 M3-C1 独立工作包的资格，不代表模型质量、threshold、部署或产品收益通过，也不自动授权 M3-C1。
+
+## RONDO Multi 四期共同合同（Plan 067 / M4-A，2026-08-24）
+
+**状态**：共同产品合同、两轮独立审查整改与最终复验均已完成；验收通过、任务目标完成，结论为 `M4_A_GO`。
+合同提交为 `c9a6f8795a2e55f7d358a57ab558350158a5f505`，整改提交为
+`304510dcf16055bb69a9086f227e0ded132a9a8e`，最终独立验收提交为
+`309e1d64864ae616124d51b6fdbe2ae74f170574`。
+
+- 冻结 `SessionId`、canonical Root `ThreadId`、`TeamInstanceId` 的 lineage、生命周期/authority anchor 与 Team generation
+  职责，并统一 resume、顶层 fork、child `spawn_agent fork_turns`、`/new`、slash `/clear`、detach、idle unload、退出和冷态
+  archive/unarchive/delete 的产品语义。
+- canonical Team State 保持唯一状态权威；现有 Root active-writer 作为唯一排他基础做架构内扩展，并增加与 Team State 集成的
+  专用 durability/read 能力。durable success、committed read、失败关闭、partial/unknown 与损坏/不兼容降级均已有明确边界，
+  child writer 不能绕过 Root 归属。
+- 独立审查补齐两项真实遗漏：mutation-capable descendant 存活时 Root/Team close 不得完成或释放 authority；第四期 WBS 按已提交
+  main 同步三期完成与资源终态。具体锁、permit、状态机、持久介质、API、字段、调用顺序和测试 fixture 仍由下游自主决定。
+- 四项 `v0.149.1` 候选增量均已明确采用、条件适配或延期决定及消费边，但本任务未回移或升级上游。M4-S1、M4-C0、M4-W0
+  可分别建立 ExecPlan；正式 W1 仍等待 W0 binding GO 与 S1 接缝，W 线不阻塞 S/C 核心收口。
+- 验收只使用现行源码、既有测试定义、冻结上游与官方 PR 的静态证据，并通过精确写集、链接、术语和 `git diff --check`；未运行
+  Cargo/Rust、Docker、真实 API/模型、训练、测评、全 workspace、CI 或 PR，也未修改 Plan 068 内容。
