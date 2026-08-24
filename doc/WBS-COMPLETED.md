@@ -1718,3 +1718,27 @@ rehearsal/全新正式 campaign 中继续，本节只冻结 v1 历史事实。
   `agent_log/2026-08-22-102052-plan057-independent-acceptance-review.md`、
   `agent_log/2026-08-22-105310-plan057-review-remediation.md`、
   `agent_log/2026-08-22-110158-plan057-final-acceptance-review.md`。
+
+## RONDO Multi 三期 M3-B1a Publication Critic 训练数据冻结（Plan 059，2026-08-23）
+
+**状态**：revision v7 已完成正式冻结、独立复核、两轮验收整改与最终独立验收，结论为**数据 GO、验收通过、任务目标完成**；
+实现提交 `6b66e3df7f54a97b680120035537798e3ffbb725`，最终验收报告提交
+`6b7fe6ee507c4b01cb230bfe3d5ee773359fa0fd`。
+
+- 在 Plan 054 v4 的 PublicationPacket、两条有序 message、control-token-safe render、exact tokenizer/template/special-token identity、
+  16,384-token window 与 overflow 语义之上，新建 Scenario/Candidate/Binary/Pair/review 合同及 grouped split、dedup/shortcut、
+  exact-token census、freeze/manifest 和轻量 consumer；没有复制第二套 renderer、packet validator 或 eval runner。
+- 最终 `publication-critic-v7` 含 36 scenario group、72 candidate（39 PASS / 33 REWRITE）、30 Boundary 与 6 Within-PASS；
+  train/validation/unseen-test 为 42/16/14。训练阶段成员为 C1 42 Binary、C2 再加 18 Boundary、C3 再加 3 Within-PASS；
+  train-only smoke bundle 不含 holdout。
+- teacher 为 GPT-5.6-sol，独立 reviewer 为 GPT-5.6-sol/xhigh。v7 受影响的 12 candidate、6 Boundary 与 1 Within-PASS 全部接受；
+  未变化 review 仅在模型可见输入逐字节相等后复用。最终无 coverage、Plan 054 reference、跨 split group、文本或 exact-token 长度 shortcut
+  finding；12 条 near-duplicate edge 均闭合在 scenario group 内。
+- 全量 exact census 为 50,073 tokens，单条 553–1,367，continuity omission 与 candidate truncation 均为 0；tracked freeze 与
+  ignored `formal-v12-final` 的 12 个文件逐字节一致。consumer 默认只持有 train `42/42/21`，显式 evaluation 为 `72/72/36`，
+  默认 holdout 与公开直接构造旁路均拒绝。
+- 最终复跑 62/62 聚焦 Python tests 与 tracked freeze consumer smoke 通过；未运行 Docker、Cargo/Bazel、模型 forward、训练、真实 API、
+  CI 或 PR，未触碰 Plan 058。最终报告见
+  `agent_log/2026-08-23-184721-plan059-v7-final-independent-acceptance.md`。
+- M3-B1b 数据前置已解锁，但尚未启动；它需要独立 ExecPlan 及 RunPod/H100、训练、上传与付费预算授权。Plan 059 的 GO 不代表训练成功、
+  性能提升或产品上线资格。
