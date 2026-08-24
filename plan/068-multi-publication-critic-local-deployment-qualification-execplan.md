@@ -207,53 +207,52 @@ cache、调试和正式运行原始结果必须直接落在主物理仓库根的
 
 ### 已完成
 
-- 规划基线已核对：`main = origin/main = 273042f3f26d8f9a22d774fa72858ebf413c122e`，主工作区 clean；Plan 060
-  `TECHNICAL_GO`、Plan 064 `DATA_GO`、Plan 066 `COMPLETE / ACCEPTED / GO`。
-- Plan 066 仓库证据记录 0 Pod；winner 卷 `hi3iaz8rsr` 保留 exact base、C1/C2/C3、正式 `checkpoint-c3`、可复建依赖/环境。
-  这是历史交接事实，实施时仍须现场复核。
-- 已核对 Plan 054 输入/scalar、Plan 055 service/scorer/typed failure/lifecycle、Plan 057 产品接入和 Plan 066 candidate/checkpoint manifests；
-  当前真实缺口是 real scorer/backend、RTX 4060 部署工件、资格 runner/launcher 与本地回收，不是重写产品协议。
-- 阶段 A 的 RunPod/S3 可达性已真实验证：已鉴权 RunPod MCP 只读确认 0 Pod、唯一 Standard 60GB 卷 `hi3iaz8rsr`
-  (`rondo-plan060-pcie-assets-20260824`, `US-KS-2`)；未创建、启动、修改或删除任何资源。
-- 用户已在主仓库根 ignored `.env.local` 安全提供 `RUNPOD_S3_ACCESS_KEY_ID` 与 `RUNPOD_S3_SECRET_ACCESS_KEY`。分支线程只经严格解析器静默确认
-  普通文件/非 symlink、`0600`、合法 `KEY=VALUE` 及两值非空；未 source、打印、复制或记录凭据。tracked 示例只声明这两个变量名。
-- 使用 exact endpoint `https://s3api-us-ks-2.runpod.io/`、卷 ID bucket、SigV4 与 path-style，真实 `HeadBucket` 通过；随后只做两层有界、
-  非递归 `ListObjectsV2`，确认交接根 `rondo-plan060-publication-critic-20260824t040742z/` 及预期 bundle/model/runs/venv/wheels 等入口可见。
-  未递归扫描、下载、校验、上传或删除对象；详情见 `agent_log/2026-08-24-105210-plan068-s3-reachability.md`。
-- 已明确控制面/数据面分工：现有 RunPod MCP 负责资源查询和最终删卷，项目内 S3 client 负责文件交接；普通 `RUNPOD_API_KEY` 不作为本任务
-  `.env.local` 硬依赖，执行者不得为此读取 MCP 的 OAuth/API credential 或创建新 key。
-- 专用 worktree 已建立：
-  `/home/sjc/desktop/RONDO/.claude/worktrees/068-m3-c1-publication-critic-local-qualification/`，分支
-  `worktree-068-m3-c1-publication-critic-local-qualification`。
+- 阶段 A/B 本地交接已闭合：通过 exact 卷/交接根、固定 allowlist 与 manifest 驱动的有界下载，共验证 120 个远端对象、
+  24,385,153,354 bytes；本地逐文件核验 exact base 九文件、C1/C2/C3、62 文件 source bundle、recipe/model contract、依赖 identity/freeze、
+  FlashOptim wheel、winner lock、provider/receipt/log，以及正式 C3 full checkpoint 12 文件、10,555,059,139 bytes。checkpoint 的 full model/tokenizer、
+  optimizer 311 项、单 param group、scheduler 与 CPU/CUDA/Python/NumPy RNG 均已反序列化核验。unseen-test 未导出、未读取、未运行。
+- exact base 另以公开 HF revision `e51ea3e08fb81326c3b812a7ff0cb9cee83e59cc` 在任务局部 cache 完成 12 文件 verify；未登录或上传。
+  `.env.local` 仅由严格解析器取得两个 S3 值并注入目标 client，未打开、source、打印、复制、哈希或进入记录。
+- 已实现 Publication Critic 专用 strict handoff、工件/身份验证、Transformers inference、持久 worker/framed IPC、真实 Rust scorer/service/probe、
+  service runner、三态资格 runner 与 write-once archive；真实模型只替换 Plan 055 scorer backend，Plan 054/055/057 产品语义未改。
+- 代表性 C1 commissioning 已覆盖 CPU FP32、CUDA BF16、offline→真实 Rust service→typed client、1/2/4/8 有界压力、取消、worker 故障、
+  typed `backend`、自动重启、graceful/forced cleanup 与 shutdown；最终没有 GPU/service/worker/probe 残留。四对象均使用原始 safetensors，
+  部署仅发生 BF16 dtype 适配，没有转换或量化。
+- 正式口径冻结为 24 条 Plan 054 `future_unseen_test=false` cohort、CPU FP32 原工件参考、CUDA BF16 直接部署、Plan 054 v4 临时 threshold，
+  freeze SHA-256 `1feb7ad63b206f3fab2fd6daf81aa89e41df5b7d9de4d9c0a428aa36b76b1809`；正式 source 为 clean
+  `4f3d67c85e0643a4272c499a45ca9245c53daabf`，正式 namespace 为
+  `plan068-formal-20260824T201213Z-qualification`。早期 preformal/announcement/parity 诊断 namespace 均未进入正式 archive。
+- write-once 正式结果已生成，四对象均为有效运行下的 `NOT_QUALIFIED`：base 未过 projected drift 与临时 verdict parity；C1 未过真实服务
+  projected score parity；C2 未过 ranking、obvious-margin direction 与 pair-direction；C3 未过真实服务 projected score parity。
+  `m3_c2_prerequisite_satisfied=false`，不得启动 M3-C2；未到达的正式指标在结果中为 `N/A` 并绑定离线或 service gate 原因。
+- 定向门禁通过：Python 113/113、Rust `codex-publication-critic` 34/34（0 skip）、Rust fmt、Plan 068 inference lock check、Python compileall 与
+  `git diff --check`。Docker 未使用/未运行。正式模型 load 约 3.26–3.51s、部署 peak RSS 约 4.295GB、peak VRAM 约 3.497GB；
+  C1/C3 warm P95 约 103–104ms，真实 service 压力均 15/15 成功，但 projected parity 分别漂移约 `9.58e-10` 与 `9.50e-4`，超过冻结 `1e-12` 门。
+- ignored 交接根 `eval-data/publication-critic/plan068/` 为 24,385,637,322 bytes（42 目录全 `0700`、209 文件全 `0600`）；任务 env
+  6,897,892,345 bytes，公开 HF cache 3,457,500,887 bytes，三者根均 `0700` 并保留。Windows C: 当前可用 139,242,090,496 bytes。
+- 删除前 provider 事实已刷新：0 Pod；当前卷列表只有 `hi3iaz8rsr`（`rondo-plan060-pcie-assets-20260824`、`US-KS-2`、Standard 60GB）；
+  compute 持续费为 0，卷仍约 `$0.005833333/h`。24 小时账单中的旧 Pod/旧卷记录仅为历史累计。
 
 ### 当前工作
 
-- `IN_PROGRESS / STAGE_A_REACHABILITY_VERIFIED`：一次性授权已用于完成最小只读可达性探测和凭据变量示例；候选下载、本地身份验证、
-  真实模型部署/资格和卷删除均未开始。用户转交本计划的更新提示词后，执行者从剩余阶段 A 工作继续。
+- `AWAITING_LOCAL_HANDOFF_ACCEPTANCE / STAGE_D1`：本地交接、正式资格、相称门禁和删除前 provider 复核均已完成；正在形成 clean task-branch
+  提交并交独立审查者。收到字面量 `LOCAL_HANDOFF_ACCEPTED` 前不得删除 winner 卷。
 
 ### 本任务剩余步骤
 
-1. 阶段 A：保留已验证的 0 Pod/winner 卷/S3 可达性事实；核对本地硬件与真实 Windows `C:` 容量，从 Plan 060/066 identity、manifest 和
-   receipt 闭合必须下载的精确路径/文件，先做有界试下载与恢复验证；冻结资格维度、参考方法、cohort 选择规则、临时 threshold 来源、
-   三态定义和禁止倒推口径的规则。
-2. 阶段 B：下载并验证必要原始资产，建立或复用干净的本地部署能力；先打通一个候选，再覆盖 base/C1/C2/C3 的身份、转换、加载尝试、
-   offline 资格与定向 tests，每个拟 `QUALIFIED` 对象完成 bounded service parity，完整 failure/cancel/shutdown 矩阵只由代表性训练候选承担。
-   普通问题在范围内修复重跑；代表性 commissioning 稳定后、四对象正式轮前冻结具体 cohort、artifact、runtime 配置和数值
-   漂移/资源/延迟/稳定性门，此后不得按候选放宽。
-3. 阶段 C：固定代码、依赖、候选/部署工件和资格口径，从 clean source/新 namespace 完整运行四对象正式资格轮，生成三态决策和精炼资源/漂移/服务结果。
-4. 阶段 D1：提交 clean 的本地交接 checkpoint，列出 tracked/ignored 工件、测试、正式结果与当前 provider 事实，停止在卷删除前，交计划制定者独立复核。
-5. 阶段 D2：收到 `LOCAL_HANDOFF_ACCEPTED` 后删除 exact winner 卷，复核 0 Pod、目标卷不存在和任务持续费归零，更新 plan/log、提交 clean final checkpoint，
-   交最终独立验收。
+1. 提交并保持 task worktree clean，由本 turn 唯一干净上下文审查者独立检查本地工件、正式结果、门禁、provider 事实和删除门；普通 finding 窄修后交同一审查者复验。
+2. 只有收到该审查者字面量 `LOCAL_HANDOFF_ACCEPTED` 后，精确删除卷 ID `hi3iaz8rsr`，并复查目标卷不存在、Pod 仍为 0、compute/volume 持续费均为 0；无关资源只报告。
+3. 更新本节和同一精炼日志，提交 final task-branch checkpoint、保持 clean，并交同一独立审查者做删除后最终验收。WBS 只提供建议 delta，不在本分支抢写。
 
 ### 阻塞项
 
-- 当前没有 RunPod S3 凭据、网络或无 Pod 可达性阻塞；若既有安全入口后续失效，仍须保留卷并诚实转为基础设施阻塞，不得创建 key 或 Pod 绕过。
-- winner 卷交接根已通过有界列表定位，但必须下载的精确文件集合尚未由 Plan 060/066 manifest/receipt 闭合；不得仅凭目录名猜测或无界递归下载。
+- 无技术或基础设施阻塞；唯一停点是不可逆删除前的 `LOCAL_HANDOFF_ACCEPTED`。卷保留期间持续产生约 `$0.005833333/h` 存储费用。
 
 ### 当前验收状态
 
-- `STAGE_A_PARTIAL_PASS`：资源 identity、S3 凭据安全入口、`HeadBucket` 和有界目录可见性已通过；这不是候选交接或阶段 C 正式资格证据。
-  尚未下载/校验候选，未运行真实模型/Docker/Cargo，未形成任何候选资格结论；winner 卷仍保留并持续计费。
+- `LOCAL_HANDOFF_READY_FOR_INDEPENDENT_REVIEW`：任务执行本身成功完成本地交接和四对象资格判定，但没有任何对象达到 `QUALIFIED`；
+  因此 M3-C2 前置保持关闭，并将失败能力如实返回上游。正式 summary 位于 ignored
+  `eval-data/publication-critic/plan068/handoff-evidence/plan068-local-handoff-summary.json`，卷仍保留并持续计费。
 
 ### 交接边界
 
@@ -278,3 +277,8 @@ cache、调试和正式运行原始结果必须直接落在主物理仓库根的
 | 008 | 现有 RunPod MCP 负责资源状态/最终删卷，既有 S3 credential 和无 Pod S3 API 负责文件交接；普通 `RUNPOD_API_KEY` 不作为项目本地交接硬依赖 | 真实 HeadBucket/有界 list 已验证两条能力边界，无需创建 transfer Pod、S3 key 或其他云资源 | RunPod、凭据 | 已验证 |
 | 009 | M4-A 只共享资源互斥与主线整合边界，不成为 Plan 068 产品依赖或组合回归 | 三、四期正交，避免互相污染 plan、代码和重型资源 | 并行、WBS | 已采纳 |
 | 010 | WBS 完成状态留到独立验收和用户批准主线整合时基于最新 main 窄同步；执行者只提供 delta | 并行 Plan 067 可能修改共享 WBS，任务分支不应用旧文件覆盖 | 文档、交付 | 已采纳 |
+| 011 | 部署采用原始 safetensors + CUDA BF16，不做转换或量化；CPU FP32 同原工件作为参考 | 四对象均在 8GB GPU 内满足 load/RSS/VRAM/latency 门，额外格式转换只会增加漂移与维护成本 | 部署、参考 | 已验证 |
+| 012 | 正式 cohort 固定 Plan 054 的 24 条非 unseen fixtures，临时 threshold 固定 Plan 054 v4；服务 projected parity 门保持 `1e-12` | commissioning 后冻结同口径，正式结果不能为 C1/C3 通过而放宽 | 资格口径 | 已冻结 |
+| 013 | base/C1/C2/C3 均判 `NOT_QUALIFIED`，M3-C2 前置保持关闭 | base/C2 离线语义门失败，C1/C3 真实 service projected parity 门失败；均是有效基础设施下的候选/适配失败 | 资格结论、交接 | 已判定 |
+| 014 | 只接受 `4f3d67c...` clean source 和 `plan068-formal-20260824T201213Z-qualification` write-once archive；早期诊断 namespace 不拼接 | 维持正式 source/config/artifact/cohort 一致，调试失败与正式证据诚实隔离 | 正式证据 | 已执行 |
+| 015 | Plan 067 已结束并合并；Plan 068 与当前 069/070 仅并行源码/轻测，重型 Cargo/Docker/真实模型继续共用全局锁串行 | 三任务产品职责独立，但共享宿主重型资源与后续主线整合面 | 并行、资源 | 已执行 |
