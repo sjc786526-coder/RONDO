@@ -1,6 +1,6 @@
 # RONDO 长程规划（WBS）
 
-最后更新：2026-08-24（Plan 066 已完成并通过独立验收）
+最后更新：2026-08-24（Plan 068 / M3-C1 已立项，待用户向执行者下达实施提示词）
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段指针、跨方向关系、
 稳定工程边界和授权门；已完成成果与验收见 `doc/WBS-COMPLETED.md`，单次任务合同见 `plan/`，执行细节见
@@ -20,7 +20,7 @@
 | 0：量化测评基准 | 既有设施与首次 schema v7 正式 canary 已完成，当前无 active campaign | 保留设施；历史结果见 COMPLETED，新 campaign 须重新立项与授权 |
 | 1：Harness 优化 | **正式收口；当前无 active 工作包** | 当前不继续新增观测或内核/热路径优化；既有实现、设施与历史结果保留。未来可由用户另行决定是否重新立项，本次收口不作永久禁止 |
 | 2：本地审批模型 | **已收口，今后不再开启** | 最终结论为“保留为实验”；不改生产默认，不再规划后续工作包 |
-| 3：RONDO Multi | 第一、二期及其收口案例、**三期 M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b 与 Plan 064 已完成**；四期已规划、尚未实施 | Plan 066 已形成合格的 C1/C2/C3 候选与恢复工件，计算 Pod 已删除、胜者卷保留；M3-C1 可另行规划和授权；M4-A 尚未立项或取得实施授权 |
+| 3：RONDO Multi | 第一、二期及其收口案例、**三期 M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b 与 Plan 064 已完成**；Plan 068 / M3-C1 已立项、尚未执行；四期已规划、尚未实施 | Plan 068 的授权范围与执行提示词已准备，待用户转交执行者后生效；它负责本地接收 base/C1/C2/C3 与必要恢复工件、真实 scorer、四候选部署资格和 winner 卷最终交接。完成前不得进入 M3-C2；M4-A 状态以其独立 worktree/后续主线整合为准 |
 
 ### 方向命名口径
 
@@ -57,8 +57,12 @@
 - M3-B1c / Plan 066 已在当前唯一 H100 PCIe 80GB 上从 exact base 干净执行 C1→C2→C3，实际消费 128 Binary、50 Boundary 与 8
   Within-PASS，保存并复验三个阶段候选、固定 validation 与完整恢复点，新进程 step 3→4 继续更新通过。计算 Pod 已永久删除，winner 卷保留
   formal checkpoint、三个候选、exact 模型与可复用环境。独立验收按用户指定冻结终审最新 provider 快照总费用 `$10.9647715263`，距 `$23`
-  硬上限 `$12.0352284737`；correctness/functionality `remaining_findings=[]`，结论为 `GO`。M3-C1 的前置阻塞已解除，但仍须另行规划和授权，
-  本结论不授予模型质量、threshold、部署或产品资格。
+  硬上限 `$12.0352284737`；correctness/functionality `remaining_findings=[]`，结论为 `GO`。该训练结论解除 M3-C1 前置，
+  但本身不授予模型质量、threshold、部署或产品资格；后续资格由已立项的 Plan 068 独立判断。
+- M3-C1 / Plan 068 已建立独立 ExecPlan，一次性授权范围待用户通过执行提示词下达，当前尚未下载 winner 卷或运行真实本地模型。它只负责
+  base/C1/C2/C3 的本地部署资格、真实 scorer/service 一致性、资源与漂移事实，以及本地安全交接后的 task-only winner 卷止费；
+  不排名模型、不冻结最终 threshold、不默认启用 Critic。只有 base 与至少一个训练候选在同一口径下取得资格，才解除 M3-C2 前置；
+  M3-C2 仍须另行规划和授权。
 
 ### 方向 3：Durable Team Runtime 四期
 
@@ -66,7 +70,8 @@
   只绑定调用者已准备且授权的 worktree，价值门证明需要时才附加 minimal handoff，不建设 workspace registry、ChangeSet
   生命周期或 Git 资产平台。
 - 四期详细 WBS 见 [`doc/WBS/durable-team-runtime.md`](WBS/durable-team-runtime.md)。M4-A 是共同前置，之后 Session、控制面原型
-  和 M4-W0 价值原型可有界并行；S/C 可以独立完成 M4-Z(core)，正式 W 实现须先获得 binding GO。M4-A 尚未建立 ExecPlan 或取得实施授权。
+  和 M4-W0 价值原型可有界并行；S/C 可以独立完成 M4-Z(core)，正式 W 实现须先获得 binding GO。M4-A 当前规划与授权状态由独立
+  Plan 067 worktree 及其后续主线整合维护；Plan 068 的授权不延伸到 M4-A。
 - 四期不依赖 Publication Critic 训练、真实模型、真实 API 或性能测评，可以与三期模型链并行；它保持 shared workspace
   为默认，不建设通用 scheduler、自动路由、自动 merge/push、第二套 Team State/trace 或审计/可信平台。
 - 三期云计算不占本地 Cargo build lock，可与四期有界并行开发；bundle/checkpoint/结果传输仍竞争本地网络与磁盘，
