@@ -13,6 +13,7 @@ from typing import Any, Protocol
 try:
     # Verified against Harbor 0.20.0.  Subclassing Codex deliberately retains its
     # output/trajectory parser, while RONDO overrides the unsafe install/run methods.
+    from harbor.agents.installed.base import NonZeroAgentExitCodeError
     from harbor.agents.installed.base import with_prompt_template
     from harbor.agents.installed.codex import Codex as HarborCodexAgent
     from harbor.models.trial.paths import EnvironmentPaths
@@ -24,6 +25,9 @@ except ModuleNotFoundError as exc:
 
     def with_prompt_template(function):  # type: ignore[no-redef]
         return function
+
+    class NonZeroAgentExitCodeError(RuntimeError):  # type: ignore[no-redef]
+        """Import-only Harbor-compatible agent failure."""
 
     class HarborCodexAgent:  # type: ignore[no-redef]
         """Import-only fallback for standard-library contract tests."""

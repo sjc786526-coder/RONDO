@@ -49,6 +49,7 @@ use crate::tools::handlers::McpHandler;
 use crate::tools::handlers::ToolSearchHandlerCache;
 use crate::tools::handlers::WaitForEnvironmentHandler;
 use crate::tools::handlers::multi_agents_spec::MULTI_AGENT_V1_NAMESPACE;
+use crate::tools::handlers::shell_spec::EXEC_COMMAND_REPEAT_GUIDANCE;
 use crate::tools::registry::CoreToolRuntime;
 use crate::tools::registry::RegisteredTool;
 use crate::tools::router::ToolRouter;
@@ -669,6 +670,112 @@ async fn shell_family_registers_visible_unified_exec_and_hidden_legacy_shell() {
     plan.assert_registered_contains(&["exec_command", "write_stdin", "shell_command"]);
     assert_eq!(plan.exposure("shell_command"), ToolExposure::Hidden);
     assert!(has_parameter(plan.visible_spec("exec_command"), "shell"));
+}
+
+#[tokio::test]
+async fn exec_command_repeat_guidance_is_feature_gated_and_root_agent_only() {
+    let disabled = probe(|turn| {
+        set_features(turn, &[Feature::ShellTool, Feature::UnifiedExec]);
+        set_feature(
+            turn,
+            Feature::ExecCommandRepeatGuidance,
+            /*enabled*/ false,
+        );
+    })
+    .await;
+    let ToolSpec::Function(disabled_exec) = disabled.visible_spec("exec_command") else {
+        panic!("expected exec_command function tool");
+    };
+    assert!(
+        !disabled_exec
+            .description
+            .contains(EXEC_COMMAND_REPEAT_GUIDANCE)
+    );
+
+    let enabled = probe(|turn| {
+        set_features(
+            turn,
+            &[
+                Feature::ShellTool,
+                Feature::UnifiedExec,
+                Feature::ExecCommandRepeatGuidance,
+            ],
+        );
+    })
+    .await;
+    let ToolSpec::Function(enabled_exec) = enabled.visible_spec("exec_command") else {
+        panic!("expected exec_command function tool");
+    };
+    assert!(
+        enabled_exec
+            .description
+            .contains(EXEC_COMMAND_REPEAT_GUIDANCE)
+    );
+    assert!(
+        enabled_exec
+            .description
+            .contains("same requester/tool path with every invocation argument unchanged")
+    );
+    assert!(
+        enabled_exec.description.contains(
+            "when the requester/tool path or any invocation argument differs; execute that call normally"
+        )
+    );
+    assert!(
+        enabled_exec
+            .description
+            .contains("condition is uncertain, execute normally")
+    );
+
+    let guardian = probe(|turn| {
+        set_features(
+            turn,
+            &[
+                Feature::ShellTool,
+                Feature::UnifiedExec,
+                Feature::ExecCommandRepeatGuidance,
+            ],
+        );
+        turn.session_source = SessionSource::SubAgent(SubAgentSource::Other(
+            crate::guardian::GUARDIAN_REVIEWER_NAME.to_string(),
+        ));
+    })
+    .await;
+    let ToolSpec::Function(guardian_exec) = guardian.visible_spec("exec_command") else {
+        panic!("expected guardian exec_command function tool");
+    };
+    assert!(
+        !guardian_exec
+            .description
+            .contains(EXEC_COMMAND_REPEAT_GUIDANCE)
+    );
+
+    let spawned_agent = probe(|turn| {
+        set_features(
+            turn,
+            &[
+                Feature::ShellTool,
+                Feature::UnifiedExec,
+                Feature::ExecCommandRepeatGuidance,
+            ],
+        );
+        turn.session_source = SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
+            parent_thread_id: ThreadId::new(),
+            depth: 1,
+            agent_path: None,
+            agent_nickname: None,
+            agent_role: None,
+        });
+    })
+    .await;
+    let ToolSpec::Function(spawned_exec) = spawned_agent.visible_spec("exec_command") else {
+        panic!("expected spawned-agent exec_command function tool");
+    };
+    assert!(
+        !spawned_exec
+            .description
+            .contains(EXEC_COMMAND_REPEAT_GUIDANCE)
+    );
 }
 
 #[tokio::test]

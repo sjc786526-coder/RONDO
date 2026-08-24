@@ -507,6 +507,31 @@ class TerminalBenchResultTests(_ResultFixture, unittest.TestCase):
         parsed = parse_single_task_result(self.jobs, host_returncode=0)
         self.assertEqual((parsed.outcome, parsed.reward), (RunOutcome.AGENT_FAILED, 0.0))
 
+    def test_plan058_opt_in_preserves_agent_failure_verifier_reward(self) -> None:
+        self.job_result["stats"]["n_completed_trials"] = 0
+        self.job_result["stats"]["n_errored_trials"] = 1
+        self.trial_result["exception_info"] = {
+            "exception_type": "NonZeroAgentExitCodeError"
+        }
+        self.trial_result["verifier_result"] = {"rewards": {"reward": 1.0}}
+        self._write_results()
+
+        historical = parse_single_task_result(self.jobs, host_returncode=0)
+        plan058 = parse_single_task_result(
+            self.jobs,
+            host_returncode=0,
+            preserve_agent_failure_verifier_reward=True,
+        )
+
+        self.assertEqual(
+            (historical.outcome, historical.task_outcome, historical.reward),
+            (RunOutcome.AGENT_FAILED, "fail", 0.0),
+        )
+        self.assertEqual(
+            (plan058.outcome, plan058.task_outcome, plan058.reward),
+            (RunOutcome.AGENT_FAILED, "pass", 1.0),
+        )
+
     def test_early_agent_error_accepts_optional_harbor_fields(self) -> None:
         self.job_result["stats"]["n_completed_trials"] = 0
         self.job_result["stats"]["n_errored_trials"] = 1
@@ -1710,6 +1735,58 @@ class TerminalBenchResultTests(_ResultFixture, unittest.TestCase):
             },
             {item.canonical_request_sha256 for item in observations},
         )
+
+    def test_completed_rondo_groups_intermediate_guardian_request(self) -> None:
+        run_id = "20260810-010000031-tb-rondo-r1"
+        observations = tuple(
+            load_guardian_evidence_bundle(
+                self.jobs,
+                self._write_guardian_bundle(review_id),
+                expected_model="gpt-5.6-luna",
+                expected_effort="low",
+            )[0]
+            for review_id in ("review-1",)
+        )
+        live_result = self._live_result(run_id)
+        object.__setattr__(live_result.prepared.spec, "side", Side.RONDO)
+        object.__setattr__(live_result, "evidence", observations)
+        object.__setattr__(
+            live_result,
+            "budget_snapshot",
+            self._completed_budget_snapshot(run_id, request_count=5),
+        )
+        metadata = self.root / "work" / "api-metadata.json"
+        self._write_metadata(
+            metadata,
+            "main",
+            "main",
+            "guardian",
+            "guardian",
+            "main",
+            guardian_digests=(
+                "d" * 64,
+                observations[0].canonical_request_sha256,
+            ),
+        )
+        parsed = parse_single_task_result(self.jobs, host_returncode=0)
+
+        target = publish_terminal_bench_result(
+            RepoPaths(self.root, self.root),
+            results_worktree_root=self.root,
+            run_id=run_id,
+            side=Side.RONDO,
+            git_commit="e" * 40,
+            eval_harness_commit="f" * 40,
+            live_result=live_result,
+            parsed=parsed,
+            metadata_path=metadata,
+            publication=self._publication(side=Side.RONDO),
+        )
+
+        summary = json.loads((target / "run-summary.json").read_text(encoding="utf-8"))
+        self.assertEqual(summary["summary"]["api_request_roles"]["guardian"], 2)
+        self.assertEqual(len(summary["summary"]["evidence"]), 1)
+        self.assertEqual(summary["summary"]["s2_request_evidence_binding"], "verified")
 
     def test_completed_rondo_rejects_evidence_request_digest_mismatch(self) -> None:
         run_id = "20260810-010000021-tb-rondo-r1"

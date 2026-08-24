@@ -21,6 +21,26 @@ from tests.test_team_lens import (
     NativeBundleBuilder,
 )
 
+GUARDIAN_LIMIT_ERROR = (
+    "exec_command failed with status 409; error code "
+    "guardian_logical_request_limit_exceeded"
+)
+GUARDIAN_REJECTION_ERROR = (
+    "exec_command failed for `/usr/bin/bash -lc 'dangerous command'`: "
+    'CreateProcess { message: "Rejected(\\"This action was rejected due to '
+    'unacceptable risk.\\\\nReason: synthetic rejection.\\\\nThe agent must not '
+    "attempt to achieve the same outcome via workaround, indirect execution, or "
+    "policy circumvention. Proceed only with a materially safer alternative, or if "
+    "the user explicitly approves the action after being informed of the risk. "
+    'Otherwise, stop and request user input.\\")" }'
+)
+UNKNOWN_PROCESS_ERROR = "write_stdin failed: Unknown process id 9"
+JUSTIFICATION_ERROR = (
+    '`justification` requires an explicit `sandbox_permissions`; use '
+    '`sandbox_permissions: "require_escalated"` for unsandboxed execution, '
+    'or omit `justification`.'
+)
+
 
 def _observation() -> dict[str, object]:
     return {
@@ -443,6 +463,218 @@ def _write_bundle(
     return builder.write()
 
 
+def _make_pre_runtime_guardian_limit(
+    bundle: Path,
+    *,
+    tool_index: int = 1,
+    error: str = GUARDIAN_LIMIT_ERROR,
+) -> None:
+    """Convert one synthetic sandbox denial to the exact Guardian-limit shape."""
+
+    tool_id = f"tool-{tool_index}"
+    runtime_cell_id = f"cell-{tool_id}"
+    model_call_id = f"model-{tool_id}"
+    events = [
+        json.loads(line)
+        for line in (bundle / "trace.jsonl").read_text("utf-8").splitlines()
+    ]
+    ended = next(
+        event
+        for event in events
+        if event["payload"]["type"] == "tool_call_ended"
+        and event["payload"]["tool_call_id"] == tool_id
+    )
+    ended["payload"]["status"] = "failed"
+    result_path = bundle / ended["payload"]["result_payload"]["path"]
+    result_path.write_text(
+        json.dumps({"type": "error", "error": error}), encoding="utf-8"
+    )
+    events = [
+        event
+        for event in events
+        if not (
+            event["payload"]["type"] == "code_cell_output_rendered"
+            and event["payload"].get("runtime_cell_id") == runtime_cell_id
+        )
+    ]
+    for event in events:
+        payload = event["payload"]
+        if payload["type"] in {"code_cell_initial_response", "code_cell_ended"}:
+            if payload.get("runtime_cell_id") == runtime_cell_id:
+                payload["status"] = "failed"
+        if (
+            payload["type"] == "code_mode_exec_output_delivered"
+            and payload.get("model_visible_call_id") == model_call_id
+        ):
+            payload["output_render"]["requested_max_output_tokens"] = None
+    for seq, event in enumerate(events, start=1):
+        event["seq"] = seq
+    (bundle / "trace.jsonl").write_text(
+        "".join(json.dumps(event) + "\n" for event in events),
+        encoding="utf-8",
+    )
+
+
+def _update_exec_invocation_arguments(
+    bundle: Path,
+    *,
+    tool_index: int = 1,
+    updates: dict[str, object] | None = None,
+    removals: tuple[str, ...] = (),
+) -> None:
+    tool_id = f"tool-{tool_index}"
+    events = [
+        json.loads(line)
+        for line in (bundle / "trace.jsonl").read_text("utf-8").splitlines()
+    ]
+    started = next(
+        event
+        for event in events
+        if event["payload"]["type"] == "tool_call_started"
+        and event["payload"]["tool_call_id"] == tool_id
+    )
+    invocation_path = bundle / started["payload"]["invocation_payload"]["path"]
+    invocation = json.loads(invocation_path.read_text("utf-8"))
+    arguments = json.loads(invocation["payload"]["arguments"])
+    for name in removals:
+        arguments.pop(name, None)
+    arguments.update(updates or {})
+    invocation["payload"]["arguments"] = json.dumps(
+        arguments, separators=(",", ":")
+    )
+    invocation_path.write_text(json.dumps(invocation), encoding="utf-8")
+
+
+def _make_pre_runtime_unknown_write_stdin(
+    bundle: Path,
+    *,
+    tool_index: int = 1,
+    process_id: int = 9,
+    error: str = UNKNOWN_PROCESS_ERROR,
+) -> None:
+    """Convert one missing exec runtime to an exact failed session lookup."""
+
+    _make_pre_runtime_guardian_limit(bundle, tool_index=tool_index)
+    tool_id = f"tool-{tool_index}"
+    events = [
+        json.loads(line)
+        for line in (bundle / "trace.jsonl").read_text("utf-8").splitlines()
+    ]
+    started = next(
+        event
+        for event in events
+        if event["payload"]["type"] == "tool_call_started"
+        and event["payload"]["tool_call_id"] == tool_id
+    )
+    started["payload"]["kind"] = {"type": "write_stdin"}
+    invocation_path = bundle / started["payload"]["invocation_payload"]["path"]
+    invocation = json.loads(invocation_path.read_text("utf-8"))
+    invocation["tool_name"] = "write_stdin"
+    invocation["payload"]["arguments"] = json.dumps(
+        {
+            "session_id": process_id,
+            "chars": "",
+            "yield_time_ms": 30_000,
+            "max_output_tokens": 20_000,
+        },
+        separators=(",", ":"),
+    )
+    invocation_path.write_text(json.dumps(invocation), encoding="utf-8")
+    ended = next(
+        event
+        for event in events
+        if event["payload"]["type"] == "tool_call_ended"
+        and event["payload"]["tool_call_id"] == tool_id
+    )
+    result_path = bundle / ended["payload"]["result_payload"]["path"]
+    result_path.write_text(
+        json.dumps({"type": "error", "error": error}), encoding="utf-8"
+    )
+    (bundle / "trace.jsonl").write_text(
+        "".join(json.dumps(event) + "\n" for event in events),
+        encoding="utf-8",
+    )
+
+
+def _make_local_guardian_limit_inference(
+    bundle: Path,
+    *,
+    inference_id: str = "inference-2",
+    error: str = GUARDIAN_LIMIT_ERROR,
+) -> None:
+    events = [
+        json.loads(line)
+        for line in (bundle / "trace.jsonl").read_text("utf-8").splitlines()
+    ]
+    terminal = next(
+        event
+        for event in events
+        if event["payload"].get("inference_call_id") == inference_id
+        and event["payload"]["type"] == "inference_completed"
+    )
+    terminal["payload"] = {
+        "type": "inference_failed",
+        "inference_call_id": inference_id,
+        "upstream_request_id": None,
+        "error": error,
+        "partial_response_payload": None,
+    }
+    (bundle / "trace.jsonl").write_text(
+        "".join(json.dumps(event) + "\n" for event in events),
+        encoding="utf-8",
+    )
+
+
+def _append_linked_local_inference_failure(bundle: Path) -> None:
+    events = [
+        json.loads(line)
+        for line in (bundle / "trace.jsonl").read_text("utf-8").splitlines()
+    ]
+    started = copy.deepcopy(
+        next(
+            event
+            for event in events
+            if event["payload"]["type"] == "inference_started"
+        )
+    )
+    turn_end_index = next(
+        index
+        for index, event in enumerate(events)
+        if event["payload"]["type"] == "codex_turn_ended"
+    )
+    turn_end = events[turn_end_index]
+    inference_id = "local-post-tool-failure"
+    started["wall_time_unix_ms"] = turn_end["wall_time_unix_ms"] - 2
+    started["payload"]["inference_call_id"] = inference_id
+    failed = {
+        **{
+            key: started[key]
+            for key in (
+                "schema_version",
+                "rollout_id",
+                "thread_id",
+                "codex_turn_id",
+            )
+        },
+        "seq": 0,
+        "wall_time_unix_ms": turn_end["wall_time_unix_ms"] - 1,
+        "payload": {
+            "type": "inference_failed",
+            "inference_call_id": inference_id,
+            "upstream_request_id": None,
+            "error": "local inference stopped after tool failure",
+            "partial_response_payload": None,
+        },
+    }
+    events[turn_end_index:turn_end_index] = [started, failed]
+    for seq, event in enumerate(events, start=1):
+        event["seq"] = seq
+    (bundle / "trace.jsonl").write_text(
+        "".join(json.dumps(event) + "\n" for event in events),
+        encoding="utf-8",
+    )
+
+
 def _write_metadata(path: Path, *roles: str, terminal: str = "completed") -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
@@ -681,6 +913,395 @@ class HarnessObservationTests(unittest.TestCase):
             observation["tools"]["repeated_exact_command_lifecycle_duration_ms"],
             30,
         )
+
+    def test_pre_runtime_guardian_limit_is_a_zero_output_failed_command(self) -> None:
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            trace_root = root / "trace-root"
+            trace_root.mkdir()
+            bundle = _write_bundle(
+                trace_root / "exec",
+                commands=((COMMAND_BODY, 128, RAW_PATH_BODY),),
+                pre_runtime_denied_command_index=1,
+            )
+            _make_pre_runtime_guardian_limit(bundle)
+            metadata = root / "api-metadata.json"
+            _write_metadata(metadata, "main")
+
+            observation = project_task_observation(trace_root, metadata)
+
+        encoded = json.dumps(observation, sort_keys=True)
+        self.assertEqual(observation["tools"]["command"], 1)
+        self.assertGreater(observation["tools"]["total_lifecycle_duration_ms"], 0)
+        self.assertEqual(observation["tools"]["command_output_bytes"], 0)
+        self.assertEqual(observation["tools"]["max_command_output_bytes"], 0)
+        self.assertNotIn(GUARDIAN_LIMIT_ERROR, encoded)
+
+    def test_pre_runtime_guardian_rejection_is_a_zero_output_failed_command(self) -> None:
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            trace_root = root / "trace-root"
+            trace_root.mkdir()
+            bundle = _write_bundle(
+                trace_root / "exec",
+                commands=((COMMAND_BODY, 128, RAW_PATH_BODY),),
+                pre_runtime_denied_command_index=1,
+            )
+            _make_pre_runtime_guardian_limit(
+                bundle, error=GUARDIAN_REJECTION_ERROR
+            )
+            metadata = root / "api-metadata.json"
+            _write_metadata(metadata, "main")
+
+            observation = project_task_observation(trace_root, metadata)
+
+        encoded = json.dumps(observation, sort_keys=True)
+        self.assertEqual(observation["tools"]["command"], 1)
+        self.assertEqual(observation["tools"]["command_output_bytes"], 0)
+        self.assertEqual(observation["tools"]["max_command_output_bytes"], 0)
+        self.assertNotIn("synthetic rejection", encoded)
+
+    def test_pre_runtime_guardian_rejection_is_not_a_guardian_limit(self) -> None:
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            trace_root = root / "trace-root"
+            trace_root.mkdir()
+            bundle = _write_bundle(
+                trace_root / "exec",
+                commands=((COMMAND_BODY, 128, RAW_PATH_BODY),),
+                pre_runtime_denied_command_index=1,
+            )
+            _make_pre_runtime_guardian_limit(
+                bundle, error=GUARDIAN_REJECTION_ERROR
+            )
+            _append_linked_local_inference_failure(bundle)
+            metadata = root / "api-metadata.json"
+            _write_metadata(metadata, "main")
+
+            with self.assertRaisesRegex(
+                HarnessObservationError, "populations disagree"
+            ):
+                project_task_observation(trace_root, metadata)
+
+    def test_pre_runtime_justification_error_is_a_failed_command(self) -> None:
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            trace_root = root / "trace-root"
+            trace_root.mkdir()
+            bundle = _write_bundle(
+                trace_root / "exec",
+                commands=((COMMAND_BODY, 128, RAW_PATH_BODY),),
+                pre_runtime_denied_command_index=1,
+            )
+            _make_pre_runtime_guardian_limit(bundle, error=JUSTIFICATION_ERROR)
+            _update_exec_invocation_arguments(
+                bundle,
+                updates={"justification": ""},
+                removals=("sandbox_permissions",),
+            )
+            metadata = root / "api-metadata.json"
+            _write_metadata(metadata, "main")
+
+            observation = project_task_observation(trace_root, metadata)
+
+        encoded = json.dumps(observation, sort_keys=True)
+        self.assertEqual(observation["tools"]["command"], 1)
+        self.assertEqual(observation["tools"]["command_output_bytes"], 0)
+        self.assertEqual(observation["tools"]["max_command_output_bytes"], 0)
+        self.assertNotIn("sandbox_permissions", encoded)
+
+    def test_pre_runtime_justification_error_is_bound_to_its_arguments(self) -> None:
+        cases = (
+            ({}, ("justification", "sandbox_permissions")),
+            ({"justification": None}, ("sandbox_permissions",)),
+            (
+                {
+                    "justification": "review this action",
+                    "sandbox_permissions": "require_escalated",
+                },
+                (),
+            ),
+        )
+        for updates, removals in cases:
+            with self.subTest(updates=updates, removals=removals):
+                with TemporaryDirectory() as raw:
+                    root = Path(raw)
+                    trace_root = root / "trace-root"
+                    trace_root.mkdir()
+                    bundle = _write_bundle(
+                        trace_root / "exec",
+                        commands=((COMMAND_BODY, 128, RAW_PATH_BODY),),
+                        pre_runtime_denied_command_index=1,
+                    )
+                    _make_pre_runtime_guardian_limit(
+                        bundle, error=JUSTIFICATION_ERROR
+                    )
+                    _update_exec_invocation_arguments(
+                        bundle,
+                        updates=updates,
+                        removals=removals,
+                    )
+                    metadata = root / "api-metadata.json"
+                    _write_metadata(metadata, "main")
+
+                    with self.assertRaisesRegex(
+                        HarnessObservationError, "typed pre-runtime rejection"
+                    ):
+                        project_task_observation(trace_root, metadata)
+
+    def test_pre_runtime_justification_error_is_not_a_guardian_limit(self) -> None:
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            trace_root = root / "trace-root"
+            trace_root.mkdir()
+            bundle = _write_bundle(
+                trace_root / "exec",
+                commands=((COMMAND_BODY, 128, RAW_PATH_BODY),),
+                pre_runtime_denied_command_index=1,
+            )
+            _make_pre_runtime_guardian_limit(bundle, error=JUSTIFICATION_ERROR)
+            _update_exec_invocation_arguments(
+                bundle,
+                updates={"justification": "review this action"},
+                removals=("sandbox_permissions",),
+            )
+            _append_linked_local_inference_failure(bundle)
+            metadata = root / "api-metadata.json"
+            _write_metadata(metadata, "main")
+
+            with self.assertRaisesRegex(
+                HarnessObservationError, "populations disagree"
+            ):
+                project_task_observation(trace_root, metadata)
+
+    def test_pre_runtime_unknown_write_stdin_is_a_zero_output_failed_poll(self) -> None:
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            trace_root = root / "trace-root"
+            trace_root.mkdir()
+            bundle = _write_bundle(
+                trace_root / "exec",
+                commands=((COMMAND_BODY, 128, RAW_PATH_BODY),),
+                pre_runtime_denied_command_index=1,
+            )
+            _make_pre_runtime_unknown_write_stdin(bundle)
+            metadata = root / "api-metadata.json"
+            _write_metadata(metadata, "main")
+
+            observation = project_task_observation(trace_root, metadata)
+
+        encoded = json.dumps(observation, sort_keys=True)
+        self.assertEqual(observation["tools"]["command"], 1)
+        self.assertEqual(observation["tools"]["command_output_bytes"], 0)
+        self.assertEqual(observation["tools"]["max_command_output_bytes"], 0)
+        self.assertEqual(observation["tools"]["repeated_exact_commands"], 0)
+        self.assertNotIn(UNKNOWN_PROCESS_ERROR, encoded)
+
+    def test_pre_runtime_unknown_write_stdin_binds_the_requested_process(self) -> None:
+        cases = (
+            (10, UNKNOWN_PROCESS_ERROR),
+            (9, "write_stdin failed: stdin is closed"),
+        )
+        for process_id, error in cases:
+            with self.subTest(process_id=process_id, error=error), TemporaryDirectory() as raw:
+                root = Path(raw)
+                trace_root = root / "trace-root"
+                trace_root.mkdir()
+                bundle = _write_bundle(
+                    trace_root / "exec",
+                    commands=((COMMAND_BODY, 128, RAW_PATH_BODY),),
+                    pre_runtime_denied_command_index=1,
+                )
+                _make_pre_runtime_unknown_write_stdin(
+                    bundle, process_id=process_id, error=error
+                )
+                metadata = root / "api-metadata.json"
+                _write_metadata(metadata, "main")
+
+                with self.assertRaisesRegex(
+                    HarnessObservationError, "typed missing-process"
+                ):
+                    project_task_observation(trace_root, metadata)
+
+    def test_pre_runtime_guardian_limit_participates_in_failure_repeat(self) -> None:
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            trace_root = root / "trace-root"
+            trace_root.mkdir()
+            bundle = _write_bundle(
+                trace_root / "exec",
+                commands=(
+                    (COMMAND_BODY, 128, RAW_PATH_BODY),
+                    (COMMAND_BODY, 1, RAW_PATH_BODY),
+                ),
+                pre_runtime_denied_command_index=1,
+                code_mode_command_indexes=(2,),
+            )
+            _make_pre_runtime_guardian_limit(bundle)
+            metadata = root / "api-metadata.json"
+            _write_metadata(metadata, "main")
+
+            observation = project_task_observation(trace_root, metadata)
+
+        self.assertEqual(
+            observation["tools"]["command_output_bytes"],
+            len(OUTPUT_BODY.encode("utf-8")),
+        )
+        self.assertEqual(observation["tools"]["repeated_exact_commands"], 1)
+        self.assertEqual(observation["tools"]["repeated_after_failure"], 1)
+
+    def test_local_guardian_limit_inference_is_not_an_api_response(self) -> None:
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            trace_root = root / "trace-root"
+            trace_root.mkdir()
+            exec_bundle = _write_bundle(
+                trace_root / "exec",
+                commands=((COMMAND_BODY, 128, RAW_PATH_BODY),),
+                pre_runtime_denied_command_index=1,
+            )
+            _make_pre_runtime_guardian_limit(exec_bundle)
+            guardian_bundle = _write_bundle(
+                trace_root / "guardian",
+                session_source={"subagent": {"other": "guardian"}},
+                commands=(),
+                turn_count=2,
+            )
+            _make_local_guardian_limit_inference(guardian_bundle)
+            metadata = root / "api-metadata.json"
+            _write_metadata(metadata, "main", "guardian")
+
+            observation = project_task_observation(trace_root, metadata)
+
+        self.assertEqual(observation["responses"]["total"], 2)
+        self.assertEqual(observation["responses"]["guardian"], 1)
+        self.assertEqual(observation["tools"]["command"], 1)
+        self.assertEqual(observation["tools"]["command_output_bytes"], 0)
+
+    def test_linked_exec_inference_failure_is_not_an_api_response(self) -> None:
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            trace_root = root / "trace-root"
+            trace_root.mkdir()
+            bundle = _write_bundle(
+                trace_root / "exec",
+                commands=((COMMAND_BODY, 128, RAW_PATH_BODY),),
+                pre_runtime_denied_command_index=1,
+            )
+            _make_pre_runtime_guardian_limit(bundle)
+            _append_linked_local_inference_failure(bundle)
+            metadata = root / "api-metadata.json"
+            _write_metadata(metadata, "main")
+
+            observation = project_task_observation(trace_root, metadata)
+
+        self.assertEqual(observation["responses"]["main"], 1)
+        self.assertEqual(observation["tools"]["command"], 1)
+
+    def test_unlinked_exec_inference_failure_is_not_exempted(self) -> None:
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            trace_root = root / "trace-root"
+            trace_root.mkdir()
+            bundle = _write_bundle(trace_root / "exec")
+            _append_linked_local_inference_failure(bundle)
+            metadata = root / "api-metadata.json"
+            _write_metadata(metadata, "main")
+
+            with self.assertRaisesRegex(
+                HarnessObservationError, "populations disagree"
+            ):
+                project_task_observation(trace_root, metadata)
+
+    def test_generic_local_guardian_failure_is_not_exempted(self) -> None:
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            trace_root = root / "trace-root"
+            trace_root.mkdir()
+            _write_bundle(trace_root / "exec")
+            guardian_bundle = _write_bundle(
+                trace_root / "guardian",
+                session_source={"subagent": {"other": "guardian"}},
+                commands=(),
+                turn_count=2,
+            )
+            _make_local_guardian_limit_inference(
+                guardian_bundle,
+                error="ordinary local Guardian failure",
+            )
+            metadata = root / "api-metadata.json"
+            _write_metadata(metadata, "main", "guardian")
+
+            with self.assertRaisesRegex(
+                HarnessObservationError, "populations disagree"
+            ):
+                project_task_observation(trace_root, metadata)
+
+    def test_pre_runtime_guardian_limit_requires_exact_failed_error_shape(self) -> None:
+        modes = (
+            "ordinary_error",
+            "missing_409",
+            "ended_completed",
+            "extra_result_field",
+            "model_requester",
+        )
+        for mode in modes:
+            with self.subTest(mode=mode), TemporaryDirectory() as raw:
+                root = Path(raw)
+                trace_root = root / "trace-root"
+                trace_root.mkdir()
+                bundle = _write_bundle(
+                    trace_root / "exec",
+                    commands=((COMMAND_BODY, 128, RAW_PATH_BODY),),
+                    pre_runtime_denied_command_index=1,
+                )
+                error = {
+                    "ordinary_error": "exec_command failed with status 409",
+                    "missing_409": (
+                        "exec_command failed; error code "
+                        "guardian_logical_request_limit_exceeded"
+                    ),
+                }.get(mode, GUARDIAN_LIMIT_ERROR)
+                _make_pre_runtime_guardian_limit(bundle, error=error)
+                events = [
+                    json.loads(line)
+                    for line in (bundle / "trace.jsonl")
+                    .read_text("utf-8")
+                    .splitlines()
+                ]
+                if mode == "ended_completed":
+                    ended = next(
+                        event
+                        for event in events
+                        if event["payload"]["type"] == "tool_call_ended"
+                    )
+                    ended["payload"]["status"] = "completed"
+                elif mode == "extra_result_field":
+                    ended = next(
+                        event
+                        for event in events
+                        if event["payload"]["type"] == "tool_call_ended"
+                    )
+                    result_path = bundle / ended["payload"]["result_payload"]["path"]
+                    result = json.loads(result_path.read_text("utf-8"))
+                    result["output"] = ""
+                    result_path.write_text(json.dumps(result), encoding="utf-8")
+                elif mode == "model_requester":
+                    started = next(
+                        event
+                        for event in events
+                        if event["payload"]["type"] == "tool_call_started"
+                    )
+                    started["payload"]["requester"] = {"type": "model"}
+                (bundle / "trace.jsonl").write_text(
+                    "".join(json.dumps(event) + "\n" for event in events),
+                    encoding="utf-8",
+                )
+                metadata = root / "api-metadata.json"
+                _write_metadata(metadata, "main")
+
+                with self.assertRaises(HarnessObservationError):
+                    project_task_observation(trace_root, metadata)
 
     def test_native_runtime_cannot_override_source_output_bytes(self) -> None:
         with TemporaryDirectory() as raw:

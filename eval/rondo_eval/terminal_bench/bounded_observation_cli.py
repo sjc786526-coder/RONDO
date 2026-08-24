@@ -69,6 +69,7 @@ from .bounded_observation import (
 from .live import run_budgeted_terminal_bench_core
 from .materialize import validate_frozen_task_source
 from .pair import (
+    guardian_review_count,
     has_complete_guardian_approval_sequence,
     load_historical_pair_identity,
     validate_harbor_installation,
@@ -523,8 +524,20 @@ def _validate_guardian_binding(live: Any, parsed: Any, metadata_path: Path) -> N
         raise BoundedObservationError(
             "Plan 056 completed request sequence is not approval-complete"
         )
+    bound_guardian_requests = guardian_requests
+    if parsed.outcome is RunOutcome.COMPLETED and guardian_requests:
+        bound_guardian_requests = [
+            request
+            for index, (role, request) in enumerate(zip(roles, requests, strict=True))
+            if role == "guardian"
+            and (index + 1 == len(roles) or roles[index + 1] != "guardian")
+        ]
+        if len(bound_guardian_requests) != guardian_review_count(roles):
+            raise BoundedObservationError(
+                "Plan 056 Guardian review grouping is inconsistent"
+            )
     expected = tuple(
-        request.get("canonical_body_sha256") for request in guardian_requests
+        request.get("canonical_body_sha256") for request in bound_guardian_requests
     )
     observed = tuple(item.canonical_request_sha256 for item in live.evidence)
     if (
@@ -669,6 +682,7 @@ def _revalidate_record_sources(
     identity: BoundedObservationIdentity,
     slot: BoundedObservationSlot,
     record: Mapping[str, Any],
+    preserve_agent_failure_verifier_reward: bool = False,
 ) -> None:
     root = campaign_root(paths, identity)
     sources = record["sources"]
@@ -693,6 +707,9 @@ def _revalidate_record_sources(
         result_path.parent,
         host_returncode=terminal["host_returncode"],
         expected_task_id=slot.task_id,
+        preserve_agent_failure_verifier_reward=(
+            preserve_agent_failure_verifier_reward
+        ),
     )
     terminal_record = record["terminal_bench"]
     if (

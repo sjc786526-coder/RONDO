@@ -30,6 +30,7 @@ from .compat import (
     EnvironmentLike,
     EnvironmentPaths,
     HarborCodexAgent,
+    NonZeroAgentExitCodeError,
     exec_result,
     with_prompt_template,
 )
@@ -46,6 +47,7 @@ _MODEL_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
 _EVAL_PROVIDER_ID = "rondo_eval_provider"
 _REASONING_EFFORTS = {"none", "low", "medium", "high", "xhigh", "max"}
 FIX_GIT_CANONICAL_WORKDIR = "/app/personal-site"
+AGENT_EXECUTION_RECEIPT_FILENAME = "rondo-agent-execution.json"
 
 
 class AdapterError(RuntimeError):
@@ -90,8 +92,6 @@ class UploadBinaryAdapter(HarborCodexAgent):
     # attribute that is absent from the lightweight compatibility test double.
     _OUTPUT_FILENAME: ClassVar[str] = "codex.txt"
     _STDERR_FILENAME: ClassVar[str] = "codex.stderr.txt"
-    _REMOTE_CODEX_HOME = PurePosixPath("/tmp/rondo-eval-codex-home")
-    _REMOTE_CODEX_SECRETS_DIR = PurePosixPath("/tmp/rondo-eval-codex-secrets")
     _REMOTE_FROZEN_MODEL_CATALOG = PurePosixPath(
         "/opt/rondo-eval/bin/frozen-model-catalog.json"
     )
@@ -136,6 +136,8 @@ class UploadBinaryAdapter(HarborCodexAgent):
         developer_instructions_path: str | None = None,
         developer_instructions_sha256: str | None = None,
         rollout_trace_root: str | None = None,
+        exec_command_repeat_guidance_enabled: bool | str = False,
+        plan058_agent_execution_id: str | None = None,
         extra_env: dict[str, str] | None = None,
         **kwargs: Any,
     ) -> None:
@@ -237,6 +239,28 @@ class UploadBinaryAdapter(HarborCodexAgent):
             rollout_trace_root,
             required=common_v2,
         )
+        repeat_guidance = _parse_bool_kwarg(
+            exec_command_repeat_guidance_enabled,
+            "exec_command_repeat_guidance_enabled",
+        )
+        if repeat_guidance and (
+            self.side is not Side.RONDO or self._product is not Product.RONDO_LOCAL
+        ):
+            raise AdapterError(
+                "exec_command repeat guidance is reserved for RONDO Local"
+            )
+        if plan058_agent_execution_id is not None and (
+            not isinstance(plan058_agent_execution_id, str)
+            or re.fullmatch(r"[A-Za-z0-9_.-]{1,160}", plan058_agent_execution_id)
+            is None
+        ):
+            raise AdapterError("Plan 058 agent execution identity is invalid")
+        if plan058_agent_execution_id is not None and (
+            self.side is not Side.RONDO or self._product is not Product.RONDO_LOCAL
+        ):
+            raise AdapterError(
+                "Plan 058 agent execution receipt is reserved for RONDO Local"
+            )
         if trace_root is not None and not common_v2 and (
             self.side is not Side.RONDO or self._product is not Product.RONDO_LOCAL
         ):
@@ -303,6 +327,8 @@ class UploadBinaryAdapter(HarborCodexAgent):
         self._developer_instructions_sha256 = policy_sha256
         self._developer_instructions = policy_text
         self._rollout_trace_root = trace_root
+        self._exec_command_repeat_guidance_enabled = repeat_guidance
+        self._plan058_agent_execution_id = plan058_agent_execution_id
         self._frozen_model_catalog_path = frozen_model_catalog_path
         self._frozen_model_catalog_sha256 = frozen_model_catalog_sha256
         self._frozen_model_catalog_source_commit = frozen_model_catalog_source_commit
@@ -548,13 +574,24 @@ class UploadBinaryAdapter(HarborCodexAgent):
         del context  # Harbor's Codex parser populates context in populate_context_post_run.
         if not isinstance(instruction, str):
             raise AdapterError("instruction must be text")
-        remote_home = self._REMOTE_CODEX_HOME.as_posix()
-        remote_secrets = self._REMOTE_CODEX_SECRETS_DIR.as_posix()
-        remote_auth = (self._REMOTE_CODEX_SECRETS_DIR / "auth.json").as_posix()
-        remote_gitconfig = (self._REMOTE_CODEX_HOME / "gitconfig").as_posix()
         agent_dir = EnvironmentPaths.agent_dir.as_posix()
+        # Release builds refuse to create their required arg0 helper aliases
+        # below a system temporary directory.  Keeping CODEX_HOME under /tmp
+        # therefore made ordinary workspace-write calls fail before execution
+        # because codex-linux-sandbox could not be found.  The Harbor agent log
+        # mount is already adapter-owned and writable, so use two hidden,
+        # precisely-cleaned directories there instead.
+        remote_home = (EnvironmentPaths.agent_dir / ".rondo-codex-home").as_posix()
+        remote_secrets = (
+            EnvironmentPaths.agent_dir / ".rondo-codex-secrets"
+        ).as_posix()
+        remote_auth = f"{remote_secrets}/auth.json"
+        remote_gitconfig = f"{remote_home}/gitconfig"
         output_path = (EnvironmentPaths.agent_dir / self._OUTPUT_FILENAME).as_posix()
         stderr_path = (EnvironmentPaths.agent_dir / self._STDERR_FILENAME).as_posix()
+        execution_receipt_path = (
+            EnvironmentPaths.agent_dir / AGENT_EXECUTION_RECEIPT_FILENAME
+        ).as_posix()
         nonsecret_env = {
             "CODEX_HOME": remote_home,
             "GIT_CONFIG_GLOBAL": remote_gitconfig,
@@ -714,6 +751,11 @@ class UploadBinaryAdapter(HarborCodexAgent):
                 'sandbox_mode="workspace-write"',
                 "sandbox_workspace_write.network_access=true",
                 "features.code_mode_host=true",
+                *(
+                    ("features.exec_command_repeat_guidance=true",)
+                    if self._exec_command_repeat_guidance_enabled
+                    else ()
+                ),
                 f'model_provider={json.dumps(_EVAL_PROVIDER_ID)}',
                 f'model_providers.{_EVAL_PROVIDER_ID}.name="Configured Provider"',
                 f'model_providers.{_EVAL_PROVIDER_ID}.base_url='
@@ -779,7 +821,7 @@ class UploadBinaryAdapter(HarborCodexAgent):
                 ),
             )
             override_args = " ".join(f"-c {shlex.quote(value)}" for value in overrides)
-            command = (
+            agent_pipeline = (
                 f"set -o pipefail; {shlex.quote(self.remote_path)} exec "
                 "--strict-config --ignore-user-config "
                 "--skip-git-repo-check "
@@ -787,6 +829,14 @@ class UploadBinaryAdapter(HarborCodexAgent):
                 f"{override_args} -- {shlex.quote(instruction)} "
                 f"</dev/null 2>{shlex.quote(stderr_path)} | tee {shlex.quote(output_path)}"
             )
+            if self._plan058_agent_execution_id is not None:
+                command = _with_plan058_execution_receipt(
+                    agent_pipeline,
+                    receipt_path=execution_receipt_path,
+                    execution_id=self._plan058_agent_execution_id,
+                )
+            else:
+                command = agent_pipeline
             _validate_safe_codex_command(
                 command,
                 side=self.side,
@@ -805,6 +855,10 @@ class UploadBinaryAdapter(HarborCodexAgent):
                 common_multi_agent_v2=self._common_multi_agent_v2,
                 multi_agent_max_concurrency=self._multi_agent_max_concurrency,
                 developer_instructions=self._developer_instructions,
+                exec_command_repeat_guidance_enabled=(
+                    self._exec_command_repeat_guidance_enabled
+                ),
+                plan058_agent_execution_id=self._plan058_agent_execution_id,
             )
             await _checked_exec_as_agent(
                 environment,
@@ -814,6 +868,34 @@ class UploadBinaryAdapter(HarborCodexAgent):
                 command_id="agent_exec",
                 timeout_sec=None,
             )
+            if self._plan058_agent_execution_id is not None:
+                receipt_result = await _checked_exec_as_agent(
+                    environment,
+                    command=f"cat -- {shlex.quote(execution_receipt_path)}",
+                    env=nonsecret_env,
+                    stage="run",
+                    command_id="read_agent_execution_receipt",
+                )
+                agent_exit, tee_exit = _parse_agent_execution_receipt_result(
+                    receipt_result,
+                    expected_execution_id=self._plan058_agent_execution_id,
+                )
+                if tee_exit != 0:
+                    raise _diagnostic_error(
+                        stage="run",
+                        command_id="agent_output_capture",
+                        stderr_summary="other_redacted",
+                    )
+                if agent_exit == 1:
+                    raise NonZeroAgentExitCodeError(
+                        "agent process exited with a non-zero status"
+                    )
+                if agent_exit != 0:
+                    raise _diagnostic_error(
+                        stage="run",
+                        command_id="agent_exec",
+                        stderr_summary="other_redacted",
+                    )
         finally:
             # Cleanup is deliberately restricted to the two adapter-owned paths.
             try:
@@ -868,6 +950,8 @@ def adapter_for(
     developer_instructions_path: str | None = None,
     developer_instructions_sha256: str | None = None,
     rollout_trace_root: str | None = None,
+    exec_command_repeat_guidance_enabled: bool = False,
+    plan058_agent_execution_id: str | None = None,
 ) -> UploadBinaryAdapter:
     adapter_type: type[UploadBinaryAdapter]
     if side is Side.CODEX:
@@ -914,6 +998,8 @@ def adapter_for(
         developer_instructions_path=developer_instructions_path,
         developer_instructions_sha256=developer_instructions_sha256,
         rollout_trace_root=rollout_trace_root,
+        exec_command_repeat_guidance_enabled=exec_command_repeat_guidance_enabled,
+        plan058_agent_execution_id=plan058_agent_execution_id,
     )
 
 
@@ -1015,6 +1101,16 @@ def manifest_agent_kwargs(adapter: UploadBinaryAdapter) -> tuple[tuple[str, str]
             (("rollout_trace_root", adapter._rollout_trace_root),)
             if adapter._rollout_trace_root is not None
             and not adapter._common_multi_agent_v2
+            else ()
+        ),
+        *(
+            (("exec_command_repeat_guidance_enabled", "true"),)
+            if adapter._exec_command_repeat_guidance_enabled
+            else ()
+        ),
+        *(
+            (("plan058_agent_execution_id", adapter._plan058_agent_execution_id),)
+            if adapter._plan058_agent_execution_id is not None
             else ()
         ),
     ]
@@ -1190,9 +1286,28 @@ def _validate_safe_codex_command(
     common_multi_agent_v2: bool = False,
     multi_agent_max_concurrency: int | None = None,
     developer_instructions: str | None = None,
+    exec_command_repeat_guidance_enabled: bool = False,
+    plan058_agent_execution_id: str | None = None,
 ) -> None:
     if not command.startswith("set -o pipefail; "):
         raise AdapterError("Codex output pipeline must preserve the command exit status")
+    receipt_name = AGENT_EXECUTION_RECEIPT_FILENAME
+    if plan058_agent_execution_id is not None:
+        receipt_contract = (
+            receipt_name,
+            'rondo_pipeline_status=("${PIPESTATUS[@]}")',
+            'rondo_agent_exit_code="${rondo_pipeline_status[0]}"',
+            'rondo_tee_exit_code="${rondo_pipeline_status[1]}"',
+            '"agent_exit_code":%s',
+            '"execution_id":%s',
+            '"tee_exit_code":%s',
+        )
+        if any(item not in command for item in receipt_contract) or not command.endswith(
+            "exit 0"
+        ):
+            raise AdapterError("Plan 058 agent execution receipt is incomplete")
+    elif receipt_name in command:
+        raise AdapterError("agent received an undeclared Plan 058 execution receipt")
     forbidden = (
         "--dangerously-bypass-approvals-and-sandbox",
         "--yolo",
@@ -1225,6 +1340,16 @@ def _validate_safe_codex_command(
         raise AdapterError("safe Codex execution options are incomplete")
     if command.count("features.code_mode_host=true") != 1:
         raise AdapterError("code-mode host feature override is ambiguous")
+    repeat_guidance_item = "features.exec_command_repeat_guidance=true"
+    if exec_command_repeat_guidance_enabled:
+        if product is not Product.RONDO_LOCAL:
+            raise AdapterError(
+                "exec_command repeat guidance is reserved for RONDO Local"
+            )
+        if command.count(repeat_guidance_item) != 1:
+            raise AdapterError("exec_command repeat guidance override is incomplete")
+    elif repeat_guidance_item in command:
+        raise AdapterError("agent received undeclared exec_command repeat guidance")
     if command.count("sandbox_workspace_write.network_access=true") != 1:
         raise AdapterError("workspace-write network policy override is ambiguous")
     if "model_providers.openai." in command:
@@ -1453,6 +1578,72 @@ def _diagnostic_error(
         stage=stage,
         command_id=command_id,
         stderr_summary=stderr_summary,
+    )
+
+
+def _parse_agent_execution_receipt_result(
+    result: object, *, expected_execution_id: str
+) -> tuple[int, int]:
+    try:
+        _code, stdout, _stderr = exec_result(result)
+        value = json.loads(stdout)
+    except (TypeError, UnicodeError, json.JSONDecodeError) as exc:
+        raise _diagnostic_error(
+            stage="run",
+            command_id="read_agent_execution_receipt",
+            stderr_summary="other_redacted",
+        ) from exc
+    if (
+        not isinstance(value, dict)
+        or set(value) != {
+            "schema_version",
+            "execution_id",
+            "agent_exit_code",
+            "tee_exit_code",
+        }
+        or value["schema_version"] != 1
+        or value["execution_id"] != expected_execution_id
+        or any(
+            isinstance(value[name], bool)
+            or not isinstance(value[name], int)
+            or not 0 <= value[name] <= 255
+            for name in ("agent_exit_code", "tee_exit_code")
+        )
+    ):
+        raise _diagnostic_error(
+            stage="run",
+            command_id="read_agent_execution_receipt",
+            stderr_summary="other_redacted",
+        )
+    return value["agent_exit_code"], value["tee_exit_code"]
+
+
+def _with_plan058_execution_receipt(
+    agent_pipeline: str, *, receipt_path: str, execution_id: str
+) -> str:
+    """Capture both pipeline exits while returning control to Harbor cleanly."""
+
+    if (
+        not agent_pipeline.startswith("set -o pipefail; ")
+        or not receipt_path.startswith("/")
+        or re.fullmatch(r"[A-Za-z0-9_.-]{1,160}", execution_id) is None
+    ):
+        raise AdapterError("Plan 058 agent execution receipt input is invalid")
+    receipt = shlex.quote(receipt_path)
+    receipt_tmp = shlex.quote(receipt_path + ".tmp")
+    encoded_execution_id = shlex.quote(json.dumps(execution_id))
+    return (
+        f"{agent_pipeline}; "
+        'rondo_pipeline_status=("${PIPESTATUS[@]}"); '
+        'rondo_agent_exit_code="${rondo_pipeline_status[0]}"; '
+        'rondo_tee_exit_code="${rondo_pipeline_status[1]}"; '
+        "umask 077; if ! printf "
+        "'{\"agent_exit_code\":%s,\"execution_id\":%s,"
+        "\"schema_version\":1,\"tee_exit_code\":%s}\\n' "
+        f'"$rondo_agent_exit_code" {encoded_execution_id} '
+        f'"$rondo_tee_exit_code" > {receipt_tmp}; then exit 70; fi; '
+        f"if ! mv -f -- {receipt_tmp} {receipt}; then exit 70; fi; "
+        "exit 0"
     )
 
 

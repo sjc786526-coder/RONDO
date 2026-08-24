@@ -18,6 +18,7 @@ fn exec_command_tool_matches_expected_spec() {
     let tool = create_exec_command_tool(CommandToolOptions {
         allow_login_shell: true,
         exec_permission_approvals_enabled: false,
+        repeat_guidance_enabled: false,
     });
 
     let description = if cfg!(windows) {
@@ -104,6 +105,7 @@ fn exec_command_tool_can_hide_shell_parameter() {
         CommandToolOptions {
             allow_login_shell: true,
             exec_permission_approvals_enabled: false,
+            repeat_guidance_enabled: false,
         },
         /*include_environment_id*/ false,
         /*include_shell_parameter*/ false,
@@ -111,6 +113,20 @@ fn exec_command_tool_can_hide_shell_parameter() {
 
     assert!(!has_parameter(&tool, "shell"));
     assert!(has_parameter(&tool, "cmd"));
+}
+
+#[test]
+fn exec_command_tool_can_add_repeat_guidance() {
+    let tool = create_exec_command_tool(CommandToolOptions {
+        allow_login_shell: true,
+        exec_permission_approvals_enabled: false,
+        repeat_guidance_enabled: true,
+    });
+
+    let ToolSpec::Function(tool) = tool else {
+        panic!("expected function tool");
+    };
+    assert!(tool.description.contains(EXEC_COMMAND_REPEAT_GUIDANCE));
 }
 
 #[test]
@@ -207,6 +223,7 @@ fn shell_command_tool_matches_expected_spec() {
     let tool = create_shell_command_tool(CommandToolOptions {
         allow_login_shell: true,
         exec_permission_approvals_enabled: false,
+        repeat_guidance_enabled: false,
     });
 
     let description = if cfg!(windows) {

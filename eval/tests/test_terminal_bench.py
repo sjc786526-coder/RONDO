@@ -1057,8 +1057,8 @@ class TerminalBenchTests(unittest.TestCase):
                 not call[1]
                 or call[1]
                 == {
-                    "CODEX_HOME": "/tmp/rondo-eval-codex-home",
-                    "GIT_CONFIG_GLOBAL": "/tmp/rondo-eval-codex-home/gitconfig",
+                    "CODEX_HOME": "/logs/agent/.rondo-codex-home",
+                    "GIT_CONFIG_GLOBAL": "/logs/agent/.rondo-codex-home/gitconfig",
                 }
                 for call in environment.calls
             )
@@ -1294,6 +1294,189 @@ class TerminalBenchTests(unittest.TestCase):
             )
         with self.assertRaises(runner_module.TerminalBenchRunError):
             enable_local_harness_observation(self.request(Side.CODEX))
+
+    def test_plan058_repeat_guidance_is_local_opt_in_and_reaches_strict_config(self) -> None:
+        request = replace(
+            self.request(Side.RONDO),
+            exec_command_repeat_guidance_enabled=True,
+        )
+        materializer = FakeMaterializer(self.root / "fake-repeat-guidance")
+        materializer.root.mkdir()
+        prepared = prepare_terminal_bench_run(
+            self.runtime_config(), request, materializer=materializer
+        )
+        adapter = prepared.adapter
+        self.assertIsInstance(adapter, RondoUploadAdapter)
+        self.assertEqual(
+            dict(adapters_module.manifest_agent_kwargs(adapter))[
+                "exec_command_repeat_guidance_enabled"
+            ],
+            "true",
+        )
+
+        environment = FakeEnvironment()
+        asyncio.run(adapter.run("native task instruction", environment, mock.Mock()))
+        commands = "\n".join(call[0] for call in environment.calls)
+        self.assertEqual(
+            commands.count("features.exec_command_repeat_guidance=true"), 1
+        )
+
+        default_local = self.adapter(RondoUploadAdapter)
+        self.assertNotIn(
+            "exec_command_repeat_guidance_enabled",
+            dict(adapters_module.manifest_agent_kwargs(default_local)),
+        )
+        with self.assertRaisesRegex(AdapterError, "reserved for RONDO Local"):
+            self.adapter(
+                CodexUploadAdapter,
+                exec_command_repeat_guidance_enabled=True,
+            )
+        with self.assertRaisesRegex(
+            runner_module.TerminalBenchRunError,
+            "reserved for RONDO Local",
+        ):
+            request = replace(
+                self.request(Side.CODEX),
+                exec_command_repeat_guidance_enabled=True,
+            )
+            materializer = FakeMaterializer(self.root / "invalid-repeat-guidance")
+            materializer.root.mkdir()
+            prepare_terminal_bench_run(
+                self.runtime_config(), request, materializer=materializer
+            )
+        with self.assertRaisesRegex(
+            runner_module.TerminalBenchRunError,
+            "flag is invalid",
+        ):
+            request = replace(
+                self.request(Side.RONDO),
+                exec_command_repeat_guidance_enabled="true",  # type: ignore[arg-type]
+            )
+            materializer = FakeMaterializer(self.root / "non-bool-repeat-guidance")
+            materializer.root.mkdir()
+            prepare_terminal_bench_run(
+                self.runtime_config(), request, materializer=materializer
+            )
+
+    def test_plan058_nonzero_receipt_uses_harbor_typed_agent_failure(self) -> None:
+        base = self.request(Side.RONDO)
+        request = replace(base, plan058_agent_execution_id=base.docker_task_id)
+        materializer = FakeMaterializer(self.root / "fake-agent-exit-receipt")
+        materializer.root.mkdir()
+        prepared = prepare_terminal_bench_run(
+            self.runtime_config(), request, materializer=materializer
+        )
+        adapter = prepared.adapter
+        self.assertEqual(
+            dict(adapters_module.manifest_agent_kwargs(adapter))[
+                "plan058_agent_execution_id"
+            ],
+            base.docker_task_id,
+        )
+
+        class ReceiptEnvironment(FakeEnvironment):
+            async def exec(self, command, **kwargs):
+                if command.removeprefix("set -o pipefail; ").startswith(
+                    "cat -- /logs/agent/rondo-agent-execution.json"
+                ):
+                    self.calls.append(
+                        (
+                            command,
+                            kwargs.get("env"),
+                            kwargs.get("timeout_sec"),
+                            kwargs.get("user"),
+                        )
+                    )
+                    return FakeExecResult(
+                        0,
+                        json.dumps(
+                            {
+                                "agent_exit_code": 1,
+                                "execution_id": base.docker_task_id,
+                                "schema_version": 1,
+                                "tee_exit_code": 0,
+                            }
+                        )
+                        + "\n",
+                    )
+                return await super().exec(command, **kwargs)
+
+        environment = ReceiptEnvironment()
+        with self.assertRaises(adapters_module.NonZeroAgentExitCodeError):
+            asyncio.run(
+                adapter.run("native task instruction", environment, mock.Mock())
+            )
+        command = next(
+            call[0]
+            for call in environment.calls
+            if "--strict-config" in call[0]
+        )
+        self.assertIn(adapters_module.AGENT_EXECUTION_RECEIPT_FILENAME, command)
+        self.assertIn('rondo_pipeline_status=("${PIPESTATUS[@]}")', command)
+        self.assertIn('rondo_agent_exit_code="${rondo_pipeline_status[0]}"', command)
+        self.assertIn('rondo_tee_exit_code="${rondo_pipeline_status[1]}"', command)
+        self.assertIn('"execution_id":%s', command)
+        self.assertIn('"tee_exit_code":%s', command)
+        self.assertTrue(command.endswith("exit 0"))
+        self.assertNotIn("approval_policy=\"never\"", command)
+        self.assertNotIn("sandbox_mode=\"danger-full-access\"", command)
+
+        default_local = self.adapter(RondoUploadAdapter)
+        self.assertNotIn(
+            "plan058_agent_execution_id",
+            dict(adapters_module.manifest_agent_kwargs(default_local)),
+        )
+        with self.assertRaisesRegex(AdapterError, "reserved for RONDO Local"):
+            self.adapter(
+                CodexUploadAdapter,
+                plan058_agent_execution_id="plan058-invalid",
+            )
+        for side, value in (
+            (Side.CODEX, "p1-b3-codex"),
+            (Side.RONDO, "wrong-attempt"),
+        ):
+            with self.subTest(side=side, value=value), self.assertRaises(
+                runner_module.TerminalBenchRunError
+            ):
+                invalid = replace(
+                    self.request(side),
+                    plan058_agent_execution_id=value,
+                )
+                invalid_materializer = FakeMaterializer(
+                    self.root / f"invalid-agent-exit-{side.value}-{value}"
+                )
+                invalid_materializer.root.mkdir()
+                prepare_terminal_bench_run(
+                    self.runtime_config(),
+                    invalid,
+                    materializer=invalid_materializer,
+                )
+
+    def test_plan058_receipt_shell_preserves_agent_and_tee_exits(self) -> None:
+        receipt = self.root / "plan058-shell-receipt.json"
+        command = adapters_module._with_plan058_execution_receipt(
+            "set -o pipefail; /bin/bash -c 'exit 1' | tee /dev/null",
+            receipt_path=str(receipt),
+            execution_id="plan058-shell-attempt-a1",
+        )
+
+        completed = subprocess.run(
+            ["/bin/bash", "-c", command],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(completed.returncode, 0)
+        self.assertEqual(
+            json.loads(receipt.read_text()),
+            {
+                "agent_exit_code": 1,
+                "execution_id": "plan058-shell-attempt-a1",
+                "schema_version": 1,
+                "tee_exit_code": 0,
+            },
+        )
 
     def test_only_multi_can_carry_the_team_state_off_flag(self) -> None:
         # `--strict-config` upstream cannot even deserialize the key, and Local
@@ -1922,6 +2105,10 @@ class TerminalBenchTests(unittest.TestCase):
         self.assertEqual(FakeBudgetProxy.last_kwargs["timeout_seconds"], 90.0)
         self.assertEqual(
             FakeBudgetProxy.last_kwargs["max_guardian_logical_requests"], 1
+        )
+        self.assertEqual(
+            FakeBudgetProxy.last_kwargs["run_id"],
+            self.request(Side.RONDO).docker_task_id,
         )
         self.assertNotEqual(
             FakeBudgetProxy.last_kwargs["timeout_seconds"],

@@ -108,6 +108,8 @@ pub enum Feature {
     CodeModeOnly,
     /// Use the single unified PTY-backed exec tool.
     UnifiedExec,
+    /// Add bounded guidance against no-progress exec_command repeats.
+    ExecCommandRepeatGuidance,
     /// Route shell tool execution through the zsh exec bridge.
     ShellZshFork,
     /// Allow unified exec to compose with the zsh exec bridge.
@@ -875,6 +877,12 @@ pub const FEATURES: &[FeatureSpec] = &[
         key: "unified_exec",
         stage: Stage::Stable,
         default_enabled: !cfg!(windows),
+    },
+    FeatureSpec {
+        id: Feature::ExecCommandRepeatGuidance,
+        key: "exec_command_repeat_guidance",
+        stage: Stage::UnderDevelopment,
+        default_enabled: false,
     },
     FeatureSpec {
         id: Feature::ShellZshFork,

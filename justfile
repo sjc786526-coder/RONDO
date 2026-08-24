@@ -510,6 +510,20 @@ eval-plan056 action="status" *args:
         uv run --directory eval --frozen --no-sync \
         python -B -m rondo_eval.terminal_bench.bounded_observation_cli "{{action}}" {{args}}
 
+# Plan 058 C2 commissioning/diagnostic/formal campaign. status is zero-API;
+# preflight is loopback-only Docker; run/resume require the task-bound paid literal.
+eval-plan058 action="status" *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    common_root="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
+    test -x "$common_root/eval/.venv/bin/python" || { echo "shared eval environment is missing" >&2; exit 2; }
+    env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy \
+        NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost \
+        UV_CACHE_DIR="$common_root/eval-data/uv-cache" \
+        UV_PROJECT_ENVIRONMENT="$common_root/eval/.venv" \
+        uv run --directory eval --frozen --no-sync \
+        python -B -m rondo_eval.terminal_bench.c2_behavior_cli "{{action}}" {{args}}
+
 # Generate and activate one schema-v7 identity.  Both runtime manifests and
 # the task-envelope budget are explicit inputs: the generator never copies the
 # historical Sol profile or cb652e1 Local bundle from v22.

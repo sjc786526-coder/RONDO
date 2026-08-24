@@ -1,0 +1,100 @@
+{
+  "schema_version": 1,
+  "result_id": "plan058-direction1-c2-phase-a-2026-08-22",
+  "source": {
+    "campaign_id": "plan056-direction1-bounded-observation-formal-v6",
+    "mode": "read_only",
+    "campaign_lock_sha256": "263cc3fa8ff75ca007100fe39e8bbde8b492f4cfc0898ef4d9490b097f3a9e7f",
+    "v28_lock_sha256": "a9567cb0ddeaa9c8e7cdfbd7253000a8453ec1ebbb03ca359deae2c048f7880b",
+    "slots_reviewed": 6,
+    "task_controls_reviewed": 0,
+    "external_campaigns_reviewed": 0
+  },
+  "baseline": {
+    "raw_exact_c2": {
+      "occurrences": 9,
+      "affected_slots": 6,
+      "affected_tasks": 4,
+      "duration_ms": 10108
+    },
+    "refined": {
+      "harmful_no_progress": {
+        "occurrences": 1,
+        "affected_slots": 1,
+        "affected_tasks": 1,
+        "duration_ms": 400
+      },
+      "reasonable_repeat": {
+        "occurrences": 8,
+        "duration_ms": 9708
+      },
+      "evidence_insufficient": {
+        "occurrences": 0,
+        "duration_ms": 0
+      }
+    }
+  },
+  "frozen_behavior_boundary": {
+    "candidate_identity": [
+      "requester",
+      "complete_command",
+      "cwd"
+    ],
+    "candidate_identity_is_sufficient_to_change_execution_eligibility": false,
+    "optimization": "Provide bounded pre-execution guidance only when the model itself can establish that an exact repeat is read-only, produces no new information, follows no relevant state change, and has no recovery reason.",
+    "always_execute": [
+      "write_or_network_or_unknown_side_effect",
+      "poll_or_wait",
+      "result_or_error_changed",
+      "file_environment_process_service_or_permission_changed",
+      "edit_then_retest",
+      "transport_or_temporary_upstream_retry",
+      "compact_resume_or_user_steer",
+      "explicit_continue",
+      "different_requester_command_or_cwd",
+      "insufficient_evidence"
+    ],
+    "recovery": "The optimization never suppresses a tool call; choosing another action or explicitly continuing immediately restores normal execution.",
+    "lifecycle": "Stateless guidance scoped to the current tool specification; it stores no cross-call, cross-turn, cross-session, or cross-task repeat state.",
+    "disabled_behavior": "The Plan 056 exec_command tool specification and execution path remain unchanged.",
+    "rollback": "Disable the feature; no state migration or data cleanup is required."
+  },
+  "frozen_decision_rules": {
+    "primary_benefit_metric": "refined_harmful_no_progress_occurrences",
+    "baseline": 1,
+    "retain_threshold": 0,
+    "required_reduction": 1,
+    "secondary_explanatory_metrics": [
+      "raw_exact_c2_occurrences",
+      "refined_harmful_no_progress_duration_ms",
+      "reasonable_repeat_occurrences",
+      "task_pass_fail"
+    ],
+    "no_harm_gates": [
+      "feature_off_preserves_plan056_exec_command_spec_and_execution",
+      "no_runtime_tool_call_suppression_or_result_mutation",
+      "writes_network_and_unknown_side_effect_calls_remain_executable",
+      "reasonable_recovery_polling_retest_resume_steer_and_continue_scenarios_remain_executable",
+      "formal_campaign_has_exactly_20_complete_source_valid_logical_results",
+      "no_material_evidence_that_the_behavior_change_caused_correctness_recovery_or_user_control_regression"
+    ],
+    "decision": {
+      "retain": "Primary threshold and every no-harm gate pass.",
+      "withdraw_or_disable": "Primary threshold is missed or any no-harm gate fails.",
+      "adjust": "Only a non-material narrowing that preserves the formally tested behavior may ship; a material behavior change remains disabled and requires a future formal evaluation."
+    }
+  },
+  "frozen_stop_rules": [
+    "plan058_total_real_api_cost_reaches_50_usd_or_cannot_reserve_the_next_worst_case_attempt",
+    "docker_or_windows_c_resource_gate_fails",
+    "required_global_heavy_resource_lease_is_unavailable",
+    "a_principle_boundary_would_be_crossed",
+    "authentication_quota_model_availability_or_configuration_error_cannot_be_repaired_in_scope",
+    "an_in_scope_local_infrastructure_failure_cannot_be_repaired"
+  ],
+  "privacy": {
+    "body_free": true,
+    "contains_prompt_response_command_or_tool_body": false,
+    "private_occurrence_table_tracked": false
+  }
+}
