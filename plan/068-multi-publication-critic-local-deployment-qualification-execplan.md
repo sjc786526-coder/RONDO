@@ -218,25 +218,34 @@ cache、调试和正式运行原始结果必须直接落在主物理仓库根的
 - 代表性 C1 commissioning 已覆盖 CPU FP32、CUDA BF16、offline→真实 Rust service→typed client、1/2/4/8 有界压力、取消、worker 故障、
   typed `backend`、自动重启、graceful/forced cleanup 与 shutdown；最终没有 GPU/service/worker/probe 残留。四对象均使用原始 safetensors，
   部署仅发生 BF16 dtype 适配，没有转换或量化。
-- 正式口径冻结为 24 条 Plan 054 `future_unseen_test=false` cohort、CPU FP32 原工件参考、CUDA BF16 直接部署、Plan 054 v4 临时 threshold，
-  freeze SHA-256 `1feb7ad63b206f3fab2fd6daf81aa89e41df5b7d9de4d9c0a428aa36b76b1809`；正式 source 为 clean
-  `4f3d67c85e0643a4272c499a45ca9245c53daabf`，正式 namespace 为
-  `plan068-formal-20260824T201213Z-qualification`。早期 preformal/announcement/parity 诊断 namespace 均未进入正式 archive。
-- write-once 正式结果已生成，四对象均为有效运行下的 `NOT_QUALIFIED`：base 未过 projected drift 与临时 verdict parity；C1 未过真实服务
-  projected score parity；C2 未过 ranking、obvious-margin direction 与 pair-direction；C3 未过真实服务 projected score parity。
-  `m3_c2_prerequisite_satisfied=false`，不得启动 M3-C2；未到达的正式指标在结果中为 `N/A` 并绑定离线或 service gate 原因。
-- 定向门禁通过：Python 113/113、Rust `codex-publication-critic` 34/34（0 skip）、Rust fmt、Plan 068 inference lock check、Python compileall 与
-  `git diff --check`。Docker 未使用/未运行。正式模型 load 约 3.26–3.51s、部署 peak RSS 约 4.295GB、peak VRAM 约 3.497GB；
-  C1/C3 warm P95 约 103–104ms，真实 service 压力均 15/15 成功，但 projected parity 分别漂移约 `9.58e-10` 与 `9.50e-4`，超过冻结 `1e-12` 门。
-- ignored 交接根 `eval-data/publication-critic/plan068/` 为 24,385,637,322 bytes（42 目录全 `0700`、209 文件全 `0600`）；任务 env
-  6,897,892,345 bytes，公开 HF cache 3,457,500,887 bytes，三者根均 `0700` 并保留。Windows C: 当前可用 139,242,090,496 bytes。
+- 首次独立审查确认旧正式轮把 Rust 单响应内部 sigmoid 校验 `1e-12` 误作独立 CUDA BF16 worker 的 projected drift 门；
+  `plan068-formal-20260824T201213Z-qualification` 因此失效且只保留为历史。随后用 C1 同一 packet 顺序启动四个 fresh worker，四者均完整
+  load/score/shutdown/reap，pairwise raw/projected drift 均为 0；跨 worker projected gate 事前冻结为与一般 BF16 部署漂移相同的统一 `0.005`，
+  不按 C1/C3 结果贴线倒推，Rust 单响应内部 `1e-12` 校验保持不变。
+- service/probe 改为面向 CUDA/动态库、离线模型、Python path、线程数和根 watchdog 的窄环境 allowlist，不再继承完整开发会话；fake sentinel
+  回归确认无关变量不进入子进程。freeze/offline/service/observations/archive 升级为 v2，直接绑定 run、freeze、artifact、cohort、packet 和 raw output hash；
+  real-service/probe/python 程序 hash 也纳入冻结，错误选择受控测试 binary 会在启动前 fail closed。
+- 最终正式口径仍为 24 条 Plan 054 `future_unseen_test=false` cohort、CPU FP32 原工件参考、CUDA BF16 直接部署和 Plan 054 v4 临时 threshold；
+  clean source 为 `3906152d1348c273f1cd94404f2a3978f2a836fc`，正式 namespace 为
+  `plan068-formal-20260824T222852Z-qualification-v3`，freeze SHA-256 为
+  `4497b02ed95583e3b2daf5ad1a102199d8144db27b20375255eefdfe3f5f1ce0`。误选受控 service 的 `...T221100Z...` 轮是基础设施失败，未拼入 v3。
+- v3 write-once 结果：base `NOT_QUALIFIED`（projected drift `0.03404`、1 次临时 verdict mismatch）；C1 `QUALIFIED`；C2
+  `NOT_QUALIFIED`（ranking `0.4565`、obvious direction `0.6037`、pair preservation `0.0833`）；C3 `QUALIFIED`。C1/C3
+  real service 均为 15/15 stress、0 verdict mismatch，service projected drift 分别约 `9.58e-10`/`9.50e-4`；C1 另完成 typed `backend`、
+  自动重启、post-restart review、cancel 与 cleanup，orphan/body leak 为 0。由于 base 未通过，`m3_c2_prerequisite_satisfied=false`，不得启动 M3-C2。
+- 本轮新增/受影响轻量门禁 41/41 通过，Python compileall 与 `git diff --check` 通过；此前已通过且未受 Rust 代码影响的 Python 113/113、
+  Rust 34/34、Rust fmt 和 lock check 不机械重跑。Docker 未使用/未运行。C1/C3 load 约 3.27/3.04s、peak RSS 约 4.299GB、
+  peak VRAM 约 3.530GB、warm P95 约 125–126ms、stress P95 约 751–755ms。
+- ignored 交接根 `eval-data/publication-critic/plan068/` 为 24,386,010,209 bytes（51 目录全 `0700`、269 文件全 `0600`）；任务 env
+  6,897,892,345 bytes。公开 HF cache 3,457,214,889 bytes，位于 `0700` 的 `eval-data/models/publication-critic/` 下，内部保持 HF 标准
+  `0755/0644`；均保留。Windows C: 当前可用 102,363,279,360 bytes；正式轮后无 GPU compute process 残留。
 - 删除前 provider 事实已刷新：0 Pod；当前卷列表只有 `hi3iaz8rsr`（`rondo-plan060-pcie-assets-20260824`、`US-KS-2`、Standard 60GB）；
   compute 持续费为 0，卷仍约 `$0.005833333/h`。24 小时账单中的旧 Pod/旧卷记录仅为历史累计。
 
 ### 当前工作
 
-- `AWAITING_LOCAL_HANDOFF_ACCEPTANCE / STAGE_D1`：本地交接、正式资格、相称门禁和删除前 provider 复核均已完成；正在形成 clean task-branch
-  提交并交独立审查者。收到字面量 `LOCAL_HANDOFF_ACCEPTED` 前不得删除 winner 卷。
+- `AWAITING_LOCAL_HANDOFF_REACCEPTANCE / STAGE_D1`：首次独立审查 findings 已修复，新的 commissioning、v3 四对象正式资格、相称门禁和删除前
+  provider 复核均已完成；正在形成 clean task-branch 提交并交同一审查者复验。收到新的字面量 `LOCAL_HANDOFF_ACCEPTED` 前不得删除 winner 卷。
 
 ### 本任务剩余步骤
 
@@ -250,8 +259,8 @@ cache、调试和正式运行原始结果必须直接落在主物理仓库根的
 
 ### 当前验收状态
 
-- `LOCAL_HANDOFF_READY_FOR_INDEPENDENT_REVIEW`：任务执行本身成功完成本地交接和四对象资格判定，但没有任何对象达到 `QUALIFIED`；
-  因此 M3-C2 前置保持关闭，并将失败能力如实返回上游。正式 summary 位于 ignored
+- `LOCAL_HANDOFF_READY_FOR_INDEPENDENT_REVIEW`：任务执行已完成本地交接和有效四对象资格判定；C1/C3 资格通过，base/C2 未通过。
+  由于 base 未通过，M3-C2 前置保持关闭。正式 summary 位于 ignored
   `eval-data/publication-critic/plan068/handoff-evidence/plan068-local-handoff-summary.json`，卷仍保留并持续计费。
 
 ### 交接边界
@@ -278,7 +287,8 @@ cache、调试和正式运行原始结果必须直接落在主物理仓库根的
 | 009 | M4-A 只共享资源互斥与主线整合边界，不成为 Plan 068 产品依赖或组合回归 | 三、四期正交，避免互相污染 plan、代码和重型资源 | 并行、WBS | 已采纳 |
 | 010 | WBS 完成状态留到独立验收和用户批准主线整合时基于最新 main 窄同步；执行者只提供 delta | 并行 Plan 067 可能修改共享 WBS，任务分支不应用旧文件覆盖 | 文档、交付 | 已采纳 |
 | 011 | 部署采用原始 safetensors + CUDA BF16，不做转换或量化；CPU FP32 同原工件作为参考 | 四对象均在 8GB GPU 内满足 load/RSS/VRAM/latency 门，额外格式转换只会增加漂移与维护成本 | 部署、参考 | 已验证 |
-| 012 | 正式 cohort 固定 Plan 054 的 24 条非 unseen fixtures，临时 threshold 固定 Plan 054 v4；服务 projected parity 门保持 `1e-12` | commissioning 后冻结同口径，正式结果不能为 C1/C3 通过而放宽 | 资格口径 | 已冻结 |
-| 013 | base/C1/C2/C3 均判 `NOT_QUALIFIED`，M3-C2 前置保持关闭 | base/C2 离线语义门失败，C1/C3 真实 service projected parity 门失败；均是有效基础设施下的候选/适配失败 | 资格结论、交接 | 已判定 |
-| 014 | 只接受 `4f3d67c...` clean source 和 `plan068-formal-20260824T201213Z-qualification` write-once archive；早期诊断 namespace 不拼接 | 维持正式 source/config/artifact/cohort 一致，调试失败与正式证据诚实隔离 | 正式证据 | 已执行 |
+| 012 | 正式 cohort 固定 Plan 054 的 24 条非 unseen fixtures，临时 threshold 固定 Plan 054 v4；跨 fresh worker projected parity 门统一为 `0.005`，单响应 sigmoid 校验仍为 `1e-12` | 四个 fresh C1 worker commissioning 均为零 pairwise drift；跨运行不要求逐位确定性，统一复用一般 BF16 projected drift cap，且不按 C1/C3 结果贴线 | 资格口径 | 已冻结 |
+| 013 | base/C1/C2/C3 分别判 `NOT_QUALIFIED`/`QUALIFIED`/`NOT_QUALIFIED`/`QUALIFIED`，M3-C2 前置保持关闭 | C1/C3 通过离线、资源、延迟、service parity、stress 与所需 lifecycle 门；base projected/verdict 与 C2 ranking/direction 仍失败，base 未通过使前置不成立 | 资格结论、交接 | 已判定 |
+| 014 | 只接受 `3906152...` clean source 和 `plan068-formal-20260824T222852Z-qualification-v3` write-once archive；旧 `...T201213Z...` 口径失效、`...T221100Z...` 基础设施失败，均不拼接 | 维持正式 source/config/program/artifact/cohort 一致，调试与失败轮诚实隔离 | 正式证据 | 已执行 |
 | 015 | Plan 067 已结束并合并；Plan 068 与当前 069/070 仅并行源码/轻测，重型 Cargo/Docker/真实模型继续共用全局锁串行 | 三任务产品职责独立，但共享宿主重型资源与后续主线整合面 | 并行、资源 | 已执行 |
+| 016 | 正式子进程采用窄环境 allowlist；run/freeze/artifact/cohort/packet/raw-output 与 real-service/probe/python 程序身份均用普通 JSON/SHA-256 直接绑定 | 修复首次独立审查的最小注入与人工错配风险，并防止受控测试 binary 冒充真实 runtime，不建设额外审计平台 | runtime、证据 | 已执行 |
