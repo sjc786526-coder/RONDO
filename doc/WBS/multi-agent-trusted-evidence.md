@@ -1,7 +1,7 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
 最后更新：2026-08-24 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
-状态：**第一期、第二期、M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b 与 Plan 064 已完成；Plan 060 技术 GO、Plan 064 DATA_GO、Plan 066 正式训练 GO；Plan 068 / M3-C1 已立项、待用户下达执行提示词；四期已规划、尚未实施**
+状态：**第一期、第二期、M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b 与 Plan 064 已完成；Plan 060 技术 GO、Plan 064 DATA_GO、Plan 066 正式训练 GO；Plan 068 / M3-C1 阶段 A 的无 Pod S3 可达性已验证，本地候选交接待执行；四期状态由独立 Plan 067 维护**
 
 ## 当前定位
 
@@ -120,7 +120,7 @@ error slice 均存在。tracked v4 同时保留 8 条 calibration 投影、conte
 **交接**：基座工程路径与 M3-B1a 数据建设 GO，未微调模型直接产品使用 NO-GO。M3-B1a 应复用 v4 输入/评价合同并建立独立
 train/validation/unseen-test split，优先补足 `internal_consistency` 精致 hard negative、new/completed useful-state 边界、
 threshold-near handoff 与 continuity/evidence omission 对照，并避免长度、角色和模板捷径。M3-A2 cohort 不得冒充未来 unseen test；
-M3-B1c 已提供通过独立验收的训练候选，Plan 068 / M3-C1 已另行立项，待用户向执行者下达一次性授权提示词。
+M3-B1c 已提供通过独立验收的训练候选，Plan 068 / M3-C1 已另行立项并完成阶段 A 的无 Pod S3 可达性探测。
 
 ### B 阶段：模型链与产品链并行
 
@@ -195,7 +195,7 @@ C1/C2/C3 三个 model-only safetensors 候选、55-candidate 固定 validation�
 validation 不进入梯度或训练决策，unseen-test 未导出、未运行。计算 Pod 已停止并永久删除，winner 卷保留 formal checkpoint、三个候选、exact 模型、
 venv 与 cache；final-01 terminal receipt 已 superseded，final-02 保留生成时的控制台费用快照。独立终审按用户指定冻结最新 provider 快照总费用
 `$10.9647715263`，距 `$23` 上限 `$12.0352284737`；correctness/functionality `remaining_findings=[]`，M3-B1c 完成并验收通过。
-该结论本身不授予实施或产品资格；Plan 068 / M3-C1 已立项，待用户下达执行提示词。
+该结论本身不授予产品资格；Plan 068 / M3-C1 已进入阶段 A，本地候选交接与部署资格仍待完成。
 
 #### M3-B2a：本地 Critic 服务（已完成并通过独立验收）
 
@@ -224,7 +224,7 @@ active cycle，每次阻断反馈轮换 continuation，Team State 专用 history
 调度器或自动重写器。实现可以为保持边界干净而重构，不要求堆叠在现有 handler 上。
 
 **交接**：修复与定向门禁已完成，同一独立审查者最终复验结论为 PASS，成果已进入主线；产品链与 Plan 066 模型链均已具备
-M3-C1 前置，Plan 068 已另行立项并等待用户下达执行提示词。本包不冻结真实 threshold/model identity，不扩张为自动改写器、第二套 Team State/trace
+M3-C1 前置，Plan 068 已另行立项并完成无 Pod S3 可达性探测。本包不冻结真实 threshold/model identity，不扩张为自动改写器、第二套 Team State/trace
 或通用服务监督器。
 
 ### C 阶段：本地收敛与最终选择
@@ -239,8 +239,9 @@ M3-C1 前置，Plan 068 已另行立项并等待用户下达执行提示词。�
 **宏观验收**：明确各候选是否具备本地资格，且至少一个候选能稳定处理有界 publication；其延迟、显存和失败率适合
 2–8 Agent 场景，格式转换或量化没有造成不可接受的判定漂移，离线 runner 与产品 runtime 判定一致。
 
-**当前状态**：Plan 068 已建立独立 ExecPlan，一次性授权范围与执行提示词已准备，待用户转交执行者后生效。资格集合为 exact base 与 Plan 066
-C1/C2/C3；本包负责真实 scorer、本地部署工件、转换/量化漂移、runner/service 一致性、资源/稳定性和 winner 卷最终交接。
+**当前状态**：Plan 068 已建立独立 ExecPlan 并进入阶段 A；现有 RunPod MCP 已确认 0 Pod/exact winner 卷，独立 S3 key 安全入口和无 Pod
+`HeadBucket`/有界目录可见性已验证，但尚未下载或校验候选。本包资格集合为 exact base 与 Plan 066 C1/C2/C3，负责真实 scorer、本地部署工件、
+转换/量化漂移、runner/service 一致性、资源/稳定性和 winner 卷最终交接。
 最终排名、正式 threshold、最终运行配置和产品启用仍属于 M3-C2 或后续工作包。
 
 #### M3-C2：联合横评与最终选择
@@ -274,8 +275,8 @@ C1/C2/C3；本包负责真实 scorer、本地部署工件、转换/量化漂移�
 - M3-A1、M3-A2 与 M3-B1a 已完成共同前置。Plan 060 / M3-B1b 与已完成的 Plan 064 构成 M3-B1c 的并列资格门；产品链的
   M3-B2a、M3-B2b 均已完成，两链在 M3-C1 前汇合。
 - M3-B1b 是独立付费资格门；Plan 060 `TECHNICAL_GO`、Plan 064 `DATA_GO` 与正式训练授权均已成立，Plan 066 已据此完成训练执行、
-  资源终态、final-02 receipt 与独立验收。Plan 068 已另行立项并等待用户下达执行提示词，不追加训练消费。
-- M3-B1c 与 M3-B2b 前置均已完成，Plan 068 / M3-C1 当前待实施；M3-C2 等待 M3-C1，M3-D 最后串行收口。
+  资源终态、final-02 receipt 与独立验收。Plan 068 已进入阶段 A，不追加训练消费。
+- M3-B1c 与 M3-B2b 前置均已完成；Plan 068 / M3-C1 的 S3 可达性已验证，本地候选交接、部署与资格待执行；M3-C2 等待 M3-C1，M3-D 最后串行收口。
 - RunPod 云端 smoke/训练不占本地 Cargo build lock，可与产品代码、数据整理和四期非冲突开发并行；真实本地模型、
   Docker 与重型 Cargo 仍按根 `AGENTS.md` 全局串行。
 - 三期与已经正式收口的方向 1 没有产品依赖。如果未来重新启动方向 1，普通工作仍可并行安排，但共享 API 预算、
@@ -374,8 +375,8 @@ C1/C2/C3；本包负责真实 scorer、本地部署工件、转换/量化漂移�
   M4-W0、M4-Z 的本地 Git 生命周期操作或正式验证已获授权。
 - RunPod 创建或计费、模型与数据上传、云端训练、权重下载、真实本地模型加载/推理、Docker 和付费 API 均须在对应任务
   开始前取得明确授权；23 USD 是三期训练的总预算上限，不等于已经授权消费。
-- Plan 068 的一次性授权文本已准备：从现有 winner 卷只读下载、项目内转换/量化/真实本地推理、必要时单一 task-only Docker，
-  以及本地副本独立验证后删除 exact task-only winner 卷；用户把该提示词转交执行者时生效。范围不包含新 Pod/云资源、远端上传、
+- Plan 068 的一次性授权已用于无 Pod S3 可达性探测，并继续覆盖从现有 winner 卷只读下载、项目内转换/量化/真实本地推理、必要时单一
+  task-only Docker，以及本地副本独立验证后删除 exact task-only winner 卷。范围不包含新 Pod/云资源、远端上传、
   真实 API、继续训练、M3-C2/M3-D、合并或推送。
 - 训练数据、权重、逐样本输出与私有运行材料留在 `eval-data/` 或仓库外；`training/` 只保存体积合规的轻量合同与数据。
 - 正确性测试随产品能力建设；测评只保留能指导模型选择和产品验收的轻量指标，不建设数据资产审计或可信证明平台。

@@ -153,8 +153,9 @@ cache、调试和正式运行原始结果必须直接落在主物理仓库根的
 11. **数据隔离。** 可使用 Plan 054 已冻结且明确 `future_unseen_test=false` 的 representative/boundary fixtures，以及阶段 A 明确允许的机械边界输入；
     不使用 v8 unseen-test。validation 若确需作为无标签部署输入，必须在阶段 A 明示且不得据其调权重、排名候选或冻结最终 threshold；更简单的等强 cohort
     应优先，避免把 M3-C1 变成 M3-C2。
-12. **远端只读交接与最小凭据。** 下载只针对 exact 卷 `hi3iaz8rsr`，优先使用 US-KS-2 官方 S3-compatible API 的只读对象操作；不做无界递归列举、
-    不记录 credential，不把 S3 access 扩张为远端重组或清理。已有凭据缺失、卷 identity/路径无法闭合或出现其他使用方时停止，保留卷并请求用户决定。
+12. **远端只读交接与最小凭据。** RunPod MCP 只负责现有 Pod/卷等资源状态与最终精确删卷，S3-compatible API 负责卷内文件列举和下载；普通
+    `RUNPOD_API_KEY` 不是项目本地交接硬依赖。下载只针对 exact 卷 `hi3iaz8rsr`，不做无界递归列举、不记录 credential，不把 S3 access
+    扩张为远端重组或清理。既有安全入口失效、卷 identity/路径无法闭合或出现其他使用方时停止，保留卷并请求用户决定。
 13. **唯一卷的删除门。** 删除前须完成本地逐文件 bytes/hash/结构校验、base+C1+C2+C3 的真实加载尝试与有效三态结论、完整 checkpoint
     tree/metadata/state 验证、依赖/recipe/receipt/winner lock 交叉绑定、正式资格结果以及独立 `LOCAL_HANDOFF_ACCEPTED`。成功加载只对
     `QUALIFIED` 对象是硬要求；若某对象在有效目标环境中可复现地加载失败并据此得到 `NOT_QUALIFIED`，不单独阻止卷删除。若失败可能来自
@@ -191,8 +192,8 @@ cache、调试和正式运行原始结果必须直接落在主物理仓库根的
   实测选择任务资格用的有界值并写入 descriptor；最终值仍留给 M3-C2。
 - 三候选约 3.46GB/个，checkpoint 约 10.56GB，加 exact base、临时下载与转换预计至少需要约 24.4GB 原始资产空间。下载前先以真实目标路径和
   Windows `C:` 实际余量做容量预检，允许内容寻址/硬链接等安全去重，但不能因此破坏各 manifest 的逻辑完整性。
-- RunPod 当前官方文档说明 US-KS-2 支持网络卷 S3-compatible API，能够不启动 Pod 下载。可先做 exact bucket identity 与浅层 prefix/list/head，
-  再按已验证 manifest 下载目标文件；大文件允许续传或合理重试。凭据仍必须由用户通过安全入口预先提供，执行者不自行创建。
+- US-KS-2 exact endpoint 的 `HeadBucket` 与两层有界、非递归 `ListObjectsV2` 已在不启动 Pod 的情况下真实通过；后续可用项目范围内的
+  boto3、AWS CLI 或更合适的兼容客户端按已验证 manifest 下载，路线不锁死。大文件允许续传或合理重试，但不得把已通过的可达性探测冒充下载完成。
 - Hugging Face exact base 兜底可使用 `hf download ... --revision e51ea3... --cache-dir <project-local>`，随后用 tracked 九文件 hash 和
   `hf cache verify` 或现有 verifier 复核；现有本地 exact snapshot 若完整则不重复下载。
 - 不要求四个候选重复整个 Plan 055/057 故障矩阵。候选差异由资格 runner 全覆盖；共用 backend/协议的生命周期与 failure 矩阵可由既有受控测试加
@@ -212,21 +213,29 @@ cache、调试和正式运行原始结果必须直接落在主物理仓库根的
   这是历史交接事实，实施时仍须现场复核。
 - 已核对 Plan 054 输入/scalar、Plan 055 service/scorer/typed failure/lifecycle、Plan 057 产品接入和 Plan 066 candidate/checkpoint manifests；
   当前真实缺口是 real scorer/backend、RTX 4060 部署工件、资格 runner/launcher 与本地回收，不是重写产品协议。
-- 已确认 RunPod 官方 S3-compatible API 当前覆盖 `US-KS-2` 并允许不启动 Pod 读取网络卷；仓库未记录可用 S3 credential，实施时只可静默
-  检查已有安全入口。缺失凭据是需用户提供的外部阻断，不授权执行者创建 key 或 Pod。
+- 阶段 A 的 RunPod/S3 可达性已真实验证：已鉴权 RunPod MCP 只读确认 0 Pod、唯一 Standard 60GB 卷 `hi3iaz8rsr`
+  (`rondo-plan060-pcie-assets-20260824`, `US-KS-2`)；未创建、启动、修改或删除任何资源。
+- 用户已在主仓库根 ignored `.env.local` 安全提供 `RUNPOD_S3_ACCESS_KEY_ID` 与 `RUNPOD_S3_SECRET_ACCESS_KEY`。分支线程只经严格解析器静默确认
+  普通文件/非 symlink、`0600`、合法 `KEY=VALUE` 及两值非空；未 source、打印、复制或记录凭据。tracked 示例只声明这两个变量名。
+- 使用 exact endpoint `https://s3api-us-ks-2.runpod.io/`、卷 ID bucket、SigV4 与 path-style，真实 `HeadBucket` 通过；随后只做两层有界、
+  非递归 `ListObjectsV2`，确认交接根 `rondo-plan060-publication-critic-20260824t040742z/` 及预期 bundle/model/runs/venv/wheels 等入口可见。
+  未递归扫描、下载、校验、上传或删除对象；详情见 `agent_log/2026-08-24-105210-plan068-s3-reachability.md`。
+- 已明确控制面/数据面分工：现有 RunPod MCP 负责资源查询和最终删卷，项目内 S3 client 负责文件交接；普通 `RUNPOD_API_KEY` 不作为本任务
+  `.env.local` 硬依赖，执行者不得为此读取 MCP 的 OAuth/API credential 或创建新 key。
 - 专用 worktree 已建立：
   `/home/sjc/desktop/RONDO/.claude/worktrees/068-m3-c1-publication-critic-local-qualification/`，分支
   `worktree-068-m3-c1-publication-critic-local-qualification`。
 
 ### 当前工作
 
-- `PLANNED / AWAITING_USER_EXECUTION_HANDOFF`：ExecPlan 与一次性授权文本已形成；用户把本任务提示词转交给执行者时授权才生效，
-  当前尚未开始实现或远端/本地真实操作。
+- `IN_PROGRESS / STAGE_A_REACHABILITY_VERIFIED`：一次性授权已用于完成最小只读可达性探测和凭据变量示例；候选下载、本地身份验证、
+  真实模型部署/资格和卷删除均未开始。用户转交本计划的更新提示词后，执行者从剩余阶段 A 工作继续。
 
 ### 本任务剩余步骤
 
-1. 阶段 A：现场核对本地硬件/容量、RunPod 0 Pod/winner 卷/现有只读传输凭据，盘点远端布局与 manifests；冻结资格维度、参考方法、
-   cohort 选择规则、临时 threshold 来源、三态定义和禁止倒推口径的规则。
+1. 阶段 A：保留已验证的 0 Pod/winner 卷/S3 可达性事实；核对本地硬件与真实 Windows `C:` 容量，从 Plan 060/066 identity、manifest 和
+   receipt 闭合必须下载的精确路径/文件，先做有界试下载与恢复验证；冻结资格维度、参考方法、cohort 选择规则、临时 threshold 来源、
+   三态定义和禁止倒推口径的规则。
 2. 阶段 B：下载并验证必要原始资产，建立或复用干净的本地部署能力；先打通一个候选，再覆盖 base/C1/C2/C3 的身份、转换、加载尝试、
    offline 资格与定向 tests，每个拟 `QUALIFIED` 对象完成 bounded service parity，完整 failure/cancel/shutdown 矩阵只由代表性训练候选承担。
    普通问题在范围内修复重跑；代表性 commissioning 稳定后、四对象正式轮前冻结具体 cohort、artifact、runtime 配置和数值
@@ -238,12 +247,13 @@ cache、调试和正式运行原始结果必须直接落在主物理仓库根的
 
 ### 阻塞项
 
-- 实施前未知已有 RunPod S3 credential 是否存在且可用；若缺失，用户须通过安全入口提供，执行者不得查看/打印秘密或自行创建 key。
-- winner 卷内 `$TASK_ROOT` 的绝对路径未被 tracked 合同冻结；阶段 A 应从卷浅层只读 inventory 与已回收 manifest/receipt 闭合，不得猜路径。
+- 当前没有 RunPod S3 凭据、网络或无 Pod 可达性阻塞；若既有安全入口后续失效，仍须保留卷并诚实转为基础设施阻塞，不得创建 key 或 Pod 绕过。
+- winner 卷交接根已通过有界列表定位，但必须下载的精确文件集合尚未由 Plan 060/066 manifest/receipt 闭合；不得仅凭目录名猜测或无界递归下载。
 
 ### 当前验收状态
 
-- `NOT_STARTED`：只有规划、实时仓库审查和工作树准备完成；未下载卷、未运行真实模型/Docker/Cargo、未修改 ignored 配置、未形成任何候选资格结论。
+- `STAGE_A_PARTIAL_PASS`：资源 identity、S3 凭据安全入口、`HeadBucket` 和有界目录可见性已通过；这不是候选交接或阶段 C 正式资格证据。
+  尚未下载/校验候选，未运行真实模型/Docker/Cargo，未形成任何候选资格结论；winner 卷仍保留并持续计费。
 
 ### 交接边界
 
@@ -265,6 +275,6 @@ cache、调试和正式运行原始结果必须直接落在主物理仓库根的
 | 005 | 转换/量化不是强制路线；原始工件若满足 8GB 资格可直接部署，否则由执行者选择更优适配 | 资格目标是可运行且语义保持，不是预设某种格式 | 部署格式 | 已采纳 |
 | 006 | 重资产只落主物理根 ignored Plan 068/model/env namespace，tracked 工作只在 068 worktree | linked worktree 不共享 ignored 资产，且权重/checkpoint 永不入库 | 数据、Git | 已采纳 |
 | 007 | winner 卷删除前必须由计划制定者做一次独立本地交接复核；通过后无需再次申请用户删除授权 | 删除唯一远端副本不可逆，而用户要求执行提示词一次性覆盖验收后的任务内止费 | 远端生命周期 | 已采纳 |
-| 008 | 只用现有 S3 credential 和无 Pod 的卷下载入口；不授权创建 transfer Pod、S3 key 或其他云资源 | Plan 068 禁止新云计算，官方 US-KS-2 S3 API 已提供直接读取能力 | RunPod、凭据 | 已采纳 |
+| 008 | 现有 RunPod MCP 负责资源状态/最终删卷，既有 S3 credential 和无 Pod S3 API 负责文件交接；普通 `RUNPOD_API_KEY` 不作为项目本地交接硬依赖 | 真实 HeadBucket/有界 list 已验证两条能力边界，无需创建 transfer Pod、S3 key 或其他云资源 | RunPod、凭据 | 已验证 |
 | 009 | M4-A 只共享资源互斥与主线整合边界，不成为 Plan 068 产品依赖或组合回归 | 三、四期正交，避免互相污染 plan、代码和重型资源 | 并行、WBS | 已采纳 |
 | 010 | WBS 完成状态留到独立验收和用户批准主线整合时基于最新 main 窄同步；执行者只提供 delta | 并行 Plan 067 可能修改共享 WBS，任务分支不应用旧文件覆盖 | 文档、交付 | 已采纳 |
