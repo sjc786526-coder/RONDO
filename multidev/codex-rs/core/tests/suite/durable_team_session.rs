@@ -20,9 +20,88 @@ use core_test_support::test_codex::test_codex;
 use pretty_assertions::assert_eq;
 use serde_json::Value;
 use serde_json::json;
+use std::io::Write;
+use std::path::PathBuf;
+use std::process::Command;
 use std::sync::Arc;
 
 const NAMESPACE: &str = "collaboration";
+const IMMEDIATE_CRASH_PROCESS_TEST: &str =
+    "suite::durable_team_session::durable_team_immediate_crash_is_cold_resumable";
+const IMMEDIATE_CRASH_MODE: &str = "CODEX_DURABLE_TEAM_IMMEDIATE_CRASH_MODE";
+const IMMEDIATE_CRASH_HOME: &str = "CODEX_DURABLE_TEAM_IMMEDIATE_CRASH_HOME";
+const IMMEDIATE_CRASH_THREAD_PREFIX: &str = "DURABLE_TEAM_THREAD=";
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn durable_team_immediate_crash_is_cold_resumable() -> Result<()> {
+    if std::env::var_os(IMMEDIATE_CRASH_MODE).is_some() {
+        let home = PathBuf::from(
+            std::env::var_os(IMMEDIATE_CRASH_HOME)
+                .expect("immediate-crash child has a shared home"),
+        );
+        let server = start_mock_server().await;
+        let mut builder = durable_team_codex_at(home);
+        let created = builder.build(&server).await?;
+        let rollout_path = created
+            .session_configured
+            .rollout_path
+            .as_ref()
+            .expect("durable Session exposes its canonical rollout");
+        assert!(rollout_path.is_file());
+        println!(
+            "{IMMEDIATE_CRASH_THREAD_PREFIX}{}",
+            created.session_configured.thread_id
+        );
+        std::io::stdout().flush()?;
+        // Bypass every destructor and graceful shutdown path. The parent must locate and resume
+        // only what Session activation made durable before returning success.
+        std::process::exit(0);
+    }
+
+    let home = tempfile::TempDir::new()?;
+    let output = Command::new(std::env::current_exe()?)
+        .arg("--exact")
+        .arg(IMMEDIATE_CRASH_PROCESS_TEST)
+        .arg("--nocapture")
+        .env(IMMEDIATE_CRASH_MODE, "1")
+        .env(IMMEDIATE_CRASH_HOME, home.path())
+        .output()?;
+    assert!(
+        output.status.success(),
+        "immediate-crash child failed: status={:?}\nstdout={}\nstderr={}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+    let child_stdout = String::from_utf8(output.stdout)?;
+    let thread_id = child_stdout
+        .lines()
+        .find_map(|line| line.strip_prefix(IMMEDIATE_CRASH_THREAD_PREFIX))
+        .ok_or_else(|| anyhow::anyhow!("child did not report its durable Root: {child_stdout}"))?;
+    let rollout_path = codex_rollout::find_thread_path_by_id_str(home.path(), thread_id, None)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("cannot locate immediately-crashed Root {thread_id}"))?;
+
+    let server = start_mock_server().await;
+    let responses = mount_sse_sequence_without_request_count_expectation(
+        &server,
+        vec![
+            publish_call("publish-after-immediate-crash", "after immediate crash"),
+            assistant_reply("after-immediate-crash-complete"),
+        ],
+    )
+    .await;
+    let mut builder = durable_team_codex_at(home.path().to_path_buf());
+    let resumed = builder
+        .resume(&server, Arc::new(tempfile::TempDir::new()?), rollout_path)
+        .await?;
+    submit_turn(&resumed, "continue after the immediate process exit").await?;
+    let requests = responses.requests();
+    assert_eq!(requests.len(), 2);
+    assert!(projection(&requests[1].body_json()).contains("after immediate crash"));
+    resumed.codex.shutdown_and_wait().await?;
+    Ok(())
+}
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn durable_team_cold_resume_preserves_identity_and_continues_mutation() -> Result<()> {
@@ -41,6 +120,24 @@ async fn durable_team_cold_resume_preserves_identity_and_continues_mutation() ->
     let first = builder.build(&server).await?;
     let session_id = first.session_configured.session_id;
     let thread_id = first.session_configured.thread_id;
+    let home = Arc::clone(&first.home);
+    let rollout_path = first
+        .session_configured
+        .rollout_path
+        .clone()
+        .expect("durable Session materializes its canonical rollout before startup succeeds");
+    assert!(rollout_path.is_file());
+    let team_directory = home.path().join("team-sessions/v1");
+    assert!(
+        team_directory
+            .join(format!("{thread_id}.team-lineage"))
+            .is_file()
+    );
+    assert!(
+        team_directory
+            .join(format!("{thread_id}.team-state"))
+            .is_file()
+    );
 
     submit_turn(&first, "publish before the process-style restart").await?;
     let initial_requests = responses.requests();
@@ -50,12 +147,6 @@ async fn durable_team_cold_resume_preserves_identity_and_continues_mutation() ->
     let team_instance = projection_field(first_projection, "team_instance")?;
     assert!(first_projection.contains("before resume"));
 
-    let home = Arc::clone(&first.home);
-    let rollout_path = first
-        .session_configured
-        .rollout_path
-        .clone()
-        .expect("durable Session has a rollout");
     first.codex.shutdown_and_wait().await?;
     let mut disabled_builder = test_codex()
         .with_model("gpt-5.6-sol")
@@ -105,6 +196,14 @@ fn durable_team_codex() -> TestCodexBuilder {
     test_codex()
         .with_model("gpt-5.6-sol")
         .with_config(enable_durable_team)
+}
+
+fn durable_team_codex_at(home: PathBuf) -> TestCodexBuilder {
+    durable_team_codex().with_config(move |config| {
+        config.codex_home = home
+            .try_into()
+            .expect("shared durable Team test home is absolute");
+    })
 }
 
 fn enable_durable_team(config: &mut codex_core::config::Config) {

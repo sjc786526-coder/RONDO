@@ -9,7 +9,7 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::collections::HashSet;
 
-#[derive(Clone, Default, Deserialize, Serialize)]
+#[derive(Clone, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct WakeLedger {
     signalled: HashMap<ThreadId, u64>,

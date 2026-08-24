@@ -204,15 +204,19 @@ Team State、writer authority、Session identity 或只读状态源。
 - Session 已接入默认关闭的 durable 配置、fresh/cold resume、marker/legacy fail-closed、稳定共享 Team handle、显式初始化失败清理和最小 live-child close barrier。
 - 调试与聚焦预验收已覆盖 Team 领域、thread-store authority、真实子进程竞争/恢复、真实 Session/tool cold resume、durable-off marker 拒绝、
   failed close 无 `ShutdownComplete` 且可继续 mutation；配置 schema 已生成，Bazel 9 lock update 成功且无 lock diff。
-- 独立终审发现 owner 在 transient/unknown commit 后缺少产品路径自动 reconcile；已把串行 reconcile 接入 Team capability resolve，补足
-  unavailable 与 after-write unknown 重试回归，同一审查者复验通过且无剩余高/中 correctness finding。
-- 最终 `just fix`（team-state、thread-store、core）与 `just fmt` 已执行。标准 `just test` 因上游 rusty-v8 默认归档 404 在测试前失败；
-  checksum-verified Codex V8 等价完整轮实际执行 14,373 项：14,363 passed、10 failed、24 skipped。失败为 8 项 068 Publication Critic
-  fixture/断言和 2 项未修改 realtime 连接失败超时；069 durable cold-resume 主链在该完整轮通过。
+- 首轮独立预验收提出 H-1、M-1 至 M-7；已逐项确认并在原 069 边界内修复：领域结构等价、退休历史校验、pending evidence
+  reconcile、最小 lineage intent/首次提交顺序、初始未知结果 owner 保留、同 store live-writer delete 拒绝和全入口有界读取均已落地。
+- 修复回归已覆盖多成员/wake/retry 跨进程恢复、Session 创建后立即非优雅退出再定位恢复、lineage/state 缺半、超限稀疏 snapshot、
+  before/after-write failure 和 delete 竞争；team-state 153/153、thread-store 188/188、core 聚焦 3/3 + 7/7 + 产品 2/2 通过。
+- 修复轮全新上下文独立复验先发现连续存储故障会把 Unknown 错降级；窄修为保留未知 generation 窗口并补回归后，同一审查者复验
+  `ACCEPT`，无剩余高/中 correctness finding。
+- 修复轮 `just fmt` 与受影响三 crate 的 `just clippy` 已通过；按复验边界未再次运行完整 workspace。首轮标准 `just test` 曾因上游
+  rusty-v8 默认归档 404 在测试前失败；checksum-verified Codex V8 等价完整轮执行 14,373 项：14,363 passed、10 failed、24 skipped，
+  其中 8 项为 068 Publication Critic fixture/断言、2 项为未修改 realtime 连接失败超时；069 durable cold-resume 主链在该轮通过。
 
 ### 当前工作
 
-- 阶段 D 预验收已完成；069 停在本地提交与外部前置等待边界。
+- 阶段 D 的预验收 finding 修复、聚焦门禁、全新上下文独立复验和 069 本地提交均已完成；停在外部前置等待边界。
 
 ### 本任务剩余步骤
 
@@ -250,6 +254,9 @@ Team State、writer authority、Session identity 或只读状态源。
 | 009 | 规划与实现不需要直接写主工作区或 ignored 产品资产；构建缓存/锁/fixture 只由既有受监控命令管理 | linked worktree 足以交付 tracked 代码，手工共享状态会破坏隔离和资源门禁 | 工作区/资源 | 已采纳 |
 | 010 | committed Team 使用 Root `ThreadId` 下的版本化 checksummed snapshot；格式与领域校验由 team-state 拥有，core 只实现本地介质适配 | 避免把 Team 状态塞进 transcript，也避免介质层复制领域不变量 | durability/read | 已采纳 |
 | 011 | AgentControl 保留稳定共享的 `Arc<TeamStateHandle>`，在 Root 激活时原位安装 durable runtime，不改变既有 `team()` API | 已存在的 control clone 必须看到同一 Team，同时避免为热替换触碰 068 owned 测试和扩大共享 API churn | lifecycle/API | 已采纳 |
-| 012 | fresh generation 0 不落 marker，最终 Root 注册才首次提交；激活错误显式等待 `LiveThreadInitGuard::discard` | 避免失败初始化留下可竞争 writer；提交结果未知时仍 fail-closed，不把不确定结果报成功 | activation/failure | 已采纳 |
+| 012 | fresh Root 先物化 canonical rollout、再提交最小 typed lineage intent、最后提交 generation 1；初始 unknown/unavailable 在原 owner 内 reconcile/retry，仍不确定时保留 degraded Session owner | 保证首次 durable success 已可定位；缺失任一 lineage/state 半边均 fail-closed；未知提交不释放唯一可重试 authority | activation/failure | 已采纳 |
 | 013 | Root close 先停止 child admission并拒绝 live descendant，再取得 Team close permit；thread shutdown 失败时双 barrier abort | 保证 close 与 mutation 不重叠、失败无 `ShutdownComplete`、owner 仍可重试 | close barrier | 已采纳 |
 | 014 | owner 的 Team capability resolve 在 read/mutation 前串行执行必要 reconcile；read-only handle 不获得该能力 | transient/unknown durable commit 后必须能从产品入口恢复可写状态，同时不能让非 owner 越权取得写 authority | recovery/authority | 已采纳 |
+| 015 | 同 generation 与 no-op 校验使用完整领域结构等价而非 JSON 字节；跨 generation reconcile 只保留尚未成为 committed Fact 的 live pending observation | HashMap 编码顺序不稳定，pending evidence 又不属于 snapshot，但同进程未提交工作不能因恢复丢失或复活 | domain/recovery | 已采纳 |
+| 016 | LocalThreadStore hard delete 在同 store 仍有 live recorder 时整批 fail-closed，不移除 recorder 或 detach authority | S1 的窄修可消除已有 permit 与删除竞态，完整 delete 生命周期仍留给 S2 | authority/delete | 已采纳 |
+| 017 | lineage 与 snapshot 所有产品读取入口均先检查 regular-file metadata，再以上限加一字节有界读取 | 让显式 64 MiB snapshot 合同发生在分配前，损坏/稀疏超限文件诚实失败 | storage/read | 已采纳 |

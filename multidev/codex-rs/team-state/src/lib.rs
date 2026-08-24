@@ -33,6 +33,7 @@ pub use availability::AvailabilityEpoch;
 pub use availability::AvailabilitySnapshot;
 pub use availability::ProducerAvailability;
 pub use durable::DurableTeamIdentity;
+pub use durable::MAX_ENCODED_SNAPSHOT_BYTES;
 pub use durable::TeamClosePermit;
 pub use durable::TeamDurabilityError;
 pub use durable::TeamDurabilityFuture;

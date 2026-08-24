@@ -226,6 +226,15 @@ impl TeamStateHandle {
                 "committed Team snapshot generation moved backwards",
             ));
         }
+        if hydrated.commit_generation == current_generation {
+            let same_state = self.with_store(|store| store.same_durable_state(&hydrated.store));
+            if !same_state {
+                return Err(TeamDurabilityError::conflict(
+                    "durable Team state changed without advancing its generation",
+                ));
+            }
+            return Ok(());
+        }
         self.with_store(|store| *store = hydrated.store);
         *runtime
             .status
@@ -276,9 +285,21 @@ impl TeamStateHandle {
             }
         };
         let reconciled = (|| {
-            let encoded = permit.read_snapshot()?.ok_or_else(|| {
-                TeamDurabilityError::unavailable("the committed Team snapshot disappeared")
-            })?;
+            let Some(encoded) = permit.read_snapshot()? else {
+                if last_known_generation == 0
+                    && matches!(
+                        previous_status,
+                        TeamDurabilityStatus::Unknown { .. }
+                            | TeamDurabilityStatus::Unavailable { .. }
+                            | TeamDurabilityStatus::Writable { .. }
+                    )
+                {
+                    return Ok(None);
+                }
+                return Err(TeamDurabilityError::unavailable(
+                    "the committed Team snapshot disappeared",
+                ));
+            };
             let hydrated = decode_snapshot(runtime.identity, &encoded)?;
             let generation_is_allowed = match previous_status {
                 TeamDurabilityStatus::Unknown {
@@ -307,25 +328,14 @@ impl TeamStateHandle {
                 )));
             }
             if hydrated.commit_generation == last_known_generation {
-                let current =
-                    self.with_store(|store| serde_json::to_vec(store))
-                        .map_err(|error| {
-                            TeamDurabilityError::corrupt(format!(
-                                "cannot compare current Team state during reconciliation: {error}"
-                            ))
-                        })?;
-                let committed = serde_json::to_vec(&hydrated.store).map_err(|error| {
-                    TeamDurabilityError::corrupt(format!(
-                        "cannot compare committed Team state during reconciliation: {error}"
-                    ))
-                })?;
-                if committed != current {
+                let same_state = self.with_store(|store| store.same_durable_state(&hydrated.store));
+                if !same_state {
                     return Err(TeamDurabilityError::conflict(
                         "durable Team state changed without advancing its generation",
                     ));
                 }
             }
-            Ok(hydrated)
+            Ok(Some(hydrated))
         })();
         let hydrated = match reconciled {
             Ok(hydrated) => hydrated,
@@ -334,13 +344,30 @@ impl TeamStateHandle {
                 return Err(error);
             }
         };
-        self.with_store(|store| *store = hydrated.store);
-        *runtime
-            .status
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = TeamDurabilityStatus::Writable {
-            commit_generation: hydrated.commit_generation,
-        };
+        if let Some(hydrated) = hydrated {
+            self.with_store(|store| {
+                if hydrated.commit_generation != last_known_generation {
+                    let mut committed = hydrated.store;
+                    committed.restore_uncommitted_observations_from(store);
+                    *store = committed;
+                }
+            });
+            *runtime
+                .status
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) =
+                TeamDurabilityStatus::Writable {
+                    commit_generation: hydrated.commit_generation,
+                };
+        } else {
+            *runtime
+                .status
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) =
+                TeamDurabilityStatus::Writable {
+                    commit_generation: 0,
+                };
+        }
         Ok(())
     }
 
@@ -415,28 +442,40 @@ impl TeamStateHandle {
         expected_generation: u64,
         error: &TeamDurabilityError,
     ) {
-        let next = match error {
-            TeamDurabilityError::Unknown { .. } => TeamDurabilityStatus::Unknown {
+        let mut status = runtime
+            .status
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let next = match (*status, error) {
+            // A temporarily unreadable medium does not answer whether the earlier unknown CAS
+            // committed generation N+1. Preserve that uncertainty so a later reconcile may still
+            // accept either N or N+1 rather than permanently narrowing itself to N.
+            (
+                TeamDurabilityStatus::Unknown {
+                    expected_generation,
+                },
+                TeamDurabilityError::Unavailable { .. },
+            ) => TeamDurabilityStatus::Unknown {
                 expected_generation,
             },
-            TeamDurabilityError::ReadOnly => TeamDurabilityStatus::ReadOnly {
+            (_, TeamDurabilityError::Unknown { .. }) => TeamDurabilityStatus::Unknown {
+                expected_generation,
+            },
+            (_, TeamDurabilityError::ReadOnly) => TeamDurabilityStatus::ReadOnly {
                 commit_generation: expected_generation,
             },
             _ => TeamDurabilityStatus::Unavailable {
                 last_known_generation: expected_generation,
             },
         };
-        *runtime
-            .status
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = next;
+        *status = next;
     }
 
     fn verify_committed_state(
         runtime: &DurableRuntime,
         permit: &mut dyn TeamWritePermit,
         expected_generation: u64,
-        expected_store: &[u8],
+        expected_store: &TeamStore,
     ) -> Result<(), TeamDurabilityError> {
         let committed = permit.read_snapshot()?;
         if expected_generation == 0 {
@@ -458,10 +497,7 @@ impl TeamStateHandle {
                 hydrated.commit_generation
             )));
         }
-        let committed_store = serde_json::to_vec(&hydrated.store).map_err(|error| {
-            TeamDurabilityError::corrupt(format!("cannot compare committed Team state: {error}"))
-        })?;
-        if committed_store != expected_store {
+        if !hydrated.store.same_durable_state(expected_store) {
             return Err(TeamDurabilityError::conflict(
                 "durable Team state changed without advancing its generation",
             ));
@@ -513,20 +549,14 @@ impl TeamStateHandle {
 
         let current = self.with_store(|store| store.clone());
         let revision_before = current.revision();
-        let before = serde_json::to_vec(&current).map_err(|error| {
-            TeamDurabilityError::corrupt(format!("cannot compare Team state: {error}"))
-        })?;
-        let mut candidate = current;
+        let mut candidate = current.clone();
         let result = mutate(&mut candidate)?;
-        let after = serde_json::to_vec(&candidate).map_err(|error| {
-            TeamDurabilityError::corrupt(format!("cannot compare Team state: {error}"))
-        })?;
-        if before == after {
+        if current.same_durable_state(&candidate) {
             if let Err(error) = Self::verify_committed_state(
                 &runtime,
                 permit.as_mut(),
                 expected_generation,
-                &before,
+                &current,
             ) {
                 Self::mark_durability_failure(&runtime, expected_generation, &error);
                 return Err(error);
@@ -539,8 +569,74 @@ impl TeamStateHandle {
             .ok_or(TeamDurabilityError::GenerationOverflow)?;
         let snapshot = encode_snapshot(runtime.identity, next_generation, &candidate)?;
         if let Err(error) = permit.compare_and_swap(expected_generation, snapshot) {
-            Self::mark_durability_failure(&runtime, expected_generation, &error);
-            return Err(error);
+            if !matches!(error, TeamDurabilityError::Unknown { .. }) {
+                Self::mark_durability_failure(&runtime, expected_generation, &error);
+                return Err(error);
+            }
+            let read_back = permit.read_snapshot();
+            match read_back {
+                Ok(Some(encoded)) => {
+                    let hydrated = match decode_snapshot(runtime.identity, &encoded) {
+                        Ok(hydrated) => hydrated,
+                        Err(read_error) => {
+                            Self::mark_durability_failure(
+                                &runtime,
+                                expected_generation,
+                                &read_error,
+                            );
+                            return Err(read_error);
+                        }
+                    };
+                    if hydrated.commit_generation == next_generation
+                        && hydrated.store.same_durable_state(&candidate)
+                    {
+                        let revision_changed = candidate.revision() != revision_before;
+                        self.with_store(|store| *store = candidate);
+                        *runtime
+                            .status
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+                            TeamDurabilityStatus::Writable {
+                                commit_generation: next_generation,
+                            };
+                        if notify && revision_changed {
+                            self.notify_change();
+                        }
+                        return Ok(result);
+                    }
+                    if hydrated.commit_generation == expected_generation
+                        && hydrated.store.same_durable_state(&current)
+                    {
+                        *runtime
+                            .status
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+                            TeamDurabilityStatus::Writable {
+                                commit_generation: expected_generation,
+                            };
+                        return Err(error);
+                    }
+                    let conflict = TeamDurabilityError::conflict(
+                        "indeterminate Team commit read back an unexpected generation or state",
+                    );
+                    Self::mark_durability_failure(&runtime, expected_generation, &conflict);
+                    return Err(conflict);
+                }
+                Ok(None) if expected_generation == 0 => {
+                    *runtime
+                        .status
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner) =
+                        TeamDurabilityStatus::Writable {
+                            commit_generation: 0,
+                        };
+                    return Err(error);
+                }
+                Ok(None) | Err(_) => {
+                    Self::mark_durability_failure(&runtime, expected_generation, &error);
+                    return Err(error);
+                }
+            }
         }
 
         let revision_changed = candidate.revision() != revision_before;
@@ -590,27 +686,35 @@ impl TeamStateHandle {
         }
     }
 
-    /// Error-preserving registration for durable activation. Core uses this at the final Session
-    /// success boundary so a failed initialization cannot leave an orphan Team marker.
+    /// Domain-facing registration API. Lifecycle callers that must preserve the durability error
+    /// class use [`Self::register_durable_participant_checked`] instead.
     pub fn register_durable_participant(
         &self,
         thread_id: ThreadId,
         role: ParticipantRole,
         label: String,
     ) -> Result<bool, TeamError> {
+        self.register_durable_participant_checked(thread_id, role, label)
+            .map_err(TeamError::from)
+    }
+
+    /// Typed registration boundary for lifecycle callers that must distinguish a retryable
+    /// durability outage from a definitive domain or lineage failure.
+    pub fn register_durable_participant_checked(
+        &self,
+        thread_id: ThreadId,
+        role: ParticipantRole,
+        label: String,
+    ) -> Result<bool, TeamDurabilityError> {
         if self.durable_runtime().is_none() {
             return Ok(self.with_store(|store| store.register_participant(thread_id, role, label)));
         }
-        let identity = self
-            .durable_identity()
-            .ok_or_else(|| {
-                TeamDurabilityError::conflict("durable registration has no durable identity")
-            })
-            .map_err(TeamError::from)?;
+        let identity = self.durable_identity().ok_or_else(|| {
+            TeamDurabilityError::conflict("durable registration has no durable identity")
+        })?;
         self.durable_mutate(false, move |store| {
             store.register_durable_participant(identity, thread_id, role, label)
         })
-        .map_err(TeamError::from)
     }
 
     pub fn participant(&self, thread_id: ThreadId) -> Option<Participant> {

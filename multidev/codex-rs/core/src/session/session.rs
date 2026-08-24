@@ -26,6 +26,8 @@ use codex_protocol::protocol::ThreadHistoryMode;
 use codex_protocol::protocol::ThreadSource;
 use codex_protocol::protocol::TurnEnvironmentSelections;
 use codex_team_state::DurableTeamIdentity;
+use codex_team_state::ParticipantRole;
+use codex_team_state::TeamDurabilityError;
 use codex_team_state::TeamDurabilityStatus;
 use codex_team_state::TeamStateHandle;
 use std::sync::OnceLock;
@@ -36,6 +38,9 @@ use tokio::sync::Semaphore;
 /// A session has at most 1 running task at a time, and can be interrupted by user input.
 pub(crate) struct Session {
     pub(crate) thread_id: ThreadId,
+    /// Identity proven from the Session source and retained for retrying an indeterminate initial
+    /// durable registration through the same live owner.
+    pub(crate) team_participant_identity: Option<(ParticipantRole, String)>,
     pub(crate) installation_id: String,
     pub(super) tx_event: Sender<Event>,
     pub(super) agent_status: watch::Sender<AgentStatus>,
@@ -807,6 +812,19 @@ impl Session {
                         );
                     }
                     let identity = DurableTeamIdentity::new(session_id, thread_id);
+                    if is_resumed {
+                        crate::team::durable::validate_durable_team_resume(
+                            config.codex_home.as_path(),
+                            identity,
+                        )?;
+                    } else if crate::team::durable::durable_team_artifacts_exist(
+                        config.codex_home.as_path(),
+                        identity,
+                    )? {
+                        anyhow::bail!(
+                            "fresh Session collides with an existing durable Team lineage"
+                        );
+                    }
                     let authority = crate::team::durable::root_team_write_authority(
                         &thread_store,
                         config.codex_home.as_path(),
@@ -837,9 +855,9 @@ impl Session {
                 }
             } else if is_root_session
                 && is_resumed
-                && crate::team::durable::committed_snapshot_exists(
+                && crate::team::durable::durable_team_artifacts_exist(
                     config.codex_home.as_path(),
-                    thread_id,
+                    DurableTeamIdentity::new(session_id, thread_id),
                 )?
             {
                 anyhow::bail!(
@@ -1268,8 +1286,13 @@ impl Session {
                 turn_environments: Arc::clone(&turn_environments),
             };
             let (mcp_prewarm_tx, mcp_prewarm_rx) = async_channel::bounded(1);
+            let team_participant_identity =
+                crate::agent::control::team_participant_identity(
+                    &session_configuration.session_source,
+                );
             let sess = Arc::new(Session {
                 thread_id,
+                team_participant_identity,
                 installation_id,
                 tx_event: tx_event.clone(),
                 agent_status,
@@ -1393,14 +1416,67 @@ impl Session {
                 let mut state = sess.state.lock().await;
                 state.queue_pending_session_start_source(session_start_source);
             }
-            // Participant registration is the first durable Team commit for a new Root. Keep it at
-            // the final fallible initialization boundary so a failed Session startup cannot leave
-            // an orphan marker or participant that later masquerades as a resumable Team.
+            // Participant registration is the first durable Team commit for a new Root. First
+            // materialize the canonical rollout and its minimal lineage intent; intent without a
+            // first snapshot stays detectable but cannot masquerade as a resumable empty Team.
             if durable_team_requested {
-                sess.services.agent_control.try_register_team_participant(
-                    thread_id,
-                    &session_configuration.session_source,
-                )?;
+                if is_root_session && !is_resumed {
+                    let live_thread = live_thread_init.as_ref().ok_or_else(|| {
+                        anyhow::anyhow!("durable Team Root lost its Session persistence")
+                    })?;
+                    live_thread.persist().await?;
+                    crate::team::durable::initialize_durable_team_lineage(
+                        &thread_store,
+                        config.codex_home.as_path(),
+                        DurableTeamIdentity::new(session_id, thread_id),
+                    )
+                    .await?;
+                }
+                let registration = sess
+                    .services
+                    .agent_control
+                    .try_register_team_participant(
+                        thread_id,
+                        &session_configuration.session_source,
+                    );
+                if let Err(first_error) = registration {
+                    if !matches!(
+                        first_error,
+                        TeamDurabilityError::Unknown { .. }
+                            | TeamDurabilityError::Unavailable { .. }
+                    ) {
+                        return Err(first_error.into());
+                    }
+                    let recovered = sess
+                        .services
+                        .agent_control
+                        .team()
+                        .ensure_readable_or_reconcile()
+                        .and_then(|()| {
+                            sess.services.agent_control.try_register_team_participant(
+                                thread_id,
+                                &session_configuration.session_source,
+                            )
+                        });
+                    if let Err(recovery_error) = recovered {
+                        if !matches!(
+                            recovery_error,
+                            TeamDurabilityError::Unknown { .. }
+                                | TeamDurabilityError::Unavailable { .. }
+                        ) {
+                            return Err(recovery_error.into());
+                        }
+                        // The fully constructed Session is the retryable owner. Returning it keeps
+                        // the Root writer, Team handle and verified participant identity reachable;
+                        // TeamAccess will reconcile and retry registration before any capability is
+                        // exposed. Until then all durable reads and writes remain fail-closed.
+                        tracing::warn!(
+                            first_error = %first_error,
+                            recovery_error = %recovery_error,
+                            "durable Team participant registration remains indeterminate; retaining degraded Session owner"
+                        );
+                    }
+                }
             } else {
                 sess.services.agent_control.register_team_participant(
                     thread_id,

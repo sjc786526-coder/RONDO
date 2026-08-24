@@ -31,6 +31,7 @@ pub(super) async fn delete_thread(
     let thread_id = params.thread_id;
     let _lifecycle_guard = store.live_writer_locks.lock_lifecycle(thread_id).await;
     let _live_writer_guard = store.live_writer_locks.lock(thread_id).await;
+    reject_live_writers(store, &[thread_id]).await?;
     let reference_index = scan_reference_index(store).await?;
     if reference_index.reference_count(thread_id) > 0 {
         return Err(referenced_thread_error(thread_id));
@@ -59,6 +60,7 @@ pub(super) async fn delete_threads(
     for &thread_id in &lock_thread_ids {
         _live_writer_guards.push(store.live_writer_locks.lock(thread_id).await);
     }
+    reject_live_writers(store, &lock_thread_ids).await?;
 
     let reference_index = scan_reference_index(store).await?;
     // References from children in this delete set are removed by the same request, so only
@@ -90,6 +92,22 @@ pub(super) async fn delete_threads(
             Ok(()) | Err(ThreadStoreError::ThreadNotFound { .. }) => {}
             Err(err) => return Err(err),
         }
+    }
+    Ok(())
+}
+
+async fn reject_live_writers(
+    store: &LocalThreadStore,
+    thread_ids: &[codex_protocol::ThreadId],
+) -> ThreadStoreResult<()> {
+    let live_recorders = store.live_recorders.lock().await;
+    if let Some(thread_id) = thread_ids
+        .iter()
+        .find(|thread_id| live_recorders.contains_key(thread_id))
+    {
+        return Err(ThreadStoreError::Conflict {
+            message: format!("thread {thread_id} already has an active writer"),
+        });
     }
     Ok(())
 }
@@ -154,21 +172,6 @@ async fn delete_thread_after_reference_check(
     }
     super::thread_history::delete_thread(store, thread_id).await?;
 
-    // Drop the recorder before removing files, but retain its Root authority (and therefore its
-    // OS writer lock) until cleanup finishes. Detaching first prevents the retained authority from
-    // admitting any new Team writes after the live recorder has gone away.
-    let _removed_writer_authority =
-        store
-            .live_recorders
-            .lock()
-            .await
-            .remove(&thread_id)
-            .map(|entry| {
-                entry.root_writer_authority.detach_owner();
-                let authority = std::sync::Arc::clone(&entry.root_writer_authority);
-                drop(entry);
-                authority
-            });
     let found_rollout_path = !rollout_paths.is_empty();
     for rollout_path in rollout_paths {
         delete_rollout_file(store, rollout_path.as_path(), thread_id)?;
@@ -587,7 +590,7 @@ SELECT
     }
 
     #[tokio::test]
-    async fn delete_thread_removes_materialized_thread_history() {
+    async fn delete_thread_rejects_live_writer_before_removing_materialized_history() {
         let home = TempDir::new().expect("temp dir");
         let config = test_config(home.path());
         let state_db = codex_state::StateRuntime::init(
@@ -637,7 +640,7 @@ SELECT
         store
             .resume_thread(ResumeThreadParams {
                 thread_id,
-                rollout_path: Some(rollout_path),
+                rollout_path: Some(rollout_path.clone()),
                 history: None,
                 include_archived: false,
                 metadata: ThreadPersistenceMetadata {
@@ -654,13 +657,21 @@ SELECT
             .join(format!("{thread_id}.lock"));
         assert!(lock_path.exists());
 
-        store
+        let authority = store
+            .writer_authority(thread_id)
+            .await
+            .expect("get Root writer authority");
+        let permit = authority.begin_write().expect("begin Root write");
+
+        let error = store
             .delete_thread(DeleteThreadParams { thread_id })
             .await
-            .expect("delete thread");
-        assert!(!lock_path.exists());
+            .expect_err("a live writer must block deletion");
+        assert!(matches!(error, ThreadStoreError::Conflict { .. }));
+        assert!(lock_path.exists());
+        assert!(rollout_path.exists());
 
-        let counts = sqlx::query_as::<_, (i64, i64, i64)>(
+        let preserved_counts = sqlx::query_as::<_, (i64, i64, i64)>(
             r#"
 SELECT
     (SELECT COUNT(*) FROM thread_turns WHERE thread_id = ?),
@@ -673,8 +684,87 @@ SELECT
         .bind(thread_id_string.as_str())
         .fetch_one(&pool)
         .await
-        .expect("read remaining history rows");
-        assert_eq!(counts, (0, 0, 0));
+        .expect("read preserved history rows");
+        assert_eq!(preserved_counts, (1, 1, 1));
+
+        drop(permit);
+        store
+            .shutdown_thread(thread_id)
+            .await
+            .expect("shut down live writer");
+        store
+            .delete_thread(DeleteThreadParams { thread_id })
+            .await
+            .expect("delete closed thread");
+        assert!(!lock_path.exists());
+        assert!(!rollout_path.exists());
+        let deleted_counts = sqlx::query_as::<_, (i64, i64, i64)>(
+            r#"
+SELECT
+    (SELECT COUNT(*) FROM thread_turns WHERE thread_id = ?),
+    (SELECT COUNT(*) FROM thread_items WHERE thread_id = ?),
+    (SELECT COUNT(*) FROM thread_history_projection_state WHERE thread_id = ?)
+            "#,
+        )
+        .bind(thread_id_string.as_str())
+        .bind(thread_id_string.as_str())
+        .bind(thread_id_string.as_str())
+        .fetch_one(&pool)
+        .await
+        .expect("read deleted history rows");
+        assert_eq!(deleted_counts, (0, 0, 0));
+    }
+
+    #[tokio::test]
+    async fn delete_threads_rejects_same_store_live_writer_before_deleting_anything() {
+        let home = TempDir::new().expect("temp dir");
+        let store = LocalThreadStore::new(test_config(home.path()), /*state_db*/ None);
+        let cold_uuid = Uuid::from_u128(314);
+        let cold_thread =
+            ThreadId::from_string(&cold_uuid.to_string()).expect("valid cold thread id");
+        let cold_path = write_session_file(home.path(), "2025-01-03T12-00-00", cold_uuid)
+            .expect("cold session file");
+        let live_uuid = Uuid::from_u128(315);
+        let live_thread =
+            ThreadId::from_string(&live_uuid.to_string()).expect("valid live thread id");
+        let live_path = write_session_file(home.path(), "2025-01-03T12-00-01", live_uuid)
+            .expect("live session file");
+        store
+            .resume_thread(ResumeThreadParams {
+                thread_id: live_thread,
+                rollout_path: Some(live_path.clone()),
+                history: None,
+                include_archived: false,
+                metadata: ThreadPersistenceMetadata {
+                    cwd: Some(home.path().to_path_buf()),
+                    model_provider: "test-provider".to_string(),
+                    memory_mode: ThreadMemoryMode::Enabled,
+                },
+            })
+            .await
+            .expect("resume live writer");
+        let authority = store
+            .writer_authority(live_thread)
+            .await
+            .expect("get live Root authority");
+        let permit = authority.begin_write().expect("begin live Root write");
+
+        let error = store
+            .delete_threads(DeleteThreadsParams {
+                thread_ids: vec![cold_thread, live_thread],
+            })
+            .await
+            .expect_err("one live writer must reject the whole batch");
+        assert!(matches!(error, ThreadStoreError::Conflict { .. }));
+        assert!(cold_path.exists());
+        assert!(live_path.exists());
+        assert!(authority.begin_write().is_ok());
+
+        drop(permit);
+        store
+            .shutdown_thread(live_thread)
+            .await
+            .expect("shut down live writer");
     }
 
     #[tokio::test]

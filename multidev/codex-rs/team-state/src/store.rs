@@ -189,6 +189,45 @@ impl TeamStore {
         }
     }
 
+    /// Compare only the state represented by a durable snapshot. Hash-map equality is semantic
+    /// and independent of randomized iteration order; pending observations are deliberately
+    /// excluded because they exist only between live capture and history retention.
+    pub(crate) fn same_durable_state(&self, other: &Self) -> bool {
+        self.instance == other.instance
+            && self.tag == other.tag
+            && self.revision == other.revision
+            && self.events == other.events
+            && self.participants == other.participants
+            && self.committed == other.committed
+            && self.wake == other.wake
+            && self.next_event_ordinal == other.next_event_ordinal
+            && self.facts == other.facts
+            && self.next_fact_ordinal == other.next_fact_ordinal
+            && self.published_facts_through == other.published_facts_through
+            && self.change_log == other.change_log
+            && self.observe_generation == other.observe_generation
+    }
+
+    /// Restore live observations that still have no committed Fact in a hydrated snapshot.
+    /// Reconciliation must not lose unrelated capture work, nor resurrect the observation whose
+    /// confirmation is already present in the committed generation.
+    pub(crate) fn restore_uncommitted_observations_from(&mut self, live: &Self) {
+        let mut seen = HashSet::new();
+        self.pending_observations = live
+            .pending_observations
+            .iter()
+            .filter(|pending| self.participants.contains_key(&pending.producer))
+            .filter(|pending| {
+                !self.facts.iter().any(|fact| {
+                    fact.producer() == pending.producer
+                        && fact.locator().item_id == pending.noted.item_id
+                })
+            })
+            .filter(|pending| seen.insert((pending.producer, pending.noted.item_id.clone())))
+            .cloned()
+            .collect();
+    }
+
     pub fn instance(&self) -> TeamInstanceId {
         self.instance
     }
@@ -1083,9 +1122,32 @@ impl TeamStore {
                     let Some(retirement) = version.retirement() else {
                         return Err(corrupt("retirement retry has no retirement record"));
                     };
+                    let expected_before = format!(
+                        "producer={} root={}",
+                        request.expected_producer_state, request.expected_root_state
+                    );
+                    let expected_after = format!(
+                        "producer={} root={} retired availability={} epoch={} reason={}",
+                        request.expected_producer_state,
+                        request.expected_root_state,
+                        request.expected_availability,
+                        request.expected_availability_epoch,
+                        clamp_retire_reason(&request.reason)
+                    );
+                    let matching_changes = self
+                        .change_log
+                        .iter()
+                        .filter(|change| {
+                            change.kind == ChangeKind::Retire
+                                && change.revision == outcome.revision
+                                && change.actor == *actor
+                                && change.target == outcome.version_id.to_string()
+                                && change.before.as_deref() == Some(expected_before.as_str())
+                                && change.after.as_deref() == Some(expected_after.as_str())
+                        })
+                        .count();
                     if request.version_id != version.id()
-                        || request.expected_producer_state != version.producer_state()
-                        || request.expected_root_state != version.root_state()
+                        || request.expected_producer_state != ProducerState::Open
                         || clamp_retire_reason(&request.reason) != retirement.reason
                         || request.expected_availability != retirement.availability
                         || request.expected_availability_epoch != retirement.availability_epoch
@@ -1096,6 +1158,7 @@ impl TeamStore {
                         || outcome.availability != retirement.availability
                         || outcome.availability_epoch != retirement.availability_epoch
                         || outcome.deduplicated
+                        || matching_changes != 1
                     {
                         return Err(corrupt("retirement retry outcome is invalid"));
                     }

@@ -53,6 +53,11 @@ impl TeamAccess {
             .ensure_readable_or_reconcile()
             .map_err(TeamError::from)?;
         let actor = session.thread_id;
+        if handle.participant(actor).is_none()
+            && let Some((role, label)) = session.team_participant_identity.as_ref()
+        {
+            handle.register_durable_participant(actor, *role, label.clone())?;
+        }
         if handle.participant(actor).is_none() {
             return Err(TeamError::UnknownParticipant);
         }

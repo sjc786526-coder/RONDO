@@ -19,6 +19,8 @@ const SNAPSHOT_MAGIC: &[u8; 17] = b"RONDO-TEAM-STATE\0";
 const SNAPSHOT_VERSION: u32 = 1;
 const HEADER_LEN: usize = SNAPSHOT_MAGIC.len() + 4 + 8 + 32;
 const MAX_SNAPSHOT_BYTES: usize = 64 * 1024 * 1024;
+/// Maximum complete frame accepted by storage adapters before allocating its body.
+pub const MAX_ENCODED_SNAPSHOT_BYTES: usize = HEADER_LEN + MAX_SNAPSHOT_BYTES;
 
 /// A Team's durable lineage. It deliberately excludes the generated Team instance: the instance
 /// is recovered from the committed state, while this identity is known before that state is read.
@@ -323,11 +325,21 @@ pub fn committed_snapshot_generation(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::availability::AvailabilitySnapshot;
+    use crate::availability::ProducerAvailability;
+    use crate::evidence::FactCategory;
+    use crate::evidence::NotedObservation;
     use crate::handle::TeamStateHandle;
     use crate::ids::TeamRevision;
     use crate::model::ParticipantRole;
+    use crate::model::ProducerState;
+    use crate::model::RootState;
+    use crate::mutation::LifecycleChange;
+    use crate::mutation::LifecycleRequest;
+    use crate::mutation::LifecycleTarget;
     use crate::mutation::PublishRequest;
     use crate::mutation::PublishTarget;
+    use crate::mutation::RetireRequest;
     use crate::mutation::Submission;
     use crate::mutation::TeamError;
     use std::sync::Arc;
@@ -338,6 +350,7 @@ mod tests {
         identity: DurableTeamIdentity,
         snapshot: Arc<Mutex<Option<Vec<u8>>>>,
         fail_next_commit: Arc<Mutex<Option<InjectedCommitFailure>>>,
+        fail_next_read: Arc<Mutex<Option<TeamDurabilityError>>>,
     }
 
     #[derive(Clone)]
@@ -352,6 +365,7 @@ mod tests {
                 identity,
                 snapshot: Arc::new(Mutex::new(None)),
                 fail_next_commit: Arc::new(Mutex::new(None)),
+                fail_next_read: Arc::new(Mutex::new(None)),
             }
         }
 
@@ -384,6 +398,13 @@ mod tests {
                 .unwrap_or_else(std::sync::PoisonError::into_inner) =
                 Some(InjectedCommitFailure::AfterWrite(error));
         }
+
+        fn fail_next_read(&self, error: TeamDurabilityError) {
+            *self
+                .fail_next_read
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(error);
+        }
     }
 
     impl TeamWriteAuthority for FakeAuthority {
@@ -396,6 +417,7 @@ mod tests {
                 identity: self.identity,
                 snapshot: Arc::clone(&self.snapshot),
                 fail_next_commit: Arc::clone(&self.fail_next_commit),
+                fail_next_read: Arc::clone(&self.fail_next_read),
             }))
         }
 
@@ -408,10 +430,19 @@ mod tests {
         identity: DurableTeamIdentity,
         snapshot: Arc<Mutex<Option<Vec<u8>>>>,
         fail_next_commit: Arc<Mutex<Option<InjectedCommitFailure>>>,
+        fail_next_read: Arc<Mutex<Option<TeamDurabilityError>>>,
     }
 
     impl TeamWritePermit for FakeWritePermit {
         fn read_snapshot(&mut self) -> Result<Option<Vec<u8>>, TeamDurabilityError> {
+            if let Some(error) = self
+                .fail_next_read
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .take()
+            {
+                return Err(error);
+            }
             Ok(self
                 .snapshot
                 .lock()
@@ -493,6 +524,45 @@ mod tests {
     }
 
     #[test]
+    fn durable_state_comparison_ignores_map_order_and_pending_observations() {
+        let (identity, mut store) = snapshot_fixture();
+        let encoded = encode_snapshot(identity, 1, &store).expect("encode snapshot");
+        let independently_hydrated = decode_snapshot(identity, &encoded)
+            .expect("decode snapshot")
+            .store;
+        store.note_observation(
+            identity.root_thread_id(),
+            NotedObservation {
+                item_id: "transient-item".to_string(),
+                call_id: "transient-call".to_string(),
+                category: FactCategory::ToolResultSuccess,
+                tool: "test".to_string(),
+            },
+        );
+
+        assert!(store.same_durable_state(&independently_hydrated));
+    }
+
+    #[test]
+    fn read_only_refresh_rejects_different_state_at_same_generation() {
+        let (identity, mut store) = snapshot_fixture();
+        let committed = encode_snapshot(identity, 1, &store).expect("encode snapshot");
+        let read_only = TeamStateHandle::from_committed_snapshot(identity, &committed)
+            .expect("hydrate read-only Team");
+        store.register_participant(
+            ThreadId::new(),
+            ParticipantRole::Member,
+            "member".to_string(),
+        );
+        let conflicting = encode_snapshot(identity, 1, &store).expect("encode conflicting state");
+
+        assert!(matches!(
+            read_only.refresh_from_committed_snapshot(&conflicting),
+            Err(TeamDurabilityError::Conflict { .. })
+        ));
+    }
+
+    #[test]
     fn checksum_corruption_fails_closed() {
         let (identity, store) = snapshot_fixture();
         let mut encoded = encode_snapshot(identity, 1, &store).expect("encode snapshot");
@@ -571,7 +641,7 @@ mod tests {
     }
 
     #[test]
-    fn indeterminate_commit_keeps_old_state_and_blocks_reads() {
+    fn after_write_unknown_readback_commits_without_exposing_old_state() {
         let root = ThreadId::new();
         let identity = DurableTeamIdentity::new(SessionId::from(root), root);
         let authority = Arc::new(FakeAuthority::new(identity));
@@ -579,21 +649,91 @@ mod tests {
         authority
             .fail_next_commit_after_write(TeamDurabilityError::unknown("injected after write"));
 
-        let error = handle
-            .register_durable_participant(root, ParticipantRole::Root, "root".to_string())
-            .expect_err("unknown commit must fail");
-        assert!(matches!(error, TeamError::Durability { .. }));
-        assert!(handle.participant(root).is_none());
+        assert!(
+            handle
+                .register_durable_participant(root, ParticipantRole::Root, "root".to_string())
+                .expect("read-back proves the candidate committed")
+        );
+        assert!(handle.participant(root).is_some());
+        assert_eq!(
+            handle.durability_status(),
+            TeamDurabilityStatus::Writable {
+                commit_generation: 1
+            }
+        );
+        handle
+            .ensure_readable()
+            .expect("committed Team is readable");
+    }
+
+    #[test]
+    fn before_write_unknown_readback_allows_exact_retry_from_generation_zero() {
+        let root = ThreadId::new();
+        let identity = DurableTeamIdentity::new(SessionId::from(root), root);
+        let authority = Arc::new(FakeAuthority::new(identity));
+        let handle = TeamStateHandle::create_durable(authority.clone()).expect("create Team");
+        authority.fail_next_commit(TeamDurabilityError::unknown("injected before write"));
+
+        assert!(matches!(
+            handle.register_durable_participant(root, ParticipantRole::Root, "root".to_string()),
+            Err(TeamError::Durability { .. })
+        ));
+        assert_eq!(
+            handle.durability_status(),
+            TeamDurabilityStatus::Writable {
+                commit_generation: 0
+            }
+        );
+        assert!(
+            handle
+                .register_durable_participant(root, ParticipantRole::Root, "root".to_string())
+                .expect("retry initial registration")
+        );
+    }
+
+    #[test]
+    fn indeterminate_initial_commit_keeps_the_owner_handle_reconcilable() {
+        let root = ThreadId::new();
+        let identity = DurableTeamIdentity::new(SessionId::from(root), root);
+        let authority = Arc::new(FakeAuthority::new(identity));
+        let handle = TeamStateHandle::create_durable(authority.clone()).expect("create Team");
+        authority
+            .fail_next_commit_after_write(TeamDurabilityError::unknown("injected after write"));
+        authority.fail_next_read(TeamDurabilityError::unavailable(
+            "injected read-back failure",
+        ));
+
+        assert!(matches!(
+            handle.register_durable_participant(root, ParticipantRole::Root, "root".to_string()),
+            Err(TeamError::Durability { .. })
+        ));
         assert!(matches!(
             handle.durability_status(),
             TeamDurabilityStatus::Unknown {
                 expected_generation: 0
             }
         ));
-        assert!(matches!(
-            handle.ensure_readable(),
-            Err(TeamDurabilityError::Unknown { .. })
+        authority.fail_next_read(TeamDurabilityError::unavailable(
+            "injected first reconcile failure",
         ));
+        assert!(matches!(
+            handle.ensure_readable_or_reconcile(),
+            Err(TeamDurabilityError::Unavailable { .. })
+        ));
+        assert!(matches!(
+            handle.durability_status(),
+            TeamDurabilityStatus::Unknown {
+                expected_generation: 0
+            }
+        ));
+        handle
+            .ensure_readable_or_reconcile()
+            .expect("same owner reconciles once the storage outage clears");
+        assert!(
+            !handle
+                .register_durable_participant(root, ParticipantRole::Root, "root".to_string())
+                .expect("exact retry deduplicates after reconciliation")
+        );
     }
 
     #[test]
@@ -662,25 +802,189 @@ mod tests {
         authority
             .fail_next_commit_after_write(TeamDurabilityError::unknown("injected after write"));
 
-        assert!(matches!(
-            handle.publish(root, &submission, request.clone()),
-            Err(TeamError::Durability { .. })
-        ));
-        assert!(matches!(
+        let first = handle
+            .publish(root, &submission, request.clone())
+            .expect("read-back proves the publish committed");
+        assert!(!first.deduplicated);
+        assert_eq!(
             handle.durability_status(),
-            TeamDurabilityStatus::Unknown {
-                expected_generation: 1
+            TeamDurabilityStatus::Writable {
+                commit_generation: 2
             }
-        ));
-
-        handle
-            .ensure_readable_or_reconcile()
-            .expect("indeterminate committed generation should reconcile");
+        );
         let outcome = handle
             .publish(root, &submission, request)
             .expect("same product retry should return the committed outcome");
         assert!(outcome.deduplicated);
         assert_eq!(handle.snapshot_for(root).expect("snapshot").events.len(), 1);
+    }
+
+    #[test]
+    fn reconciliation_preserves_unrelated_pending_observations() {
+        let root = ThreadId::new();
+        let identity = DurableTeamIdentity::new(SessionId::from(root), root);
+        let authority = Arc::new(FakeAuthority::new(identity));
+        let handle = TeamStateHandle::create_durable(authority.clone()).expect("create Team");
+        handle
+            .register_durable_participant(root, ParticipantRole::Root, "root".to_string())
+            .expect("register Root");
+        for item in ["item-a", "item-b"] {
+            handle
+                .note_durable_observation(
+                    root,
+                    NotedObservation {
+                        item_id: item.to_string(),
+                        call_id: format!("call-{item}"),
+                        category: FactCategory::ToolResultSuccess,
+                        tool: "test".to_string(),
+                    },
+                )
+                .expect("note observation");
+        }
+        authority
+            .fail_next_commit_after_write(TeamDurabilityError::unknown("injected after write"));
+        authority.fail_next_read(TeamDurabilityError::unavailable(
+            "injected read-back failure",
+        ));
+
+        assert!(matches!(
+            handle.confirm_durable_observation(root, "item-a"),
+            Err(TeamError::Durability { .. })
+        ));
+        handle
+            .reconcile_durable()
+            .expect("reconcile committed confirmation");
+        assert_eq!(
+            handle
+                .confirm_durable_observation(root, "item-a")
+                .expect("recheck committed observation"),
+            None,
+            "the committed observation must not be resurrected"
+        );
+        assert!(
+            handle
+                .confirm_durable_observation(root, "item-b")
+                .expect("confirm unrelated pending observation")
+                .is_some(),
+            "an unrelated pending observation must survive reconciliation"
+        );
+    }
+
+    #[test]
+    fn before_write_reconciliation_keeps_all_pending_observations_retryable() {
+        let root = ThreadId::new();
+        let identity = DurableTeamIdentity::new(SessionId::from(root), root);
+        let authority = Arc::new(FakeAuthority::new(identity));
+        let handle = TeamStateHandle::create_durable(authority.clone()).expect("create Team");
+        handle
+            .register_durable_participant(root, ParticipantRole::Root, "root".to_string())
+            .expect("register Root");
+        for item in ["item-a", "item-b"] {
+            handle
+                .note_durable_observation(
+                    root,
+                    NotedObservation {
+                        item_id: item.to_string(),
+                        call_id: format!("call-{item}"),
+                        category: FactCategory::ToolResultSuccess,
+                        tool: "test".to_string(),
+                    },
+                )
+                .expect("note observation");
+        }
+        authority.fail_next_commit(TeamDurabilityError::unavailable("injected before write"));
+
+        assert!(matches!(
+            handle.confirm_durable_observation(root, "item-a"),
+            Err(TeamError::Durability { .. })
+        ));
+        handle
+            .ensure_readable_or_reconcile()
+            .expect("reconcile unchanged committed generation");
+        assert!(
+            handle
+                .confirm_durable_observation(root, "item-a")
+                .expect("retry first pending observation")
+                .is_some()
+        );
+        assert!(
+            handle
+                .confirm_durable_observation(root, "item-b")
+                .expect("confirm unrelated pending observation")
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn retirement_retry_survives_later_root_state_changes() {
+        let root = ThreadId::new();
+        let member = ThreadId::new();
+        let identity = DurableTeamIdentity::new(SessionId::from(root), root);
+        let authority = Arc::new(FakeAuthority::new(identity));
+        let handle = TeamStateHandle::create_durable(authority.clone()).expect("create Team");
+        handle
+            .register_durable_participant(root, ParticipantRole::Root, "root".to_string())
+            .expect("register Root");
+        handle
+            .register_durable_participant(member, ParticipantRole::Member, "member".to_string())
+            .expect("register member");
+        let published = handle
+            .publish(
+                member,
+                &Submission {
+                    based_on: TeamRevision::INITIAL,
+                    request_id: "member-publish".to_string(),
+                },
+                PublishRequest {
+                    target: PublishTarget::NewEvent {
+                        title: "retire me".to_string(),
+                    },
+                    summary: "member became unavailable".to_string(),
+                    handoff: None,
+                },
+            )
+            .expect("publish member version");
+        let availability =
+            AvailabilitySnapshot::from_entries(vec![(member, ProducerAvailability::Unavailable)]);
+        let request = RetireRequest {
+            version_id: published.version_id,
+            expected_producer_state: ProducerState::Open,
+            expected_root_state: RootState::Pending,
+            expected_availability: ProducerAvailability::Unavailable,
+            expected_availability_epoch: availability.epoch,
+            reason: "member is gone".to_string(),
+        };
+        let submission = Submission {
+            based_on: published.revision,
+            request_id: "root-retire".to_string(),
+        };
+        let retired = handle
+            .retire(root, &submission, request.clone(), &availability, || {
+                availability.epoch
+            })
+            .expect("retire member version");
+        handle
+            .update_lifecycle(
+                root,
+                LifecycleRequest {
+                    targets: vec![LifecycleTarget {
+                        version_id: published.version_id,
+                        expected_producer_state: ProducerState::Open,
+                        expected_root_state: RootState::Pending,
+                        change: LifecycleChange::SetRootState(RootState::Resolved),
+                    }],
+                },
+            )
+            .expect("resolve retired version");
+
+        let resumed = TeamStateHandle::resume_durable(authority).expect("resume durable Team");
+        let retry = resumed
+            .retire(root, &submission, request, &availability, || {
+                availability.epoch
+            })
+            .expect("retry retirement after root-state change");
+        assert!(retry.deduplicated);
+        assert_eq!(retry.revision, retired.revision);
     }
 
     #[test]

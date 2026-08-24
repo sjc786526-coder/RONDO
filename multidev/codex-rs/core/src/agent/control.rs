@@ -41,6 +41,7 @@ use codex_protocol::protocol::ThreadSource;
 use codex_protocol::protocol::TurnEnvironmentSelection;
 use codex_protocol::user_input::UserInput;
 use codex_team_state::ParticipantRole;
+use codex_team_state::TeamDurabilityError;
 use codex_team_state::TeamError;
 use codex_team_state::TeamStateHandle;
 use codex_thread_store::LoadThreadHistoryParams;
@@ -206,12 +207,12 @@ impl AgentControl {
         &self,
         thread_id: ThreadId,
         session_source: &SessionSource,
-    ) -> Result<(), TeamError> {
+    ) -> Result<(), TeamDurabilityError> {
         let Some((role, label)) = team_participant_identity(session_source) else {
             return Ok(());
         };
         self.team()
-            .register_durable_participant(thread_id, role, label)
+            .register_durable_participant_checked(thread_id, role, label)
             .map(|_| ())
     }
 
@@ -903,7 +904,9 @@ mod tests;
 /// consolidation and other internal sessions, unknown sources, and spawns without a verifiable
 /// path — gets no team identity at all, so it cannot act as a participant even if the team tools
 /// were somehow reachable from it.
-fn team_participant_identity(session_source: &SessionSource) -> Option<(ParticipantRole, String)> {
+pub(crate) fn team_participant_identity(
+    session_source: &SessionSource,
+) -> Option<(ParticipantRole, String)> {
     match session_source {
         SessionSource::Cli
         | SessionSource::VSCode
