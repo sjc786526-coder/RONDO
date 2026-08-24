@@ -726,6 +726,17 @@ def _valid_process_identity(value: Any) -> bool:
     )
 
 
+def valid_distinct_process_identities(start: Any, resumed: Any) -> bool:
+    """Return whether two well-formed process receipts prove a new process."""
+
+    return (
+        _valid_process_identity(start)
+        and _valid_process_identity(resumed)
+        and start.get("pid") != resumed.get("pid")
+        and start.get("instance_id") != resumed.get("instance_id")
+    )
+
+
 def _is_sha256(value: Any) -> bool:
     return (
         isinstance(value, str)

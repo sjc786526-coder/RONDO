@@ -128,27 +128,28 @@
   三阶段均完成 BF16 全参数 FlashAdamW 有限更新，1,720,577,024 参数及 311/311 optimizer tensors 全覆盖。
 - C1/C2/C3 三个 model-only safetensors 候选、固定 validation 事实和正式 C3 full checkpoint 已保存并复验；新 OS 进程从正式 checkpoint
   step 3→4 恢复继续通过。validation 未产生梯度或改变 optimizer/scheduler，unseen-test 未导出、未运行。
+- 独立预验收确认训练主体 `PASS`；其窄 finding 已闭合：Plan 066 resume receipt validator 现在独立要求 start/resume process identity
+  结构合法且 PID、instance ID 均不同，实际 final-01 receipt 与相邻 Plan 060 回归继续通过。
+- 当前计算 Pod `oe6gbptvq5yhja` 已停止并永久删除，账户 Pod 数为零；winner Standard 卷 `hi3iaz8rsr`、三个候选、正式 checkpoint、
+  exact 模型、venv 与 cache 保留。终态连续费用为 `$11.6881377997`，只剩约 `$0.005833/h` 卷费；final receipt 已生成并验证。
 
 ### 当前工作
 
-- `TRAINING_EXECUTION_COMPLETE / RESOURCE_RELEASE_AWAITING_USER_APPROVAL`：训练、候选、恢复和小型证据回收已完成；按用户最新指令，当前 Pod
-  `oe6gbptvq5yhja` 与 winner 卷 `hi3iaz8rsr` 暂不停止、终止或删除。terminal provider facts、settled billing 与 formal final receipt
-  必须等用户批准资源释放后生成。
+- `EXECUTION_COMPLETE / PENDING_INDEPENDENT_ACCEPTANCE`：训练、候选、恢复、计算资源终态、settled billing 和 formal final receipt 均已闭合；
+  winner 卷按用户决定保留。执行者工作已完成，等待独立验收收口。
 
 ### 本任务剩余步骤
 
-- 等待用户批准后停止并终止当前计算 Pod；按届时指令保留或清理 winner 卷中的候选、formal checkpoint、exact 模型、venv 与 cache。
-- 计算资源终态和 provider 账单结算后生成 terminal provider facts 与 formal final receipt，再交独立验收；不提前写 M3-B1c 完成或解锁 M3-C1。
+- 独立验收核对窄 validator 修复、Pod/卷终态、费用与 final receipt；验收前不提前写 M3-B1c 完成或解锁 M3-C1。
 
 ### 阻塞项
 
-- 无训练路线或工件阻塞。唯一未完成项是用户明确要求延后的资源释放；当前 GPU 仍按约 `$2.89/h`、winner Standard 卷按约 `$0.017/h`
-  持续计费，仍受 Plan 060+066 连续 23 USD 硬上限约束。
+- 无已知阻塞。计算持续费为零；保留的 winner Standard 卷继续产生约 `$0.005833/h` 存储费。
 
 ### 当前验收状态
 
-- `EXECUTION COMPLETE / TERMINAL RECEIPT AND INDEPENDENT ACCEPTANCE PENDING`。M3-B1c 已产生三个正式训练候选和有效恢复证据，但资源释放、
-  settled billing、formal final receipt 与最终独立验收尚未完成，当前不声明任务 `COMPLETE` 或模型产品资格。
+- `EXECUTION COMPLETE / INDEPENDENT ACCEPTANCE PENDING`。final receipt 状态为 `execution_complete_pending_independent_acceptance`，建议结论
+  `GO_RECOMMENDED`；最终独立验收前不声明任务 `COMPLETE`、模型产品资格或 M3-C1 解锁。
 
 ### 交接边界
 
@@ -165,3 +166,4 @@
 | 005 | 各阶段保留模型候选，但只强制至少一个最新 full recovery checkpoint | 满足后续资格与故障恢复，同时避免三个 10GB optimizer checkpoint 挤占卷 | 工件、恢复 | 已采纳 |
 | 006 | validation 可做阶段同口径比较；unseen-test 默认封存，最多在 recipe/选择冻结后一次盲评 | 支持候选交接并防止 holdout 反向调参 | 评价、数据隔离 | 已采纳 |
 | 007 | 正式训练和候选复验完成后暂不释放当前 Pod/卷，等待用户另行批准 | 用户要求保留难抢计算资源与可复用设施；terminal receipt 因此顺延 | 资源终态、账单、验收 | 已采纳 |
+| 008 | 预验收后删除计算 Pod、保留 winner 卷及正式候选/checkpoint | 训练正确性证据已闭合，GPU 空转无收益；固定容量卷保留 M3-C1 工件 | 资源终态、工件交接 | 已执行 |

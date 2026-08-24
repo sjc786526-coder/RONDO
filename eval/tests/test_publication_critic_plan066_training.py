@@ -37,7 +37,9 @@ from rondo_eval.publication_critic.full_model_training.plan066_finalize import (
 )
 from rondo_eval.publication_critic.full_model_training.plan066_contract import (  # noqa: E402
     validate_plan066_recipe,
+    validate_plan066_resume_receipt,
 )
+from rondo_eval.publication_critic.full_model_training import plan066_contract  # noqa: E402
 from rondo_eval.publication_critic.full_model_training.plan066_data import (  # noqa: E402
     ValidationDataset,
     build_plan066_export,
@@ -154,6 +156,70 @@ class Plan066ContractTests(unittest.TestCase):
         formal["data_cursor"]["pair_ids"].pop()
         with self.assertRaisesRegex(FullModelTrainingError, "checkpoint_progress_invalid"):
             checkpoint._validate_progress(formal)
+
+    def test_resume_validator_requires_distinct_process_identities(self):
+        start_process = {
+            "instance_id": "start-instance",
+            "pid": 101,
+            "parent_pid": 10,
+            "started_at": "2026-08-24T10:00:00Z",
+        }
+        resume_process = {
+            "instance_id": "resume-instance",
+            "pid": 202,
+            "parent_pid": 20,
+            "started_at": "2026-08-24T10:01:00Z",
+        }
+        receipt = {
+            "schema": "rondo-publication-critic-plan066-formal-pending-v1",
+            "status": "pending_billing_and_resource_cleanup",
+            "created_at": "2026-08-24T10:02:00Z",
+            "identity": {},
+            "start_process": start_process,
+            "resume_process": resume_process,
+            "new_os_process_confirmed": True,
+            "restored_from_global_step": 3,
+            "continued_global_step": 4,
+            "continued_stage": {},
+            "coverage": {},
+            "restored_optimizer_state": {},
+            "restored_optimizer_runtime": {},
+            "checkpoint": {"process": start_process},
+            "timing": {},
+            "formal_start_receipt_sha256": "a" * 64,
+            "billing": None,
+            "remote_resource_terminal_state": None,
+            "qualification_conclusion": None,
+            "continued_data": {},
+        }
+        with (
+            mock.patch.object(plan066_contract, "valid_full_parameter_coverage", return_value=True),
+            mock.patch.object(plan066_contract, "valid_stage_receipt", return_value=True),
+            mock.patch.object(plan066_contract, "valid_checkpoint_receipt", return_value=True),
+            mock.patch.object(
+                plan066_contract,
+                "resume_receipt_evidence_matches_coverage",
+                return_value=True,
+            ),
+            mock.patch.object(plan066_contract, "_finite_timing", return_value=True),
+            mock.patch.object(plan066_contract, "_valid_continued_data", return_value=True),
+        ):
+            validate_plan066_resume_receipt(receipt, formal=True)
+            mutations = {
+                "same_pid": {**resume_process, "pid": start_process["pid"]},
+                "same_instance": {
+                    **resume_process,
+                    "instance_id": start_process["instance_id"],
+                },
+                "malformed": {**resume_process, "pid": True},
+            }
+            for name, changed_process in mutations.items():
+                changed = copy.deepcopy(receipt)
+                changed["resume_process"] = changed_process
+                with self.subTest(name=name), self.assertRaisesRegex(
+                    FullModelTrainingError, "plan066_resume_receipt_invalid"
+                ):
+                    validate_plan066_resume_receipt(changed, formal=True)
 
     def test_provider_facts_bind_continuous_budget_terminal_compute_and_candidates(self):
         identity = {

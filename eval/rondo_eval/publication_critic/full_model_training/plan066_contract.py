@@ -13,6 +13,7 @@ from .contract import (
     STAGES,
     resume_receipt_evidence_matches_coverage,
     start_receipt_evidence_matches_coverage,
+    valid_distinct_process_identities,
     valid_checkpoint_receipt,
     valid_full_parameter_coverage,
     valid_stage_receipt,
@@ -166,6 +167,9 @@ def validate_plan066_resume_receipt(value: Any, *, formal: bool) -> dict[str, An
         or value.get("schema") != schema
         or value.get("status") != status
         or value.get("new_os_process_confirmed") is not True
+        or not valid_distinct_process_identities(
+            value.get("start_process"), value.get("resume_process")
+        )
         or value.get("restored_from_global_step") != 3
         or value.get("continued_global_step") != 4
         or not valid_full_parameter_coverage(value.get("coverage"))
