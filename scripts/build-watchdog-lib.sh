@@ -27,6 +27,86 @@ rondo_cgroup_population_state() {
   fi
 }
 
+rondo_active_heavy_scopes() {
+  local uid="$1"
+  local cgroup_mount="${2:-/sys/fs/cgroup}"
+  local unit_listing=""
+  local unit_line=""
+  local unit=""
+  local unit_pattern=""
+  local properties=""
+  local load_state=""
+  local active_state=""
+  local control_group=""
+  local cgroup_root=""
+  local population_state=""
+
+  [[ "$uid" =~ ^[0-9]+$ ]] || return 1
+  [[ "$cgroup_mount" == /* && -d "$cgroup_mount" && ! -L "$cgroup_mount" ]] || return 1
+  unit_pattern="^rondo-build-${uid}-[0-9]+-[0-9]+[.]scope$"
+
+  unit_listing="$(
+    LC_ALL=C systemctl --user list-units --type=scope --all --full --plain \
+      --no-legend --no-pager "rondo-build-${uid}-*.scope" 2>/dev/null
+  )" || return 1
+
+  while IFS= read -r unit_line; do
+    [[ -n "$unit_line" ]] || continue
+    read -r unit _ <<<"$unit_line"
+    [[ "$unit" =~ $unit_pattern ]] || continue
+
+    properties="$(
+      LC_ALL=C systemctl --user show "$unit" --property=LoadState \
+        --property=ActiveState --property=ControlGroup --no-pager 2>/dev/null
+    )" || return 1
+    load_state="$(awk -F= '$1 == "LoadState" {print substr($0, index($0, "=") + 1); found=1; exit} END {if (!found) exit 1}' <<<"$properties")" \
+      || return 1
+    active_state="$(awk -F= '$1 == "ActiveState" {print substr($0, index($0, "=") + 1); found=1; exit} END {if (!found) exit 1}' <<<"$properties")" \
+      || return 1
+    control_group="$(awk -F= '$1 == "ControlGroup" {print substr($0, index($0, "=") + 1); found=1; exit} END {if (!found) exit 1}' <<<"$properties")" \
+      || return 1
+
+    case "$active_state" in
+      inactive | failed) continue ;;
+      active | activating | deactivating) ;;
+      *) return 1 ;;
+    esac
+    [[ "$load_state" == "loaded" ]] || return 1
+    if [[ "$control_group" != /* || "$control_group" == "/" \
+      || "$control_group" == *"/../"* || "$control_group" == */.. \
+      || "$control_group" == *"/./"* || "$control_group" == */. \
+      || "$control_group" != */"$unit" ]]; then
+      return 1
+    fi
+
+    cgroup_root="${cgroup_mount}${control_group}"
+    [[ ! -L "$cgroup_root" ]] || return 1
+    population_state="$(rondo_cgroup_population_state "$cgroup_root" "$$")"
+    case "$population_state" in
+      active)
+        printf '%s\n' "$unit"
+        ;;
+      gone)
+        ;;
+      unknown)
+        # A unit may disappear between list-units and the cgroup read. Re-read
+        # ActiveState so an already inactive/failed historical unit does not
+        # become a permanent false positive; every other unknown remains closed.
+        properties="$(
+          LC_ALL=C systemctl --user show "$unit" --property=ActiveState --no-pager 2>/dev/null
+        )" || return 1
+        active_state="$(awk -F= '$1 == "ActiveState" {print substr($0, index($0, "=") + 1); found=1; exit} END {if (!found) exit 1}' <<<"$properties")" \
+          || return 1
+        case "$active_state" in
+          inactive | failed) ;;
+          *) return 1 ;;
+        esac
+        ;;
+      *) return 1 ;;
+    esac
+  done <<<"$unit_listing"
+}
+
 rondo_cgroup_direct_member_count() {
   local cgroup_root="$1"
 
