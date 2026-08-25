@@ -1,7 +1,7 @@
 # RONDO 长程规划（WBS）
 
-最后更新：2026-08-25（Plan 075 已完成 `NO-GO` 原因调研并建议待授权 Plan 076 有界诊断；M3-D 保持锁定；
-Plan 078 的 `#37847` 前置已先期进入主线；Plan 077 / M4-C1 已取得 `M4_C1_QUERY_PASS` 并在 M4-S2 正式轮前进入主线）
+最后更新：2026-08-25（Plan 079 已完成 Skywork 4B BF16 base 正式质量测评并取得 `4B_BASE_QUALITY_NO_GO`；
+三期尚未选择后继工作包，M3-D 保持锁定；Plan 077 / M4-C1 已取得 `M4_C1_QUERY_PASS`，M4-S2 正式轮仍在推进）
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段指针、跨方向关系、
 稳定工程边界和授权门；已完成成果与验收见 `doc/WBS-COMPLETED.md`，单次任务合同见 `plan/`，执行细节见
@@ -21,7 +21,7 @@ Plan 078 的 `#37847` 前置已先期进入主线；Plan 077 / M4-C1 已取得 `
 | 0：量化测评基准 | 既有设施与首次 schema v7 正式 canary 已完成，当前无 active campaign | 保留设施；历史结果见 COMPLETED，新 campaign 须重新立项与授权 |
 | 1：Harness 优化 | **正式收口；当前无 active 工作包** | 当前不继续新增观测或内核/热路径优化；既有实现、设施与历史结果保留。未来可由用户另行决定是否重新立项，本次收口不作永久禁止 |
 | 2：本地审批模型 | **已收口，今后不再开启** | 最终结论为“保留为实验”；不改生产默认，不再规划后续工作包 |
-| 3：RONDO Multi | 第一、二期及其收口案例、**三期 M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、M3-C2、Plan 064、Plan 071、Plan 073、Plan 075 与四期 M4-A、M4-C0、M4-S1、M4-C1、Plan 074 已完成** | Plan 075 确认现有 base/C1/C3 无可发布选择，现有证据不足以指定单一根因；唯一建议的下一工作包是待授权 Plan 076 训练动态与质量门有界诊断，不是正式训练。Critic 保持 default-off，M3-D 保持锁定。Plan 078 的 `#37847` 前置已先期进入主线；Plan 077 / M4-C1 正式实现随后、先于 M4-S2 正式轮进入主线。M4-S2 仍在独立 worktree 推进并负责 shared 接缝及 query/lifecycle 聚焦兼容验收；正式 Session Control/TUI 等待 M4-S2 |
+| 3：RONDO Multi | 第一、二期及其收口案例、**三期 M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、M3-C2、Plan 064、Plan 071、Plan 073、Plan 075、Plan 079 与四期 M4-A、M4-C0、M4-S1、M4-C1、Plan 074 已完成** | Plan 079 的 exact 4B BF16 base 正式质量测评为 `4B_BASE_QUALITY_NO_GO`，未形成训练、量化、本地部署或产品资格；三期尚未选择后继工作包，Critic 保持 default-off，M3-D 保持锁定。Plan 078 的 `#37847` 前置与 Plan 077 / M4-C1 已先期进入主线；M4-S2 仍在独立 worktree 推进并负责 shared 接缝及 query/lifecycle 聚焦兼容验收；正式 Session Control/TUI 等待 M4-S2 |
 
 ### 方向命名口径
 
@@ -38,7 +38,8 @@ Plan 078 的 `#37847` 前置已先期进入主线；Plan 077 / M4-C1 已取得 `
 
 ## 2. 下一工作包与顺序
 
-方向 3 是当前唯一已经明确下一工作包的产品推进面。方向 1 已正式收口，不作为方向 3 的前置或旁支。
+方向 3 是当前唯一仍在推进的产品线。三期尚未选择后继工作包；四期 M4-S2 正式轮仍在独立 worktree 推进。
+方向 1 已正式收口，不作为方向 3 的前置或旁支。
 
 ### 方向 3：Publication Critic 三期
 
@@ -72,9 +73,11 @@ Plan 078 的 `#37847` 前置已先期进入主线；Plan 077 / M4-C1 已取得 `
   Plan 073 / M3-C2 随后以同一冻结协议正式比较 exact base、C1、C3，三者均未达到发布质量底线，终态为 `NO-GO`；没有
   selection lock 或 unseen-test 释放，也没有最终模型、threshold 或运行配置。Publication Critic 保持 default-off，M3-D 保持锁定；
   Plan 075 已完成证据链重建：直接失败层是模型质量；部署、runtime 和 threshold 不是原因；Plan 066 训练后的 C1/C3 有输出/排序
-  退化，但现有单 recipe/seed/run 不能把 LR、裁剪、objective、optimizer、数据或底模之一确定为单一根因。唯一建议的下一工作包是
-  待授权 Plan 076：以 exact base 仅作历史诊断 control，执行训练动态与质量门有界诊断；它不实施正式训练、不产生正式候选，详细
-  数值边界见三期子 WBS。当前未授权执行或产生云端费用。
+  退化，但现有单 recipe/seed/run 不能把 LR、裁剪、objective、optimizer、数据或底模之一确定为单一根因。Plan 079 随后对 exact
+  `Skywork/Skywork-Reward-V2-Qwen3-4B@fd958fef475f323f4e6b195930e3dd918485c668` 原始 BF16 base 完成冻结 validation 正式测评：
+  55/55、零 typed failure，但完整 operating curve 不存在满足全部质量门的点，终态为 `4B_BASE_QUALITY_NO_GO`。该结果未产生训练、
+  量化、本地部署或产品资格；三期尚未选择后继工作包，也未授权新的云计算或本地模型任务。任务 Pod 已删除，20 GB Standard 网络卷
+  `v1us0nmk0p` 按用户要求保留在 `US-IL-1` 并继续计费，删除仍须另行批准；详细结果与后续边界见三期子 WBS。
 
 ### 方向 3：Durable Team Runtime 四期
 

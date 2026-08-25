@@ -2080,3 +2080,26 @@ correctness/functionality `remaining_findings=[]`，路线结论为 `GO`。
 - 未运行 Docker、真实 API/模型、训练、测评、CI/PR 或远端操作。Plan 078 的 `#37847` 前置已先期进入本地 `main`；Plan 077 /
   M4-C1 正式实现随后、先于 M4-S2 正式轮进入主线。M4-S2 正式轮作为后整合者负责 shared 接缝收敛及 query/lifecycle 聚焦兼容
   验收，正式 Session Control/TUI 继续等待 M4-S2。
+
+## Publication Critic Skywork 4B 云端基座质量测评（Plan 079，2026-08-25）
+
+**状态**：exact `Skywork/Skywork-Reward-V2-Qwen3-4B@fd958fef475f323f4e6b195930e3dd918485c668` 原始 BF16 base 的
+commissioning、唯一正式轮、独立复算、一次验收整改与最终复验均已完成；验收通过、任务目标完成，终态为
+`4B_BASE_QUALITY_NO_GO`。正式评分绑定源码 `610d880`，交付实现为 `b671f51ff63f1f80aaddbd035e57634adb1838f5`，
+formal retry 整改为 `d29e857`，最终独立验收提交为 `43cf0eeb3e1b4826c60924fc1385319d7adead3a`。
+
+- 唯一正式轮 `plan079-formal-20260825T175912Z-610d880-r1` 从 clean source 与空 namespace 完成冻结 v8 validation 55/55，
+  typed failure 为 0；完整 operating curve 无 admissible point。False PASS 为 `12/21 = 0.5714`、False REWRITE 为
+  `4/34 = 0.1176`、balanced accuracy 为 `0.6555`、ROC AUC 为 `0.6218`、boundary strict win 为 `13/19 = 0.6842`，
+  within-PASS 为 `6/7 = 0.8571`。相较历史 1.7B base，4B 降低 False REWRITE 但显著增加 False PASS，仍未达到发布门限。
+- 正式运行复用冻结 typed packet/render、16,384 context、scalar head、score 方向、validation 与 pair/metrics；只消费物理不含
+  unseen-test 的既有 train+validation bundle。未重问 Judge、训练、量化、转换、重跑 1.7B/C1/C2/C3、启用产品或解锁 M3-D。
+  正式结果与独立复算逐字节一致；formal 崩溃恢复整改只允许通过完整既有合同验证的 `INCONCLUSIVE` 进入新空 namespace 重跑，
+  不改变本次完整 NO-GO 结果。
+- 任务 Pod `iocp8k8w6zvh4s` 已删除并确认同名查询为 0，GPU 持续费用为 `$0/h`。20 GB Standard 网络卷 `v1us0nmk0p` 按用户
+  要求保留在 `US-IL-1`，观察使用量约 `7.68 GiB`、费率 `$0.00194444449/h`，删除仍须单独批准；任务交接累计费用保守上界
+  `$0.3207`。没有运行本地重型 Cargo、Docker 或真实本地模型。
+- 聚焦 base-quality 与 Pod monitor 测试 23/23，复用的 Plan 073 threshold/selection/archive/freeze 测试 23/23；format、定向
+  `py_compile`、shell syntax、JSON 与 diff checks 通过。最终独立复验无剩余 correctness/functionality finding。
+- 结果见 `eval/results/publication-critic/skywork-reward-v2-qwen3-4b-base-quality-v1.{json,md}`，执行与验收细节见对应 Plan 079
+  `agent_log`。本任务没有形成后继任务授权；三期当前状态与后续选择只由 `doc/WBS.md` 及三期子 WBS 维护。
