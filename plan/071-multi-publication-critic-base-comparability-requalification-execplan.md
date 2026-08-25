@@ -213,11 +213,15 @@ Plan 068 的核心模型、checkpoint、证据、serving env 与旧 target 只�
 - v5 三对象各覆盖 24 条 offline reference/deployment、fresh-worker parity、18 次真实 service 调用、15/15 stress 与 clean
   shutdown；C1 cancel/post-cancel recheck 通过。三个 canonical watchdog 均 `status=0 / stop=none / cleanup=none`，模型、GPU
   compute 与 scope 已全部退出，Plan 071 后续不再占用重型资源。
+- 独立验收提交 `a42a46515955e61a719bf68b8f4b54f0d7c2d2dc` 发现：base 与 C1/C3 同时不合格时仍会错误输出
+  `BASE_NOT_COMPARABLE`。现已把“至少一个锚点 `QUALIFIED`”作为所有正式可比终态前置；无合格锚点统一返回
+  `INCONCLUSIVE / no_qualified_anchor_for_shared_comparability_rule`，并增加三对象同时不合格回归。修复后 41/41 通过，从 v5
+  manifest/raw 重建的 observations/result 与正式 archive 完全一致，因此按审查决定保留 v5，不重跑真实模型或改变 schema。
 
 ### 本任务剩余步骤
 
-1. 更新本计划与精炼执行日志，完成轻量定向门禁并提交 clean 分支。
-2. 通过既有 queue 机制交最终独立验收；范围内 finding 自主修复并重新交接。
+1. 提交终态逻辑窄整改与回归并保持分支 clean。
+2. 通过既有 queue 机制重新交最终独立验收；范围内 finding 自主修复并重新交接。
 
 ### 阻塞项
 
@@ -226,7 +230,7 @@ Plan 068 的核心模型、checkpoint、证据、serving env 与旧 target 只�
 
 ### 当前验收状态
 
-- `FORMAL_COMPLETE_REVIEW_HANDOFF_PENDING`
+- `REMEDIATION_COMPLETE_REVIEW_REHANDOFF_PENDING`
 
 ### 交接边界
 
@@ -250,3 +254,4 @@ Plan 068 的核心模型、checkpoint、证据、serving env 与旧 target 只�
 | 008 | 继续只读复用 Plan 068 已验收 env、service/probe 二进制和 24GB 工件，不修改 Rust、不建新 env、不使用 Docker | commissioning 与正式链路均证明 Python-only 资格修正足以闭合，扩大构建或复制没有功能收益 | 依赖、磁盘、门禁范围 | 已执行 |
 | 009 | `plan071-formal-20260825T060132Z-qualification-v1` 仅保留为 superseded 预审证据；修复异常分支并把 result schema 升为 v2 后，从新 clean source 和空 namespace 完整重跑 | 独立审查发现失败 warm review 计数和无合格锚点终态两个异常分支；数值 GO 未被推翻，但正式 program/result 身份已改变，不能沿用旧 archive 改算 | 正式证据、schema、重跑 | 已执行 |
 | 010 | v2/v3/v4 作为有原因、不可续用的 aborted namespace 保留；仅 v5 是最终 formal | v2 遵守更新后的跨任务终态门主动中止；v3/v4 由 production proof 在模型加载前拒绝。用新 namespace 重跑可避免把基础设施失败或零散进度混入正式身份 | 资源交接、正式证据、运行身份 | 已执行 |
+| 011 | 无合格锚点时，无论 base 对象结论为何，正式任务终态均为 `INCONCLUSIVE`；只有存在合格锚点时，base 不合格才是 `BASE_NOT_COMPARABLE` | 没有 C1/C3 合格锚点就无法证明共享环境与规则仍建立了公平对照，不能把共同失败归因为 base 不可比；该修复不改变 v5 实际 GO 分支 | 三态终态逻辑、聚焦回归 | 已执行 |

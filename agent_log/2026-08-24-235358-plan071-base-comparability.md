@@ -54,5 +54,18 @@ leak 均为 `0`。任务终态是 `BASE_COMPARABILITY_GO`（`base_and_anchor_qua
   commissioning、superseded/aborted 历史和唯一 v5 formal 均保留。未复制或改写约 24GB Plan 068 工件，也未创建 Plan 071 env/cache。
 - 正式 archive：`eval-data/publication-critic/plan071/formal/runs/plan071-formal-20260825T064600Z-qualification-v5/`。
 
+## 独立验收整改
+
+独立验收提交 `a42a46515955e61a719bf68b8f4b54f0d7c2d2dc` 发现一个 P2：base、C1、C3 同时
+`NOT_QUALIFIED` 时，旧分支仍输出 `BASE_NOT_COMPARABLE`。finding 属实；没有任何合格锚点时，共享环境和规则未建立有效对照，
+应返回 `INCONCLUSIVE`。整改将 anchor 前置检查统一放在所有 formal 可比终态之前，无合格锚点使用既有 typed reason
+`no_qualified_anchor_for_shared_comparability_rule`；base 不合格但至少一个锚点合格仍保持 `BASE_NOT_COMPARABLE / base_not_qualified`。
+
+新增三对象同时不合格回归后，受影响 unittest 为 41/41，compileall 与 `git diff --check` 通过。修复后的
+`build_observations/evaluate_run` 从 v5 manifest/raw 重建 observations，与 raw/archive 完全相等；重建 result 与归档完全相等，仍为
+`BASE_COMPARABILITY_GO / base_and_anchor_qualified`，observations canonical SHA-256 仍为
+`46d7b4bfc725f61d66d2ca20030b7409f124467020b8201eec114c4cd93eb6ac`。因此按审查者代用户作出的决定，保留 v5 为唯一真实
+formal，不重跑模型、Cargo 或 Docker，也不为未命中分支 bugfix 改变 result schema。
+
 WBS 建议 delta：记录 Plan 071 已用同一资格口径使 exact base、C1、C3 均取得 `QUALIFIED`，C2 保持历史 `NOT_QUALIFIED`，
 M3-C2 的 base+anchor 前置可解除但不得自动启动；本 task branch 不抢写并行共享 WBS。

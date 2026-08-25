@@ -545,12 +545,12 @@ def evaluate_run(
     if mode != "formal":
         terminal = "INCONCLUSIVE"
         terminal_reason = "commissioning_has_no_task_terminal"
-    elif conclusions.get("base") == "QUALIFIED" and anchor_qualified:
-        terminal = "BASE_COMPARABILITY_GO"
-        terminal_reason = "base_and_anchor_qualified"
-    elif conclusions.get("base") == "QUALIFIED":
+    elif not anchor_qualified:
         terminal = "INCONCLUSIVE"
         terminal_reason = "no_qualified_anchor_for_shared_comparability_rule"
+    elif conclusions.get("base") == "QUALIFIED":
+        terminal = "BASE_COMPARABILITY_GO"
+        terminal_reason = "base_and_anchor_qualified"
     elif conclusions.get("base") == "INCONCLUSIVE":
         terminal = "INCONCLUSIVE"
         terminal_reason = "base_qualification_inconclusive"

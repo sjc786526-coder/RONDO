@@ -597,6 +597,34 @@ class Plan071ComparabilityTests(unittest.TestCase):
             "no_qualified_anchor_for_shared_comparability_rule",
         )
 
+    def test_unqualified_base_without_qualified_anchor_is_inconclusive(self) -> None:
+        freeze = validate_freeze(_freeze())
+        observations = [
+            _observation(
+                freeze,
+                object_id,
+                deployed_raw=_raw([THRESHOLD_RAW + 0.40, -2.0, 1.0, -1.0]),
+            )
+            for object_id in ("base", "c1", "c3")
+        ]
+        result = evaluate_run(
+            _run_input(freeze, observations),
+            freeze,
+            mode="formal",
+            run_id=freeze["run_id"],
+        )
+
+        self.assertEqual(
+            [item["conclusion"] for item in result["objects"]],
+            ["NOT_QUALIFIED", "NOT_QUALIFIED", "NOT_QUALIFIED"],
+        )
+        self.assertEqual(result["task_terminal"], "INCONCLUSIVE")
+        self.assertEqual(
+            result["task_terminal_reason"],
+            "no_qualified_anchor_for_shared_comparability_rule",
+        )
+        self.assertFalse(result["m3_c2_prerequisite_satisfied"])
+
     def test_c1_cancel_recheck_failure_cannot_qualify(self) -> None:
         freeze = validate_freeze(_freeze())
         observations = [
