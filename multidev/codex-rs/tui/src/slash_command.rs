@@ -23,6 +23,7 @@ pub enum SlashCommand {
     SandboxReadRoot,
     Experimental,
     Sessions,
+    SessionControl,
     #[strum(to_string = "approve")]
     AutoReview,
     Memories,
@@ -133,7 +134,8 @@ impl SlashCommand {
                 "let sandbox read a directory: /sandbox-add-read-dir <absolute_path>"
             }
             SlashCommand::Experimental => "toggle experimental features",
-            SlashCommand::Sessions => "inspect and control experimental Sessions",
+            SlashCommand::Sessions => "inspect Sessions",
+            SlashCommand::SessionControl => "use experimental Session control",
             SlashCommand::AutoReview => "approve one retry of a recent auto-review denial",
             SlashCommand::Memories => "configure memory use and generation",
             SlashCommand::Mcp => "list configured MCP tools; use /mcp verbose for details",
@@ -173,6 +175,7 @@ impl SlashCommand {
                 | SlashCommand::Resume
                 | SlashCommand::SandboxReadRoot
                 | SlashCommand::Sessions
+                | SlashCommand::SessionControl
         )
     }
 
@@ -205,6 +208,7 @@ impl SlashCommand {
             | SlashCommand::SandboxReadRoot
             | SlashCommand::Experimental
             | SlashCommand::Sessions
+            | SlashCommand::SessionControl
             | SlashCommand::Memories
             | SlashCommand::Import
             | SlashCommand::Review

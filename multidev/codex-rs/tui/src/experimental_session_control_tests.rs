@@ -117,6 +117,14 @@ fn loaded_owner_view() -> ExperimentalSessionView {
 
 #[test]
 fn parses_all_explicit_commands() {
+    assert!(SESSION_CONTROL_USAGE.starts_with("Usage: /session-control "));
+    let mutation_status = render_mutation_status(
+        "attempt not submitted",
+        ViewFreshness::Stale,
+        MutationCertainty::None,
+    );
+    assert!(mutation_status.contains("Run /session-control refresh"));
+    assert!(!mutation_status.contains("Run /sessions refresh"));
     assert_eq!(
         ExperimentalSessionCommand::parse(""),
         Ok(ExperimentalSessionCommand::List)
@@ -145,7 +153,7 @@ fn parses_all_explicit_commands() {
     );
     assert_eq!(
         ExperimentalSessionCommand::parse("track nope"),
-        Err(SESSIONS_USAGE)
+        Err(SESSION_CONTROL_USAGE)
     );
 }
 

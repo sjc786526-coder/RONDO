@@ -109,24 +109,114 @@ fn next_add_to_history_event(rx: &mut tokio::sync::mpsc::UnboundedReceiver<AppEv
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum SessionRouteEvent {
+    Query(String),
+    Control(String),
+}
+
+fn drain_session_route_events(
+    rx: &mut tokio::sync::mpsc::UnboundedReceiver<AppEvent>,
+) -> Vec<SessionRouteEvent> {
+    std::iter::from_fn(|| rx.try_recv().ok())
+        .filter_map(|event| match event {
+            AppEvent::DurableSessionQueryCommand(args) => Some(SessionRouteEvent::Query(args)),
+            AppEvent::ExperimentalSessionControlCommand(args) => {
+                Some(SessionRouteEvent::Control(args))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
 #[tokio::test]
-async fn sessions_dispatch_requires_the_independent_product_opt_in() {
+async fn session_routes_are_gate_specific_and_unambiguous() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.4")).await;
     while rx.try_recv().is_ok() {}
 
+    assert_eq!(
+        crate::bottom_pane::slash_commands::find_builtin_command(
+            "session-control",
+            chat.builtin_command_flags(),
+        ),
+        None
+    );
     chat.dispatch_command_with_args(SlashCommand::Sessions, "list".to_string(), Vec::new());
-    assert!(
-        !std::iter::from_fn(|| rx.try_recv().ok())
-            .any(|event| matches!(event, AppEvent::ExperimentalSessionControlCommand(_)))
+    chat.dispatch_command_with_args(SlashCommand::SessionControl, "list".to_string(), Vec::new());
+    assert_eq!(drain_session_route_events(&mut rx), Vec::new());
+
+    chat.set_feature_enabled(Feature::ExperimentalSessionControl, /*enabled*/ true);
+    assert_eq!(
+        crate::bottom_pane::slash_commands::find_builtin_command(
+            "session-control",
+            chat.builtin_command_flags(),
+        ),
+        Some(SlashCommand::SessionControl)
+    );
+    chat.dispatch_command_with_args(SlashCommand::Sessions, "list".to_string(), Vec::new());
+    chat.dispatch_command(SlashCommand::SessionControl);
+    assert_eq!(
+        drain_session_route_events(&mut rx),
+        vec![
+            SessionRouteEvent::Control("list".to_string()),
+            SessionRouteEvent::Control(String::new()),
+        ]
+    );
+
+    chat.set_feature_enabled(Feature::ExperimentalSessionControl, /*enabled*/ false);
+    chat.set_feature_enabled(Feature::DurableSessionQuery, /*enabled*/ true);
+    assert_eq!(
+        crate::bottom_pane::slash_commands::find_builtin_command(
+            "session-control",
+            chat.builtin_command_flags(),
+        ),
+        None
+    );
+    chat.dispatch_command_with_args(
+        SlashCommand::Sessions,
+        "read session-a root-a".to_string(),
+        Vec::new(),
+    );
+    chat.dispatch_command_with_args(
+        SlashCommand::SessionControl,
+        "track root-a version-a open pending resolved".to_string(),
+        Vec::new(),
+    );
+    assert_eq!(
+        drain_session_route_events(&mut rx),
+        vec![SessionRouteEvent::Query(
+            "read session-a root-a".to_string()
+        )]
     );
 
     chat.set_feature_enabled(Feature::ExperimentalSessionControl, /*enabled*/ true);
-    chat.dispatch_command_with_args(SlashCommand::Sessions, "list".to_string(), Vec::new());
-    assert!(
-        std::iter::from_fn(|| rx.try_recv().ok()).any(|event| matches!(
-            event,
-            AppEvent::ExperimentalSessionControlCommand(args) if args == "list"
-        ))
+    assert_eq!(
+        crate::bottom_pane::slash_commands::find_builtin_command(
+            "session-control",
+            chat.builtin_command_flags(),
+        ),
+        Some(SlashCommand::SessionControl)
+    );
+    chat.dispatch_command(SlashCommand::Sessions);
+    chat.dispatch_command_with_args(
+        SlashCommand::Sessions,
+        "track root-a version-a open pending resolved".to_string(),
+        Vec::new(),
+    );
+    chat.dispatch_command(SlashCommand::SessionControl);
+    chat.dispatch_command_with_args(
+        SlashCommand::SessionControl,
+        "track root-a version-a open pending resolved".to_string(),
+        Vec::new(),
+    );
+    assert_eq!(
+        drain_session_route_events(&mut rx),
+        vec![
+            SessionRouteEvent::Query(String::new()),
+            SessionRouteEvent::Query("track root-a version-a open pending resolved".to_string()),
+            SessionRouteEvent::Control(String::new()),
+            SessionRouteEvent::Control("track root-a version-a open pending resolved".to_string()),
+        ]
     );
 }
 

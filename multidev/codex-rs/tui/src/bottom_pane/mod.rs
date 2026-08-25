@@ -469,9 +469,13 @@ impl BottomPane {
         self.request_redraw();
     }
 
-    pub fn set_experimental_session_control_enabled(&mut self, enabled: bool) {
-        self.composer
-            .set_experimental_session_control_enabled(enabled);
+    pub fn set_sessions_command_enabled(&mut self, enabled: bool) {
+        self.composer.set_sessions_command_enabled(enabled);
+        self.request_redraw();
+    }
+
+    pub fn set_session_control_command_enabled(&mut self, enabled: bool) {
+        self.composer.set_session_control_command_enabled(enabled);
         self.request_redraw();
     }
 

@@ -537,6 +537,9 @@
             "deferred_tool_world_state": {
               "type": "boolean"
             },
+            "durable_session_query": {
+              "type": "boolean"
+            },
             "elevated_windows_sandbox": {
               "type": "boolean"
             },
@@ -5211,6 +5214,9 @@
           "type": "boolean"
         },
         "deferred_tool_world_state": {
+          "type": "boolean"
+        },
+        "durable_session_query": {
           "type": "boolean"
         },
         "elevated_windows_sandbox": {

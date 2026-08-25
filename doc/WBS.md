@@ -1,7 +1,7 @@
 # RONDO 长程规划（WBS）
 
 最后更新：2026-08-25（Plan 075 已完成 `NO-GO` 原因调研并建议待授权 Plan 076 有界诊断；M3-D 保持锁定；
-Plan 069 / M4-S1 已取得 `M4_S1_PASS`；Plan 077 / M4-C1 与 Plan 078 / M4-S2 已按并行边界立项）
+Plan 078 的 `#37847` 前置已先期进入主线；Plan 077 / M4-C1 已取得 `M4_C1_QUERY_PASS` 并在 M4-S2 正式轮前进入主线）
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段指针、跨方向关系、
 稳定工程边界和授权门；已完成成果与验收见 `doc/WBS-COMPLETED.md`，单次任务合同见 `plan/`，执行细节见
@@ -21,7 +21,7 @@ Plan 069 / M4-S1 已取得 `M4_S1_PASS`；Plan 077 / M4-C1 与 Plan 078 / M4-S2 
 | 0：量化测评基准 | 既有设施与首次 schema v7 正式 canary 已完成，当前无 active campaign | 保留设施；历史结果见 COMPLETED，新 campaign 须重新立项与授权 |
 | 1：Harness 优化 | **正式收口；当前无 active 工作包** | 当前不继续新增观测或内核/热路径优化；既有实现、设施与历史结果保留。未来可由用户另行决定是否重新立项，本次收口不作永久禁止 |
 | 2：本地审批模型 | **已收口，今后不再开启** | 最终结论为“保留为实验”；不改生产默认，不再规划后续工作包 |
-| 3：RONDO Multi | 第一、二期及其收口案例、**三期 M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、M3-C2、Plan 064、Plan 071、Plan 073、Plan 075 与四期 M4-A、M4-C0、M4-S1、Plan 074 已完成** | Plan 075 确认现有 base/C1/C3 无可发布选择，现有证据不足以指定单一根因；唯一建议的下一工作包是待授权 Plan 076 训练动态与质量门有界诊断，不是正式训练。Critic 保持 default-off，M3-D 保持锁定。Plan 077 / M4-C1 正式 Session Query 与 Plan 078 / M4-S2 恢复和生命周期收口从共同 `main@dfc4278` 独立立项，可并行轻量开发；正式 Session Control/TUI 同时等待两者进入主线 |
+| 3：RONDO Multi | 第一、二期及其收口案例、**三期 M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、M3-C2、Plan 064、Plan 071、Plan 073、Plan 075 与四期 M4-A、M4-C0、M4-S1、M4-C1、Plan 074 已完成** | Plan 075 确认现有 base/C1/C3 无可发布选择，现有证据不足以指定单一根因；唯一建议的下一工作包是待授权 Plan 076 训练动态与质量门有界诊断，不是正式训练。Critic 保持 default-off，M3-D 保持锁定。Plan 078 的 `#37847` 前置已先期进入主线；Plan 077 / M4-C1 正式实现随后、先于 M4-S2 正式轮进入主线。M4-S2 仍在独立 worktree 推进并负责 shared 接缝及 query/lifecycle 聚焦兼容验收；正式 Session Control/TUI 等待 M4-S2 |
 
 ### 方向命名口径
 
@@ -85,14 +85,14 @@ Plan 069 / M4-S1 已取得 `M4_S1_PASS`；Plan 077 / M4-C1 与 Plan 078 / M4-S2 
   `M4_A_GO`；Plan 070 / M4-C0 已完成默认关闭的 experimental app-server v2→client→TUI 纵向原型并取得
   `M4_C0_PROTOTYPE_PASS`。Plan 069 已完成默认关闭的 canonical Team durability/read、Root 单一写 authority、跨进程 cold resume
   与最小 close barrier；在精确吸收 Plan 074 / `#37198` persisted cwd read consistency 后，从全新 Session/store 完成阶段 E 正式链和
-  独立终审，结论为 `M4_S1_PASS`。Plan 077 / M4-C1 正式 Session Query 与 Plan 078 / M4-S2 已从同一 clean
-  `main@dfc4278` 分别立项，二者无产品前置依赖；正式 Session Control/TUI 等待两者，后进入主线者承担一轮 query 与最新 lifecycle
-  的聚焦兼容验收，不预定合并顺序；
+  独立终审，结论为 `M4_S1_PASS`。Plan 077 / M4-C1 已基于该 read model 完成正式只读 Session Query，结论为
+  `M4_C1_QUERY_PASS`。Plan 078 的 `#37847` 前置已先期进入主线；M4-C1 正式实现随后、先于 M4-S2 正式轮进入主线。M4-S2 正式轮
+  仍在独立 worktree 推进并作为后整合者负责 query 与最新 lifecycle 的聚焦兼容验收；正式 Session Control/TUI 等待 M4-S2；
   M4-W0 仍是独立价值原型，正式 W 实现须先获得 binding GO。
 - 四期不依赖 Publication Critic 训练、真实模型、真实 API 或性能测评，可以与三期模型链并行；它保持 shared workspace
   为默认，不建设通用 scheduler、自动路由、自动 merge/push、第二套 Team State/trace 或审计/可信平台。
 - 三期未来另行授权的云计算不占本地 Cargo build lock，可与四期有界并行开发；bundle/checkpoint/结果传输仍竞争本地网络与磁盘。
-  Plan 077/078 的每个重型 Cargo 批次还须先取得用户针对该批次的明确批准，具体串行关系和运行时机由用户人工判断、调度；获批后再按根
+  Plan 078 的每个重型 Cargo 批次仍须先取得用户针对该批次的明确批准，具体运行时机由用户人工判断、调度；获批后再按根
   `AGENTS.md` 与三期本地模型、Docker 等重型任务互斥。详细资源关系见四期子 WBS。
 
 如果未来重新启动方向 1，它仍与方向 3 保持产品源码和任务合同独立；本地重型 Cargo、Docker、真实本地模型
@@ -140,8 +140,8 @@ RONDO/
 
 - 重型 Cargo 构建与测试必须经仓库根共享 `scripts/with-build-lock.sh` 或已接入它的 `just` 配方；
   `CARGO_TARGET_DIR` 必须位于项目根内并受看门狗监督。
-- 两套产品的重型构建、Docker、真实本地模型加载/推理全局串行；同一时刻只保留一个产品的热 target。Plan 077/078 的重型批次不自动
-  排队，须由用户在逐批明确批准时人工判断串行关系和运行时机。
+- 两套产品的重型构建、Docker、真实本地模型加载/推理全局串行；同一时刻只保留一个产品的热 target。Plan 078 的重型批次不自动
+  排队，须由用户逐批明确批准并人工决定运行时机。
 - 具体磁盘、Windows `C:`、内存、swap、Docker 增量和 fail-closed 阈值以根 `AGENTS.md` 为准，不使用 WSL
   虚拟容量代替宿主容量。
 

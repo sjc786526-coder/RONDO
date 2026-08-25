@@ -210,6 +210,7 @@ mod app_server_events;
 pub(crate) mod app_server_requests;
 mod background_requests;
 mod config_persistence;
+mod durable_session_query;
 mod event_dispatch;
 mod experimental_session_control;
 mod history_pagination;

@@ -12,6 +12,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
+use crate::durable_session_query::DurableSessionQueryCompletion;
 use crate::inline_visualization::InlineVisualizationContext;
 use codex_app_server_protocol::AddCreditsNudgeCreditType;
 use codex_app_server_protocol::AddCreditsNudgeEmailStatus;
@@ -187,6 +188,10 @@ pub(crate) enum KeymapCaptureMode {
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
 pub(crate) enum AppEvent {
+    /// User-invoked read-only Durable Session query command.
+    DurableSessionQueryCommand(String),
+    /// One bounded background `session/list` or `session/read` completion.
+    DurableSessionQueryCompleted(DurableSessionQueryCompletion),
     /// User-invoked command for the default-off experimental Session prototype.
     ExperimentalSessionControlCommand(String),
     /// Open the agent picker for switching active threads.

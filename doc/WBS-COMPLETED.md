@@ -2055,3 +2055,28 @@ correctness/functionality `remaining_findings=[]`，路线结论为 `GO`。
 - shared core 触发的一次标准全 workspace `just test` 在测试前被 rusty-v8 v150.4.0 默认 archive URL 的 HTTP 404 阻断，未产生
   JUnit，未表述为通过或重复扩大完整轮；既有 checksum-verified 历史完整轮仍为 14,373 项中 14,363 通过、10 项既知相邻失败。
   本阶段未使用 Docker、真实模型/API、训练、测评、CI/PR，未把 069 合入或推送主线。
+
+## M4-C1 正式 Durable Session Query（Plan 077，2026-08-25）
+
+**状态**：基于 M4-S1 canonical durable read model 的正式只读 Session Query、四项独立审查整改与最终复验均已完成；验收通过、
+任务目标完成，结论为 `M4_C1_QUERY_PASS`。初始实现提交为 `3642b04405bfad5daff3462f9a9f9ef7edd86a9a`，整改提交为
+`c14d66143433acc887e7bce1ef6747ccd6574ba5`，最终独立验收提交为 `7f179b19615d3e3e4ea8eb54bb0ca2f6b63812c4`。
+
+- 默认关闭的正式 app-server v2 `session/list` / `session/read`、app-server client 与 TUI `/sessions` 纵向链已经闭合。查询从
+  ThreadStore 的 canonical persisted `SessionMeta` 定位 Session/Root identity，再与 durable marker 和同一完整 committed Team
+  snapshot 交叉验证；state DB 只提供有界候选，不成为第二份 durable 状态源，prototype input 不再参与正式事实。
+- 查询可在服务重启后发现 active/archived Durable Session，并分轴投影 Session/Root/Team identity、domain lifecycle、runtime
+  residency、operation availability、provenance 与 freshness。分页 continuation、source change、损坏、不完整、backend unavailable
+  和 stale retained view 均保守表达，不把不同一致性边界拼成当前事实。
+- 整条查询链不加载或恢复 Agent/Session，不取得 writer authority，不启动模型、工具或 API，也不产生 Team mutation。C0 control
+  保持独立默认关闭 gate；两个 gate 同开时 `/sessions` 固定正式 query、`/session-control` 固定 C0，仅开启 C0 时保留旧
+  `/sessions` alias，query-only 不暴露控制操作。
+- 提交级独立审查发现并推动关闭四个中等级问题：InMemory 易失 metadata 不再冒充 persisted seam；client 在提交前对称验证
+  `Available <=> Team` 及 canonical Root viewer；双 gate 不再互相遮蔽；Team authored label/summary 只在正式 renderer 边界
+  单行化。最终复验无剩余高、中或低等级 correctness finding。
+- 正式证据包括 lower locator/meta **18/18**、app-server/client/TUI query **46/46** 与整改直接因果轮 **8/8**，均为 0
+  failure/error；相关 schema export、四 crate scoped fix、fmt/fmt-check 与 diff 门禁通过。workspace `just test` 在测试前被既有
+  rusty-v8 v150.4.0 archive HTTP 404 阻断，core/protocol 宽轮也受范围外 proxy/mock 环境失败影响，均未冒充通过或用于扩大写集。
+- 未运行 Docker、真实 API/模型、训练、测评、CI/PR 或远端操作。Plan 078 的 `#37847` 前置已先期进入本地 `main`；Plan 077 /
+  M4-C1 正式实现随后、先于 M4-S2 正式轮进入主线。M4-S2 正式轮作为后整合者负责 shared 接缝收敛及 query/lifecycle 聚焦兼容
+  验收，正式 Session Control/TUI 继续等待 M4-S2。

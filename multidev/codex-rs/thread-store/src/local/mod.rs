@@ -2,11 +2,13 @@ mod archive_thread;
 mod create_thread;
 mod delete_thread;
 mod helpers;
+mod list_session_locators;
 mod list_threads;
 mod live_writer;
 mod model_context;
 mod move_thread_to_section;
 mod paginated_fork;
+mod read_session_meta;
 mod read_thread;
 mod rollout_migration;
 // This lands before the reader PRs that consume the shared lineage resolver.
@@ -22,6 +24,14 @@ pub(crate) mod writer_lock;
 
 #[cfg(test)]
 mod test_support;
+
+#[cfg(test)]
+#[path = "read_session_meta_tests.rs"]
+mod read_session_meta_tests;
+
+#[cfg(test)]
+#[path = "list_session_locators_tests.rs"]
+mod list_session_locators_tests;
 
 use codex_protocol::ThreadId;
 use codex_protocol::protocol::ThreadHistoryMode;
@@ -49,6 +59,8 @@ use crate::DeleteThreadSectionParams;
 use crate::DeleteThreadsParams;
 use crate::ItemPage;
 use crate::ListItemsParams;
+use crate::ListSessionLocatorsFuture;
+use crate::ListSessionLocatorsParams;
 use crate::ListThreadSectionsParams;
 use crate::ListThreadsParams;
 use crate::ListTurnsParams;
@@ -56,6 +68,8 @@ use crate::LoadThreadHistoryParams;
 use crate::MoveThreadToSectionParams;
 use crate::PrepareForkParams;
 use crate::PreparedFork;
+use crate::ReadSessionMetaFuture;
+use crate::ReadSessionMetaParams;
 use crate::ReadThreadByRolloutPathParams;
 use crate::ReadThreadParams;
 use crate::RenameThreadSectionParams;
@@ -455,6 +469,17 @@ impl ThreadStore for LocalThreadStore {
 
     fn prepare_fork(&self, params: PrepareForkParams) -> ThreadStoreFuture<'_, PreparedFork> {
         Box::pin(async move { paginated_fork::prepare(self, params).await })
+    }
+
+    fn read_session_meta(&self, params: ReadSessionMetaParams) -> ReadSessionMetaFuture<'_> {
+        Box::pin(async move { read_session_meta::read_session_meta(self, params).await })
+    }
+
+    fn list_session_locators(
+        &self,
+        params: ListSessionLocatorsParams,
+    ) -> ListSessionLocatorsFuture<'_> {
+        Box::pin(async move { list_session_locators::list_session_locators(self, params).await })
     }
 
     fn read_thread(&self, params: ReadThreadParams) -> ThreadStoreFuture<'_, StoredThread> {

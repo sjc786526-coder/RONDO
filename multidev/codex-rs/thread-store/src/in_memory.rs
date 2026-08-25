@@ -55,13 +55,19 @@ mod tests {
     use super::*;
     use crate::ItemSortKey;
     use crate::ListItemsParams;
+    use crate::ListSessionLocatorsError;
+    use crate::ListSessionLocatorsParams;
     use crate::ListTurnsParams;
+    use crate::ReadSessionMetaError;
+    use crate::ReadSessionMetaParams;
+    use crate::SessionLocatorStorage;
     use crate::SortDirection;
     use crate::StoredTurnItemsView;
     use crate::ThreadPersistenceMetadata;
     use crate::ThreadSortKey;
     use codex_protocol::models::BaseInstructions;
     use codex_protocol::protocol::SessionSource;
+    use pretty_assertions::assert_eq;
 
     #[tokio::test]
     async fn default_turn_pagination_methods_return_unsupported() {
@@ -105,6 +111,61 @@ mod tests {
                 operation: "list_items"
             }
         ));
+    }
+
+    #[tokio::test]
+    async fn durable_session_locator_discovery_is_fail_closed_by_default() {
+        let store = InMemoryThreadStore::default();
+        let error = ThreadStore::list_session_locators(
+            &store,
+            ListSessionLocatorsParams {
+                page_size: 10,
+                cursor: None,
+                storage: SessionLocatorStorage::Active,
+            },
+        )
+        .await
+        .expect_err("in-memory storage has no persistent locator authority");
+        assert_eq!(
+            error,
+            ListSessionLocatorsError::Unsupported {
+                operation: "list_session_locators",
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn in_memory_thread_store_does_not_support_canonical_session_meta_reads() {
+        let store = InMemoryThreadStore::default();
+        let thread_id = ThreadId::default();
+        store
+            .create_thread(create_thread_params(thread_id, ThreadHistoryMode::Legacy))
+            .await
+            .expect("create thread");
+
+        let error = ThreadStore::read_session_meta(
+            &store,
+            ReadSessionMetaParams {
+                thread_id,
+                include_archived: false,
+            },
+        )
+        .await
+        .expect_err("in-memory storage cannot authenticate persisted SessionMeta");
+
+        assert_eq!(
+            error,
+            ReadSessionMetaError::Unsupported {
+                operation: "read_session_meta",
+            }
+        );
+        assert_eq!(
+            store.calls().await,
+            InMemoryThreadStoreCalls {
+                create_thread: 1,
+                ..InMemoryThreadStoreCalls::default()
+            }
+        );
     }
 
     #[tokio::test]
@@ -471,6 +532,7 @@ struct InMemoryThreadStoreState {
     calls: InMemoryThreadStoreCalls,
     created_threads: HashMap<ThreadId, CreateThreadParams>,
     histories: HashMap<ThreadId, Vec<RolloutItem>>,
+    archived_threads: HashSet<ThreadId>,
     metadata_updates: HashMap<ThreadId, ThreadMetadataPatch>,
     sections: HashMap<ThreadId, String>,
     section_positions: HashMap<ThreadId, i64>,
@@ -784,6 +846,7 @@ impl InMemoryThreadStore {
         state.calls.delete_thread += 1;
         let existed = state.histories.remove(&params.thread_id).is_some();
         state.created_threads.remove(&params.thread_id);
+        state.archived_threads.remove(&params.thread_id);
         state.names.remove(&params.thread_id);
         state.metadata_updates.remove(&params.thread_id);
         state.sections.remove(&params.thread_id);
@@ -939,9 +1002,11 @@ impl ThreadStore for InMemoryThreadStore {
         Box::pin(InMemoryThreadStore::move_thread_to_section(self, params))
     }
 
-    fn archive_thread(&self, _params: ArchiveThreadParams) -> ThreadStoreFuture<'_, ()> {
+    fn archive_thread(&self, params: ArchiveThreadParams) -> ThreadStoreFuture<'_, ()> {
         Box::pin(async move {
-            self.state.lock().await.calls.archive_thread += 1;
+            let mut state = self.state.lock().await;
+            state.calls.archive_thread += 1;
+            state.archived_threads.insert(params.thread_id);
             Ok(())
         })
     }
@@ -950,7 +1015,10 @@ impl ThreadStore for InMemoryThreadStore {
         Box::pin(async move {
             let mut state = self.state.lock().await;
             state.calls.unarchive_thread += 1;
-            stored_thread_from_state(&state, params.thread_id, /*include_history*/ false)
+            let thread =
+                stored_thread_from_state(&state, params.thread_id, /*include_history*/ false)?;
+            state.archived_threads.remove(&params.thread_id);
+            Ok(thread)
         })
     }
 

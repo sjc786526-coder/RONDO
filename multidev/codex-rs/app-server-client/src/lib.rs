@@ -15,6 +15,7 @@
 //! bridging async `mpsc` channels on both sides. Queues are bounded so overload
 //! surfaces as channel-full errors rather than unbounded memory growth.
 
+mod durable_session_query;
 mod experimental_session_control;
 mod path;
 mod remote;
@@ -64,6 +65,19 @@ use tokio::time::timeout;
 use toml::Value as TomlValue;
 use tracing::warn;
 
+pub use crate::durable_session_query::CommittedProjection;
+pub use crate::durable_session_query::CommittedProjectionConflict;
+pub use crate::durable_session_query::DurableSessionQueryAttachment;
+pub use crate::durable_session_query::DurableSessionQueryClientState;
+pub use crate::durable_session_query::DurableSessionQueryProjection;
+pub use crate::durable_session_query::DurableSessionQueryState;
+pub use crate::durable_session_query::InvalidSessionListProjection;
+pub use crate::durable_session_query::InvalidSessionReadProjection;
+pub use crate::durable_session_query::QueryConnectionEpoch;
+pub use crate::durable_session_query::QueryReadApplyResult;
+pub use crate::durable_session_query::QueryReadTicket;
+pub use crate::durable_session_query::QueryViewFreshness;
+pub use crate::durable_session_query::SessionCommittedRead;
 pub use crate::experimental_session_control::ConnectionEpoch;
 pub use crate::experimental_session_control::ExperimentalSessionControl;
 pub use crate::experimental_session_control::KnownMutationOutcome;

@@ -674,6 +674,16 @@ client_request_definitions! {
         serialization: thread_id(params.thread_id),
         response: v2::ThreadReadResponse,
     },
+    DurableSessionList => "session/list" {
+        params: v2::DurableSessionListParams,
+        serialization: None,
+        response: v2::DurableSessionListResponse,
+    },
+    DurableSessionRead => "session/read" {
+        params: v2::DurableSessionReadParams,
+        serialization: None,
+        response: v2::DurableSessionReadResponse,
+    },
     #[experimental("experimentalSession/list")]
     ExperimentalSessionList => "experimentalSession/list" {
         params: v2::ExperimentalSessionListParams,

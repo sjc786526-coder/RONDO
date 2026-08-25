@@ -1,8 +1,8 @@
-//! Thin App wiring for the default-off `/sessions` prototype.
+//! Thin App wiring for the default-off `/session-control` prototype.
 
 use super::*;
 use crate::experimental_session_control::ExperimentalSessionCommand;
-use crate::experimental_session_control::SESSIONS_USAGE;
+use crate::experimental_session_control::SESSION_CONTROL_USAGE;
 use crate::experimental_session_control::render_detached;
 use crate::experimental_session_control::render_list;
 use crate::experimental_session_control::render_mutation_status;
@@ -28,7 +28,7 @@ impl App {
             Ok(command) => command,
             Err(_) => {
                 self.chat_widget
-                    .add_error_message(SESSIONS_USAGE.to_string());
+                    .add_error_message(SESSION_CONTROL_USAGE.to_string());
                 return;
             }
         };
