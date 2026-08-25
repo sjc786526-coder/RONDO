@@ -170,16 +170,18 @@ git-ignored `codex-source-code/` 只作冻结源码的只读对照，不写入�
   通过，同一上下文独立审查者复验 `ACCEPT`，无剩余高/中 correctness finding。
 - 外部验收发现 rollout cwd 在 matching persisted overlay 前被过早拒绝；现已把 cwd 有效性裁决延后到最终 projection，并覆盖空/相对 rollout
   cwd、matching history/permission 与 mismatch fail-closed。新回归 1/1、ThreadStore 191/191、app-server 2/2、ThreadStore clippy 均通过。
+- 外部复验已接受整改提交 `8c60ad4ae411d6f314c0432dc6531e8bab8d5fb8`，确认上一轮中等级 finding 已关闭，范围内无剩余
+  高/中等级 correctness finding；最终报告见 `agent_log/2026-08-25-024006-plan074-external-reacceptance.md`。
 - 相邻 069 core cold-resume 测试在未修改的 mock sampling 链上两次因 `/v1/responses` 第五次请求返回 502 而超时；无 cwd/ThreadStore
   断言失败。联合 app-server clippy 同样被未修改 core 的 `MutexGuard` 跨 await 既有禁止项阻断，074 自身告警已关闭并由专属 clippy 通过。
 
 ### 当前工作
 
-- 外部验收 finding 已完成窄修和聚焦复验；正在进行最终记录、Git/资源/并行现场检查并形成 remediation 提交。
+- 实现、聚焦验证和外部验收均已完成；用户已批准同步权威文档并把 074 合入本地 `main`，本计划随该整合冻结。
 
 ### 本任务剩余步骤
 
-- 形成 clean remediation 提交后，通过指定 Codex queue 通知外部验收者复验并停止；不合并、不推送。
+- 无任务内实现或验收步骤；Plan 069 后续吸收最新 `main` 并执行阶段 E，继续由其自身合同和四期 WBS 管理。
 
 ### 阻塞项
 
@@ -187,13 +189,12 @@ git-ignored `codex-source-code/` 只作冻结源码的只读对照，不写入�
 
 ### 当前验收状态
 
-- `REMEDIATION_COMPLETE / FOCUSED_GATES_PASS / EXTERNAL_REACCEPTANCE_PENDING`。
+- `PLAN_074_COMPLETE / EXTERNAL_ACCEPTED / MAIN_INTEGRATED`。
 
 ### 交接边界
 
-- 074 执行者只交付 clean 本地分支提交；合入/推送和共享 WBS 同步等待用户批准。
-- 074 获批进入 `main` 后，Plan 069 是否吸收最新 `main` 并执行阶段 E 继续以
-  `doc/WBS/durable-team-runtime.md` 和 Plan 069 合同为准，不在本计划安排或执行。
+- 074 已按用户批准随本次权威文档同步进入本地 `main`；本任务未推送、未归档分支，也未执行 Plan 069 阶段 E。
+- Plan 069 吸收最新 `main` 并执行阶段 E 继续以 `doc/WBS/durable-team-runtime.md` 和 Plan 069 合同为准，不在本计划安排或执行。
 
 ## 6. 关键决策记录
 

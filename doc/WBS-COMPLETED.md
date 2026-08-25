@@ -1975,3 +1975,21 @@ correctness/functionality `remaining_findings=[]`，路线结论为 `GO`。
   既有 helper 回归 **9/9**、`bash -n` 与 diff 门通过；正式轮后无 active RONDO scope 或 Plan 072 临时目录残留。
 - 未运行 Cargo、Docker、真实模型、GPU、API、训练、性能测评或全量测试；未写入主工作区 ignored 资产，未触碰、合并或推送
   069、071 及其它工作树/分支。
+
+## Persisted CWD Read Consistency 窄回移（Plan 074，2026-08-25）
+
+**状态**：`#37198` 所需能力已按冻结 `v0.147.0` 和当前 RONDO 架构完成窄回移、外部整改复验与本地主线整合；验收通过、
+任务目标完成。实现提交为 `bf8b7da6a7a4bc1db962c1f5a4b97dc55267673c`，整改提交为
+`8c60ad4ae411d6f314c0432dc6531e8bab8d5fb8`。
+
+- ThreadStore read-by-ID/read-by-rollout 只在 canonical rollout lineage 匹配时采用 persisted absolute cwd；空/相对 rollout cwd 可由
+  同 lineage 的可信 metadata 修复，metadata 缺失、不可解析或 mismatch 时仍在最终 projection fail-closed。legacy permission 按最终
+  cwd 自洽重算，state-only list 不会把损坏 cwd 绝对化为进程 cwd。
+- persisted cwd 只代表已持久读取事实；显式 resume cwd/workspace roots 继续按既有优先级决定 live execution 和权限上下文，恢复或
+  投影不会把历史事实冒充 writer binding，也不会扩大执行权限。实现对照官方 exact commit `547080e4d690cdeea12f427a8d9c5165928821ed`，
+  未整体升级上游或引入第二套 ThreadStore、workspace registry、权限或审计体系。
+- 整改后的聚焦证据为 ThreadStore **191/191**、app-server read/list/resume **2/2**、新增 lineage/cwd/permission 回归 **1/1**，
+  ThreadStore clippy、`just fmt` 与 diff 检查通过；外部复验结论 `ACCEPT`，无剩余高/中等级 correctness finding。
+- 069 相邻 mock sampling 的 `/v1/responses` 502 超时和未修改 core 的既有 clippy 阻断已如实记录为非 074 问题，本任务未为其扩大
+  写集或重跑全 workspace。未运行 Docker、真实 API/模型、训练、性能测评、CI/PR，也未执行 Plan 069 阶段 E；因此本条只解除
+  `#37198` 代码前置，不代表 `M4-S1 PASS`。
