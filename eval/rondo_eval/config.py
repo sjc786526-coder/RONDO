@@ -285,6 +285,36 @@ def load_local_model_secret(config: RuntimeConfig) -> tuple[str, str] | None:
     return (env_name, value) if value else None
 
 
+def load_allowlisted_secret_values(
+    paths: RepoPaths,
+    names: tuple[str, ...],
+) -> dict[str, str]:
+    """Load only named, tracked-allowlisted values from the main-root env file."""
+
+    if (
+        not names
+        or len(names) != len(set(names))
+        or any(not isinstance(name, str) or not _ENV_NAME.fullmatch(name) for name in names)
+    ):
+        raise ConfigError("requested secret names are invalid")
+    allowed = _allowed_secret_names(paths.worktree_root / "rondo.secrets.example.env")
+    if any(name not in allowed for name in names):
+        raise ConfigError("requested secret name is absent from the tracked allowlist")
+    values = _parse_env_file(
+        paths.common_root / ".env.local",
+        require_mode=True,
+        allow_empty=True,
+        allowed_names=allowed,
+    )
+    selected: dict[str, str] = {}
+    for name in names:
+        value = values.get(name)
+        if value is None or not value:
+            raise ConfigError(f"required secret {name} is missing or empty")
+        selected[name] = value
+    return selected
+
+
 def _load_secret_by_name(config: RuntimeConfig, env_name: str) -> tuple[str, str]:
     values = _parse_env_file(
         config.paths.common_root / ".env.local",

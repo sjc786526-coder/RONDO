@@ -13,6 +13,14 @@ doctest = false
 name = "codex-publication-critic-service"
 path = "src/bin/codex-publication-critic-service.rs"
 
+[[bin]]
+name = "codex-publication-critic-real-service"
+path = "src/bin/codex-publication-critic-real-service.rs"
+
+[[bin]]
+name = "codex-publication-critic-probe"
+path = "src/bin/codex-publication-critic-probe.rs"
+
 [lints]
 workspace = true
 

@@ -1,7 +1,7 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
 最后更新：2026-08-24 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
-状态：**第一期、第二期、M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、Plan 064 与四期 M4-A 已完成；Plan 060 技术 GO、Plan 064 DATA_GO、Plan 066 正式训练 GO；M4-A 结论为 `M4_A_GO`**
+状态：**第一期、第二期、M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、Plan 064 与四期 M4-A 已完成；Plan 060 技术 GO、Plan 064 DATA_GO、Plan 066 正式训练 GO；M3-C1 有训练候选通过但 base 对照未取得同口径资格，M3-C2 仍锁定；M4-A 结论为 `M4_A_GO`**
 
 ## 当前定位
 
@@ -81,8 +81,8 @@ M3-B1b      Plan 064 v8 数据扩充         │
 M3-B1c 正式分阶段训练与工件回收          │
         └──────────────┬───────────────┘
                        ↓
-                 M3-C1 本地部署资格
-                       ↓
+                 M3-C1 本地部署资格（已完成）
+                       ↓ base 对照修正并重验通过后
                  M3-C2 联合横评与最终选择
                        ↓
                  M3-D 端到端收口
@@ -121,7 +121,7 @@ error slice 均存在。tracked v4 同时保留 8 条 calibration 投影、conte
 **交接**：基座工程路径与 M3-B1a 数据建设 GO，未微调模型直接产品使用 NO-GO。M3-B1a 应复用 v4 输入/评价合同并建立独立
 train/validation/unseen-test split，优先补足 `internal_consistency` 精致 hard negative、new/completed useful-state 边界、
 threshold-near handoff 与 continuity/evidence omission 对照，并避免长度、角色和模板捷径。M3-A2 cohort 不得冒充未来 unseen test；
-M3-B1c 已提供通过独立验收的训练候选；M3-C1 可另行规划和授权。
+M3-B1c 已提供通过独立验收的训练候选；Plan 068 / M3-C1 随后完成本地交接、真实部署资格、独立验收与远端止费。
 
 ### B 阶段：模型链与产品链并行
 
@@ -193,16 +193,17 @@ M3-C1。最后一个 checkpoint 不自动获得产品资格。
 **当前状态**：Plan 066 `final-01` 已从 exact base 干净完成 C1→C2→C3，实际消费 128 Binary、C2 加 50 Boundary、C3 再加 8
 Within-PASS，共 451,743 tokens；三阶段均完成 1,720,577,024 个 BF16 参数和 311/311 optimizer tensors 的 FlashAdamW 有限更新。
 C1/C2/C3 三个 model-only safetensors 候选、55-candidate 固定 validation、正式 C3 full checkpoint 和新进程 step 3→4 恢复继续均已形成并复验；
-validation 不进入梯度或训练决策，unseen-test 未导出、未运行。计算 Pod 已停止并永久删除，winner 卷保留 formal checkpoint、三个候选、exact 模型、
-venv 与 cache；final-01 terminal receipt 已 superseded，final-02 保留生成时的控制台费用快照。独立终审按用户指定冻结最新 provider 快照总费用
+validation 不进入梯度或训练决策，unseen-test 未导出、未运行。计算 Pod 已停止并永久删除；Plan 068 随后把 formal checkpoint、三个候选、
+exact 模型与必要环境安全交接到本地，并在独立复验接受后永久删除 winner 卷。final-01 terminal receipt 已 superseded，final-02 保留生成时的控制台费用快照。独立终审按用户指定冻结最新 provider 快照总费用
 `$10.9647715263`，距 `$23` 上限 `$12.0352284737`；correctness/functionality `remaining_findings=[]`，M3-B1c 完成并验收通过。
-M3-C1 可另行规划和授权，但不自动获得实施授权或产品资格。
+该结论本身不授予产品资格；四对象的本地资格结论见 M3-C1。
 
 #### M3-B2a：本地 Critic 服务（已完成并通过独立验收）
 
 **结果**：Plan 055 新建专用 `codex-publication-critic` crate，以 loopback framed JSON 提供版本化协议、调用方可信配置绑定的
 service/model/scoring identity、可替换 scorer、typed client 与有界生命周期。受控 backend 的真实服务进程测试覆盖
-PASS/REWRITE、严格解析、identity/score 漂移、并发/队列、timeout/cancel、异常退出和关闭回收；尚未运行真实模型。
+PASS/REWRITE、严格解析、identity/score 漂移、并发/队列、timeout/cancel、异常退出和关闭回收；本包验收时尚未运行真实模型，
+真实 scorer 后由 Plan 068 接入同一服务边界。
 
 **边界**：本包只负责模型服务与稳定调用边界，不修改 Multi 发布流程，不复用 RONDO Local 的审批模型产品合同，也不建设
 第二套 trace、复杂鉴权或通用模型服务平台。typed packet 没有任意 metadata 扩展袋，但 B2a 不声明能识别合法文本字段中被
@@ -216,7 +217,7 @@ PASS/REWRITE、严格解析、identity/score 漂移、并发/队列、timeout/ca
 **结果**：Plan 057 已把默认关闭的 typed Critic 配置接入 `team_publish` 前置流程。关闭态保留原工具合同和 store 路径；启用态审核
 Team State 共享 canonical preparation，以 event-local 单页公共 history 构造 Plan 055 packet，最多返回两次固定 rewrite，第三次审核
 非阻断，typed failure 只回退到唯一一次现行 store commit。committed/attempt replay、取消、并发与 body-free 观测均有聚焦回归，代表性
-产品路径启动 Plan 055 正式服务进程并走正式 typed client；尚未运行真实模型。
+产品路径启动 Plan 055 正式服务进程并走正式 typed client；本包验收时尚未运行真实模型，后续真实资格由 Plan 068 完成。
 
 独立审查发现的 cycle 隔离、continuation 阶段授权、锁内 bounded history 与 body-redacted trace 终态问题均已修复：无关请求不清理
 active cycle，每次阻断反馈轮换 continuation，Team State 专用 history 不携 route/Fact ID，PostToolUse feedback 保留安全终态。
@@ -224,12 +225,13 @@ active cycle，每次阻断反馈轮换 continuation，Team State 专用 history
 **边界**：只增加 Publication Critic 所需产品能力；不接管 Producer/Root 语义，不新建 Agent 间协议、第二套 Team State、
 调度器或自动重写器。实现可以为保持边界干净而重构，不要求堆叠在现有 handler 上。
 
-**交接**：修复与定向门禁已完成，同一独立审查者最终复验结论为 PASS，成果已进入主线；产品链已具备进入 M3-C1 的前置能力，但仍等待模型链完成。
-本包不冻结真实 threshold/model identity，不扩张为自动改写器、第二套 Team State/trace 或通用服务监督器。
+**交接**：修复与定向门禁已完成，同一独立审查者最终复验结论为 PASS，成果已进入主线；产品链与 Plan 066 模型链均已具备
+M3-C1 前置，Plan 068 已复用本服务接缝完成真实模型资格运行。本包不冻结真实 threshold/model identity，不扩张为自动改写器、第二套 Team State/trace
+或通用服务监督器。
 
 ### C 阶段：本地收敛与最终选择
 
-#### M3-C1：本地部署资格
+#### M3-C1：本地部署资格（已完成）
 
 **目标**：在模型链和产品链均完成后，把候选训练模型部署到目标本地环境，关闭格式、量化、资源和服务兼容性问题。
 
@@ -238,6 +240,18 @@ active cycle，每次阻断反馈轮换 continuation，Team State 专用 history
 
 **宏观验收**：明确各候选是否具备本地资格，且至少一个候选能稳定处理有界 publication；其延迟、显存和失败率适合
 2–8 Agent 场景，格式转换或量化没有造成不可接受的判定漂移，离线 runner 与产品 runtime 判定一致。
+
+**结果**：Plan 068 已完成 120/120 个必要对象（24,385,153,354 bytes）及正式 checkpoint 的本地交接，以原始 safetensors、
+CUDA BF16 scorer 和 CPU FP32 reference 接入 Plan 055/057 既有服务接缝。唯一有效正式轮
+`plan068-formal-20260824T222852Z-qualification-v3` 给出 base `NOT_QUALIFIED`、C1 `QUALIFIED`、
+C2 `NOT_QUALIFIED`、C3 `QUALIFIED`：base 因 projected drift `0.03404159` 与 1 次临时 verdict mismatch 未通过，
+C2 因 ranking 与 direction 门未通过；C1/C3 的 runner/service projected parity、verdict parity、15/15 stress 与本地资源门通过。
+资格运行未读取 unseen-test，也未转换、量化、继续训练或修改冻结权重。
+
+**交接**：本地副本和身份经独立复验接受后，exact RunPod winner 卷 `hi3iaz8rsr` 已永久删除；当前 RunPod 为 0 Pod、
+0 volume，compute/volume 持续费用均为 0，必要本地资产继续保留。Plan 068 的实现与任务流程验收通过，但因 base 对照未在
+同一口径取得资格，`m3_c2_prerequisite_satisfied=false`。三期须先另建任务修正并重验 base 本地部署可比性，不得直接启动
+M3-C2；该修正不得借机改冻结权重、数据、产品语义或最终 threshold。
 
 #### M3-C2：联合横评与最终选择
 
@@ -248,6 +262,9 @@ active cycle，每次阻断反馈轮换 continuation，Team State 专用 history
 
 **宏观验收**：发布质量、False PASS/REWRITE、边界样本、延迟和本地资源开销得到联合比较；最终选择有清晰理由且可由现有
 轻量设施复测，未达标则回到对应工作包迭代而非建立模型退役制度。
+
+**当前状态**：未启动、未授权。虽然 C1/C3 已取得本地资格，但 base 对照未通过 Plan 068 的同口径资格门；只有 base
+本地部署可比性修正并重新验收通过后，才可另行规划和授权本包。
 
 ### D 阶段：端到端收口
 
@@ -270,8 +287,9 @@ active cycle，每次阻断反馈轮换 continuation，Team State 专用 history
 - M3-A1、M3-A2 与 M3-B1a 已完成共同前置。Plan 060 / M3-B1b 与已完成的 Plan 064 构成 M3-B1c 的并列资格门；产品链的
   M3-B2a、M3-B2b 均已完成，两链在 M3-C1 前汇合。
 - M3-B1b 是独立付费资格门；Plan 060 `TECHNICAL_GO`、Plan 064 `DATA_GO` 与正式训练授权均已成立，Plan 066 已据此完成训练执行、
-  资源终态与 final-02 receipt。独立验收未闭合前不自动启动 M3-C1，也不继续追加训练消费。
-- M3-C1 等待 M3-B1c 与 M3-B2b，M3-C2 等待 M3-C1，M3-D 最后串行收口。
+  资源终态、final-02 receipt 与独立验收；Plan 068 已完成本地交接、资格运行和远端止费，没有追加训练消费。
+- M3-B1c 与 M3-B2b 前置、Plan 068 / M3-C1 均已完成；C1/C3 已取得资格，但 base 未通过同口径资格，因此 M3-C2 继续等待
+  base 本地部署可比性修正与重验，M3-D 最后串行收口。
 - RunPod 云端 smoke/训练不占本地 Cargo build lock，可与产品代码、数据整理和四期非冲突开发并行；真实本地模型、
   Docker 与重型 Cargo 仍按根 `AGENTS.md` 全局串行。
 - 三期与已经正式收口的方向 1 没有产品依赖。如果未来重新启动方向 1，普通工作仍可并行安排，但共享 API 预算、
@@ -370,5 +388,7 @@ active cycle，每次阻断反馈轮换 continuation，Team State 专用 history
   本地 Git 生命周期操作、外部资源或正式验证已获实施授权。
 - RunPod 创建或计费、模型与数据上传、云端训练、权重下载、真实本地模型加载/推理、Docker 和付费 API 均须在对应任务
   开始前取得明确授权；23 USD 是三期训练的总预算上限，不等于已经授权消费。
+- Plan 068 的一次性授权已随本地交接、真实推理、资格验收和 exact winner 卷删除全部完成，不向后续任务延伸。后续 base
+  本地部署可比性修正、M3-C2/M3-D、云资源、远端上传、真实 API、继续训练或产品启用均须另建任务并取得相应授权。
 - 训练数据、权重、逐样本输出与私有运行材料留在 `eval-data/` 或仓库外；`training/` 只保存体积合规的轻量合同与数据。
 - 正确性测试随产品能力建设；测评只保留能指导模型选择和产品验收的轻量指标，不建设数据资产审计或可信证明平台。

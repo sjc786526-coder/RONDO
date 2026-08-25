@@ -1889,3 +1889,28 @@ correctness/functionality `remaining_findings=[]`，路线结论为 `GO`。
   可分别建立 ExecPlan；正式 W1 仍等待 W0 binding GO 与 S1 接缝，W 线不阻塞 S/C 核心收口。
 - 验收只使用现行源码、既有测试定义、冻结上游与官方 PR 的静态证据，并通过精确写集、链接、术语和 `git diff --check`；未运行
   Cargo/Rust、Docker、真实 API/模型、训练、测评、全 workspace、CI 或 PR，也未修改 Plan 068 内容。
+
+## Publication Critic 本地部署资格与候选交接（Plan 068 / M3-C1，2026-08-24）
+
+**状态**：本地工件交接、真实模型服务接入、四对象正式资格运行、独立审查整改、远端清理与最终验收均已完成；
+实现和任务流程验收通过。base `NOT_QUALIFIED`、C1 `QUALIFIED`、C2 `NOT_QUALIFIED`、C3 `QUALIFIED`，
+但因 base 对照未取得同口径资格，M3-C2 前置未满足。资格与远端清理提交为
+`261164fb82747b2f175b5f29613bec1a56a756fa`，最终独立验收提交为
+`a0f0220452a1f8f084a0645888e7de5918db84eb`。
+
+- 通过无 Pod RunPod S3 入口安全接收并验证 120/120 个必要对象、24,385,153,354 bytes，覆盖 exact base、
+  C1/C2/C3、正式 checkpoint 与必要恢复环境；本地副本的 bytes/hash/身份闭合，unseen-test 始终封存。
+- 在 Plan 055/057 的既有协议、typed failure 与产品语义上接入真实 scorer，正式部署路径使用原始 safetensors 与
+  CUDA BF16，CPU FP32 作为转换前 reference；没有量化、修改权重、继续训练或另建通用模型服务体系。
+- 调试阶段先用 fresh worker 完成窄 commissioning，再冻结统一 BF16 projected cap `0.005` 和干净正式配置。
+  唯一有效正式轮为 `plan068-formal-20260824T222852Z-qualification-v3`：base 因 projected drift
+  `0.03404159` 和 1 次临时 verdict mismatch 失败；C2 因 ranking/direction 失败；C1/C3 的 runner/service
+  projected parity、0 verdict mismatch、15/15 stress、typed failure、取消与关闭语义通过，本地资源和延迟适合既定有界场景。
+- 正式 evidence、freeze、offline/service observations 与 result 以普通 JSON/SHA-256 绑定；此前调试或基础设施失败轮均明确失效，
+  未拼接成正式结果。相关定向 Python 113/113、Rust 34/34、整改复验 41/41，以及 fmt/lock/compileall/diff 门禁通过；
+  最终清理未改变代码、模型或资格证据，因此未机械重跑真实模型、Cargo 或 Docker。
+- 本地交接经独立审查明确接受后，永久删除 exact RunPod winner 卷 `hi3iaz8rsr`；删除后实时复核为 0 Pod、
+  0 volume，当前 compute/volume 持续费用均为 0。本地候选、正式 checkpoint 与资格证据继续保留。
+- 未运行 unseen-test、真实 API、Docker、云端训练或 Hugging Face 上传，未启动 M3-C2/M3-D，也未默认启用 Critic。
+  任务执行日志见 `agent_log/2026-08-24-210426-plan068-local-qualification.md`，最终独立验收见
+  `agent_log/2026-08-24-185009-plan068-final-review.md`。
