@@ -202,23 +202,27 @@ linked worktree 不共享主根 ignored `eval-data/`。因此 Plan 073 的模型
 
 ### 当前工作
 
-- `EXECUTED_AWAITING_INDEPENDENT_ACCEPTANCE`：task branch 已完成并提交，等待计划制定者独立验收。
+- `INDEPENDENT_ACCEPTANCE_FAILED / REMEDIATION_REQUIRED`：正式质量结果可复算为 `NO-GO`，但 validation release 在 lock 前读取完整 v8，且
+  selection lock 对 `SELECTED` result 只做浅校验；详见 `agent_log/2026-08-25-020456-plan073-independent-acceptance-review.md`。
 
 ### 本任务剩余步骤
 
-- 无。执行侧步骤 1–6 已全部完成；`NO-GO` 终态使 selection lock 与 unseen 盲验按协议不产生。
+- 将 validation release 改为真正的 split-scoped 读取，确保 lock 前不打开 unseen-bearing 数据源，并补相称回归。
+- 严格校验 selection result 与 lock 的 run/freeze、terminal、ranking、admission、artifact 和归档身份一致性，拒绝伪造 `SELECTED`。
+- 修正 Judge package 的 opaque identity/必要绑定及证据表述；用现有 raw 结果做轻量重建和 focused 复验，不重跑模型或 Opus。
 
 ### 阻塞项
 
-- 无。重型资源已释放；本任务未使用 Docker、重型 Cargo、付费 API 或远端资源。
+- lock 前 unseen 读取边界和 selection-lock 构造正确性尚未满足；这两项关闭前 task branch 不得合并。
+- 重型资源已释放；整改不需要 Docker、重型 Cargo、付费 API、远端资源或新的真实模型/Judge 运行。
 
 ### 当前验收状态
 
-- `EXECUTED / NO-GO / PENDING_INDEPENDENT_ACCEPTANCE`
+- `EXECUTED / NO-GO RESULT RETAINED / INDEPENDENT_ACCEPTANCE_FAILED`
 
 ### 交接边界
 
-- 执行者只完成 Plan 073 本地 task branch 并提交；计划制定者随后按本计划、live code、正式结果和资源事实独立验收。
+- 执行者只在 Plan 073 本地 task branch 完成上述窄整改和复验；计划制定者随后复审，不重开模型或 Judge 正式轮。
 - 只有独立接受的 `GO` 才由 WBS 解锁 M3-D。`NO-GO` 或 `INCONCLUSIVE` 只交付结论和返回边界，不在本计划扩写训练、C2 修复、新候选或下游任务。
 - 任务完成后冻结本计划；共享 WBS、WBS-COMPLETED、合并、推送和分支归档由用户后续单独批准并基于届时最新 `main` 完成。
 
