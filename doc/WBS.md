@@ -1,6 +1,6 @@
 # RONDO 长程规划（WBS）
 
-最后更新：2026-08-24（Plan 067 / M4-A、Plan 068 / M3-C1 与 Plan 070 / M4-C0 均已完成并通过独立验收）
+最后更新：2026-08-25（Plan 072 共享重型任务启动前冲突观察门已完成并通过独立验收）
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段指针、跨方向关系、
 稳定工程边界和授权门；已完成成果与验收见 `doc/WBS-COMPLETED.md`，单次任务合同见 `plan/`，执行细节见
@@ -65,7 +65,9 @@
   本地保留 120/120 个必要对象与正式 checkpoint；RunPod exact winner 卷已删除，当前 0 Pod、0 volume、持续费用为 0。
 - Plan 068 的技术实现与任务流程验收通过，但约定要求 base 对照和至少一个训练候选同口径可比，因此
   `m3_c2_prerequisite_satisfied=false`。三期下一包应先在不改冻结权重、数据、产品语义或最终 threshold 的前提下，修正并重验
-  base 本地部署可比性；具体路线另建 ExecPlan。M3-C2 与 M3-D 均未启动，也未获实施授权。
+  base 本地部署可比性；具体路线另建 ExecPlan。该包的本地重型步骤继续复用 canonical shared wrapper：wrapper 在取得 flock 后、
+  payload 前会对既存 populated RONDO heavy scope 或不可可靠观察的 scope 事实 fail-closed，无需另建人工观察门或第二套互斥设施。
+  M3-C2 与 M3-D 均未启动，也未获实施授权。
 
 ### 方向 3：Durable Team Runtime 四期
 
@@ -126,6 +128,9 @@ RONDO/
 
 - 重型 Cargo 构建与测试必须经仓库根共享 `scripts/with-build-lock.sh` 或已接入它的 `just` 配方；
   `CARGO_TARGET_DIR` 必须位于项目根内并受看门狗监督。
+- canonical wrapper 在取得 flock 后、任何 payload 启动前枚举当前用户的 canonical RONDO heavy scope，并以 cgroup
+  `populated` 事实判定冲突；仍 populated 或事实不可可靠取得时稳定拒绝，不等待、不清理、不接管旧 scope。历史 inactive/failed
+  unit 只有在无 ControlGroup、明确 unpopulated，或 cgroup 已消失且终态复读一致时才放行。
 - 两套产品的重型构建、Docker、真实本地模型加载/推理全局串行；同一时刻只保留一个产品的热 target。
 - 具体磁盘、Windows `C:`、内存、swap、Docker 增量和 fail-closed 阈值以根 `AGENTS.md` 为准，不使用 WSL
   虚拟容量代替宿主容量。

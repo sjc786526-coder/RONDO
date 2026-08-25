@@ -1936,3 +1936,19 @@ correctness/functionality `remaining_findings=[]`，路线结论为 `GO`。
   判定在 070 写集外，本任务未弱化或掩盖。
 - 正式 Session query 仍等待 M4-S1，以真实 durable read model 替换 prototype input；正式 control/TUI 再等待 M4-S2 的恢复和 close
   barrier。C0 不冻结正式 RPC、字段、UI、timeout 或通用 `thread/unarchive` authority，也不授权产品启用、S1/S2、外部资源或远端操作。
+
+## 共享重型任务启动前冲突观察门（Plan 072，2026-08-25）
+
+**状态**：共享 wrapper 补丁、独立审查整改、clean-HEAD 正反例与最终复审均已完成；结论为
+`STARTUP_GUARD_ADDED`，`remaining_findings=[]`。正式验收代码 HEAD 为
+`c517896924977fe6f044fdc514edc83586294884`。
+
+- `scripts/with-build-lock.sh` 在成功取得 canonical flock 后、任何 payload 前调用共享 helper；匹配的 RONDO heavy scope
+  仍 `populated=1` 或观察事实不可可靠取得时以 `84` fail-closed，且不等待、kill、清理、接管或调度旧 scope。
+- inactive/failed 历史 unit 只有在无 ControlGroup、明确 `populated=0`，或 cgroup 已消失且终态复读一致时才 clear；非空且
+  populated 的 failed scope 仍是冲突。独立审查发现并推动关闭了过早 clear 的真实缺口。
+- 正式轮从 clean `c517896…` 创建全新 task-owned scope/nonce/PID/marker，聚焦 Python **7/7** 通过：冲突时 contender
+  返回 `84` 且 marker 不存在、旧 scope identity/population 不变；精确 teardown 并确认 gone 后，新 marker 正常执行。
+  既有 helper 回归 **9/9**、`bash -n` 与 diff 门通过；正式轮后无 active RONDO scope 或 Plan 072 临时目录残留。
+- 未运行 Cargo、Docker、真实模型、GPU、API、训练、性能测评或全量测试；未写入主工作区 ignored 资产，未触碰、合并或推送
+  069、071 及其它工作树/分支。

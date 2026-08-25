@@ -98,29 +98,33 @@
 
 - 从 clean 本地 `main@d941d0a0df7687cc0d546de2012ba1d5db58b10b` 创建专用 worktree/分支。
 - 已阅读根规则、README、当前 WBS、模板、三份原始问题报告和当前 wrapper/watchdog/lease/model service 相关实现与测试。
-- 当前只读结论是：历史碰撞和人工错峰事实成立，历史唯一根因未知；现有 tracked wrapper 未见等强的 active heavy scope 启动前一致性检查。
+- 只读结论是：历史碰撞和人工错峰事实成立，历史唯一根因未知；现有 tracked wrapper 没有等强的 active heavy scope 启动前一致性检查。
 - 用户进一步收窄任务：只把上述人工启动前确认固化到 shared wrapper，不做全面生命周期验证或调度设施。
-- 规划阶段未运行 wrapper scope、测试、Cargo、Docker、模型、GPU、API 或测评，未修改生产代码/WBS，未创建主工作区 ignored 资产。
+- 在 helper 增加 canonical scope 枚举、systemd state/ControlGroup 与 `cgroup.events populated` 核对；wrapper 在 flock 成功后、
+  两条 payload 路径前调用，冲突或 unknown 稳定返回 `84`，不改变旧 scope。
+- 初次动态基线发现 069 的 active heavy scope 后保留现场并 defer；用户报告资源释放后，主执行者在同一 FD 持锁期间确认
+  lock 可取得且 active scope 为 0，才创建第一套 072 fixture。
+- 独立审查发现 inactive/failed + 非空 populated cgroup 被过早 clear；已收紧为必须读取 cgroup 事实并增加回归。
+- 调试链完整打通后冻结候选；最终从 clean `c517896924977fe6f044fdc514edc83586294884` 创建全新 fixture，正式聚焦
+  7/7 通过（4.414 秒），既有 helper 9/9、`bash -n` 与 diff 门通过。正式轮后 HEAD 不变、worktree clean，
+  无 active RONDO scope 或 Plan 072 临时目录残留。
+- 最终独立复审结论为 `ACCEPT`、`remaining_findings=[]`；没有主工作区 ignored 写入，也没有运行或接触禁止项。
 
 ### 当前工作
 
-- ExecPlan 已按收窄后的目标形成，等待执行者实施。
+- 任务完成；本计划随最终文档提交冻结，后续路线只见 WBS。
 
 ### 本任务剩余步骤
 
-1. 用 live code 确认检查点和 active/populated scope 的最小可靠观察方式。
-2. 先用 model-free fixture 复现 lock/scope 矛盾与 contender marker；若现有行为未阻止 payload，在 shared wrapper/helper 加轻量启动前门禁。
-3. 运行最小 pure/focused 与 model-free 正反例；普通问题自主修复重跑。
-4. 从 clean committed HEAD 和全新 fixture 再运行一次正式聚焦验收，精炼更新 plan/WBS/环境文档/日志并安排独立审查。
-5. 本地提交最终分支，确认 worktree clean、其它 worktree 未被触碰，然后停止等待用户决定是否合并。
+- 无。执行者完成本地最终提交与 clean/隔离复核后停止，等待用户决定是否合并。
 
 ### 阻塞项
 
-- 当前无阻塞；动态行为等待执行阶段 model-free 验证。
+- 当前无阻塞。
 
 ### 当前验收状态
 
-- `NOT_STARTED`：只完成规划与只读调查，没有执行动态验证或生产补丁。
+- `STARTUP_GUARD_ADDED` / `PASS`：clean-HEAD 正式聚焦 7/7，独立复审 `ACCEPT`、`remaining_findings=[]`。
 
 ### 交接边界
 
@@ -161,3 +165,5 @@
 | 003 | 门禁只观察并拒绝，不等待、清理、接管或调度旧任务 | 保持补丁轻量，旧任务生命周期继续由原 owner/watchdog 负责 | 行为、安全 | 已采纳 |
 | 004 | 用一个 model-free 矛盾 fixture 加清除后的正常正例验收，不建设完整异常退出矩阵 | 精确覆盖历史问题，同时避免把任务扩大为一般生命周期平台 | 测试 | 已采纳 |
 | 005 | Plan 071 只通过 WBS 消费 canonical wrapper 当前事实，不触碰其分支或冻结其执行策略 | 保持并行隔离与规划唯一来源 | Git、交接 | 已采纳 |
+| 006 | systemd 只发现 canonical unit/复核消失竞态，当前存活以 ControlGroup 的 `populated` 为准 | inactive/failed 不保证非空 cgroup 已无人；unknown 必须拒绝 | helper、错误语义 | 已采纳 |
+| 007 | 正式 fixture 持锁完成自身 identity/population 核对后才释放 lock 制造矛盾，teardown 只处理 exact owner | 避免把真实竞争、未知 scope 或清理副作用误算为门禁证据 | 测试、安全 | 已采纳 |
