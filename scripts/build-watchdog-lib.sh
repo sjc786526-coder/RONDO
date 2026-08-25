@@ -67,7 +67,9 @@ rondo_active_heavy_scopes() {
       || return 1
 
     case "$active_state" in
-      inactive | failed) continue ;;
+      inactive | failed)
+        [[ -n "$control_group" ]] || continue
+        ;;
       active | activating | deactivating) ;;
       *) return 1 ;;
     esac
@@ -89,6 +91,9 @@ rondo_active_heavy_scopes() {
       gone)
         ;;
       unknown)
+        # An existing but unreadable/malformed cgroup is still unknown even if
+        # systemd already reports the unit inactive or failed.
+        [[ ! -e "$cgroup_root" ]] || return 1
         # A unit may disappear between list-units and the cgroup read. Re-read
         # ActiveState so an already inactive/failed historical unit does not
         # become a permanent false positive; every other unknown remains closed.

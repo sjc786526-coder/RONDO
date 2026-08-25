@@ -95,7 +95,9 @@ exit 2
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, f"{unit}\n")
 
-    def test_inactive_failed_and_unpopulated_scopes_are_clear(self) -> None:
+    def test_inactive_failed_without_cgroup_and_unpopulated_scopes_are_clear(
+        self,
+    ) -> None:
         unit = "rondo-build-1000-20260825010102-4243.scope"
         for active_state in ("inactive", "failed"):
             with self.subTest(active_state=active_state), tempfile.TemporaryDirectory(
@@ -131,6 +133,31 @@ exit 2
             )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, "")
+
+    def test_inactive_or_failed_populated_cgroup_is_still_a_conflict(self) -> None:
+        unit = "rondo-build-1000-20260825010105-4246.scope"
+        control_group = f"/test.slice/{unit}"
+        for active_state in ("inactive", "failed"):
+            with self.subTest(active_state=active_state), tempfile.TemporaryDirectory(
+                prefix="plan072-pure-"
+            ) as directory:
+                root = Path(directory)
+                cgroup = root / control_group.removeprefix("/")
+                cgroup.mkdir(parents=True)
+                (cgroup / "cgroup.events").write_text(
+                    "populated 1\n", encoding="utf-8"
+                )
+                result = self._run_fake(
+                    root,
+                    listing=f"{unit} loaded {active_state} dead fixture\n",
+                    properties=(
+                        "LoadState=loaded\n"
+                        f"ActiveState={active_state}\n"
+                        f"ControlGroup={control_group}\n"
+                    ),
+                )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout, f"{unit}\n")
 
     def test_observation_failures_remain_fail_closed(self) -> None:
         unit = "rondo-build-1000-20260825010103-4244.scope"
