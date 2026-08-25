@@ -1,4 +1,5 @@
 use codex_protocol::ThreadId;
+use codex_protocol::protocol::DurableTeamSessionMeta;
 use codex_protocol::protocol::SessionMeta;
 use std::fmt;
 use std::path::PathBuf;
@@ -80,14 +81,7 @@ impl RootWritePermit {
     /// Team durability uses this while the write permit is live so a snapshot read or commit
     /// cannot report success after the Root lineage marker has disappeared or changed.
     pub fn read_session_meta(&self) -> ThreadStoreResult<SessionMeta> {
-        codex_rollout::read_session_meta_line_blocking(&self.state.rollout_path)
-            .map(|line| line.meta)
-            .map_err(|error| ThreadStoreError::Internal {
-                message: format!(
-                    "cannot read canonical SessionMeta for Root thread {}: {error}",
-                    self.state.thread_id
-                ),
-            })
+        self.state.read_session_meta()
     }
 }
 
@@ -119,6 +113,16 @@ impl RootClosePermit {
         self.state.thread_id
     }
 
+    /// Requires the live writer shutdown covered by this close generation to revalidate an exact
+    /// canonical durable-Team marker after recorder flush and before releasing the owner.
+    pub fn require_session_meta(
+        &mut self,
+        expected: DurableTeamSessionMeta,
+    ) -> ThreadStoreResult<()> {
+        self.state
+            .require_close_session_meta(self.generation, expected)
+    }
+
     /// Reopens the authority after a durable Team close failed before thread shutdown.
     pub fn abort(mut self) -> ThreadStoreResult<()> {
         self.state.abort_close(self.generation)?;
@@ -128,8 +132,8 @@ impl RootClosePermit {
 
     /// Seals the authority after the durable Team close has succeeded.
     ///
-    /// Completion prevents all later Team mutations while the store retains the strong authority
-    /// and OS writer lock until thread shutdown itself succeeds.
+    /// Completion prevents all later Team mutations. Call it only after the persistence and any
+    /// registered final marker validation for this close generation have succeeded.
     pub fn complete(mut self) -> ThreadStoreResult<()> {
         self.state.complete_close(self.generation)?;
         self.finished = true;
@@ -171,6 +175,7 @@ struct AuthorityInner {
     lifecycle: AuthorityLifecycle,
     active_writes: usize,
     close_permit_issued: bool,
+    required_session_meta: Option<DurableTeamSessionMeta>,
     next_close_generation: u64,
 }
 
@@ -201,6 +206,7 @@ impl RootWriterAuthorityState {
                 lifecycle: AuthorityLifecycle::Active,
                 active_writes: 0,
                 close_permit_issued: false,
+                required_session_meta: None,
                 next_close_generation: 1,
             }),
             writes_drained: Notify::new(),
@@ -259,6 +265,7 @@ impl RootWriterAuthorityState {
                     })?;
                     inner.lifecycle = AuthorityLifecycle::Closing { generation };
                     inner.close_permit_issued = false;
+                    inner.required_session_meta = None;
                     generation
                 }
                 AuthorityLifecycle::Closing { .. } => {
@@ -341,6 +348,62 @@ impl RootWriterAuthorityState {
         self.writes_drained.notify_one();
     }
 
+    fn read_session_meta(&self) -> ThreadStoreResult<SessionMeta> {
+        codex_rollout::read_session_meta_line_blocking(&self.rollout_path)
+            .map(|line| line.meta)
+            .map_err(|error| ThreadStoreError::Internal {
+                message: format!(
+                    "cannot read canonical SessionMeta for Root thread {}: {error}",
+                    self.thread_id
+                ),
+            })
+    }
+
+    fn require_close_session_meta(
+        &self,
+        generation: u64,
+        expected: DurableTeamSessionMeta,
+    ) -> ThreadStoreResult<()> {
+        let mut inner = self.lock_inner()?;
+        match inner.lifecycle {
+            AuthorityLifecycle::Closing {
+                generation: current,
+            } if current == generation && inner.close_permit_issued => {
+                inner.required_session_meta = Some(expected);
+                Ok(())
+            }
+            _ => Err(close_permit_stale(self.thread_id)),
+        }
+    }
+
+    /// Final I/O validation for an externally coordinated close. The local writer invokes this
+    /// after flushing the recorder but before removing the live entry, so failure still leaves an
+    /// attached owner that the close permit can reopen.
+    pub(crate) fn validate_close_session_meta(&self) -> ThreadStoreResult<()> {
+        let expected = {
+            let inner = self.lock_inner()?;
+            match inner.lifecycle {
+                AuthorityLifecycle::Closing { .. } if inner.close_permit_issued => {
+                    inner.required_session_meta
+                }
+                _ => return Err(close_permit_stale(self.thread_id)),
+            }
+        };
+        let Some(expected) = expected else {
+            return Ok(());
+        };
+        let session_meta = self.read_session_meta()?;
+        if session_meta.durable_team != Some(expected) {
+            return Err(ThreadStoreError::Conflict {
+                message: format!(
+                    "canonical SessionMeta for Root thread {} no longer carries the expected durable Team marker",
+                    self.thread_id
+                ),
+            });
+        }
+        Ok(())
+    }
+
     fn finish_write(&self) {
         let Ok(mut inner) = self.inner.lock() else {
             return;
@@ -365,6 +428,7 @@ impl RootWriterAuthorityState {
                     AuthorityLifecycle::Closed
                 };
                 inner.close_permit_issued = false;
+                inner.required_session_meta = None;
                 Ok(())
             }
             _ => Err(close_permit_stale(self.thread_id)),
@@ -379,6 +443,7 @@ impl RootWriterAuthorityState {
             } if current == generation && inner.active_writes == 0 => {
                 inner.lifecycle = AuthorityLifecycle::Closed;
                 inner.close_permit_issued = false;
+                inner.required_session_meta = None;
                 Ok(())
             }
             _ => Err(close_permit_stale(self.thread_id)),

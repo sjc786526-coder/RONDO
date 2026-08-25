@@ -220,8 +220,12 @@ Team State、writer authority、Session identity 或只读状态源。
   fail-closed，并由下一次 projection/tool/wait/close 在同一 owner 内重试；两种组合故障均有稳定回归。
 - 第三轮独立复验确认前述三项阻断均已关闭，但另发现两个中等级缺口：已激活 Session 的后续 committed read/mutation 未持续复核
   canonical `SessionMeta`，以及 projection/wait 会把持续 durable unavailable 降级为无 Team/正常等待；两项均已在原 069 边界内窄修，
-  当前等待同一独立审查者复验。
-- 本轮 `just fmt` 与 `git diff --check` 已通过；core marker-loss/projection/wait 聚焦回归 3/3、rollout/thread-store/team-state 聚焦回归
+  并经第四轮复验确认关闭。
+- 第四轮独立复验另发现四项中等级缺口：close 最终成功边界、post-CAS typed mismatch 的 `Unknown(N)` 保留、阻塞 wait 的最终复核和
+  blocking SessionMeta head 上限；均已在原 authority/durability/read 接缝内修复，当前等待同一独立审查者复验。
+- 最新 `just fmt` 与 `git diff --check` 已通过；core close/blocked-wait 产品回归 2/2、受影响 team-state/thread-store/rollout 邻近回归
+  29/29 通过，watchdog 均为 `complete`、退出码 0、`stop_reason=none`。前一轮 core marker-loss/projection/wait 聚焦回归 3/3、
+  rollout/thread-store/team-state 聚焦回归
   26/26 通过，watchdog 均为 `complete`、退出码 0、`stop_reason=none`。按复验决定未再次运行完整 workspace 或 clippy。首轮标准
   `just test` 曾因上游
   rusty-v8 默认归档 404 在测试前失败；checksum-verified Codex V8 等价完整轮执行 14,373 项：14,363 passed、10 failed、24 skipped，
@@ -229,7 +233,7 @@ Team State、writer authority、Session identity 或只读状态源。
 
 ### 当前工作
 
-- 第三轮 correctness 修复和直接受影响的聚焦门禁均已完成；正在形成单一本地提交并交回同一独立审查者复验。
+- 第四轮 correctness 修复和直接受影响的聚焦门禁均已完成；正在形成单一本地提交并交回同一独立审查者复验。
 
 ### 本任务剩余步骤
 
@@ -278,3 +282,6 @@ Team State、writer authority、Session identity 或只读状态源。
 | 018 | durable intent 固化到 canonical Root `SessionMeta`，Team backend 只保留 committed snapshot；删除 `.team-lineage` 旁路，在任何持久副作用前拒绝不可证明 participant identity 的 fresh durable Root；marker persist/read-back 未决时保留 degraded Session owner，所有 Team access/close 先在同一 owner 内重试 marker 与 generation 1 | Session lineage 与 Team backend 独立后，整个 Team backend 丢失仍可 fail-closed；消除第二次 lineage 发布，并闭合 canonical marker 自身的 persist-after-success/read-back-unavailable 窗口，同时保持单一 Root authority 与首次 snapshot CAS | activation/lineage/failure | 已采纳 |
 | 019 | Root write permit 持有 canonical rollout 路径，并在 permit/OS writer authority 生命周期内读取 `SessionMeta`；每次 committed read 与 mutation 都复核 marker，CAS 成功后再复核一次，读取和 mutation 均不把 marker 丢失或损坏当作 durable success | activation 完成不是永久证明；只有把 lineage 复核纳入后续 durable 边界，才能避免活跃进程在 marker mutation 后返回不可恢复的成功，同时无需引入第二套 registry 或 lease | authority/read/commit | 已采纳 |
 | 020 | projection 与 wait 对 activation/reconcile/snapshot 的 durable unavailable 直接传播错误；只有 feature-off 或合法的非 participant 仍映射为无 Team/无 waiter | 持续存储故障不是业务上的空 Team 或正常等待，静默降级会让调用者误判生命周期状态 | projection/wait/failure | 已采纳 |
+| 021 | Team close generation 登记预期 typed marker；local writer 在 recorder shutdown/materialization 后、移除 live entry/owner 前执行最终复核，并记录已 prepared 的 recorder 使 marker 修复后的同 owner close retry 不重复发送 Shutdown | close 初检不能代表最终成功边界；只在现有 complete 中读取又会因 recorder entry 已移除而无法 abort。复用 close generation 与 live entry 可保留唯一 authority，无需通用事务或新 lifecycle 平台 | close/authority/failure | 已采纳 |
+| 022 | 既有 `Unknown(N)` 在任何 reconcile 失败后保持 N/N+1 窗口，直到成功读回并判定 snapshot；blocking SessionMeta reader 对解压后的 head 累计限制 16 MiB 和 10 条记录 | typed marker mismatch 不能证明 post-CAS 未提交；plain 无换行或 zstd 膨胀输入也不能让 authority read 无界分配或阻塞 | recovery/storage/read | 已采纳 |
+| 023 | wait resolve 成功时保留 Team handle/actor guard，任一正常 wait 分支胜出后、发出 Completed 前再执行一次 durable wake read | marker 丢失不会触发 Team watch；入口健康不代表 timeout/mailbox 返回时仍可恢复 | wait/failure | 已采纳 |

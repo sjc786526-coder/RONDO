@@ -726,9 +726,26 @@ mod tests {
                 expected_generation: 0
             }
         ));
+        authority.fail_next_read(TeamDurabilityError::IdentityMismatch);
+        assert!(matches!(
+            handle.ensure_readable_or_reconcile(),
+            Err(TeamDurabilityError::IdentityMismatch)
+        ));
+        assert!(matches!(
+            handle.durability_status(),
+            TeamDurabilityStatus::Unknown {
+                expected_generation: 0
+            }
+        ));
         handle
             .ensure_readable_or_reconcile()
-            .expect("same owner reconciles once the storage outage clears");
+            .expect("same owner reconciles once the typed marker is restored");
+        assert_eq!(
+            handle.durability_status(),
+            TeamDurabilityStatus::Writable {
+                commit_generation: 1
+            }
+        );
         assert!(
             !handle
                 .register_durable_participant(root, ParticipantRole::Root, "root".to_string())

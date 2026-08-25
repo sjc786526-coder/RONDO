@@ -90,6 +90,31 @@ async fn read_session_meta_line_stops_before_invalid_utf8_compressed_tail() -> a
     Ok(())
 }
 
+#[test]
+fn blocking_session_meta_head_rejects_oversized_plain_and_compressed_records() -> anyhow::Result<()>
+{
+    let home = TempDir::new()?;
+    let uuid = Uuid::from_u128(19);
+    let rollout_path = rollout_path(home.path(), "2025-01-03T12-00-00", uuid);
+    fs::create_dir_all(rollout_path.parent().expect("rollout parent"))?;
+    fs::write(
+        &rollout_path,
+        vec![b'x'; crate::list::MAX_SESSION_META_HEAD_BYTES + 1],
+    )?;
+
+    let plain_error = read_session_meta_line_blocking(&rollout_path)
+        .expect_err("oversized plain head must fail closed");
+    assert_eq!(plain_error.kind(), std::io::ErrorKind::InvalidData);
+    assert!(plain_error.to_string().contains("SessionMeta limit"));
+
+    compress_now(&rollout_path)?;
+    let compressed_error = read_session_meta_line_blocking(&rollout_path)
+        .expect_err("oversized decompressed head must fail closed");
+    assert_eq!(compressed_error.kind(), std::io::ErrorKind::InvalidData);
+    assert!(compressed_error.to_string().contains("SessionMeta limit"));
+    Ok(())
+}
+
 #[tokio::test]
 async fn read_session_meta_line_preserves_pre_header_and_error_semantics() -> anyhow::Result<()> {
     let home = TempDir::new()?;

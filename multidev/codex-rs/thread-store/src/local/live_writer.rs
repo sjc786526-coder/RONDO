@@ -168,26 +168,50 @@ pub(super) async fn shutdown_thread(
     // permit with the same barrier semantics.
     let owner_close = root_writer_authority.begin_owner_close().await?;
     let rollout_path = recorder.rollout_path().to_path_buf();
-    let shutdown_result: ThreadStoreResult<()> = async {
-        if matches!(history_mode, ThreadHistoryMode::Legacy) {
-            recorder.shutdown().await.map_err(thread_store_io_error)?;
-        } else {
-            recorder.shutdown().await.map_err(thread_store_io_error)?;
-            if let Err(err) = super::thread_history_materialization::materialize_to_sqlite(
-                store,
-                thread_id,
-                rollout_path.as_path(),
-            )
-            .await
-            {
-                warn!("failed to project durable rollout during shutdown for {thread_id}: {err}");
+    let shutdown_prepared = {
+        let live_recorders = store.live_recorders.lock().await;
+        live_recorders
+            .get(&thread_id)
+            .ok_or(ThreadStoreError::ThreadNotFound { thread_id })?
+            .shutdown_prepared
+    };
+    if !shutdown_prepared {
+        let shutdown_result: ThreadStoreResult<()> = async {
+            if matches!(history_mode, ThreadHistoryMode::Legacy) {
+                recorder.shutdown().await.map_err(thread_store_io_error)?;
+            } else {
+                recorder.shutdown().await.map_err(thread_store_io_error)?;
+                if let Err(err) = super::thread_history_materialization::materialize_to_sqlite(
+                    store,
+                    thread_id,
+                    rollout_path.as_path(),
+                )
+                .await
+                {
+                    warn!(
+                        "failed to project durable rollout during shutdown for {thread_id}: {err}"
+                    );
+                }
             }
+            sync_materialized_rollout_path(store, thread_id, rollout_path.as_path()).await?;
+            Ok(())
         }
-        sync_materialized_rollout_path(store, thread_id, rollout_path.as_path()).await?;
-        Ok(())
+        .await;
+        shutdown_result?;
+        store
+            .live_recorders
+            .lock()
+            .await
+            .get_mut(&thread_id)
+            .ok_or(ThreadStoreError::ThreadNotFound { thread_id })?
+            .shutdown_prepared = true;
     }
-    .await;
-    shutdown_result?;
+    if matches!(&owner_close, OwnerCloseState::ExternallyClosing) {
+        // Team close registers its exact typed marker on the existing close generation. Validate
+        // only after recorder shutdown, but while the live entry and OS-backed owner are retained,
+        // so a failure can abort back to the same retryable owner.
+        root_writer_authority.validate_close_session_meta()?;
+    }
     if let Some(metrics) = codex_otel::global()
         && let Ok(metadata) = std::fs::metadata(&rollout_path)
     {

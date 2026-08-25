@@ -4,6 +4,8 @@ use codex_utils_path as path_utils;
 use std::cmp::Reverse;
 use std::ffi::OsStr;
 use std::io;
+use std::io::BufRead;
+use std::io::Read;
 use std::num::NonZero;
 use std::ops::ControlFlow;
 use std::path::Path;
@@ -119,6 +121,7 @@ struct HeadTailSummary {
 /// Hard cap to bound worst‑case work per request.
 const MAX_SCAN_FILES: usize = 10000;
 const HEAD_RECORD_LIMIT: usize = 10;
+pub(crate) const MAX_SESSION_META_HEAD_BYTES: usize = 16 * 1024 * 1024;
 const USER_EVENT_SCAN_LIMIT: usize = 200;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1293,8 +1296,50 @@ pub async fn read_session_meta_line(path: &Path) -> io::Result<SessionMetaLine> 
 /// Synchronous head read used by a live Root write permit to revalidate canonical lineage at the
 /// Team committed-read and mutation-success boundaries.
 pub fn read_session_meta_line_blocking(path: &Path) -> io::Result<SessionMetaLine> {
-    for line in compression::open_rollout_line_reader_blocking(path)? {
-        if let Some(session_meta_line) = session_meta_from_line(path, line?.trim())? {
+    let mut reader = compression::open_rollout_line_reader_blocking(path)?;
+    let mut total_bytes = 0usize;
+    let mut records = 0usize;
+    loop {
+        let remaining = MAX_SESSION_META_HEAD_BYTES.saturating_sub(total_bytes);
+        let mut bytes = Vec::new();
+        let byte_count = reader
+            .by_ref()
+            .take((remaining + 1) as u64)
+            .read_until(b'\n', &mut bytes)?;
+        if byte_count == 0 {
+            break;
+        }
+        if byte_count > remaining {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "rollout head at {} exceeds the {} byte SessionMeta limit",
+                    path.display(),
+                    MAX_SESSION_META_HEAD_BYTES
+                ),
+            ));
+        }
+        total_bytes += byte_count;
+        let line = std::str::from_utf8(&bytes).map_err(|error| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("rollout head at {} is not UTF-8: {error}", path.display()),
+            )
+        })?;
+        if line.trim().is_empty() {
+            continue;
+        }
+        records += 1;
+        if records > HEAD_RECORD_LIMIT {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "rollout at {} has no session metadata in its first {HEAD_RECORD_LIMIT} records",
+                    path.display()
+                ),
+            ));
+        }
+        if let Some(session_meta_line) = session_meta_from_line(path, line.trim())? {
             return Ok(session_meta_line);
         }
     }

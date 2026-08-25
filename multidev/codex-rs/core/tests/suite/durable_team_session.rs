@@ -4,6 +4,9 @@ use anyhow::Result;
 use codex_features::Feature;
 use codex_protocol::SessionId;
 use codex_protocol::ThreadId;
+use codex_protocol::items::CollabAgentTool;
+use codex_protocol::items::CollabAgentToolCallStatus;
+use codex_protocol::items::TurnItem;
 use codex_protocol::protocol::DurableTeamSessionMeta;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::Op;
@@ -64,6 +67,7 @@ struct PersistAfterSuccessThreadStore {
     inner: Arc<dyn ThreadStore>,
     persist_failures_remaining: Arc<AtomicUsize>,
     history_read_failures_remaining: Arc<AtomicUsize>,
+    shutdown_marker_loss: Option<Arc<std::sync::Mutex<Option<(PathBuf, PathBuf)>>>>,
 }
 
 impl PersistAfterSuccessThreadStore {
@@ -99,6 +103,19 @@ impl PersistAfterSuccessThreadStore {
             inner,
             persist_failures_remaining,
             history_read_failures_remaining,
+            shutdown_marker_loss: None,
+        }
+    }
+
+    fn with_shutdown_marker_loss(
+        inner: Arc<dyn ThreadStore>,
+        shutdown_marker_loss: Arc<std::sync::Mutex<Option<(PathBuf, PathBuf)>>>,
+    ) -> Self {
+        Self {
+            inner,
+            persist_failures_remaining: Arc::new(AtomicUsize::new(0)),
+            history_read_failures_remaining: Arc::new(AtomicUsize::new(0)),
+            shutdown_marker_loss: Some(shutdown_marker_loss),
         }
     }
 
@@ -156,7 +173,23 @@ impl ThreadStore for PersistAfterSuccessThreadStore {
     }
 
     fn shutdown_thread(&self, thread_id: ThreadId) -> ThreadStoreFuture<'_, ()> {
-        self.inner.shutdown_thread(thread_id)
+        let inner = Arc::clone(&self.inner);
+        let marker_loss = self.shutdown_marker_loss.as_ref().map(Arc::clone);
+        Box::pin(async move {
+            if let Some(marker_loss) = marker_loss
+                && let Some((rollout_path, hidden_path)) = marker_loss
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .take()
+            {
+                std::fs::rename(rollout_path, hidden_path).map_err(|error| {
+                    ThreadStoreError::Internal {
+                        message: format!("cannot hide Root marker during injected close: {error}"),
+                    }
+                })?;
+            }
+            inner.shutdown_thread(thread_id).await
+        })
     }
 
     fn discard_thread(&self, thread_id: ThreadId) -> ThreadStoreFuture<'_, ()> {
@@ -539,6 +572,81 @@ async fn durable_team_projection_fails_before_sampling_when_activation_stays_una
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn durable_team_close_revalidates_marker_before_shutdown_complete() -> Result<()> {
+    let server = start_mock_server().await;
+    let home = Arc::new(tempfile::TempDir::new()?);
+    let shutdown_marker_loss = Arc::new(std::sync::Mutex::new(None));
+    let marker_loss_for_store = Arc::clone(&shutdown_marker_loss);
+    let mut builder = durable_team_codex()
+        .with_home(Arc::clone(&home))
+        .with_thread_store_wrapper(move |inner| {
+            Arc::new(PersistAfterSuccessThreadStore::with_shutdown_marker_loss(
+                inner,
+                Arc::clone(&marker_loss_for_store),
+            ))
+        });
+    let created = builder.build(&server).await?;
+    let rollout_path = codex_rollout::find_thread_path_by_id_str(
+        home.path(),
+        &created.session_configured.thread_id.to_string(),
+        None,
+    )
+    .await?
+    .ok_or_else(|| anyhow::anyhow!("cannot locate durable Root rollout behind test wrapper"))?;
+    let hidden_path = rollout_path.with_extension("jsonl.hidden-close-marker");
+    *shutdown_marker_loss
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) =
+        Some((rollout_path.clone(), hidden_path.clone()));
+
+    let close_id = created.codex.submit(Op::Shutdown {}).await?;
+    let close_error = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let event = created.codex.next_event().await?;
+            if event.id != close_id {
+                continue;
+            }
+            match event.msg {
+                EventMsg::Error(error) => return Ok::<_, anyhow::Error>(error.message),
+                EventMsg::ShutdownComplete => {
+                    anyhow::bail!("close reported completion after marker loss")
+                }
+                _ => {}
+            }
+        }
+    })
+    .await
+    .map_err(|_| anyhow::anyhow!("close did not report final marker failure"))??;
+    assert!(
+        close_error.contains("Failed to shutdown thread persistence"),
+        "unexpected close failure: {close_error}"
+    );
+    let no_completion = tokio::time::timeout(Duration::from_millis(100), async {
+        loop {
+            let event = created.codex.next_event().await?;
+            if event.id == close_id && matches!(event.msg, EventMsg::ShutdownComplete) {
+                anyhow::bail!("failed close emitted ShutdownComplete")
+            }
+        }
+        #[allow(unreachable_code)]
+        Ok::<_, anyhow::Error>(())
+    })
+    .await;
+    assert!(
+        no_completion.is_err(),
+        "failed close must remain incomplete"
+    );
+
+    std::fs::rename(&hidden_path, &rollout_path)?;
+    created
+        .codex
+        .shutdown_and_wait()
+        .await
+        .expect("same Session retries close after marker restoration");
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn durable_team_wait_fails_when_root_marker_disappears_after_sampling() -> Result<()> {
     let server = start_mock_server().await;
     let home = Arc::new(tempfile::TempDir::new()?);
@@ -601,6 +709,115 @@ async fn durable_team_wait_fails_when_root_marker_disappears_after_sampling() ->
         responses.requests().len(),
         1,
         "wait must not complete normally or trigger another sampling while Team durability is unavailable"
+    );
+
+    created.codex.shutdown_and_wait().await?;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn durable_team_wait_fails_when_root_marker_disappears_while_blocked() -> Result<()> {
+    let server = start_mock_server().await;
+    let home = Arc::new(tempfile::TempDir::new()?);
+    let mut builder = durable_team_codex()
+        .with_home(Arc::clone(&home))
+        .with_config(|config| {
+            config.multi_agent_v2.min_wait_timeout_ms = 50;
+            config.multi_agent_v2.default_wait_timeout_ms = 500;
+        });
+    let created = builder.build(&server).await?;
+    let rollout_path = created
+        .session_configured
+        .rollout_path
+        .clone()
+        .expect("live Root rollout path");
+    let hidden_path = rollout_path.with_extension("jsonl.hidden-blocked-wait-marker");
+    let responses = mount_sse_sequence_without_request_count_expectation(
+        &server,
+        vec![wait_call_with_timeout("blocked-wait-marker-loss", 500)],
+    )
+    .await;
+
+    let submission_id = created
+        .codex
+        .submit(Op::UserInput {
+            items: vec![UserInput::Text {
+                text: "lose marker while wait is blocked".to_string(),
+                text_elements: Vec::new(),
+            }],
+            final_output_json_schema: None,
+            responsesapi_client_metadata: None,
+            additional_context: Default::default(),
+            thread_settings: ThreadSettingsOverrides::default(),
+        })
+        .await?;
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let event = created.codex.next_event().await?;
+            if event.id != submission_id {
+                continue;
+            }
+            match event.msg {
+                EventMsg::ItemStarted(started)
+                    if matches!(
+                        started.item,
+                        TurnItem::CollabAgentToolCall(ref item)
+                            if item.tool == CollabAgentTool::Wait
+                                && item.status == CollabAgentToolCallStatus::InProgress
+                    ) =>
+                {
+                    return Ok::<_, anyhow::Error>(());
+                }
+                EventMsg::Error(error) => {
+                    anyhow::bail!("wait failed before marker was hidden: {}", error.message)
+                }
+                EventMsg::TurnComplete(_) => {
+                    anyhow::bail!("wait completed before marker was hidden")
+                }
+                _ => {}
+            }
+        }
+    })
+    .await
+    .map_err(|_| anyhow::anyhow!("wait tool did not enter its blocked state"))??;
+
+    std::fs::rename(&rollout_path, &hidden_path)?;
+    let terminal = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let event = created.codex.next_event().await?;
+            if event.id != submission_id {
+                continue;
+            }
+            match event.msg {
+                EventMsg::Error(error) => return Ok::<_, anyhow::Error>(error.message),
+                EventMsg::ItemCompleted(completed)
+                    if matches!(
+                        completed.item,
+                        TurnItem::CollabAgentToolCall(ref item)
+                            if item.tool == CollabAgentTool::Wait
+                    ) =>
+                {
+                    anyhow::bail!("wait emitted Completed after durable marker loss")
+                }
+                EventMsg::TurnComplete(_) => {
+                    anyhow::bail!("wait turn completed after durable marker loss")
+                }
+                _ => {}
+            }
+        }
+    })
+    .await
+    .map_err(|_| anyhow::anyhow!("blocked wait did not report marker loss"));
+    std::fs::rename(&hidden_path, &rollout_path)?;
+    let error = terminal??;
+    assert!(
+        error.contains("Team world state is unavailable"),
+        "unexpected blocked wait failure: {error}"
+    );
+    assert_eq!(
+        responses.requests().len(),
+        1,
+        "blocked wait failure must not trigger another sampling request"
     );
 
     created.codex.shutdown_and_wait().await?;
@@ -742,13 +959,17 @@ fn assistant_reply(response_id: &str) -> String {
 }
 
 fn wait_call(response_id: &str) -> String {
+    wait_call_with_timeout(response_id, 50)
+}
+
+fn wait_call_with_timeout(response_id: &str, timeout_ms: u64) -> String {
     sse(vec![
         ev_response_created(response_id),
         ev_function_call_with_namespace(
             response_id,
             NAMESPACE,
             "wait_agent",
-            r#"{"timeout_ms":50}"#,
+            &format!(r#"{{"timeout_ms":{timeout_ms}}}"#),
         ),
         ev_completed(response_id),
     ])

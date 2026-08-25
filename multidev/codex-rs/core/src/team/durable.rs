@@ -145,10 +145,16 @@ impl TeamWriteAuthority for LocalTeamWriteAuthority {
 
     fn begin_close(&self) -> TeamDurabilityFuture<'_, Box<dyn TeamClosePermit>> {
         Box::pin(async move {
-            let root_permit = self
+            let mut root_permit = self
                 .root_authority
                 .begin_close()
                 .await
+                .map_err(map_thread_store_error)?;
+            root_permit
+                .require_session_meta(DurableTeamSessionMeta::current(
+                    self.identity.session_id(),
+                    self.identity.root_thread_id(),
+                ))
                 .map_err(map_thread_store_error)?;
             Ok(Box::new(LocalTeamClosePermit {
                 root_permit: Some(root_permit),

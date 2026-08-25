@@ -116,6 +116,10 @@ struct LiveRecorderEntry {
     // canonical SessionMeta is durable. Retain the mode captured when live persistence was opened
     // so missing SQLite rows can still be seeded.
     history_mode: ThreadHistoryMode,
+    // Recorder shutdown closes its command channel after a successful drain. A durable Team close
+    // may still fail its final typed-marker check, so retain that prepared state and skip sending a
+    // second Shutdown command when the same owner retries close.
+    shutdown_prepared: bool,
     // This strong authority owns the OS writer lock. Capabilities handed to Team state are weak,
     // while an in-flight permit keeps both the authority and lock alive through durable success.
     root_writer_authority: Arc<RootWriterAuthorityState>,
@@ -311,6 +315,7 @@ impl LocalThreadStore {
                 entry.insert(LiveRecorderEntry {
                     recorder,
                     history_mode,
+                    shutdown_prepared: false,
                     root_writer_authority: RootWriterAuthorityState::new(
                         thread_id,
                         rollout_path,
@@ -1461,6 +1466,69 @@ mod tests {
         run_writer_authority_child(home.path(), thread_id, "conflict");
         close.complete().expect("complete external close");
         run_writer_authority_child(home.path(), thread_id, "acquire");
+    }
+
+    #[tokio::test]
+    async fn external_close_revalidates_marker_before_releasing_owner() {
+        let home = TempDir::new().expect("temp dir");
+        let store = LocalThreadStore::new(test_config(home.path()), /*state_db*/ None);
+        let thread_id = ThreadId::new();
+        let session_id = codex_protocol::SessionId::new();
+        let expected =
+            codex_protocol::protocol::DurableTeamSessionMeta::current(session_id, thread_id);
+        let mut params = create_thread_params(thread_id);
+        params.session_id = session_id;
+        params.durable_team = Some(expected);
+        store
+            .create_thread(params)
+            .await
+            .expect("create durable Root writer");
+        store
+            .persist_thread(thread_id)
+            .await
+            .expect("materialize canonical SessionMeta");
+        let rollout_path = store
+            .live_rollout_path(thread_id)
+            .await
+            .expect("live rollout path");
+        let hidden_path = rollout_path.with_extension("jsonl.hidden-marker");
+        let authority = store
+            .writer_authority(thread_id)
+            .await
+            .expect("derive Root authority");
+
+        let mut close = authority.begin_close().await.expect("start Team close");
+        close
+            .require_session_meta(expected)
+            .expect("register final marker validation");
+        std::fs::rename(&rollout_path, &hidden_path).expect("hide marker during close");
+        let error = store
+            .shutdown_thread(thread_id)
+            .await
+            .expect_err("missing final marker must fail writer shutdown");
+        assert!(
+            error
+                .to_string()
+                .contains("cannot read canonical SessionMeta"),
+            "unexpected close validation error: {error}"
+        );
+        close.abort().expect("failed close reopens owner");
+        std::fs::rename(&hidden_path, &rollout_path).expect("restore canonical marker");
+        let write = authority
+            .begin_write()
+            .expect("marker failure must retain the same Root owner");
+        drop(write);
+
+        let mut retry = authority.begin_close().await.expect("retry Team close");
+        retry
+            .require_session_meta(expected)
+            .expect("register retry marker validation");
+        store
+            .shutdown_thread(thread_id)
+            .await
+            .expect("retry shutdown after marker restoration");
+        retry.complete().expect("complete retry close");
+        assert!(authority.begin_write().is_err());
     }
 
     fn run_writer_authority_child(home: &std::path::Path, thread_id: ThreadId, mode: &str) {

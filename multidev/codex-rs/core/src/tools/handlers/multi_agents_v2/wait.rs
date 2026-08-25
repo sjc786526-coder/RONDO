@@ -75,21 +75,25 @@ impl Handler {
             .await;
         // Team changes have their own consumable wake, so a change published before this wait
         // started is still delivered, and one already consumed does not wake the waiter twice.
-        let team_waiter = if crate::team::team_state_enabled(&turn) {
+        let (team_waiter, team_guard) = if crate::team::team_state_enabled(&turn) {
             session
                 .ensure_durable_root_activation()
                 .await
                 .map_err(codex_team_state::TeamError::from)
                 .map_err(crate::tools::handlers::team_tools::team_error)?;
             match crate::team::TeamAccess::resolve(&session) {
-                Ok(access) => Some(access.handle().wake_waiter(access.actor())),
-                Err(codex_team_state::TeamError::UnknownParticipant) => None,
+                Ok(access) => {
+                    let handle = std::sync::Arc::clone(access.handle());
+                    let actor = access.actor();
+                    (Some(handle.wake_waiter(actor)), Some((handle, actor)))
+                }
+                Err(codex_team_state::TeamError::UnknownParticipant) => (None, None),
                 Err(error) => {
                     return Err(crate::tools::handlers::team_tools::team_error(error));
                 }
             }
         } else {
-            None
+            (None, None)
         };
 
         session
@@ -121,6 +125,14 @@ impl Handler {
             },
             None => wait_for_activity(&mut activity_rx, pending_activity, deadline).await,
         };
+        if let Some((handle, actor)) = team_guard {
+            // Marker loss does not notify change_tx. Revalidate after any normally winning wait
+            // branch and before reporting Completed so a blocked wait cannot hide durable loss as
+            // an ordinary timeout or mailbox wake.
+            handle
+                .has_pending_durable_wake(actor)
+                .map_err(crate::tools::handlers::team_tools::team_error)?;
+        }
         let result = WaitAgentResult::from_outcome(outcome);
 
         session

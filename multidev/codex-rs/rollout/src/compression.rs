@@ -60,7 +60,7 @@ pub async fn open_rollout_line_reader(path: &Path) -> io::Result<RolloutLineRead
 /// Live Root writer permits are synchronous capabilities. Their canonical metadata check only
 /// reads the rollout head, so keep this narrow blocking counterpart instead of forcing Team state
 /// to grow an async mutation API solely for one small local read.
-pub(crate) fn open_rollout_line_reader_blocking(path: &Path) -> io::Result<BlockingLineReader> {
+pub(crate) fn open_rollout_line_reader_blocking(path: &Path) -> io::Result<BlockingRolloutReader> {
     reader::open_once_blocking(path)
 }
 
@@ -232,6 +232,7 @@ impl RolloutLineReader {
 }
 
 type BlockingLineReader = std::io::Lines<std::io::BufReader<Box<dyn Read + Send>>>;
+pub(crate) type BlockingRolloutReader = std::io::BufReader<Box<dyn Read + Send>>;
 
 mod worker {
     use std::ffi::OsStr;
@@ -1077,7 +1078,7 @@ mod reader {
         })
     }
 
-    pub(super) fn open_once_blocking(path: &Path) -> io::Result<super::BlockingLineReader> {
+    pub(super) fn open_once_blocking(path: &Path) -> io::Result<super::BlockingRolloutReader> {
         let path = path::existing_rollout_path_blocking(path).unwrap_or_else(|| path.to_path_buf());
         let input = File::open(path.as_path())?;
         let reader: Box<dyn Read + Send> = if path::is_compressed_rollout_path(path.as_path()) {
@@ -1085,7 +1086,7 @@ mod reader {
         } else {
             Box::new(input)
         };
-        Ok(io::BufReader::new(reader).lines())
+        Ok(io::BufReader::new(reader))
     }
 }
 

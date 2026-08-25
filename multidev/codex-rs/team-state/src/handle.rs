@@ -478,14 +478,14 @@ impl TeamStateHandle {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let next = match (*status, error) {
-            // A temporarily unreadable medium does not answer whether the earlier unknown CAS
-            // committed generation N+1. Preserve that uncertainty so a later reconcile may still
-            // accept either N or N+1 rather than permanently narrowing itself to N.
+            // No failed read can answer whether the earlier unknown CAS committed generation
+            // N+1. That includes a temporarily mismatched or unsupported typed Root marker: until
+            // a snapshot is successfully read and judged, preserve the N/N+1 recovery window.
             (
                 TeamDurabilityStatus::Unknown {
                     expected_generation,
                 },
-                TeamDurabilityError::Unavailable { .. },
+                _,
             ) => TeamDurabilityStatus::Unknown {
                 expected_generation,
             },
