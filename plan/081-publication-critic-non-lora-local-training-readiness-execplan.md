@@ -244,10 +244,15 @@ XXX用以下内容代替：
   现将无 completion marker 的本次未资格 checkpoint 原子隐藏并删除，旧有效锚与 postpublish 已资格锚不受影响；新增首 checkpoint 失败后
   丢弃原 controller、同 store exact-base 新 generation 成功回归；独立复审确认该 P2 关闭且无新增 P1/P2。Plan 081 34 项与 7 项精选历史
   回归合计 41/41 通过。
+- 2026-08-25：第五轮复验提交 `b92e794` 对 `867b887` 报告 2 个 P2、无 P1/P3：普通 dict equality 会误拒合法多元素 Tensor state，
+  未资格 checkpoint 的 tombstone 清理失败会在 controller 回滚前再次退出；均确认存在且不构成 `REPLAN_REQUIRED`。
+- 2026-08-25：codec adapter 现显式提供类型感知 `training_states_equal()`，probe/resume 使用各自 comparator 核对 decoded/captured/restored
+  state，异常、非原生 bool 或任一 restore 值漂移均 fail-closed；未资格 discard 前先恢复 committed state，清理错误仍如实上抛并保留
+  `recovery_required`。Plan 081 36 项与 7 项精选历史回归合计 43/43 通过。
 
 ### 当前工作
 
-- 第四轮复验的 2 个 P2 及整改后全差异复核补出的 1 个 P2 均已整改；完成最终复核、diff/生成物检查和提交后，等待指定审查者再次复验。
+- 第五轮复验的 2 个 P2 均已整改；完成最终复核、diff/生成物检查和提交后，等待指定审查者再次复验。
 
 ### 本任务剩余步骤
 
@@ -260,7 +265,7 @@ XXX用以下内容代替：
 
 ### 当前验收状态
 
-- `IMPLEMENTATION_COMPLETE / FOURTH_REVIEW_REMEDIATED / FOCUSED_LOCAL_GATES_PASS / REACCEPTANCE_PENDING`。
+- `IMPLEMENTATION_COMPLETE / FIFTH_REVIEW_REMEDIATED / FOCUSED_LOCAL_GATES_PASS / REACCEPTANCE_PENDING`。
 
 ### 交接边界
 
@@ -293,3 +298,5 @@ XXX用以下内容代替：
 | 015 | checkpoint 替换旧锚前执行 adapter 级完整恢复资格；首 checkpoint 前失败可从原 controller 或 class/store 入口以 fresh exact-base 新 attempt 重启；cloud handoff 必要清单精确冻结 | reader 可解码不等于 adapter 可恢复；同 store base 是 write-once，跨进程重启也必须证明 exact base 且不覆盖旧工件；必要交接项不可静默删改 | recovery/handoff | 已采纳 |
 | 016 | 新 checkpoint 资格使用 disposable fresh exact-base probe 和 probe 自身 reader，独立证明 model load 后再 restore/recapture 四块 state 深度等值；store 级 base 重启遇任一 live verified checkpoint 时先要求 resume | live adapter 会掩盖 no-op model/state restore；marker 缺失不等于 checkpoint 不可恢复，stale marker 也不代表 live checkpoint | recovery qualification | 已采纳 |
 | 017 | 本次新 checkpoint 未通过资格时，若尚无 completion marker，则以既有 prune tombstone 原子退出 live 集合；旧资格锚和已通过资格的新锚继续保留 | 未资格的首 checkpoint 既不能 resume 又会阻断 exact-base restart；失败产物不得冒充恢复锚 | failed qualification | 已采纳 |
+| 018 | codec adapter 必须提供返回原生 bool 的类型感知 training state comparator；probe 和 fresh resume 均以各自 comparator 核对 decoded、restored 与 recaptured state | 普通 Mapping equality 无法正确归约多元素 Tensor；类型语义属于 codec/adapter，不在 controller 建 canonicalization 平台 | state equality | 已采纳 |
+| 019 | 未资格 checkpoint 的 committed state 与 recovery_required 收口先于可能失败的 discard；cleanup 异常保留原失败为 context 并继续上抛 | rename 或 tombstone 删除失败不能让 controller 留在 running 的 post-update 半态 | cleanup failure | 已采纳 |

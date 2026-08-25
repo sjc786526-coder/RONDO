@@ -322,10 +322,10 @@ threshold 的前提下，以同一冻结规则重验 exact base、C1、C3；唯�
 不得复制第二套数据/评价/训练平台，不冻结具体层数、LR、batch、更新数或 optimizer。开发期 validation 可驱动观察/选择，
 但不进入梯度、不读取 unseen，也不冒充正式 M3-C2 或产品资格。
 
-**当前状态**：Plan 081 前三轮指定验收 finding 均已整改；第四轮复验发现 live adapter 会掩盖 no-op restore、首 checkpoint 前
-重启仍依赖原 controller 内存 2 个 P2、无 P1/P3。现已用 disposable fresh recovery probe、restore 后四块 state recapture 等值核对及
-class/store exact-base 重启入口完成范围内窄整改；整改后全差异复核补出的首个未资格 checkpoint 阻断 base restart 问题，也通过
-原子退出 live 集合和跨进程 fixture 回归闭合，等待指定审查者再次复验。
+**当前状态**：Plan 081 前四轮指定验收 finding 均已整改；第五轮复验发现普通 dict equality 会误拒合法 Tensor state、未资格
+checkpoint tombstone 清理失败会跳过 controller 恢复态回滚 2 个 P2，无 P1/P3。现已把类型感知 comparator 纳入 codec adapter 合同，
+并把 committed state 与 `recovery_required` 收口前移到可能失败的 discard 之前；Tensor-like round-trip/漂移及 rename 前后清理失败的
+focused fixture 回归已通过，等待指定审查者再次复验。
 `LOCAL_TRAINING_READINESS_PASS` 尚未成立；未运行真实模型、GPU 或云端训练，未产生真实质量候选，也未解锁 Plan 082 或 M3-D。
 
 **出口**：独立验收只给出 `LOCAL_TRAINING_READINESS_PASS` 或 `REPLAN_REQUIRED`。普通实现、fixture、依赖或接口问题须在本任务内

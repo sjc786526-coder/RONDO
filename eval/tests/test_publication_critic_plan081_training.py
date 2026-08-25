@@ -53,6 +53,84 @@ from rondo_eval.publication_critic.full_model_training.plan081_observation impor
 
 
 PLAN081_ROOT = REPO_ROOT / "training/publication-critic-plan081"
+_TENSOR_MARKER = "__plan081_fixture_tensor__"
+
+
+class _AmbiguousTensorComparison:
+    def __init__(self, values: tuple[bool, ...]) -> None:
+        self.values = values
+
+    def __bool__(self) -> bool:
+        raise RuntimeError("fixture tensor truth value is ambiguous")
+
+
+class _TensorLike:
+    def __init__(self, values: tuple[int, ...]) -> None:
+        self.values = values
+
+    def __eq__(self, other: object) -> object:
+        if not isinstance(other, _TensorLike):
+            return False
+        return _AmbiguousTensorComparison(
+            tuple(left == right for left, right in zip(self.values, other.values))
+        )
+
+
+def _encode_fixture_state(value):
+    if isinstance(value, _TensorLike):
+        return {_TENSOR_MARKER: list(value.values)}
+    if isinstance(value, dict):
+        return {key: _encode_fixture_state(item) for key, item in value.items()}
+    if isinstance(value, tuple):
+        return tuple(_encode_fixture_state(item) for item in value)
+    if isinstance(value, list):
+        return [_encode_fixture_state(item) for item in value]
+    return value
+
+
+def _decode_fixture_state(value):
+    if isinstance(value, dict) and set(value) == {_TENSOR_MARKER}:
+        return _TensorLike(tuple(value[_TENSOR_MARKER]))
+    if isinstance(value, dict):
+        return {key: _decode_fixture_state(item) for key, item in value.items()}
+    if isinstance(value, tuple):
+        return tuple(_decode_fixture_state(item) for item in value)
+    if isinstance(value, list):
+        return [_decode_fixture_state(item) for item in value]
+    return value
+
+
+def _fixture_state_values_equal(left, right) -> bool:
+    if isinstance(left, _TensorLike) or isinstance(right, _TensorLike):
+        return (
+            isinstance(left, _TensorLike)
+            and isinstance(right, _TensorLike)
+            and left.values == right.values
+        )
+    if isinstance(left, dict) or isinstance(right, dict):
+        return (
+            isinstance(left, dict)
+            and isinstance(right, dict)
+            and set(left) == set(right)
+            and all(
+                _fixture_state_values_equal(left[key], right[key])
+                for key in left
+            )
+        )
+    if isinstance(left, (tuple, list)) or isinstance(right, (tuple, list)):
+        return (
+            type(left) is type(right)
+            and len(left) == len(right)
+            and all(
+                _fixture_state_values_equal(left_item, right_item)
+                for left_item, right_item in zip(left, right)
+            )
+        )
+    try:
+        result = left == right
+    except Exception:
+        return False
+    return result is True
 
 
 def _scope(name: str, parameters: tuple[str, ...], elements: int) -> TrainableScope:
@@ -251,6 +329,10 @@ class _FakeAdapter:
         self.reader_calls = 0
         self.received_validation_datasets: list[ValidationDataset] = []
         self.restored_typed_state = False
+        self.tensor_state = False
+        self.restored_state_drift = False
+        self.state_comparison_mode = "normal"
+        self.state_comparison_calls = 0
 
     def configure_trainable_scope(self, scope: TrainableScope) -> None:
         self.events.append(f"configure:{scope.scope_id}")
@@ -282,6 +364,9 @@ class _FakeAdapter:
         probe.restore_mode = self.restore_mode
         probe.model_load_mode = self.model_load_mode
         probe.reader_failure = self.reader_failure
+        probe.tensor_state = self.tensor_state
+        probe.restored_state_drift = self.restored_state_drift
+        probe.state_comparison_mode = self.state_comparison_mode
         if self.probe_mode == "suppress":
             probe.fresh_exact_base = False
             try:
@@ -326,10 +411,15 @@ class _FakeAdapter:
         self.model_step = step
         self.loaded_model_payload = None
         self.data_cursor = {"fixture_update": step}
+        slot_value = (
+            _TensorLike((step, step + 1))
+            if self.tensor_state
+            else (b"\x00\xff", step)
+        )
         self.optimizer_state = {
             "step": step,
             "scope_id": scope.scope_id,
-            "slots": {7: (b"\x00\xff", step)},
+            "slots": {7: slot_value},
         }
         self.scheduler_state = {"milestones": (step, step + 1)}
         self.rng_state = {"fixture_token": (b"rng", step * 17)}
@@ -413,12 +503,27 @@ class _FakeAdapter:
         self.events.append(f"model:{self.model_step}")
 
     def capture_training_state(self) -> dict:
-        return {
+        value = {
             "optimizer": copy.deepcopy(self.optimizer_state),
             "scheduler": copy.deepcopy(self.scheduler_state),
             "rng": copy.deepcopy(self.rng_state),
             "data": dict(self.data_cursor),
         }
+        if self.restored_state_drift and self.loaded_model_payload is not None:
+            slot = value["optimizer"]["slots"][7]
+            if isinstance(slot, _TensorLike):
+                value["optimizer"]["slots"][7] = _TensorLike(
+                    (*slot.values[:-1], slot.values[-1] + 1)
+                )
+        return value
+
+    def training_states_equal(self, left: dict, right: dict) -> bool:
+        self.state_comparison_calls += 1
+        if self.state_comparison_mode == "raise":
+            raise ValueError("fixture state comparator failed")
+        if self.state_comparison_mode == "non_bool":
+            return 1  # type: ignore[return-value]
+        return _fixture_state_values_equal(left, right)
 
     def training_state_codec_id(self) -> str:
         return self.codec_id
@@ -437,7 +542,8 @@ class _FakeAdapter:
             written["data"] = {"fixture_update": self.step + 100}
         elif mode == "restore_poison":
             written["optimizer"]["restore_poison"] = True
-        path.write_bytes(b"PLAN081-LITERAL-V1\n" + repr(written).encode("utf-8"))
+        encoded = _encode_fixture_state(written)
+        path.write_bytes(b"PLAN081-LITERAL-V1\n" + repr(encoded).encode("utf-8"))
 
     def read_training_state(self, path: Path) -> dict:
         self.reader_calls += 1
@@ -447,7 +553,9 @@ class _FakeAdapter:
         prefix = b"PLAN081-LITERAL-V1\n"
         if not raw.startswith(prefix):
             raise ValueError("fixture codec header invalid")
-        value = ast.literal_eval(raw[len(prefix) :].decode("utf-8"))
+        value = _decode_fixture_state(
+            ast.literal_eval(raw[len(prefix) :].decode("utf-8"))
+        )
         if not isinstance(value, dict):
             raise ValueError("fixture state is not a mapping")
         return value
@@ -1157,6 +1265,96 @@ class Plan081ControllerTests(unittest.TestCase):
                 ).is_dir()
             )
 
+    def test_unqualified_discard_failure_still_seals_controller_state(self) -> None:
+        observations = {
+            0: _logits(2.0),
+            1: _logits(2.5),
+            2: _logits(2.8),
+            3: _logits(3.0),
+            4: _logits(3.2),
+        }
+        for phase in ("before_hide", "after_hide"):
+            with self.subTest(phase=phase), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                adapter = _FakeAdapter(observations)
+                controller, store = self._controller(root, adapter)
+                controller.run(adapter, stop_after=2)
+                old_checkpoint = "checkpoint-attempt-000-step-000002"
+                bad_checkpoint = "checkpoint-attempt-000-step-000004"
+                adapter.checkpoint_writer_modes[4] = "undecodable"
+                original_replace = plan081_artifacts_module.os.replace
+                original_rmtree = plan081_artifacts_module.shutil.rmtree
+
+                def replace_or_fail(source: Path, destination: Path) -> None:
+                    if (
+                        phase == "before_hide"
+                        and Path(destination).name.startswith(
+                            f".{bad_checkpoint}.prune-"
+                        )
+                    ):
+                        raise OSError("fixture discard rename failed")
+                    original_replace(source, destination)
+
+                def remove_or_fail(path: Path, *args, **kwargs) -> None:
+                    if (
+                        phase == "after_hide"
+                        and Path(path).name.startswith(f".{bad_checkpoint}.prune-")
+                    ):
+                        raise OSError("fixture discard tree removal failed")
+                    original_rmtree(path, *args, **kwargs)
+
+                with mock.patch.object(
+                    plan081_artifacts_module.os,
+                    "replace",
+                    side_effect=replace_or_fail,
+                ), mock.patch.object(
+                    plan081_artifacts_module.shutil,
+                    "rmtree",
+                    side_effect=remove_or_fail,
+                ):
+                    with self.assertRaisesRegex(
+                        FullModelTrainingError, "plan081_artifact_prune_failed"
+                    ):
+                        controller.run(adapter)
+
+                self.assertEqual(controller.state["status"], "recovery_required")
+                self.assertEqual(controller.state["current_step"], 3)
+                self.assertEqual(
+                    controller.state["latest_checkpoint_id"], old_checkpoint
+                )
+                self.assertTrue(store.has_retention_completion(old_checkpoint))
+                live_bad = (
+                    root / "recovery-checkpoints" / bad_checkpoint
+                ).exists()
+                self.assertEqual(live_bad, phase == "before_hide")
+                tombstones = list(
+                    (root / "recovery-checkpoints").glob(
+                        f".{bad_checkpoint}.prune-*"
+                    )
+                )
+                self.assertEqual(len(tombstones), int(phase == "after_hide"))
+
+                store.discard_unqualified_checkpoint(bad_checkpoint)
+                self.assertEqual(
+                    store.verified_checkpoint_ids(), (old_checkpoint,)
+                )
+                resumed_adapter = _FakeAdapter(observations)
+                resumed = ContinuousTrainingController.resume(
+                    route_contract=load_route_contract(
+                        PLAN081_ROOT / "route-contract-v1.json"
+                    ),
+                    control_plan=_control_plan(),
+                    comparison_policy=ComparisonPolicy(
+                        "boundary_pair_mean_margin", 0.05
+                    ),
+                    training_dataset=_training_dataset(),
+                    validation_dataset=_validation_dataset(),
+                    artifact_store=store,
+                    adapter=resumed_adapter,
+                    checkpoint_id=old_checkpoint,
+                )
+                self.assertEqual(resumed.run(resumed_adapter)["status"], "completed")
+
     def test_checkpoint_writer_failure_keeps_last_verified_pointer(self) -> None:
         observations = {
             0: _logits(2.0),
@@ -1431,6 +1629,82 @@ class Plan081ControllerTests(unittest.TestCase):
                     checkpoint_id=checkpoint_id,
                 )
             self.assertTrue(store.has_retention_completion(checkpoint_id))
+
+    def test_checkpoint_state_comparator_handles_tensor_like_values(self) -> None:
+        observations = {
+            0: _logits(2.0),
+            1: _logits(2.5),
+            2: _logits(2.8),
+            3: _logits(3.0),
+            4: _logits(3.2),
+        }
+        with self.assertRaisesRegex(RuntimeError, "truth value is ambiguous"):
+            bool(
+                {"state": _TensorLike((1, 2))}
+                == {"state": _TensorLike((1, 2))}
+            )
+
+        with tempfile.TemporaryDirectory() as directory:
+            adapter = _FakeAdapter(observations)
+            adapter.tensor_state = True
+            controller, store = self._controller(
+                Path(directory), adapter, maximum=2
+            )
+            self.assertEqual(controller.run(adapter)["status"], "completed")
+            self.assertGreater(
+                adapter.recovery_probes[-1].state_comparison_calls, 0
+            )
+            checkpoint_id = "checkpoint-attempt-000-step-000002"
+            resumed_adapter = _FakeAdapter(observations)
+            resumed_adapter.tensor_state = True
+            resumed = ContinuousTrainingController.resume(
+                route_contract=load_route_contract(
+                    PLAN081_ROOT / "route-contract-v1.json"
+                ),
+                control_plan=_control_plan(maximum=2),
+                comparison_policy=ComparisonPolicy(
+                    "boundary_pair_mean_margin", 0.05
+                ),
+                training_dataset=_training_dataset(),
+                validation_dataset=_validation_dataset(),
+                artifact_store=store,
+                adapter=resumed_adapter,
+                checkpoint_id=checkpoint_id,
+            )
+            self.assertEqual(resumed.run(resumed_adapter)["status"], "completed")
+
+        for failure_mode, expected_error in (
+            ("drift", "plan081_checkpoint_restore_state_mismatch"),
+            ("raise", "plan081_training_state_compare_failed"),
+            ("non_bool", "plan081_training_state_compare_result_invalid"),
+        ):
+            with (
+                self.subTest(failure_mode=failure_mode),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                root = Path(directory)
+                adapter = _FakeAdapter(observations)
+                adapter.tensor_state = True
+                controller, store = self._controller(root, adapter)
+                controller.run(adapter, stop_after=2)
+                old_checkpoint = "checkpoint-attempt-000-step-000002"
+                bad_checkpoint = "checkpoint-attempt-000-step-000004"
+                if failure_mode == "drift":
+                    adapter.restored_state_drift = True
+                else:
+                    adapter.state_comparison_mode = failure_mode
+
+                with self.assertRaisesRegex(FullModelTrainingError, expected_error):
+                    controller.run(adapter)
+                self.assertEqual(controller.state["status"], "recovery_required")
+                self.assertEqual(
+                    controller.state["latest_checkpoint_id"], old_checkpoint
+                )
+                self.assertTrue(store.has_retention_completion(old_checkpoint))
+                self.assertFalse(
+                    (root / "recovery-checkpoints" / bad_checkpoint).exists()
+                )
+                self.assertFalse(store.has_retention_completion(bad_checkpoint))
 
     def test_postpublish_checkpoint_failure_keeps_new_verified_anchor(self) -> None:
         observations = {

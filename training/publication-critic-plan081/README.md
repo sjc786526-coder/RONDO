@@ -38,13 +38,20 @@ fresh exact-base starting state, decodes the artifact with its own bound reader,
 loads the model payload and proves the adapter's model-load postcondition before
 any scope/state restore, restores all optimizer/scheduler/RNG/data state, and
 captures four state sections exactly equal to the decoded checkpoint.
+The codec contract also supplies `training_states_equal()`, so Tensor-bearing
+optimizer and RNG structures use adapter-owned, type-aware equality rather than
+Python container equality. The comparator must return a native boolean; an
+exception, a non-boolean result, or any decoded-to-restored value drift fails
+qualification before retention.
 The live training adapter is not used as its own recovery proof. Byte-tree
 integrity, decodability, or a successful restore return alone is not recovery
 qualification.
 If qualification fails, the newly published but never-qualified checkpoint is
 atomically hidden and removed. An earlier qualified recovery point remains
 untouched, and a failed first checkpoint therefore cannot block an exact-base
-restart in a new process.
+restart in a new process. If hiding or tombstone deletion itself fails, the
+controller first restores committed progress and enters `recovery_required`;
+the cleanup error remains visible and the existing store cleanup can be retried.
 
 Checkpoint retention is complete only after its write-once completion artifact
 has been atomically published. Resume may repair an absent marker only for the

@@ -395,7 +395,8 @@ class ContinuousTrainingController:
                 self._apply_retention(prune_checkpoints=True)
                 self.artifact_store.mark_retention_complete(checkpoint_id)
             return scope
-        except BaseException:
+        except BaseException as step_error:
+            cleanup_error: BaseException | None = None
             if checkpoint_state is not None and checkpoint_id is not None:
                 if checkpoint_qualified:
                     self.state = checkpoint_state
@@ -410,20 +411,30 @@ class ContinuousTrainingController:
                             expected_data_cursor=receipt["data_cursor"],
                         )
                     except BaseException:
-                        self.artifact_store.discard_unqualified_checkpoint(
-                            checkpoint_id
-                        )
                         self.state = committed_state
+                        self.state["status"] = "recovery_required"
+                        try:
+                            self.artifact_store.discard_unqualified_checkpoint(
+                                checkpoint_id
+                            )
+                        except BaseException as exc:
+                            cleanup_error = exc
                     else:
                         self.state = checkpoint_state
                 else:
-                    self.artifact_store.discard_unqualified_checkpoint(
-                        checkpoint_id
-                    )
                     self.state = committed_state
+                    self.state["status"] = "recovery_required"
+                    try:
+                        self.artifact_store.discard_unqualified_checkpoint(
+                            checkpoint_id
+                        )
+                    except BaseException as exc:
+                        cleanup_error = exc
             else:
                 self.state = committed_state
             self.state["status"] = "recovery_required"
+            if cleanup_error is not None:
+                raise cleanup_error from step_error
             raise
 
     def _qualify_checkpoint(
@@ -1167,8 +1178,10 @@ def _adapter_training_state_codec(
     codec_method = getattr(adapter, "training_state_codec_id", None)
     state_writer = getattr(adapter, "write_training_state", None)
     state_reader = getattr(adapter, "read_training_state", None)
-    if not callable(codec_method) or not callable(state_writer) or not callable(
-        state_reader
+    state_comparator = getattr(adapter, "training_states_equal", None)
+    if not all(
+        callable(method)
+        for method in (codec_method, state_writer, state_reader, state_comparator)
     ):
         raise FullModelTrainingError("plan081_training_state_codec_invalid")
     codec_id = codec_method()
@@ -1230,7 +1243,7 @@ def _restore_adapter_checkpoint(
         adapter.assert_data_cursor(training_state["data"])
         restored_state = adapter.capture_training_state()
         _validate_training_state(restored_state)
-        if not _training_states_equal(restored_state, training_state):
+        if not _training_states_equal(adapter, restored_state, training_state):
             raise FullModelTrainingError(
                 "plan081_checkpoint_restore_state_mismatch"
             )
@@ -1242,12 +1255,29 @@ def _restore_adapter_checkpoint(
         ) from exc
 
 
-def _training_states_equal(left: Mapping[str, Any], right: Mapping[str, Any]) -> bool:
+def _training_states_equal(
+    adapter: Any,
+    left: Mapping[str, Any],
+    right: Mapping[str, Any],
+) -> bool:
+    comparator = getattr(adapter, "training_states_equal", None)
+    if not callable(comparator):
+        raise FullModelTrainingError(
+            "plan081_training_state_comparator_missing"
+        )
     try:
-        result = left == right
-    except Exception:
-        return False
-    return result is True
+        result = comparator(left, right)
+    except FullModelTrainingError:
+        raise
+    except Exception as exc:
+        raise FullModelTrainingError(
+            "plan081_training_state_compare_failed"
+        ) from exc
+    if type(result) is not bool:
+        raise FullModelTrainingError(
+            "plan081_training_state_compare_result_invalid"
+        )
+    return result
 
 
 def _artifact_id(kind: str, generation: int, step: int) -> str:
