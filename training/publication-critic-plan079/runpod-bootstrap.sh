@@ -9,6 +9,9 @@ set -eu
 : "${RONDO_PLAN079_VALIDATION_SHA256:?set validation archive hash}"
 : "${RONDO_PLAN079_IMAGE_ID:?set observed image identity}"
 : "${RONDO_PLAN079_STATUS:?set unique status path}"
+case "$RONDO_PLAN079_SOURCE_SHA256" in *[!0-9a-f]*) exit 2 ;; esac
+case "$RONDO_PLAN079_VALIDATION_SHA256" in *[!0-9a-f]*) exit 2 ;; esac
+if [ "${#RONDO_PLAN079_SOURCE_SHA256}" -ne 64 ] || [ "${#RONDO_PLAN079_VALIDATION_SHA256}" -ne 64 ]; then exit 2; fi
 case "$RONDO_PLAN079_TASK_ROOT" in /workspace/*) ;; *) exit 2 ;; esac
 task_root="$(realpath -e -- "$RONDO_PLAN079_TASK_ROOT")"
 case "$task_root" in /workspace/*) ;; *) exit 2 ;; esac
@@ -42,14 +45,20 @@ printf '%s  %s\n' "$RONDO_PLAN079_SOURCE_SHA256" "$source_archive" | sha256sum -
 printf '%s  %s\n' "$RONDO_PLAN079_VALIDATION_SHA256" "$validation_archive" | sha256sum --check --status
 bundle="$task_root/validation-bundle"
 if [ ! -d "$bundle" ]; then
-  mkdir -m 700 "$bundle"
-  tar --no-same-owner --no-same-permissions -xf "$validation_archive" -C "$bundle"
+  bundle_staging="$task_root/validation-bundle.extracting.$$"
+  if [ -e "$bundle_staging" ] || [ -L "$bundle_staging" ]; then exit 2; fi
+  mkdir -m 700 "$bundle_staging"
+  tar --no-same-owner --no-same-permissions -xf "$validation_archive" -C "$bundle_staging"
+  mv -T "$bundle_staging" "$bundle"
 fi
 
 export PYTHONDONTWRITEBYTECODE=1
 export PYTHONPATH="$source_root/eval"
-source_receipt="$task_root/source-receipt.json"
-source_receipt_candidate="$task_root/source-receipt.candidate.$$.json"
+source_receipts="$task_root/source-receipts"
+mkdir -m 700 -p "$source_receipts"
+if [ -L "$source_receipts" ] || [ ! -d "$source_receipts" ]; then exit 2; fi
+source_receipt="$source_receipts/$RONDO_PLAN079_SOURCE_SHA256.json"
+source_receipt_candidate="$source_receipts/$RONDO_PLAN079_SOURCE_SHA256.candidate.$$.json"
 "${RONDO_PLAN079_BOOTSTRAP_PYTHON:-python3}" -B -P \
   -m rondo_eval.publication_critic.base_quality verify-source \
   --source-archive "$source_archive" \

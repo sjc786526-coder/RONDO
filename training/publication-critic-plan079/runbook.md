@@ -25,7 +25,10 @@ volume.
    source archive before extracting it into a new, archive-specific source
    root; never reuse a source root for a different archive. Bootstrap and every
    evaluation independently compare every archived file with that executing
-   source tree and reject extra, stale, linked, or drifted entries.
+   source tree and reject extra, stale, linked, or drifted entries. Source
+   receipts are keyed by archive hash so a repaired commissioning source can
+   coexist with prior evidence; changing source still invalidates the prior
+   commissioning qualification.
 5. Launch `bootstrap` with one unique launch name. It verifies both uploaded
    archives, installs only the locked ordinary dependencies into the persistent
    volume, downloads the exact official two-shard revision, verifies the full
