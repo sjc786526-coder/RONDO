@@ -26,6 +26,9 @@ use crate::DeleteThreadParams;
 use crate::ListThreadsParams;
 use crate::LoadThreadHistoryParams;
 use crate::MoveThreadToSectionParams;
+use crate::ReadSessionMetaError;
+use crate::ReadSessionMetaFuture;
+use crate::ReadSessionMetaParams;
 use crate::ReadThreadByRolloutPathParams;
 use crate::ReadThreadParams;
 use crate::ResumeThreadParams;
@@ -55,13 +58,17 @@ mod tests {
     use super::*;
     use crate::ItemSortKey;
     use crate::ListItemsParams;
+    use crate::ListSessionLocatorsError;
+    use crate::ListSessionLocatorsParams;
     use crate::ListTurnsParams;
+    use crate::SessionLocatorStorage;
     use crate::SortDirection;
     use crate::StoredTurnItemsView;
     use crate::ThreadPersistenceMetadata;
     use crate::ThreadSortKey;
     use codex_protocol::models::BaseInstructions;
     use codex_protocol::protocol::SessionSource;
+    use pretty_assertions::assert_eq;
 
     #[tokio::test]
     async fn default_turn_pagination_methods_return_unsupported() {
@@ -105,6 +112,137 @@ mod tests {
                 operation: "list_items"
             }
         ));
+    }
+
+    #[tokio::test]
+    async fn durable_session_locator_discovery_is_fail_closed_by_default() {
+        let store = InMemoryThreadStore::default();
+        let error = ThreadStore::list_session_locators(
+            &store,
+            ListSessionLocatorsParams {
+                page_size: 10,
+                cursor: None,
+                storage: SessionLocatorStorage::Active,
+            },
+        )
+        .await
+        .expect_err("in-memory storage has no persistent locator authority");
+        assert_eq!(
+            error,
+            ListSessionLocatorsError::Unsupported {
+                operation: "list_session_locators",
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn read_session_meta_returns_only_the_canonical_metadata() {
+        let store = InMemoryThreadStore::default();
+        let thread_id = ThreadId::default();
+        store
+            .create_thread(create_thread_params(thread_id, ThreadHistoryMode::Legacy))
+            .await
+            .expect("create thread");
+        let expected = {
+            let state = store.state.lock().await;
+            let Some(RolloutItem::SessionMeta(meta_line)) = state
+                .histories
+                .get(&thread_id)
+                .and_then(|items| items.first())
+            else {
+                panic!("canonical SessionMeta");
+            };
+            serde_json::to_value(&meta_line.meta).expect("serialize expected SessionMeta")
+        };
+
+        let actual = ThreadStore::read_session_meta(
+            &store,
+            ReadSessionMetaParams {
+                thread_id,
+                include_archived: false,
+            },
+        )
+        .await
+        .expect("read canonical SessionMeta");
+
+        assert_eq!(
+            serde_json::to_value(actual).expect("serialize actual SessionMeta"),
+            expected
+        );
+        assert_eq!(
+            store.calls().await,
+            InMemoryThreadStoreCalls {
+                create_thread: 1,
+                read_session_meta: 1,
+                ..InMemoryThreadStoreCalls::default()
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn read_session_meta_respects_archive_and_identity() {
+        let store = InMemoryThreadStore::default();
+        let thread_id = ThreadId::default();
+        let actual_thread_id =
+            ThreadId::from_string("00000000-0000-0000-0000-000000000001").expect("valid thread id");
+        store
+            .create_thread(create_thread_params(thread_id, ThreadHistoryMode::Legacy))
+            .await
+            .expect("create thread");
+        ThreadStore::archive_thread(&store, ArchiveThreadParams { thread_id })
+            .await
+            .expect("archive thread");
+
+        let active_only_error = ThreadStore::read_session_meta(
+            &store,
+            ReadSessionMetaParams {
+                thread_id,
+                include_archived: false,
+            },
+        )
+        .await
+        .expect_err("active-only read must exclude archived metadata");
+        assert_eq!(
+            active_only_error,
+            ReadSessionMetaError::NotFound { thread_id }
+        );
+        ThreadStore::read_session_meta(
+            &store,
+            ReadSessionMetaParams {
+                thread_id,
+                include_archived: true,
+            },
+        )
+        .await
+        .expect("archived metadata is eligible when requested");
+
+        {
+            let mut state = store.state.lock().await;
+            let Some(RolloutItem::SessionMeta(meta_line)) = state
+                .histories
+                .get_mut(&thread_id)
+                .and_then(|items| items.first_mut())
+            else {
+                panic!("canonical SessionMeta");
+            };
+            meta_line.meta.id = actual_thread_id;
+        }
+        let mismatch = ThreadStore::read_session_meta(
+            &store,
+            ReadSessionMetaParams {
+                thread_id,
+                include_archived: true,
+            },
+        )
+        .await
+        .expect_err("metadata identity mismatch must fail closed");
+        assert_eq!(
+            mismatch,
+            ReadSessionMetaError::IdentityMismatch {
+                requested_thread_id: thread_id,
+                actual_thread_id,
+            }
+        );
     }
 
     #[tokio::test]
@@ -446,6 +584,7 @@ pub struct InMemoryThreadStoreCalls {
     pub discard_thread: usize,
     pub load_history: usize,
     pub load_latest_model_context: usize,
+    pub read_session_meta: usize,
     pub read_thread: usize,
     pub read_thread_with_history: usize,
     pub read_thread_by_rollout_path: usize,
@@ -471,6 +610,7 @@ struct InMemoryThreadStoreState {
     calls: InMemoryThreadStoreCalls,
     created_threads: HashMap<ThreadId, CreateThreadParams>,
     histories: HashMap<ThreadId, Vec<RolloutItem>>,
+    archived_threads: HashSet<ThreadId>,
     metadata_updates: HashMap<ThreadId, ThreadMetadataPatch>,
     sections: HashMap<ThreadId, String>,
     section_positions: HashMap<ThreadId, i64>,
@@ -615,6 +755,45 @@ impl InMemoryThreadStore {
             thread_id: params.thread_id,
             items: items.clone(),
         })
+    }
+
+    async fn read_session_meta(
+        &self,
+        params: ReadSessionMetaParams,
+    ) -> Result<SessionMeta, ReadSessionMetaError> {
+        let mut state = self.state.lock().await;
+        state.calls.read_session_meta += 1;
+        let thread_id = params.thread_id;
+        if !params.include_archived && state.archived_threads.contains(&thread_id) {
+            return Err(ReadSessionMetaError::NotFound { thread_id });
+        }
+        let history = state
+            .histories
+            .get(&thread_id)
+            .ok_or(ReadSessionMetaError::NotFound { thread_id })?;
+        let meta = history
+            .iter()
+            .find_map(|item| match item {
+                RolloutItem::SessionMeta(meta_line) => Some(&meta_line.meta),
+                RolloutItem::ResponseItem(_)
+                | RolloutItem::InterAgentCommunication(_)
+                | RolloutItem::InterAgentCommunicationMetadata { .. }
+                | RolloutItem::Compacted(_)
+                | RolloutItem::TurnContext(_)
+                | RolloutItem::WorldState(_)
+                | RolloutItem::EventMsg(_) => None,
+            })
+            .ok_or_else(|| ReadSessionMetaError::Corrupt {
+                thread_id,
+                message: "canonical SessionMeta is missing".to_string(),
+            })?;
+        if meta.id != thread_id {
+            return Err(ReadSessionMetaError::IdentityMismatch {
+                requested_thread_id: thread_id,
+                actual_thread_id: meta.id,
+            });
+        }
+        Ok(meta.clone())
     }
 
     async fn read_thread(&self, params: ReadThreadParams) -> ThreadStoreResult<StoredThread> {
@@ -784,6 +963,7 @@ impl InMemoryThreadStore {
         state.calls.delete_thread += 1;
         let existed = state.histories.remove(&params.thread_id).is_some();
         state.created_threads.remove(&params.thread_id);
+        state.archived_threads.remove(&params.thread_id);
         state.names.remove(&params.thread_id);
         state.metadata_updates.remove(&params.thread_id);
         state.sections.remove(&params.thread_id);
@@ -859,6 +1039,10 @@ impl ThreadStore for InMemoryThreadStore {
         params: LoadThreadHistoryParams,
     ) -> ThreadStoreFuture<'_, StoredModelContext> {
         Box::pin(InMemoryThreadStore::load_latest_model_context(self, params))
+    }
+
+    fn read_session_meta(&self, params: ReadSessionMetaParams) -> ReadSessionMetaFuture<'_> {
+        Box::pin(InMemoryThreadStore::read_session_meta(self, params))
     }
 
     fn read_thread(&self, params: ReadThreadParams) -> ThreadStoreFuture<'_, StoredThread> {
@@ -939,9 +1123,11 @@ impl ThreadStore for InMemoryThreadStore {
         Box::pin(InMemoryThreadStore::move_thread_to_section(self, params))
     }
 
-    fn archive_thread(&self, _params: ArchiveThreadParams) -> ThreadStoreFuture<'_, ()> {
+    fn archive_thread(&self, params: ArchiveThreadParams) -> ThreadStoreFuture<'_, ()> {
         Box::pin(async move {
-            self.state.lock().await.calls.archive_thread += 1;
+            let mut state = self.state.lock().await;
+            state.calls.archive_thread += 1;
+            state.archived_threads.insert(params.thread_id);
             Ok(())
         })
     }
@@ -950,7 +1136,10 @@ impl ThreadStore for InMemoryThreadStore {
         Box::pin(async move {
             let mut state = self.state.lock().await;
             state.calls.unarchive_thread += 1;
-            stored_thread_from_state(&state, params.thread_id, /*include_history*/ false)
+            let thread =
+                stored_thread_from_state(&state, params.thread_id, /*include_history*/ false)?;
+            state.archived_threads.remove(&params.thread_id);
+            Ok(thread)
         })
     }
 

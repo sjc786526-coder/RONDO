@@ -62,7 +62,7 @@ pub(crate) struct BuiltinCommandFlags {
     pub(crate) service_tier_commands_enabled: bool,
     pub(crate) goal_command_enabled: bool,
     pub(crate) personality_command_enabled: bool,
-    pub(crate) experimental_session_control_enabled: bool,
+    pub(crate) sessions_command_enabled: bool,
     pub(crate) allow_elevate_sandbox: bool,
     pub(crate) side_conversation_active: bool,
 }
@@ -78,9 +78,7 @@ pub(crate) fn builtins_for_input(flags: BuiltinCommandFlags) -> Vec<(&'static st
         .filter(|(_, cmd)| flags.token_activity_command_enabled || *cmd != SlashCommand::Usage)
         .filter(|(_, cmd)| flags.goal_command_enabled || *cmd != SlashCommand::Goal)
         .filter(|(_, cmd)| flags.personality_command_enabled || *cmd != SlashCommand::Personality)
-        .filter(|(_, cmd)| {
-            flags.experimental_session_control_enabled || *cmd != SlashCommand::Sessions
-        })
+        .filter(|(_, cmd)| flags.sessions_command_enabled || *cmd != SlashCommand::Sessions)
         .filter(|(_, cmd)| !flags.side_conversation_active || cmd.available_in_side_conversation())
         .collect()
 }
@@ -111,8 +109,8 @@ pub(crate) fn commands_for_input(
 /// Find a single built-in command by a recognized name or alias, after applying feature gating.
 ///
 /// Side-conversation and token-activity gating are intentionally enforced by dispatch rather than
-/// command lookup. The experimental Session command is different: its product opt-in must also
-/// gate lookup so the default-off prototype does not change how an otherwise unknown command is
+/// command lookup. The Session command is different: its independent product opt-in must also gate
+/// lookup so default-off Session surfaces do not change how an otherwise unknown command is
 /// handled.
 pub(crate) fn find_builtin_command(name: &str, flags: BuiltinCommandFlags) -> Option<SlashCommand> {
     let cmd = SlashCommand::from_str(name).ok().or_else(|| {
@@ -176,7 +174,7 @@ mod tests {
             service_tier_commands_enabled: true,
             goal_command_enabled: true,
             personality_command_enabled: true,
-            experimental_session_control_enabled: true,
+            sessions_command_enabled: true,
             allow_elevate_sandbox: true,
             side_conversation_active: false,
         }
@@ -236,21 +234,21 @@ mod tests {
     #[test]
     fn sessions_command_is_hidden_without_the_product_opt_in() {
         let mut flags = all_enabled_flags();
-        flags.experimental_session_control_enabled = false;
+        flags.sessions_command_enabled = false;
         assert!(
             builtins_for_input(flags)
                 .iter()
                 .all(|(_, command)| *command != SlashCommand::Sessions)
         );
 
-        flags.experimental_session_control_enabled = true;
+        flags.sessions_command_enabled = true;
         assert!(
             builtins_for_input(flags)
                 .iter()
                 .any(|(_, command)| *command == SlashCommand::Sessions)
         );
 
-        flags.experimental_session_control_enabled = false;
+        flags.sessions_command_enabled = false;
         assert_eq!(find_builtin_command("sessions", flags), None);
     }
 

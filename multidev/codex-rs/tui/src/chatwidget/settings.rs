@@ -100,8 +100,11 @@ impl ChatWidget {
         if feature == Feature::MentionsV2 {
             self.sync_mentions_v2_enabled();
         }
-        if feature == Feature::ExperimentalSessionControl {
-            self.sync_experimental_session_control_enabled();
+        if matches!(
+            feature,
+            Feature::DurableSessionQuery | Feature::ExperimentalSessionControl
+        ) {
+            self.sync_sessions_command_enabled();
         }
         if feature == Feature::PreventIdleSleep {
             self.turn_lifecycle.set_prevent_idle_sleep(enabled);
@@ -296,11 +299,13 @@ impl ChatWidget {
             .set_goal_command_enabled(self.config.features.enabled(Feature::Goals));
     }
 
-    pub(super) fn sync_experimental_session_control_enabled(&mut self) {
-        self.bottom_pane.set_experimental_session_control_enabled(
-            self.config
-                .features
-                .enabled(Feature::ExperimentalSessionControl),
+    pub(super) fn sync_sessions_command_enabled(&mut self) {
+        self.bottom_pane.set_sessions_command_enabled(
+            self.config.features.enabled(Feature::DurableSessionQuery)
+                || self
+                    .config
+                    .features
+                    .enabled(Feature::ExperimentalSessionControl),
         );
     }
 

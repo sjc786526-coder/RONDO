@@ -720,6 +720,50 @@
       ],
       "type": "string"
     },
+    "DurableSessionListParams": {
+      "description": "Parameters for discovering canonical durable Sessions.",
+      "properties": {
+        "archived": {
+          "description": "Selects the archived source when true and the active source when false.",
+          "type": "boolean"
+        },
+        "cursor": {
+          "description": "Opaque pagination cursor returned by a previous call for the same source.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "limit": {
+          "description": "Optional page size; the server applies a bounded default and maximum.",
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "DurableSessionReadParams": {
+      "description": "Parameters for reading one canonical durable Session.",
+      "properties": {
+        "rootThreadId": {
+          "description": "Canonical Root identity used only to locate the durable record. The server must still cross-check it against the marker and Session identity.",
+          "type": "string"
+        },
+        "sessionId": {
+          "description": "Canonical Session identity to cross-check against the durable marker.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "rootThreadId",
+        "sessionId"
+      ],
+      "type": "object"
+    },
     "DynamicToolNamespaceTool": {
       "oneOf": [
         {
@@ -5929,6 +5973,54 @@
         "params"
       ],
       "title": "Thread/readRequest",
+      "type": "object"
+    },
+    {
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/RequestId"
+        },
+        "method": {
+          "enum": [
+            "session/list"
+          ],
+          "title": "Session/listRequestMethod",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/DurableSessionListParams"
+        }
+      },
+      "required": [
+        "id",
+        "method",
+        "params"
+      ],
+      "title": "Session/listRequest",
+      "type": "object"
+    },
+    {
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/RequestId"
+        },
+        "method": {
+          "enum": [
+            "session/read"
+          ],
+          "title": "Session/readRequestMethod",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/DurableSessionReadParams"
+        }
+      },
+      "required": [
+        "id",
+        "method",
+        "params"
+      ],
+      "title": "Session/readRequest",
       "type": "object"
     },
     {

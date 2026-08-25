@@ -102,6 +102,9 @@ Team Event 历史、历史成员档案或时间旅行查询。
 - `multidev/codex-rs/core/`：只读 query façade/projection；不得借机扩张 Session lifecycle 或 writer 接口。
 - `multidev/codex-rs/thread-store/`、`multidev/codex-rs/team-state/`：仅缺失的 storage-neutral、无写副作用 durable discovery/read
   接缝、typed error/projection 与就近测试；不改变 durable commit/authority/介质语义。
+- `multidev/codex-rs/state/`：仅正式 Session query 所需的 bounded、typed-error、read-only state-DB candidate locator 及就近测试；
+  state DB 只负责候选定位，不成为 Durable Session/Team identity、lifecycle 或 committed state 的权威来源，也不得增加 registry、
+  query cache、写回、repair 或 lifecycle 状态。每个候选仍须经 canonical `SessionMeta` 与 committed snapshot 验证。
 - `multidev/codex-rs/features/`、`multidev/codex-rs/protocol/`、配置/schema、workspace/Cargo/Bazel manifest/lock 和生成物：仅由真实
   查询实现触发的最小变化。
 
@@ -277,32 +280,69 @@ Team Event 历史、历史成员档案或时间旅行查询。
   query-only presentation，控制型 TUI 继续等待后续任务。
 - 已确认 `dfc4278` 未持久化 whole-Session `open/closing/closed/failed`；077 只能诚实查询冷态记录并把不可证明的 lifecycle 显示为
   unknown，后续只消费 078/owning lifecycle 提供的 canonical fact，不建立第二状态源。
-- 已确认 078 worktree 同样基于 `dfc4278`，规划终检时已在其分支提交至 `bbc2d417798e5cb2c18f6824214f6e949610566e`
-  且 clean；077 未读取其实现内容。执行者进入时重新核对元数据和共享写集，共享 WBS 留给后整合者，不在本计划写集。
+- 已确认 078 worktree 同样基于 `dfc4278`；执行期间仅核对其 branch/HEAD/status 元数据，未读取其未提交实现。两任务当前共同触及
+  `core/src/team/durable.rs`、`thread-store/src/lib.rs`、`thread-store/src/store.rs`，由后整合者收敛，共享 WBS 不在本计划写集。
 - 规划时资源快照：RONDO 约 159G，069 target 约 72G，Windows `C:` 可用约 96G；正式执行以每轮实时计数为准。
 - 已完成任务合同、query surface 与 durable read model 三路只读专项审阅；全部高/中等级 finding 已关闭，未运行构建或测试。
+- 已实现独立默认关闭的 `durable_session_query` feature、稳定 app-server v2 `session/list`/`session/read` DTO/RPC、bounded state-DB
+  locator、canonical Root `SessionMeta` 读取、同边界 marker/snapshot 校验、bounded committed Team projection、typed failure 和
+  active/archive keyset pagination；没有 writer、repair、resume/load、模型或 control action。
+- 已实现 app-server client 的 connection/attachment/read ticket、whole-view replacement、stale 与 committed generation + fingerprint
+  高水位，并接入 `/sessions list|next|read|refresh` 的异步、单次 15 秒 timeout、query-only TUI 展示和三组 snapshot。
+- 已通过目标代码静态检查和多轮独立只读审查；自审发现并修正 TUI snapshot 夹具与真实 operation/provenance 投影不一致。
+  最终契约审查另发现 client 只保存最近一个 Session 高水位会让 `A → B → A` 绕过回退保护；已改为按 Session 保存
+  generation+fingerprint，并补返回与 detach 回归。两项均已纳入 client/TUI 稳定重跑；`git diff --check` 通过且无
+  `*.snap.new`。
+- 已在获批重型时段以共享 069 target、canonical lock/watchdog、`CARGO_BUILD_JOBS=2` 完成 lower/protocol 聚焦门禁 42/42 和
+  app-server 聚焦门禁 11/11。早先全九 crate 聚焦批次因 sustained memory PSI 主动停止；后续 client/TUI 聚焦批次因运行中出现
+  scope 外 Cargo PID 主动停止且未执行测试，两次均已释放重型资源并如实汇报。
+- 用户已批准把 `state/` 四文件纳入上述窄 locator 范围，并批准 077/078 在独立分支保留三个 shared 文件的各自改动；077 不读取、
+  复制或覆盖 078，后整合者基于最新 main 做 query/lifecycle 兼容收敛。
+- 修正 client 高水位与 TUI 夹具后，client/TUI 聚焦门禁最终稳定通过 23/23、0 flaky、0 retry、3462 skipped；此前调试轮为
+  23/23 但含一次临时 SQLite pool timeout 的自动重试，正式证据采用修正后的稳定轮。
+- stable/experimental app-server schema generator 各 1/1 通过，配置 schema generator 通过；生成差异只包含正式 Session Query
+  request/DTO/bundle/export 与默认关闭 feature 的 6 行配置 schema 增量。
+- state/features/team-state/thread-store 四 crate 全量门禁 567/567 通过、1 skipped；九个直接修改 crate 的 scoped `just fix`
+  全部通过，最终 target-free `UV_CACHE_DIR=.uv-cache just fmt` 通过，且未在 fix/fmt 后重跑测试。
+- workspace `just test` 只运行一次并在测试前被既有 `v8 = 150.4.0` 的缺失官方
+  `librusty_v8_ptrcomp_sandbox_release_x86_64-unknown-linux-gnu.a.gz` 资产 404 阻断；未用不兼容 ABI 资产替换、未启用源码构建、未升级依赖。
+  后续收窄的 core/protocol 全量轮在 protocol/077 相关项通过后，因大量 scope 外本地 mock 请求被 502 代理链截获而出现共同失败/超时；
+  为避免 1145 个剩余测试继续长超时重试，按外部阻断终止条件由 wrapper 正常中断。本轮只记录为 2538 passed、44 failed、4 timed out、
+  1145 not run，不冒充通过，也不把 scope 外基线失败归因于 077。
+- 重型证据完成后的独立终审又发现并已窄修四组真实边界：legacy seconds 会形成不推进的 locator cursor；state row/path probe 会吞掉
+  corruption 或 OS I/O；无 source generation 的跨页/多 locator-page 查询会过度声明 complete；client list/read 没有共用同 Session
+  committed 高水位，也未校验 response identity 与跨请求 canonical Root 稳定性。client 现以独立于 Team 可用性的 client-local
+  `Session -> Root` 轴保持已认证身份，错误 Root attachment 即使只收到无 Root/Team 的 typed unavailable 也不能通过。修复只使用已批准写集，没有引入 state registry/cache、
+  source-generation 平台或 lifecycle 状态；新增 BLOB/path compression、archive-between-pages、list/read 双向 rollback/fingerprint、identity/root
+  mismatch 与原子无部分提交回归。
+- 上述终审修复后，正确 workdir 下的 target-free `UV_CACHE_DIR=.uv-cache just fmt` 与 `just fmt-check`、多轮 `git diff --check` 通过；
+  lower、app-server、client/TUI 与最终合同审查者对最新 live diff 均未发现剩余高/中等级 finding。
+- 用户释放 078 重型时段并授权 077/078 临时使用项目 `270/285/290GB` warn/stop/max 后，最新 review-fix 聚焦正式轮在共享 069 target、
+  canonical lock/watchdog、`CARGO_BUILD_JOBS=2` 下通过 64/64：state/thread-store 18/18，app-server/client/TUI 46/46，均 0 failure/error。
+  第二组首轮在测试前按 `project_reached_proactive_stop` 主动停止；精确删除 13 个本轮未触碰的陈旧 core/app-server-protocol incremental
+  hash 目录 `13,537,357,824 B` 后，同一命令重跑通过。没有删除 `deps`、源码、fixture、JUnit 或其他任务数据。
 
 ### 当前工作
 
-- ExecPlan 已形成，尚未开始产品实现、构建或测试。
+- 产品实现、相称回归、生成物、独立审查、最终聚焦重型复验、104 文件精确 write set 核对和 077 本地提交均已完成；提交后 worktree
+  clean，交付留在 `worktree-077-m4-c1-durable-session-query`，未 merge/rebase/cherry-pick/push/关闭或重命名。最终正式轮结束值：项目
+  `277,175,566,336 B`、069 target `183,133,495,296 B`、Windows `C:` 可用 `79,156,465,664 B`；`stop=none / cleanup=none`，
+  重型资源已释放。
 
 ### 本任务剩余步骤
 
-1. 执行者复核 live seam、078 当前 write set 与精确任务写集。
-2. 实现 canonical durable list/read 与 app-server v2 public JSON-RPC 测试。
-3. 实现 client freshness/replacement 与 TUI 只读展示/snapshots。
-4. 闭合分页、restart、损坏/不完整、side-effect-free、default-off/non-durable 聚焦回归。
-5. 汇报精确重型命令与实时资源/078 状态，逐批取得用户额外批准和人工串行调度后完成相关门禁；以新领域状态执行正式 query 链，
-   更新 Plan 状态和精炼日志。
-6. 执行者自审并只提交 077；本会话审查者独立终审，范围内 finding 整改复验后再形成最终结论。
+- 本任务范围内无剩余实施步骤；提交级独立只读终审完成后交回用户验收，不 merge/rebase/cherry-pick/push/关闭 worktree/重命名分支。
 
 ### 阻塞项
 
-- 无产品或代码前置阻塞。任何重型 Cargo 批次尚未预授权；执行者准备好精确命令后须等待用户额外明确批准和人工串行调度。
+- 无 task-local 阻塞项。
+- workspace-wide 验证仍有上述 V8 官方资产缺失和 scope 外 mock/代理环境阻断；它们保留为未通过项，不通过规避 ABI、升级依赖或扩大
+  本任务来伪造绿色结果。
 
 ### 当前验收状态
 
-- `PLAN_READY / INDEPENDENT_PLAN_REVIEW_COMPLETE / IMPLEMENTATION_NOT_STARTED`。
+- `M4_C1_QUERY_PASS / LOCAL_COMMIT_COMPLETE`。最新代码、生成物、独立审查、review-fix 聚焦正式轮与 077 本地提交均完成；workspace
+  非 077 阻断如实保留。
 
 ### 交接边界
 
@@ -328,3 +368,16 @@ Team Event 历史、历史成员档案或时间旅行查询。
 | 009 | 077 不把 cold/unloaded 推断为 closed；baseline 上不可证明的 whole-Session lifecycle 为 unknown，后整合者只消费 078 的 canonical fact | S1 当前没有持久 close 状态，猜测或新建 marker 会侵入 S2 并制造第二状态源 | lifecycle/并行 | 已采纳 |
 | 010 | runtime residency 只声明查询所在 app-server 的正向 owner 观察；本 server 未命中不能证明全局 unloaded | baseline 没有跨进程 owner absence 的只读权威接口，查询也不得新建 IPC 或取得 authority | residency | 已采纳 |
 | 011 | durable commit generation、Team revision 与 client read ticket generation 分开表达和校验 | 三者属于不同一致性边界，互相代替会把旧 committed state 或迟到 response 误标为 fresh | freshness | 已采纳 |
+| 012 | locator 使用 state DB 的专用 bounded、typed-error、query-only 接缝，空 preview 也纳入；每个候选仍须经 canonical Root marker/snapshot 认证 | generic thread list 会隐藏部分失败、可扫描/repair 且过滤空 preview；把 SQL/schema 复制到 thread-store 又会造成层次泄漏。用户已明确批准 `state/` 四文件的窄扩展 | state/thread-store | 已采纳 |
+| 013 | `session/list`/`session/read` 是稳定 v2 RPC，不标记 experimental；产品 feature 仍按现行 feature stage 记为 Experimental 且默认关闭 | RPC 合同的稳定性与产品 opt-in 生命周期是两条独立轴，普通 experimental API capability 不应成为 query gate | protocol/feature | 已采纳 |
+| 014 | committed projection 同时暴露 canonical generation、完整 snapshot SHA-256 fingerprint 和独立 Team revision；client 以 generation+fingerprint 维护同 Session 高水位 | 单独 generation 不能发现同代内容变化，bounded view 或 revision 也不能替代完整 committed identity | core/client | 已采纳 |
+| 015 | sustained PSI 后将聚焦批次按 lower/app-server/client+TUI 拆分并固定 `CARGO_BUILD_JOBS=2`；任何 scope 外 Cargo 出现立即停止并重新交还人工调度 | 在不清理共享 target、不弱化门禁的前提下降低峰值，并保持 077/078 串行构建约束 | 构建/资源 | 已采纳 |
+| 016 | 077 可在独立分支保留与 078 重叠的三处 additive query 改动：`core/src/team/durable.rs` 拆出 validated-intent 后的只读 snapshot 入口以保留 marker/snapshot typed failure；`thread-store/src/lib.rs` 导出 locator/meta query DTO 与错误；`thread-store/src/store.rs` 为 store trait 增加默认 fail-closed 的只读方法 | 用户已确认 shared 文件本身不阻止轻量并行。整合时须保留 078 对 lifecycle/reload 的所有权，把新增符号按最新 main 加法收敛并完成 query/lifecycle 兼容验收；若出现同一语义所有权竞争则暂停 | shared core/thread-store | 已采纳 |
+| 017 | workspace final 不以其他 V8 archive、关闭 sandbox feature、`V8_FROM_SOURCE` 或依赖升级规避 `v8 150.4.0` 的官方 `ptrcomp_sandbox` 资产缺失 | 现有 build script 明确把 pointer compression 与 sandbox 拼入 ABI 资产名，而官方该版本 Linux x86_64 release 只发布普通/ptrcomp/simdutf 变体；替换会伪造验证，源码构建和升级又超出范围与资源门 | workspace/依赖 | 已采纳 |
+| 018 | 项目越过 240GB 后只完成单 crate scoped fix，不再运行 workspace 或多 crate 宽门禁；到 254.99GB 后停止所有 target 写入 | 遵守 240/255/260GB 分级门禁，同时在不清缓存的前提下完成直接修改 crate 的 lint；最终只剩 target-free 审查与 Git 交付 | 构建/资源 | 已采纳 |
+| 019 | formal path lookup 保留 state fetch unavailable、row corrupt、indexed file missing 与 OS I/O unavailable 的 typed 区分；plain rollout 优先、`.zst` 仅在可证明 missing 时 fallback | Option-only lookup 会把真实 source failure 误报 corruption/NotFound，破坏 query failure honesty | state/thread-store | 已采纳 |
+| 020 | locator collection 没有 source generation 时，cursor continuation 或单 RPC 内跨多个 locator page 保守返回 `complete=false/sourceChanged` | keyset 只稳定排序，不能证明 active/archive membership 跨读取不变；不为 077 新建 registry 或 generation 平台 | app-server/pagination | 已采纳 |
+| 021 | formal client 的 list/read 共用按 Session 保存的 generation+fingerprint 高水位，并在 apply 前验证 response Session/Root 与跨请求 canonical Root；整页 staged 后原子提交 | ticket 只证明时序，不能阻止旧 committed state、错误 identity 或换 Root 建第二 key 被标 fresh | client/TUI | 已采纳 |
+| 022 | 078 接管重型时段后，077 只做 target-free 整改与审查；最终复验须在 078 释放后重新申请并重新过实时容量门禁 | 遵守用户最新人工调度，避免通过排队/锁空闲推定授权或在临界磁盘继续写 target | 构建/调度 | 已采纳 |
+| 023 | client-local canonical Root 轴独立于 committed Team 高水位；Team unavailable 时可保留已认证 Root，但不能推进 committed，高水位/Root 只在整个 response `Applied` 后原子更新 | canonical SessionMeta identity 不应因 snapshot 失败而遗失，也不能让 typed unavailable 为错误 Root attachment 背书；该内存同步边界不成为 durable authority 或 query cache | client/identity | 已采纳 |
+| 024 | 最终复验仅临时使用用户批准的项目 `270/285/290GB` 门限；触及 stop 后只删除 13 个可重建且在本轮前已陈旧的 incremental hash 目录，再原命令重跑 | 保留 canonical watchdog 和最终代码证据，同时避免清理 `deps`、权威数据或来源不明产物；临时门限不写入仓库 | 资源/清理 | 已采纳 |

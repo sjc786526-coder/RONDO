@@ -385,7 +385,10 @@ impl ChatWidget {
                 self.open_experimental_popup();
             }
             SlashCommand::Sessions => {
-                if self
+                if self.config.features.enabled(Feature::DurableSessionQuery) {
+                    self.app_event_tx
+                        .send(AppEvent::DurableSessionQueryCommand(String::new()));
+                } else if self
                     .config
                     .features
                     .enabled(Feature::ExperimentalSessionControl)
@@ -692,7 +695,10 @@ impl ChatWidget {
         let trimmed = args.trim();
         match cmd {
             SlashCommand::Sessions => {
-                if self
+                if self.config.features.enabled(Feature::DurableSessionQuery) {
+                    self.app_event_tx
+                        .send(AppEvent::DurableSessionQueryCommand(trimmed.to_string()));
+                } else if self
                     .config
                     .features
                     .enabled(Feature::ExperimentalSessionControl)
@@ -1074,10 +1080,11 @@ impl ChatWidget {
             goal_command_enabled: self.config.features.enabled(Feature::Goals),
             service_tier_commands_enabled: self.fast_mode_enabled(),
             personality_command_enabled: self.config.features.enabled(Feature::Personality),
-            experimental_session_control_enabled: self
-                .config
-                .features
-                .enabled(Feature::ExperimentalSessionControl),
+            sessions_command_enabled: self.config.features.enabled(Feature::DurableSessionQuery)
+                || self
+                    .config
+                    .features
+                    .enabled(Feature::ExperimentalSessionControl),
             allow_elevate_sandbox,
             side_conversation_active: self.active_side_conversation,
         }

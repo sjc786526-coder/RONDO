@@ -543,6 +543,9 @@ impl App {
                     &feature_updates_to_apply,
                 )
                 .await;
+                if !self.config.features.enabled(Feature::DurableSessionQuery) {
+                    app_server.durable_session_detach();
+                }
                 if windows_sandbox_changed {
                     self.propagate_windows_sandbox_turn_context();
                 }
@@ -559,6 +562,9 @@ impl App {
         for (feature, effective_enabled) in feature_updates_to_apply {
             self.chat_widget
                 .set_feature_enabled(feature, effective_enabled);
+        }
+        if !self.config.features.enabled(Feature::DurableSessionQuery) {
+            app_server.durable_session_detach();
         }
         if show_memory_enable_notice {
             self.chat_widget.add_memories_enable_notice();

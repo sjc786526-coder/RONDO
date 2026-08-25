@@ -110,14 +110,17 @@ fn next_add_to_history_event(rx: &mut tokio::sync::mpsc::UnboundedReceiver<AppEv
 }
 
 #[tokio::test]
-async fn sessions_dispatch_requires_the_independent_product_opt_in() {
+async fn sessions_dispatch_uses_the_independent_query_gate_before_c0() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.4")).await;
     while rx.try_recv().is_ok() {}
 
     chat.dispatch_command_with_args(SlashCommand::Sessions, "list".to_string(), Vec::new());
     assert!(
-        !std::iter::from_fn(|| rx.try_recv().ok())
-            .any(|event| matches!(event, AppEvent::ExperimentalSessionControlCommand(_)))
+        !std::iter::from_fn(|| rx.try_recv().ok()).any(|event| matches!(
+            event,
+            AppEvent::DurableSessionQueryCommand(_)
+                | AppEvent::ExperimentalSessionControlCommand(_)
+        ))
     );
 
     chat.set_feature_enabled(Feature::ExperimentalSessionControl, /*enabled*/ true);
@@ -126,6 +129,29 @@ async fn sessions_dispatch_requires_the_independent_product_opt_in() {
         std::iter::from_fn(|| rx.try_recv().ok()).any(|event| matches!(
             event,
             AppEvent::ExperimentalSessionControlCommand(args) if args == "list"
+        ))
+    );
+
+    chat.set_feature_enabled(Feature::ExperimentalSessionControl, /*enabled*/ false);
+    chat.set_feature_enabled(Feature::DurableSessionQuery, /*enabled*/ true);
+    chat.dispatch_command_with_args(
+        SlashCommand::Sessions,
+        "read session-a root-a".to_string(),
+        Vec::new(),
+    );
+    assert!(
+        std::iter::from_fn(|| rx.try_recv().ok()).any(|event| matches!(
+            event,
+            AppEvent::DurableSessionQueryCommand(args) if args == "read session-a root-a"
+        ))
+    );
+
+    chat.set_feature_enabled(Feature::ExperimentalSessionControl, /*enabled*/ true);
+    chat.dispatch_command_with_args(SlashCommand::Sessions, "list".to_string(), Vec::new());
+    assert!(
+        std::iter::from_fn(|| rx.try_recv().ok()).any(|event| matches!(
+            event,
+            AppEvent::DurableSessionQueryCommand(args) if args == "list"
         ))
     );
 }

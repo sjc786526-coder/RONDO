@@ -3,8 +3,11 @@
 //! This module owns the typed JSON-RPC calls needed by the TUI and keeps
 //! request/response plumbing out of `App` and `ChatWidget`.
 
+mod durable_session_query;
 mod fs;
 mod history;
+
+pub(crate) use durable_session_query::DurableSessionQueryRequest;
 
 pub(crate) use history::HISTORY_ITEM_PAGE_LIMIT;
 pub(crate) use history::HISTORY_ITEM_SCAN_LIMIT;
@@ -24,6 +27,7 @@ use codex_app_server_client::AppServerClient;
 use codex_app_server_client::AppServerEvent;
 use codex_app_server_client::AppServerPath;
 use codex_app_server_client::AppServerRequestHandle;
+use codex_app_server_client::DurableSessionQueryClientState;
 use codex_app_server_client::ExperimentalSessionControl;
 use codex_app_server_client::KnownMutationOutcome;
 use codex_app_server_client::MutationCertainty;
@@ -322,6 +326,7 @@ pub(crate) struct AppServerBootstrap {
 pub(crate) struct AppServerSession {
     client: AppServerClient,
     next_request_id: i64,
+    durable_session_query: Mutex<DurableSessionQueryClientState>,
     experimental_session_control:
         Mutex<ExperimentalSessionControl<ExperimentalSessionReadParams, ExperimentalSessionView>>,
     experimental_session_mutation_attempt_timeout: Duration,
@@ -398,9 +403,12 @@ impl AppServerSession {
     pub(crate) fn new(client: AppServerClient, thread_params_mode: ThreadParamsMode) -> Self {
         let mut experimental_session_control = ExperimentalSessionControl::new();
         experimental_session_control.bind_connection();
+        let mut durable_session_query = DurableSessionQueryClientState::new();
+        durable_session_query.bind_connection();
         Self {
             client,
             next_request_id: 1,
+            durable_session_query: Mutex::new(durable_session_query),
             experimental_session_control: Mutex::new(experimental_session_control),
             experimental_session_mutation_attempt_timeout:
                 EXPERIMENTAL_SESSION_MUTATION_ATTEMPT_TIMEOUT,

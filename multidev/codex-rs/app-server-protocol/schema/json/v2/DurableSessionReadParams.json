@@ -1,0 +1,20 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "description": "Parameters for reading one canonical durable Session.",
+  "properties": {
+    "rootThreadId": {
+      "description": "Canonical Root identity used only to locate the durable record. The server must still cross-check it against the marker and Session identity.",
+      "type": "string"
+    },
+    "sessionId": {
+      "description": "Canonical Session identity to cross-check against the durable marker.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "rootThreadId",
+    "sessionId"
+  ],
+  "title": "DurableSessionReadParams",
+  "type": "object"
+}

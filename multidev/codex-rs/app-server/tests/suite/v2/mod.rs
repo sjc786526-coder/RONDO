@@ -18,6 +18,7 @@ mod connection_handling_websocket_unix;
 #[cfg(unix)]
 mod curated_mcp_sync;
 mod current_time;
+mod durable_session_query;
 mod dynamic_tools;
 mod environment_add;
 mod environment_info;

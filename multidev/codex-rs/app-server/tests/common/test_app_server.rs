@@ -31,6 +31,8 @@ use codex_app_server_protocol::ConfigBatchWriteParams;
 use codex_app_server_protocol::ConfigReadParams;
 use codex_app_server_protocol::ConfigValueWriteParams;
 use codex_app_server_protocol::ConsumeAccountRateLimitResetCreditParams;
+use codex_app_server_protocol::DurableSessionListParams;
+use codex_app_server_protocol::DurableSessionReadParams;
 use codex_app_server_protocol::ExperimentalFeatureListParams;
 use codex_app_server_protocol::ExperimentalSessionListParams;
 use codex_app_server_protocol::ExperimentalSessionReadParams;
@@ -650,6 +652,24 @@ impl TestAppServer {
     ) -> anyhow::Result<i64> {
         let params = Some(serde_json::to_value(params)?);
         self.send_request("thread/read", params).await
+    }
+
+    /// Send a stable `session/list` JSON-RPC request.
+    pub async fn send_durable_session_list_request(
+        &mut self,
+        params: DurableSessionListParams,
+    ) -> anyhow::Result<i64> {
+        let params = Some(serde_json::to_value(params)?);
+        self.send_request("session/list", params).await
+    }
+
+    /// Send a stable `session/read` JSON-RPC request.
+    pub async fn send_durable_session_read_request(
+        &mut self,
+        params: DurableSessionReadParams,
+    ) -> anyhow::Result<i64> {
+        let params = Some(serde_json::to_value(params)?);
+        self.send_request("session/read", params).await
     }
 
     /// Send an `experimentalSession/list` JSON-RPC request.

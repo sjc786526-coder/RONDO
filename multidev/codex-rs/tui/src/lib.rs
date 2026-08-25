@@ -116,6 +116,7 @@ mod cwd_prompt;
 mod debug_config;
 mod diff_model;
 mod diff_render;
+mod durable_session_query;
 mod exec_cell;
 mod exec_command;
 mod experimental_session_control;

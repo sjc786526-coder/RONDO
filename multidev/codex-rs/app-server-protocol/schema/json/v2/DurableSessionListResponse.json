@@ -1,0 +1,622 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "DurableSessionDomainLifecycle": {
+      "description": "Domain lifecycle, independent of storage placement and runtime residency.",
+      "enum": [
+        "open",
+        "closing",
+        "closed",
+        "failed",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "DurableSessionFactProvenance": {
+      "description": "Canonical or observation source for one projected fact axis.",
+      "enum": [
+        "sessionMeta",
+        "threadStore",
+        "committedTeamSnapshot",
+        "serverRuntimeObservation",
+        "derivedPolicy",
+        "unavailable"
+      ],
+      "type": "string"
+    },
+    "DurableSessionIdentity": {
+      "description": "Canonical durable Session identity and its Root lineage identity.",
+      "properties": {
+        "rootThreadId": {
+          "description": "`None` means that a canonical Root identity could not be established.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sessionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId"
+      ],
+      "type": "object"
+    },
+    "DurableSessionListIncompleteReason": {
+      "description": "Why a list page cannot claim a complete read of its selected source.",
+      "enum": [
+        "sourceUnavailable",
+        "sourceUnsupported",
+        "sourceChanged",
+        "budgetExhausted",
+        "recordUnreadable",
+        "recordIncompatible",
+        "classificationFailed",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "DurableSessionOperation": {
+      "description": "One operation's availability and the fact source supporting it.",
+      "properties": {
+        "availability": {
+          "$ref": "#/definitions/DurableSessionOperationAvailability"
+        },
+        "provenance": {
+          "$ref": "#/definitions/DurableSessionFactProvenance"
+        }
+      },
+      "required": [
+        "availability",
+        "provenance"
+      ],
+      "type": "object"
+    },
+    "DurableSessionOperationAvailability": {
+      "description": "Whether an operation is available from the currently proven facts.",
+      "oneOf": [
+        {
+          "properties": {
+            "status": {
+              "enum": [
+                "available"
+              ],
+              "title": "AvailableDurableSessionOperationAvailabilityStatus",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "title": "AvailableDurableSessionOperationAvailability",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "reason": {
+              "$ref": "#/definitions/DurableSessionOperationAvailabilityReason"
+            },
+            "status": {
+              "enum": [
+                "unknown"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "reason",
+            "status"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "reason": {
+              "$ref": "#/definitions/DurableSessionOperationAvailabilityReason"
+            },
+            "status": {
+              "enum": [
+                "unavailable"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "reason",
+            "status"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "DurableSessionOperationAvailabilityReason": {
+      "description": "Why an operation is unknown or unavailable in this projection.",
+      "enum": [
+        "readIncomplete",
+        "identityUnavailable",
+        "storageUnavailable",
+        "lifecycleUnknown",
+        "residencyUnknown",
+        "ownerUnavailableHere",
+        "notObservedHere",
+        "alreadyArchived",
+        "notArchived",
+        "closing",
+        "closed",
+        "failed",
+        "childSession",
+        "unsupported"
+      ],
+      "type": "string"
+    },
+    "DurableSessionOperations": {
+      "description": "Availability of the Session operations that a query may present.",
+      "properties": {
+        "archive": {
+          "$ref": "#/definitions/DurableSessionOperation"
+        },
+        "close": {
+          "$ref": "#/definitions/DurableSessionOperation"
+        },
+        "delete": {
+          "$ref": "#/definitions/DurableSessionOperation"
+        },
+        "resume": {
+          "$ref": "#/definitions/DurableSessionOperation"
+        },
+        "unarchive": {
+          "$ref": "#/definitions/DurableSessionOperation"
+        }
+      },
+      "required": [
+        "archive",
+        "close",
+        "delete",
+        "resume",
+        "unarchive"
+      ],
+      "type": "object"
+    },
+    "DurableSessionProvenance": {
+      "description": "Provenance for each independent Session fact axis.",
+      "properties": {
+        "domainLifecycle": {
+          "$ref": "#/definitions/DurableSessionFactProvenance"
+        },
+        "identity": {
+          "$ref": "#/definitions/DurableSessionFactProvenance"
+        },
+        "residency": {
+          "$ref": "#/definitions/DurableSessionFactProvenance"
+        },
+        "storageStatus": {
+          "$ref": "#/definitions/DurableSessionFactProvenance"
+        },
+        "team": {
+          "$ref": "#/definitions/DurableSessionFactProvenance"
+        }
+      },
+      "required": [
+        "domainLifecycle",
+        "identity",
+        "residency",
+        "storageStatus",
+        "team"
+      ],
+      "type": "object"
+    },
+    "DurableSessionReadIssue": {
+      "description": "Typed issue that limits or prevents a durable Session read.",
+      "oneOf": [
+        {
+          "enum": [
+            "sessionNotFound",
+            "sourceUnavailable",
+            "sourceUnsupported",
+            "sourceChanged",
+            "budgetExhausted",
+            "identityUnavailable",
+            "sessionMetaUnreadable",
+            "sessionMetaIncompatible",
+            "durableMarkerMissing",
+            "durableMarkerIncompatible",
+            "durableMarkerIdentityMismatch",
+            "teamSnapshotMissing",
+            "teamSnapshotCorrupt",
+            "teamSnapshotIncompatible",
+            "teamSnapshotValidationFailed",
+            "legacySession",
+            "durableSessionsDisabled",
+            "unknown"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "The supplied Root locator resolves to a child rather than a canonical Root.",
+          "enum": [
+            "notCanonicalRoot"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "The supplied Session and Root identities do not describe the same lineage.",
+          "enum": [
+            "sessionRootIdentityMismatch"
+          ],
+          "type": "string"
+        }
+      ]
+    },
+    "DurableSessionReadStatus": {
+      "description": "Completeness of the durable read used to build this projection.",
+      "oneOf": [
+        {
+          "properties": {
+            "status": {
+              "enum": [
+                "available"
+              ],
+              "title": "AvailableDurableSessionReadStatusStatus",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "title": "AvailableDurableSessionReadStatus",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "issue": {
+              "$ref": "#/definitions/DurableSessionReadIssue"
+            },
+            "status": {
+              "enum": [
+                "incomplete"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "issue",
+            "status"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "issue": {
+              "$ref": "#/definitions/DurableSessionReadIssue"
+            },
+            "status": {
+              "enum": [
+                "unavailable"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "issue",
+            "status"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "issue": {
+              "$ref": "#/definitions/DurableSessionReadIssue"
+            },
+            "status": {
+              "enum": [
+                "unsupported"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "issue",
+            "status"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "DurableSessionResidency": {
+      "description": "Runtime residency observed only by the app-server answering this query.",
+      "enum": [
+        "observedOwnerHere",
+        "ownerUnavailableHere",
+        "notObservedHere",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "DurableSessionStorageStatus": {
+      "description": "Persistent source selected for this Session record.",
+      "oneOf": [
+        {
+          "enum": [
+            "active",
+            "archived"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "The selected durable source could not prove active or archived status.",
+          "enum": [
+            "unknown"
+          ],
+          "type": "string"
+        }
+      ]
+    },
+    "DurableSessionTeamEventProjection": {
+      "description": "One bounded event from the committed Team snapshot.",
+      "properties": {
+        "eventId": {
+          "type": "string"
+        },
+        "omittedVersions": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "title": {
+          "type": "string"
+        },
+        "versions": {
+          "items": {
+            "$ref": "#/definitions/DurableSessionTeamVersionProjection"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "eventId",
+        "omittedVersions",
+        "title",
+        "versions"
+      ],
+      "type": "object"
+    },
+    "DurableSessionTeamParticipantProjection": {
+      "description": "One participant included in the bounded committed Team projection.",
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "role": {
+          "$ref": "#/definitions/DurableSessionTeamRole"
+        },
+        "threadId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "label",
+        "role",
+        "threadId"
+      ],
+      "type": "object"
+    },
+    "DurableSessionTeamProducerState": {
+      "enum": [
+        "open",
+        "closed"
+      ],
+      "type": "string"
+    },
+    "DurableSessionTeamProjection": {
+      "description": "Bounded projection of one complete committed Team snapshot.",
+      "properties": {
+        "commitFingerprint": {
+          "description": "SHA-256 of the complete validated snapshot payload, encoded as `sha256:` followed by 64 lowercase hexadecimal digits. This includes state omitted from the bounded projection.",
+          "type": "string"
+        },
+        "commitGeneration": {
+          "description": "Canonical durable commit generation for this exact snapshot.",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "events": {
+          "items": {
+            "$ref": "#/definitions/DurableSessionTeamEventProjection"
+          },
+          "type": "array"
+        },
+        "omittedEvents": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "omittedParticipants": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "participants": {
+          "items": {
+            "$ref": "#/definitions/DurableSessionTeamParticipantProjection"
+          },
+          "type": "array"
+        },
+        "revision": {
+          "description": "Team domain revision stored in this exact snapshot.",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "teamInstanceId": {
+          "type": "string"
+        },
+        "viewer": {
+          "$ref": "#/definitions/DurableSessionTeamViewer"
+        }
+      },
+      "required": [
+        "commitFingerprint",
+        "commitGeneration",
+        "events",
+        "omittedEvents",
+        "omittedParticipants",
+        "participants",
+        "revision",
+        "teamInstanceId",
+        "viewer"
+      ],
+      "type": "object"
+    },
+    "DurableSessionTeamRole": {
+      "enum": [
+        "root",
+        "member"
+      ],
+      "type": "string"
+    },
+    "DurableSessionTeamRootState": {
+      "enum": [
+        "pending",
+        "tracking",
+        "resolved"
+      ],
+      "type": "string"
+    },
+    "DurableSessionTeamVersionProjection": {
+      "description": "One committed Team version within an event projection.",
+      "properties": {
+        "authorLabel": {
+          "type": "string"
+        },
+        "authorThreadId": {
+          "type": "string"
+        },
+        "producerState": {
+          "$ref": "#/definitions/DurableSessionTeamProducerState"
+        },
+        "retired": {
+          "type": "boolean"
+        },
+        "rootState": {
+          "$ref": "#/definitions/DurableSessionTeamRootState"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "versionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "authorLabel",
+        "authorThreadId",
+        "producerState",
+        "retired",
+        "rootState",
+        "summary",
+        "versionId"
+      ],
+      "type": "object"
+    },
+    "DurableSessionTeamViewer": {
+      "description": "Session member through whose lineage the Team projection is viewed.",
+      "properties": {
+        "role": {
+          "$ref": "#/definitions/DurableSessionTeamRole"
+        },
+        "threadId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "role",
+        "threadId"
+      ],
+      "type": "object"
+    },
+    "DurableSessionView": {
+      "description": "Read-only projection of one canonical durable Session.\n\nDurable identity, storage placement, domain lifecycle, server-local runtime residency, operation availability, and read completeness remain independent axes. A caller must not infer one axis from another.",
+      "properties": {
+        "domainLifecycle": {
+          "$ref": "#/definitions/DurableSessionDomainLifecycle"
+        },
+        "identity": {
+          "$ref": "#/definitions/DurableSessionIdentity"
+        },
+        "operationAvailability": {
+          "$ref": "#/definitions/DurableSessionOperations"
+        },
+        "provenance": {
+          "$ref": "#/definitions/DurableSessionProvenance"
+        },
+        "readStatus": {
+          "$ref": "#/definitions/DurableSessionReadStatus"
+        },
+        "residency": {
+          "$ref": "#/definitions/DurableSessionResidency"
+        },
+        "storageStatus": {
+          "$ref": "#/definitions/DurableSessionStorageStatus"
+        },
+        "team": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/DurableSessionTeamProjection"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Present only when one complete committed Team snapshot was projected."
+        }
+      },
+      "required": [
+        "domainLifecycle",
+        "identity",
+        "operationAvailability",
+        "provenance",
+        "readStatus",
+        "residency",
+        "storageStatus"
+      ],
+      "type": "object"
+    }
+  },
+  "description": "One bounded page of canonical durable Sessions.",
+  "properties": {
+    "complete": {
+      "description": "Whether discovery completed against the selected source for this request. This is independent of whether `next_cursor` offers another complete page.",
+      "type": "boolean"
+    },
+    "data": {
+      "items": {
+        "$ref": "#/definitions/DurableSessionView"
+      },
+      "type": "array"
+    },
+    "incompleteReason": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/DurableSessionListIncompleteReason"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "nextCursor": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "complete",
+    "data"
+  ],
+  "title": "DurableSessionListResponse",
+  "type": "object"
+}
