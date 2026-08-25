@@ -91,7 +91,26 @@ if [[ "$lock_path" != "0" ]]; then
   chmod 600 -- "$lock_path" 2>/dev/null || true
   if ! flock --nonblock 199; then
     echo "[rondo] waiting for the active heavy build (lock: ${lock_path})" >&2
-    flock 199
+    if ! flock 199; then
+      echo "[rondo] cannot acquire the heavy build lock: ${lock_path}" >&2
+      exit 70
+    fi
+  fi
+
+  for required_guard_command in systemctl awk; do
+    if ! command -v "$required_guard_command" >/dev/null 2>&1; then
+      echo "[rondo] ${required_guard_command} is unavailable; cannot observe prior heavy scopes" >&2
+      exit 84
+    fi
+  done
+  active_heavy_scopes=""
+  if ! active_heavy_scopes="$(rondo_active_heavy_scopes "$uid")"; then
+    echo "[rondo] cannot verify that no prior RONDO heavy scope is populated; refusing payload start" >&2
+    exit 84
+  fi
+  if [[ -n "$active_heavy_scopes" ]]; then
+    echo "[rondo] canonical lock conflicts with populated RONDO heavy scope(s): ${active_heavy_scopes//$'\n'/,}; refusing payload start" >&2
+    exit 84
   fi
 fi
 
