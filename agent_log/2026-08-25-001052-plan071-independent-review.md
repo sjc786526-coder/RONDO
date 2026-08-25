@@ -55,4 +55,3 @@ BASE_NOT_COMPARABLE base_not_qualified
   `46d7b4bfc725f61d66d2ca20030b7409f124467020b8201eec114c4cd93eb6ac`、result file
   `66d12dff77995f23927b62d7c181d8eb993511a3a832641b88e9296535a4e20e`，均与执行汇报一致。
 - `git diff --check` 通过；未运行真实模型、Cargo、Docker、HF 下载或外部服务。
-
