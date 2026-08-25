@@ -2,8 +2,8 @@
 
 > 本计划是 Plan 080 / M4-C2 的稳定任务合同。
 > 除“当前状态”和“关键决策记录”外，其他部分在执行期间默认不得修改。
-> 如果必须改变目标、范围、硬约束或完成标准，应暂停执行并请求用户确认；普通源码、fixture、snapshot、构建、测试或审查问题应在
-> 范围内自主窄修并重跑。原则性边界、授权外高危扩张或资源门 fail-closed 时才停止对应动作。
+> 如果必须改变目标、范围、硬约束或完成标准，应暂停对应动作，按本计划指定的 Codex 跨会话队列联系审查者取得批示；普通源码、
+> fixture、snapshot、构建、测试或审查问题应在范围内自主窄修并重跑。原则性边界、授权外高危扩张或资源门 fail-closed 时才停止对应动作。
 > 本计划只描述正式 Session Control / TUI；M4-Z(core)、M4-W0/W1 与其他跨任务路线以 `doc/WBS.md` 和
 > `doc/WBS/durable-team-runtime.md` 为唯一来源。
 
@@ -154,6 +154,50 @@ archive、unarchive、delete 等操作只调用 M4-S2/原生 ThreadStore 生命�
     `debug/incremental` 中可重建部分。任务结束不保留任何全局 override，默认门限自然恢复。
 12. **文档与生成物归位**：API 文档、schema、snapshot、Plan 状态、WBS 当前事实、COMPLETED 历史和 agent_log 各归其位；不在 Plan/
     README/log 中复制下游路线，不建设额外机器验收、审计或签名设施。
+13. **跨会话请示与收口**：需要额外授权、出现计划外变数或不确定事项时，只按下述用户指定的 `codex queue` 方式联系审查者并以其
+    回复为批示；不用文件、终端输出或人工提醒传话。每次发送后停止会话，不等待、不轮询、不重复发送；任务完成后必须在所有变更和本地提交完成后，
+    按指定模板发送唯一的最终验收消息，然后停止会话。
+
+### 审查者跨会话队列（用户指定原文，执行者必须原样遵循）
+
+联系审查者，按照如下的指定方法，使用 Codex 的跨会话队列，不要通过文件、终端输出或人工提醒传递消息。执行：
+
+```text
+codex queue --thread UUID --message 'XXX'
+```
+
+其中UUID用审查者的会话的UUID： 01a03a62-346a-7211-9b28-18dc28cff513 替换。
+XXX用你需要发送/询问的消息内容嵌入代替，直接一模一样复制替换进去即可。注意使用单引号包裹完整消息，并确保内容中的单引号安全处理，避免 shell 解析异常。
+（重要）你发送完队列消息之后，停止会话，不用维持等待或者轮询！审查者的消息会自动唤醒你的。审查者会以相同方式通知你，你后续如果仍然需要沟通，再次使用：
+
+```text
+codex queue --thread UUID --message 'XXX'
+```
+
+的方式，反馈给审查者即可，内容和填充规则和之前一致。注意不要重复提交相同的/消息给审查者，另外这个消息队列本身是queue的形式，因此会在接收者空闲时才会接收到，所以不要重复发送。有问题时可以使用 codex queue --help。而且你问完问题建议主动停止会话，不然你收不到审查者的消息。
+
+需要申请额外授权/计划外的变数/不确定的东西需要请示的时候，使用codex queue联系审查者，以此作为批示。
+
+执行者最终完成任务之后，应该使用 Codex 的跨会话队列通知审查者，告诉他如下内容：执行：
+
+```text
+codex queue --thread UUID --message 'XXX'
+```
+
+其中UUID用  01a03a62-346a-7211-9b28-18dc28cff513 替换，这是审查者的会话的UUID。
+XXX用以下内容代替：
+
+“执行者完成了，请你验收审查。不过不要无限扩大不必要的设施与审计校验等，不重跑太重的测试，主要关注正确性和功能性，以及之前遗漏未发现的东西或者局部修复导致的全局回归。如果他还提到需要我确认/决策的东西，请你也直接帮我做出你认为最合理的决策，都写在agent_log的审查报告里面。最后在输出的时候输出精炼的验收摘要，报告路径，替我做出的决策（如有），以及目前项目的状态：验收通过/不通过（关注做的对不对）+任务目标完成/失败（关注是否实现预期）
++<你的执行完成的汇报>”
+
+其中<你的执行完成的汇报>就是你本来TUI汇报输出给用户看的内容，直接一模一样复制替换进去即可。注意使用单引号包裹完整消息，并确保内容中的单引号安全处理，避免 shell 解析异常。
+（重要）你发送完队列消息之后，停止会话即可，不用维持等待或者轮询！审查者的消息会自动唤醒你的。后续审查者会以相同方式通知你，可能让你修复问题，你执行完之后，再次使用：
+
+```text
+codex queue --thread UUID --message 'XXX'
+```
+
+的方式，反馈给审查者即可，内容和填充规则和之前一致。如果验收通过，他不会再通知你。注意严格遵循完成所有变动之后再提交，不要重复提交相同的实现给审查者。
 
 ## 4. 软性建议
 
@@ -175,8 +219,8 @@ archive、unarchive、delete 等操作只调用 M4-S2/原生 ThreadStore 生命�
   `tui/src/app.rs`、`chatwidget.rs` 或 core 大模块，也不要机械追求改动行数最小而制造耦合。
 - 测试可以分层：首批合并树 query×lifecycle 兼容；领域 owner/close/cold partial；public JSON-RPC；client unknown/no replay/late response；
   TUI confirmation/stale/resync snapshots；最后 fresh 产品链。每个语义由最合适层拥有，避免在所有层复制相同故障矩阵。
-- 可使用少量子智能体并行调查不重叠的 protocol/server、client/TUI 或做独立终审；共享代码和最终集成由单一执行者负责，不建立评审
-  委员会、审计清单或可信设施。
+- 任务无需节省额度，效率优先。执行者确认有必要时，可使用更多子智能体并行调查不重叠的 protocol/server、client/TUI 或做独立终审，
+  数量不超过当前最大并发配置且不铺张浪费；共享代码和最终集成由单一执行者负责，不建立评审委员会、审计清单或可信设施。
 
 ### 建议的阶段编排与退出条件
 
@@ -205,7 +249,8 @@ archive、unarchive、delete 等操作只调用 M4-S2/原生 ThreadStore 生命�
 
 - 冻结本轮代码/配置，在新的 Session/store 跑正式 list/read→online/cold control→query resync→restart rebuild 场景；由未参与主体实现的
   审查者复核 authority、unknown/no replay、close/replacement/late completion、非激活 cold 操作与关闭态。
-- 退出条件：正式轮对应最终候选，无未关闭高/中 correctness finding；Plan/WBS/COMPLETED/log 精炼同步，080 分支提交且 clean，不合并/推送。
+- 退出条件：正式轮对应最终候选，无未关闭高/中 correctness finding；Plan/WBS/COMPLETED/log 精炼同步，080 分支在所有变更完成后提交且 clean，
+  不合并/推送。随后把原本要向用户输出的完整汇报填入用户指定模板，用唯一的 `codex queue` 消息通知审查者，发送后立即停止会话，不等待或轮询。
 
 ## 5. 当前状态
 
@@ -235,7 +280,7 @@ archive、unarchive、delete 等操作只调用 M4-S2/原生 ThreadStore 生命�
 - 阶段 B：正式 protocol/server 与权威领域控制接缝。
 - 阶段 C：client/TUI 控制、结果 certainty 与正式 query 重同步。
 - 阶段 D：相关聚焦回归、生成物、snapshot、lint/fmt 和范围内整改。
-- 阶段 E：fresh 正式链、独立终审、权威文档/日志与 clean 本地提交。
+- 阶段 E：fresh 正式链、独立终审、权威文档/日志、clean 本地提交，以及按用户指定模板向审查者发送唯一的跨会话验收消息后停止会话。
 
 ### 阻塞项
 
@@ -249,6 +294,8 @@ archive、unarchive、delete 等操作只调用 M4-S2/原生 ThreadStore 生命�
 ### 交接边界
 
 - 执行者从阶段 A 开始；不得把计划编制时的源码调查、WBS 更新或历史 077/078 证据冒充 Plan 080 产品实现与验收。
+- 额外授权、计划外变数、需要批示的不确定项以及最终验收交接，都只使用本计划指定的 `codex queue --thread 01a03a62-346a-7211-9b28-18dc28cff513`；
+  每次发送后停止会话，不等待、不轮询、不重复发送。
 - Plan 080 完成后冻结本计划；M4-Z(core) 与其它后续工作只链接当前 WBS，不在本计划继续规划。
 
 ## 6. 关键决策记录
@@ -265,3 +312,4 @@ archive、unarchive、delete 等操作只调用 M4-S2/原生 ThreadStore 生命�
 | 006 | 只清 069 `debug/incremental` 并复用同一 target；临时 270/285/290GB 仅通过命令环境变量生效 | 保留高价值缓存并在当前容量下安全构建，不永久抬高项目门禁 | build/resources | 已采纳 |
 | 007 | 所有 tracked 变更留在 080 worktree；唯一预期跨 worktree ignored 写是 069 target | 当前任务不需要主工作区私有配置或其它现场，便于审查和清理 | worktree/ignored | 已采纳 |
 | 008 | 终审只要求关闭高/中 correctness finding；不建设额外审计、可信或机器验收体系 | 关注功能正确性并避免为个人开发制造第二套冗余平台 | review/scope | 已采纳 |
+| 009 | 请示、批示和最终验收交接只使用用户指定的 Codex 跨会话队列，发送后停止会话 | 确保执行者与审查者跨会话消息可靠交付，不用文件、终端或人工提醒绕路 | coordination/handoff | 已采纳 |
