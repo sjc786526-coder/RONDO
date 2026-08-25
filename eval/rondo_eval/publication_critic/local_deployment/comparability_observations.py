@@ -284,7 +284,7 @@ def build_observations(
                         float(parity["projected_score_absolute_difference"])
                     ],
                     verdict_mismatch_count=verdict_mismatches,
-                    bounded_call_count=len(calls),
+                    bounded_call_count=len(successful),
                 ),
                 "stress": _success(
                     "observed",

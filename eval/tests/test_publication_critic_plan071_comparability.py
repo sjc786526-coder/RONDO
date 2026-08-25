@@ -218,7 +218,7 @@ def _observation(
             raw_logit_absolute_differences=[0.0],
             score_absolute_differences=[0.0],
             verdict_mismatch_count=0,
-            bounded_call_count=1,
+            bounded_call_count=18,
         ),
         "stress": _success(
             "observed",
@@ -483,6 +483,7 @@ class Plan071ComparabilityTests(unittest.TestCase):
         self.assertEqual(len(cross["near_threshold_verdict_mismatch_sample_ids"]), 1)
         self.assertEqual(cross["stable_verdict_mismatch_sample_ids"], [])
         self.assertEqual(result["task_terminal"], "BASE_COMPARABILITY_GO")
+        self.assertEqual(result["task_terminal_reason"], "base_and_anchor_qualified")
         self.assertTrue(result["m3_c2_prerequisite_satisfied"])
         self.assertEqual(result["schema"], RESULT_SCHEMA)
 
@@ -565,6 +566,37 @@ class Plan071ComparabilityTests(unittest.TestCase):
         self.assertEqual(result["task_terminal"], "INCONCLUSIVE")
         self.assertFalse(result["m3_c2_prerequisite_satisfied"])
 
+    def test_qualified_base_without_qualified_anchor_is_inconclusive(self) -> None:
+        freeze = validate_freeze(_freeze())
+        observations = [
+            _observation(freeze, "base"),
+            _observation(
+                freeze,
+                "c1",
+                deployed_raw=_raw([THRESHOLD_RAW + 0.40, -2.0, 1.0, -1.0]),
+            ),
+            _observation(
+                freeze,
+                "c3",
+                deployed_raw=_raw([THRESHOLD_RAW + 0.40, -2.0, 1.0, -1.0]),
+            ),
+        ]
+        result = evaluate_run(
+            _run_input(freeze, observations),
+            freeze,
+            mode="formal",
+            run_id=freeze["run_id"],
+        )
+
+        self.assertEqual(result["objects"][0]["conclusion"], "QUALIFIED")
+        self.assertEqual(result["objects"][1]["conclusion"], "NOT_QUALIFIED")
+        self.assertEqual(result["objects"][2]["conclusion"], "NOT_QUALIFIED")
+        self.assertEqual(result["task_terminal"], "INCONCLUSIVE")
+        self.assertEqual(
+            result["task_terminal_reason"],
+            "no_qualified_anchor_for_shared_comparability_rule",
+        )
+
     def test_c1_cancel_recheck_failure_cannot_qualify(self) -> None:
         freeze = validate_freeze(_freeze())
         observations = [
@@ -642,6 +674,42 @@ class Plan071ComparabilityTests(unittest.TestCase):
 
             with self.assertRaisesRegex(QualificationError, "offline evidence identity"):
                 build_observations(freeze, manifest, manifest_sha256="b" * 64)
+
+    def test_observation_builder_cannot_count_failed_warm_review_as_verdict(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            freeze = validate_freeze(_freeze())
+            manifest = _write_builder_evidence(root, freeze)
+            service_path = Path(manifest["objects"]["base"]["service_run"])
+            service = json.loads(service_path.read_text(encoding="utf-8"))
+            service["warm_reviews"][0] = {
+                "outcome": "failure",
+                "failure_code": "backend",
+                "latency_ms": 30.0,
+            }
+            service_path.write_text(json.dumps(service), encoding="utf-8")
+
+            observations = build_observations(
+                freeze,
+                manifest,
+                manifest_sha256="b" * 64,
+            )
+            result = evaluate_run(
+                observations,
+                freeze,
+                mode="formal",
+                run_id=freeze["run_id"],
+            )
+
+            base = result["objects"][0]
+            self.assertEqual(base["conclusion"], "NOT_QUALIFIED")
+            self.assertIn("service_verdict_parity_gate_failed", base["reasons"])
+            self.assertEqual(
+                base["metrics"]["service_verdict_parity"]["value"][
+                    "bounded_call_count"
+                ],
+                17,
+            )
 
     def test_service_runner_executes_plan071_with_plan071_result_schema(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

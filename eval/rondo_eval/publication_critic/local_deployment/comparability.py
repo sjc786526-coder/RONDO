@@ -43,7 +43,7 @@ from .qualification import validate_freeze as validate_plan068_freeze
 
 FREEZE_SCHEMA = "rondo-publication-critic-plan071-comparability-freeze-v1"
 OBSERVATIONS_SCHEMA = "rondo-publication-critic-plan071-observations-v1"
-RESULT_SCHEMA = "rondo-publication-critic-plan071-comparability-result-v1"
+RESULT_SCHEMA = "rondo-publication-critic-plan071-comparability-result-v2"
 OFFLINE_SCHEMA = "rondo-publication-critic-plan071-offline-scores-v1"
 SERVICE_RESULT_SCHEMA = "rondo-publication-critic-plan071-service-run-v1"
 QUALIFICATION_OBJECTS = ("base", "c1", "c3")
@@ -324,6 +324,8 @@ def _compatibility_observation(
 def _split_service_metrics(
     metrics: dict[str, Any],
     gates: Mapping[str, Any],
+    *,
+    expected_bounded_call_count: int,
 ) -> list[str]:
     service = metrics.pop("service", None)
     if service is None:
@@ -351,7 +353,7 @@ def _split_service_metrics(
     ):
         failures.append("deployment_worker_parity_gate_failed")
     if (
-        verdict["bounded_call_count"] == 0
+        verdict["bounded_call_count"] != expected_bounded_call_count
         or verdict["verdict_mismatch_count"] > gates["max_service_verdict_mismatches"]
     ):
         failures.append("service_verdict_parity_gate_failed")
@@ -476,7 +478,13 @@ def evaluate_object(
         )
         if failed
     ]
-    failures.extend(_split_service_metrics(metrics, gates))
+    failures.extend(
+        _split_service_metrics(
+            metrics,
+            gates,
+            expected_bounded_call_count=3 + sum(freeze["stress_call_counts"]),
+        )
+    )
     failures.extend(_affected_lifecycle_failures(metrics, common["object_id"]))
     if common["conclusion"] == "INCONCLUSIVE":
         conclusion = "INCONCLUSIVE"
@@ -536,16 +544,19 @@ def evaluate_run(
     anchor_qualified = any(conclusions.get(item) == "QUALIFIED" for item in ("c1", "c3"))
     if mode != "formal":
         terminal = "INCONCLUSIVE"
+        terminal_reason = "commissioning_has_no_task_terminal"
     elif conclusions.get("base") == "QUALIFIED" and anchor_qualified:
         terminal = "BASE_COMPARABILITY_GO"
-    elif conclusions.get("base") == "INCONCLUSIVE" or (
-        conclusions.get("base") == "QUALIFIED"
-        and not anchor_qualified
-        and any(conclusions.get(item) == "INCONCLUSIVE" for item in ("c1", "c3"))
-    ):
+        terminal_reason = "base_and_anchor_qualified"
+    elif conclusions.get("base") == "QUALIFIED":
         terminal = "INCONCLUSIVE"
+        terminal_reason = "no_qualified_anchor_for_shared_comparability_rule"
+    elif conclusions.get("base") == "INCONCLUSIVE":
+        terminal = "INCONCLUSIVE"
+        terminal_reason = "base_qualification_inconclusive"
     else:
         terminal = "BASE_NOT_COMPARABLE"
+        terminal_reason = "base_not_qualified"
     if terminal not in TASK_TERMINALS:
         raise AssertionError("unreachable Plan 071 terminal")
     return {
@@ -557,6 +568,7 @@ def evaluate_run(
         "evidence_manifest_sha256": observations["evidence_manifest_sha256"],
         "objects": results,
         "task_terminal": terminal,
+        "task_terminal_reason": terminal_reason,
         "m3_c2_prerequisite_satisfied": terminal == "BASE_COMPARABILITY_GO",
         "c2_historical_conclusion": "NOT_QUALIFIED",
         "c2_requalified": False,

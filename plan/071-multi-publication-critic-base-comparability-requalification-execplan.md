@@ -180,34 +180,44 @@ Plan 068 的核心模型、checkpoint、证据、serving env 与旧 target 只�
 
 ### 已完成
 
-- `main = origin/main = fe9fdc4c60d8315740c3ada71ed2c76db6a335e7`，规划时主工作区 clean。
-- 已从 clean main 创建独立工作树
-  `/home/sjc/desktop/RONDO/.claude/worktrees/071-m3-c1-base-comparability/`，分支
-  `worktree-071-m3-c1-base-comparability`。
-- 已只读核对 README、当前 WBS、Plan 054/055/057/068 边界、Plan 068 v3 manifest/result/raw evidence、现有代码与定向测试接缝。
-- Plan 068 本地交接和远端清理已完成：exact base、C1/C2/C3、完整 checkpoint 与必要证据保存在物理根 ignored `eval-data/`；
-  RunPod 当前历史终态为 0 Pod/0 volume/持续费用 0。本任务不再包含远端交接或止费。
-- 规划时 069/070 均存在未提交 Rust 实现且共享重型 Cargo 槽；Plan 071 只可立即开展阶段 A 和轻量纯逻辑工作。
+- 已只读闭合 Plan 068 v3 的 artifact/runtime/raw/service/result 身份。base 的 CPU FP32→CUDA BF16 max raw drift 为
+  `0.1650810242`，低于 v3 在 base 结果前已冻结的 `0.25` raw cap；max projected drift `0.03404159195` 是 sigmoid
+  在具体 score 区域的放大。唯一 verdict flip 的 reference raw logit 位于临时 threshold raw logit 的 `0.25` 半径内；
+  无半径外 stable flip。C1/C3 是同规则锚点，C2 保持历史 `NOT_QUALIFIED` 且未重验。
+- 新增版本化 Plan 071 comparability/offline/observations/worker-parity 能力；Plan 068 schema 与结果保持只读。cross-runtime
+  raw/envelope/near-threshold、同 CUDA BF16 fresh-worker parity、精确产品 service verdict 分层判定；service runner 通过显式
+  contract 选择复用既有唯一服务体系，没有改变 Plan 054/055/057 稳定语义。
+- 源码与定向测试提交 `c72edde0f6f7cdd3b944b38fc2a47dbb7ceae65e` 后保持 clean；8 条 calibration commissioning
+  `plan071-commissioning-20260825T055253Z-qualification-v1` 打通 base/C1/C3 完整链路，三对象均 `QUALIFIED`。具体门限
+  未按 commissioning 结果调整。
+- 从新的空 namespace 完成预审 formal `plan071-formal-20260825T060132Z-qualification-v1`，绑定 clean source `c72edde...`、
+  freeze canonical SHA-256 `15ff83bedc107e1004140a3fee0d9e6dd2869186910e96e130a0ba831bd141d9`、exact base/C1/C2/C3
+  artifact、旧验收 service/probe/Python 程序、Plan 054 threshold/reference 与 24 条非 unseen cohort。
+- 预审 formal 数值结论为 base/C1/C3 均 `QUALIFIED`、任务终态 `BASE_COMPARABILITY_GO`；C2 未重验并保持历史
+  `NOT_QUALIFIED`。独立审查随后发现两个异常分支，逻辑修复与 40/40 回归已闭合；由于 source/result schema 身份改变，
+  该轮降为 superseded 预审证据，不能作为最终唯一 formal，须从新的空 namespace 完整重跑。
+- 三个正式对象各完成 24 条 CPU FP32 reference、CUDA BF16 deployment、fresh-worker parity、18 次真实 service verdict
+  调用、15/15 stress 和 clean shutdown；C1 另完成 cancel/post-cancel ready/review。所有正式 watchdog 均
+  `stop=none / cleanup=none / swap=0`，最终 GPU compute process 为 0。
+- 受影响 Python 定向测试 40/40、compileall 与 `git diff --check` 通过。没有 Rust 源码变化，故未运行 Cargo；Docker、HF 下载、
+  真实 API、远端操作和 unseen-test 均未运行。
 
 ### 当前工作
 
-- ExecPlan 已制定，等待执行者按本计划实施。
+- 独立审查的逻辑 finding 已修复并复审通过；正在形成修复后的 clean source checkpoint，随后用新 namespace 重跑唯一有效 formal。
 
 ### 本任务剩余步骤
 
-1. 阶段 A：只读完成 v3 归因、比较层拆分与资格规则选择方法复核；不运行真实模型、Cargo 或 Docker。
-2. 阶段 B：在重型资源释放前完成纯逻辑实现/定向轻测；资源窗口可用后，以有界 commissioning 打通 base 与锚点，按证据修正并冻结正式规则与身份。
-3. 阶段 C：从 clean tracked source 和新正式 namespace 完成 base + 锚点同口径重验；按共享影响覆盖 C1/C3，汇总三态对象结论和任务终态。
-4. 阶段 D：运行相称门禁，更新本计划和精炼日志，提交 clean task branch，交计划制定者独立审查；finding 在范围内自主修复和复验。
+1. 提交修复后的 clean source checkpoint，从新 namespace 完整重跑 base/C1/C3 formal。
+2. 更新本计划与精炼执行日志并提交 clean 分支，通过既有 queue 机制交最终独立验收。
 
 ### 阻塞项
 
-- 阶段 A 与轻量纯逻辑工作无阻塞。
-- Cargo、Docker 与真实本地模型须等待 Plan 069/070 释放重型资源槽；这是排期门，不是 base 资格失败或任务终态。
+- 无实现或资源阻塞。070 已完成、069 已暂停后才运行真实模型；Plan 071 已释放重型资源槽，后续不再需要 Cargo、Docker 或真实模型。
 
 ### 当前验收状态
 
-- `PLAN_READY_IMPLEMENTATION_NOT_STARTED`
+- `REVIEW_FIXES_COMPLETE_FORMAL_RERUN_PENDING`
 
 ### 交接边界
 
@@ -225,3 +235,8 @@ Plan 068 的核心模型、checkpoint、证据、serving env 与旧 target 只�
 | 002 | Plan 068 模型、checkpoint、v3 evidence、serving env 与旧 target 全部只读保留 | 远端副本已永久删除，且 base 修正、候选锚点与未来恢复仍依赖这些唯一/有价值资产；复制整套资产没有收益 | ignored 资产、复现与恢复 | 已采纳 |
 | 003 | Plan 071 把 cross-runtime 数值可比性、deployment 内部 parity 与产品 verdict 分层判断 | v3 已显示 raw drift、sigmoid 后 drift 和 near-threshold flip 可能回答不同问题；混成单门会妨碍正确归因 | 资格 schema、runner、正式 freeze | 已采纳 |
 | 004 | C2 不进入本任务重验；C1/C3 只按共享影响承担锚点/回归 | C2 的 Plan 068 失败是 ranking/direction 模型能力，不是 base 部署可比性缺口 | 正式运行范围、资源 | 已采纳 |
+| 005 | cross-runtime 沿用 Plan 068 在 base 结果前已冻结的 `0.25` raw-logit cap；projected 层用该 cap 经 stable sigmoid 导出的逐行 envelope，并把同一 raw 半径作为临时 threshold guard | 该方法不从 Plan 071 base 结果贴线；它把 dtype raw 误差、sigmoid 区域敏感度和近阈值放大分开，同时对 base/C1/C3 一致应用 | Plan 071 freeze、比较与三态结论 | 已执行 |
+| 006 | 同 CUDA BF16 offline→fresh worker 继续使用独立 `0.005` projected / `0.25` raw 门，产品 service 仍按 descriptor exact threshold 判 verdict | Plan 068 fresh-worker commissioning 给出独立部署重复性依据；资格 guard 不得改变产品 verdict | worker parity、service parity | 已执行 |
+| 007 | 共享资格逻辑变化后正式覆盖 base、C1、C3 全部受影响门；C1 承担 cancel recheck，Plan 068 v3 完整 failure/restart matrix 不机械重跑 | C1/C3 分别覆盖饱和与非饱和 score 区域；既有 failure matrix 与 Rust 服务边界未变化 | 正式对象与生命周期范围 | 已执行 |
+| 008 | 继续只读复用 Plan 068 已验收 env、service/probe 二进制和 24GB 工件，不修改 Rust、不建新 env、不使用 Docker | commissioning 与正式链路均证明 Python-only 资格修正足以闭合，扩大构建或复制没有功能收益 | 依赖、磁盘、门禁范围 | 已执行 |
+| 009 | `plan071-formal-20260825T060132Z-qualification-v1` 仅保留为 superseded 预审证据；修复异常分支并把 result schema 升为 v2 后，从新 clean source 和空 namespace 完整重跑 | 独立审查发现失败 warm review 计数和无合格锚点终态两个异常分支；数值 GO 未被推翻，但正式 program/result 身份已改变，不能沿用旧 archive 改算 | 正式证据、schema、重跑 | 执行中 |
