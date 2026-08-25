@@ -42,6 +42,7 @@ from rondo_eval.publication_critic.base_quality.contract import (  # noqa: E402
     RUNTIME_CONTRACT,
 )
 from rondo_eval.publication_critic.base_quality.runner import (  # noqa: E402
+    _retryable_inconclusive_formal_namespace,
     build_commissioning_binding,
     build_scores_document,
     prepare_validation_release,
@@ -891,7 +892,9 @@ class ArchiveAndRunTest(unittest.TestCase):
             with self.assertRaisesRegex(
                 BaseQualityError, "formal_result_reconciliation_required"
             ):
-                second.require_formal_unclaimed()
+                second.require_formal_unclaimed(
+                    retryable_inconclusive=_retryable_inconclusive_formal_namespace
+                )
 
             commissioning_evidence = (
                 commissioning,
@@ -948,6 +951,81 @@ class ArchiveAndRunTest(unittest.TestCase):
             self.assertEqual(recovered, (scores, runtime, result))
             self.assertEqual(recovered_again, recovered)
             self.assertTrue((runs / "formal-authority.json").is_file())
+
+    def test_valid_inconclusive_allows_retry_but_malformed_evidence_blocks(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runs = root / "runs"
+            release = _release()
+            _, lock, receipt = _snapshot(root / "model")
+            inconclusive_spec = _spec(release, receipt, lock, suffix="inconclusive")
+            rows = _rows(release, good=True)[:-1]
+            missing_id = release["items"][-1]["candidate_id"]
+            scores = build_scores_document(
+                inconclusive_spec,
+                release,
+                rows,
+                [
+                    {
+                        "candidate_id": missing_id,
+                        "failure_kind": "RuntimeError",
+                        "failure_code": "model_runtime_failure",
+                    }
+                ],
+            )
+            runtime = _runtime()
+            runtime["scored_count"] = 54
+            runtime["typed_failure_count"] = 1
+            result = recompute_result(inconclusive_spec, release, scores, runtime)
+            self.assertEqual(result["terminal"], "INCONCLUSIVE")
+            self.assertFalse(result["valid_full_quality_run"])
+
+            prior = BaseQualityArchive(
+                runs, inconclusive_spec["run_id"], "formal"
+            ).create()
+            prior.bind_json("run-spec.json", inconclusive_spec)
+            prior.bind_json("validation-release.json", release)
+            prior.bind_json(
+                "final-evidence.json",
+                {
+                    "schema": "rondo-publication-critic-plan079-final-evidence-v1",
+                    "scores": scores,
+                    "runtime": runtime,
+                    "result": result,
+                },
+            )
+            retry = BaseQualityArchive(
+                runs,
+                "plan079-formal-20260825T140000Z-retry",
+                "formal",
+            )
+            retry.require_formal_unclaimed(
+                retryable_inconclusive=_retryable_inconclusive_formal_namespace
+            )
+
+            malformed = BaseQualityArchive(
+                runs,
+                "plan079-formal-20260825T150000Z-malformed",
+                "formal",
+            ).create()
+            malformed.bind_json(
+                "final-evidence.json",
+                {
+                    "schema": "rondo-publication-critic-plan079-final-evidence-v1",
+                    "result": {
+                        "terminal": "INCONCLUSIVE",
+                        "valid_full_quality_run": False,
+                    },
+                },
+            )
+            with self.assertRaisesRegex(
+                BaseQualityError, "formal_result_reconciliation_required"
+            ):
+                retry.require_formal_unclaimed(
+                    retryable_inconclusive=_retryable_inconclusive_formal_namespace
+                )
 
 
 @unittest.skipUnless(

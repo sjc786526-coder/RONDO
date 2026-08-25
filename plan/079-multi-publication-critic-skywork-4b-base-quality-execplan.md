@@ -214,13 +214,16 @@ linked worktree 不共享主根 ignored `eval-data/`。因此运行输入投影�
 - 2026-08-25：正式结果已完整落盘且 authority 已存在后，执行者最终只读复核发现“final evidence 已写、authority 尚未写”崩溃窗口；
   窄化修复为：其它 formal namespace 遇到待协调 evidence 时 fail-closed，同一 run 可验证恢复并幂等补 claim，既有 authority 允许同 run
   只读恢复但继续拒绝不同 run。该修复只改变归档崩溃恢复，不改变冻结评分、输入、指标或既有正式结果，因而未重跑有效 NO-GO。
+- 2026-08-25：首次独立验收在 `c705777` 发现合法但不完整的 formal `INCONCLUSIVE` 也被待认领 gate 阻断新空 namespace；执行者确认并
+  窄修为由 archive 发现候选、runner 使用候选自带 run-spec/release/scores/runtime/result 做完整既有合同验证，仅对合法
+  `INCONCLUSIVE / valid_full_quality_run=false` 放行重跑，缺失、漂移或语义含混的 evidence 继续 fail-closed。修复不改变正式评分，未重跑云端。
 - 2026-08-25：执行期间一次过宽的只读检索机械遍历到禁止的 mixed v8 路径并输出普通行；未筛选、使用、评分或上传任何该内容，
   随即停止触碰该路径。正式输入和云端资产始终只来自物理不含 unseen-test 的 Plan 066 train+validation bundle。
 
 ### 当前工作
 
-- `EXECUTOR_COMPLETE / PENDING INDEPENDENT ACCEPTANCE`：实现、聚焦测试、真实 commissioning、唯一正式轮、独立复算、Pod 止费、
-  结果/计划/日志/WBS delta 与 task branch 提交均在本任务收口；等待 Plan 079 制定者进行独立验收。
+- `EXECUTOR_REMEDIATED / PENDING REACCEPTANCE`：实现、真实运行、结果、止费和提交均已完成；首次独立验收唯一 P2 已窄修并通过
+  focused regression，等待 Plan 079 制定者复验。
 
 ### 本任务剩余步骤
 
@@ -233,8 +236,8 @@ linked worktree 不共享主根 ignored `eval-data/`。因此运行输入投影�
 
 ### 当前验收状态
 
-- `4B_BASE_QUALITY_NO_GO / EXECUTOR VERIFIED`：正式结果有效且已独立复算，Pod 已删除，卷保留；计划制定者独立验收尚未执行，
-  因此本状态不冒充最终接受或 main 整合。
+- `4B_BASE_QUALITY_NO_GO / CHANGES_REQUIRED REMEDIATED`：正式结果有效且已独立复算，Pod 已删除，卷保留；首次验收 finding 已修复，
+  但复验尚未通过，因此不冒充最终接受或 main 整合。
 
 ### 交接边界
 

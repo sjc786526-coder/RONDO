@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -41,7 +42,11 @@ class BaseQualityArchive:
     def _formal_authority_path(self) -> Path:
         return self._archive.runs_root / "formal-authority.json"
 
-    def require_formal_unclaimed(self) -> None:
+    def require_formal_unclaimed(
+        self,
+        *,
+        retryable_inconclusive: Callable[[Path], bool] | None = None,
+    ) -> None:
         """Reject another formal run while allowing exact-result recovery."""
 
         if self.mode != "formal":
@@ -70,6 +75,10 @@ class BaseQualityArchive:
                 continue
             final_evidence = candidate / "final-evidence.json"
             if final_evidence.exists() or final_evidence.is_symlink():
+                if retryable_inconclusive is not None and retryable_inconclusive(
+                    candidate
+                ):
+                    continue
                 raise BaseQualityError("formal_result_reconciliation_required")
 
     def _load_formal_authority(self) -> dict[str, Any] | None:

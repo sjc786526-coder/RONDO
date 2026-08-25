@@ -52,6 +52,37 @@ _ATTEMPT_ID = re.compile(r"[a-z0-9][a-z0-9-]{0,47}\Z")
 _FINAL_EVIDENCE_SCHEMA = "rondo-publication-critic-plan079-final-evidence-v1"
 
 
+def _retryable_inconclusive_formal_namespace(namespace: Path) -> bool:
+    """Accept only a fully validated non-authoritative formal INCONCLUSIVE."""
+
+    try:
+        archive = BaseQualityArchive(namespace.parent, namespace.name, "formal")
+        spec_value = archive.load_json("run-spec.json")
+        release_value = archive.load_json("validation-release.json")
+        evidence = archive.load_json("final-evidence.json")
+        if spec_value is None or release_value is None or evidence is None:
+            return False
+        spec = validate_run_spec(spec_value)
+        release = validate_release(release_value)
+        if (
+            spec["mode"] != "formal"
+            or spec["run_id"] != namespace.name
+            or release_sha256(release) != spec["input"]["release_sha256"]
+            or set(evidence) != {"schema", "scores", "runtime", "result"}
+            or evidence.get("schema") != _FINAL_EVIDENCE_SCHEMA
+        ):
+            return False
+        scores = validate_scores_document(evidence["scores"], spec, release)
+        runtime = validate_runtime_facts(evidence["runtime"])
+        result = validate_result(evidence["result"], spec, release, scores, runtime)
+    except Exception:  # noqa: BLE001 - malformed evidence must remain fail-closed
+        return False
+    return (
+        result["terminal"] == "INCONCLUSIVE"
+        and result["valid_full_quality_run"] is False
+    )
+
+
 def prepare_validation_release(
     bundle_root: Path, repo_root: Path
 ) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -443,7 +474,9 @@ def run_evaluation(
     ):
         raise BaseQualityError("runtime_receipt_cloud_identity_mismatch")
     archive = BaseQualityArchive(runs_root, spec["run_id"], spec["mode"])
-    archive.require_formal_unclaimed()
+    archive.require_formal_unclaimed(
+        retryable_inconclusive=_retryable_inconclusive_formal_namespace
+    )
     archive.create(allow_completed_formal_recovery=True)
     archive.bind_json("run-spec.json", spec)
     archive.bind_json("validation-release.json", release)
