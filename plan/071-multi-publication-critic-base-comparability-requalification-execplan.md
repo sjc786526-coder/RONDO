@@ -204,20 +204,29 @@ Plan 068 的核心模型、checkpoint、证据、serving env 与旧 target 只�
 
 ### 当前工作
 
-- 独立审查的逻辑 finding 已修复并复审通过；正在形成修复后的 clean source checkpoint，随后用新 namespace 重跑唯一有效 formal。
+- 修复后的 clean source checkpoint 为 `90ce6ba5eb3ba3faa3ffa4db41934c1147e18653`。唯一有效正式轮
+  `plan071-formal-20260825T064600Z-qualification-v5` 从新的空 namespace 完整运行，freeze canonical SHA-256 为
+  `02fbb85d9eb3c76a6761fd86b495d46a01720e13ced4fbac0b74e3cd8e831616`；base/C1/C3 均为 `QUALIFIED`，任务终态为
+  `BASE_COMPARABILITY_GO`（`base_and_anchor_qualified`）。C2 未重验并保持 Plan 068 历史 `NOT_QUALIFIED`。
+- v2 因更新后的 069 资源交接要求在首个对象结果产生前主动中止；v3/v4 分别因非 canonical watchdog override 和相对 wrapper
+  路径被 production proof 在模型加载前 fail-closed。三轮均有 `abort.json`、不属于正式证据，且未被 v5 聚合引用。
+- v5 三对象各覆盖 24 条 offline reference/deployment、fresh-worker parity、18 次真实 service 调用、15/15 stress 与 clean
+  shutdown；C1 cancel/post-cancel recheck 通过。三个 canonical watchdog 均 `status=0 / stop=none / cleanup=none`，模型、GPU
+  compute 与 scope 已全部退出，Plan 071 后续不再占用重型资源。
 
 ### 本任务剩余步骤
 
-1. 提交修复后的 clean source checkpoint，从新 namespace 完整重跑 base/C1/C3 formal。
-2. 更新本计划与精炼执行日志并提交 clean 分支，通过既有 queue 机制交最终独立验收。
+1. 更新本计划与精炼执行日志，完成轻量定向门禁并提交 clean 分支。
+2. 通过既有 queue 机制交最终独立验收；范围内 finding 自主修复并重新交接。
 
 ### 阻塞项
 
-- 无实现或资源阻塞。070 已完成、069 已暂停后才运行真实模型；Plan 071 已释放重型资源槽，后续不再需要 Cargo、Docker 或真实模型。
+- 无实现或资源阻塞。用户明确把重型资源所有权切换给 071 后，v5 才进入真实模型；069 等待且 072 未占用 canonical heavy lock。
+  v5 终态核验已确认 Cargo/rustc/nextest、Docker task、模型 service/worker、GPU compute 与 `rondo-build` scope 均不存在，重型资源槽已释放。
 
 ### 当前验收状态
 
-- `REVIEW_FIXES_COMPLETE_FORMAL_RERUN_PENDING`
+- `FORMAL_COMPLETE_REVIEW_HANDOFF_PENDING`
 
 ### 交接边界
 
@@ -239,4 +248,5 @@ Plan 068 的核心模型、checkpoint、证据、serving env 与旧 target 只�
 | 006 | 同 CUDA BF16 offline→fresh worker 继续使用独立 `0.005` projected / `0.25` raw 门，产品 service 仍按 descriptor exact threshold 判 verdict | Plan 068 fresh-worker commissioning 给出独立部署重复性依据；资格 guard 不得改变产品 verdict | worker parity、service parity | 已执行 |
 | 007 | 共享资格逻辑变化后正式覆盖 base、C1、C3 全部受影响门；C1 承担 cancel recheck，Plan 068 v3 完整 failure/restart matrix 不机械重跑 | C1/C3 分别覆盖饱和与非饱和 score 区域；既有 failure matrix 与 Rust 服务边界未变化 | 正式对象与生命周期范围 | 已执行 |
 | 008 | 继续只读复用 Plan 068 已验收 env、service/probe 二进制和 24GB 工件，不修改 Rust、不建新 env、不使用 Docker | commissioning 与正式链路均证明 Python-only 资格修正足以闭合，扩大构建或复制没有功能收益 | 依赖、磁盘、门禁范围 | 已执行 |
-| 009 | `plan071-formal-20260825T060132Z-qualification-v1` 仅保留为 superseded 预审证据；修复异常分支并把 result schema 升为 v2 后，从新 clean source 和空 namespace 完整重跑 | 独立审查发现失败 warm review 计数和无合格锚点终态两个异常分支；数值 GO 未被推翻，但正式 program/result 身份已改变，不能沿用旧 archive 改算 | 正式证据、schema、重跑 | 执行中 |
+| 009 | `plan071-formal-20260825T060132Z-qualification-v1` 仅保留为 superseded 预审证据；修复异常分支并把 result schema 升为 v2 后，从新 clean source 和空 namespace 完整重跑 | 独立审查发现失败 warm review 计数和无合格锚点终态两个异常分支；数值 GO 未被推翻，但正式 program/result 身份已改变，不能沿用旧 archive 改算 | 正式证据、schema、重跑 | 已执行 |
+| 010 | v2/v3/v4 作为有原因、不可续用的 aborted namespace 保留；仅 v5 是最终 formal | v2 遵守更新后的跨任务终态门主动中止；v3/v4 由 production proof 在模型加载前拒绝。用新 namespace 重跑可避免把基础设施失败或零散进度混入正式身份 | 资源交接、正式证据、运行身份 | 已执行 |
