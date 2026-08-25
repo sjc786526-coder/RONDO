@@ -54,6 +54,7 @@ use std::fs;
 use std::fs::FileTimes;
 use std::fs::OpenOptions;
 use std::path::Path;
+use std::path::PathBuf;
 use tempfile::TempDir;
 use tokio::time::timeout;
 use uuid::Uuid;
@@ -1022,6 +1023,36 @@ sqlite = true
     let scanned_response: ThreadListResponse =
         timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(request_id)).await??;
     assert_eq!(scanned_response.data.len(), 0);
+
+    metadata.cwd = PathBuf::from("relative-corrupt-cwd");
+    state_db.upsert_thread(&metadata).await?;
+    let request_id = mcp
+        .send_thread_list_request(codex_app_server_protocol::ThreadListParams {
+            cursor: None,
+            limit: Some(10),
+            sort_key: None,
+            sort_direction: None,
+            model_providers: Some(vec!["mock_provider".to_string()]),
+            source_kinds: None,
+            archived: None,
+            section_id: None,
+            cwd: None,
+            use_state_db_only: true,
+            search_term: None,
+            parent_thread_id: None,
+            ancestor_thread_id: None,
+        })
+        .await?;
+    let error: JSONRPCError = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_error_message(RequestId::Integer(request_id)),
+    )
+    .await??;
+    assert!(
+        error.error.message.contains("has no usable absolute cwd"),
+        "unexpected state-only list error: {}",
+        error.error.message
+    );
 
     Ok(())
 }

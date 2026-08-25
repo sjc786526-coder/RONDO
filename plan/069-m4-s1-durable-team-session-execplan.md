@@ -237,34 +237,33 @@ Team State、writer authority、Session identity 或只读状态源。
   `just test` 曾因上游
   rusty-v8 默认归档 404 在测试前失败；checksum-verified Codex V8 等价完整轮执行 14,373 项：14,363 passed、10 failed、24 skipped，
   其中 8 项为 068 Publication Critic fixture/断言、2 项为未修改 realtime 连接失败超时；069 durable cold-resume 主链在该轮通过。
+- 阶段 E 已把精确 `main@62d3ed732bf9452014a85722e7ed88c50a63dd94` 无冲突整合进 069 分支，消费 Plan 074 persisted cwd
+  read consistency，而未吸收更晚主线或 Plan 073 现场。Stage E 只新增同一 fresh Session/store 内的 create→mutation→durable commit→
+  非 owner committed read→非优雅进程退出→同 identity cold resume→继续 mutation→正常 close 产品链，并把 activation retry 的单通道
+  gate 改为一许可 `Semaphore`，保持同一 Root owner 内串行且不跨 `await` 持有 Tokio mutex guard。
+- 全新正式 namespace `/tmp/rondo-plan069-stage-e-formal.FrZoOy` 的 durable 产品/跨进程链 3/3、ThreadStore persisted cwd 2/2、app-server
+  persisted read/live override 2/2 均通过；ThreadStore 191/191、activation/retry 3/3 及 ThreadStore/core clippy 也通过。所有成功轮的
+  watchdog 均为 `complete`、退出码 0、`stop_reason=none`。最终独立终审结论 `ACCEPT`，无高/中等级 correctness finding。
+- shared core 改动触发的一次标准 `just test` 已通过 canonical lock/watchdog 执行；它在运行测试前被上游 rusty-v8 v150.4.0 默认
+  archive URL 的 HTTP 404 阻断，watchdog `20260825-041855-1000-2298859` 为 `complete`、`run_rc=101`、`stop_reason=none`、无 JUnit。
+  未重复扩大为第二次完整轮；Stage E 正式聚焦链与既有 checksum-verified 完整历史证据均如实保留。
 
 ### 当前工作
 
-- 主体实现与预验收已经完成，Plan 074 / `#37198` 窄回移也已进入本地 `main@62d3ed732bf9452014a85722e7ed88c50a63dd94`；
-  阶段 E 已获授权，等待执行者在保留的 069 worktree 中整合该精确 main 并完成最终正式验收。
-- 069 的 `multidev/codex-rs/target` 当前约 59 GiB，是阶段 E 的首选增量构建资产；不得为制造“干净状态”执行 `cargo clean`。正式轮的
-  “干净”只要求最终代码/配置和全新的任务专用 Session/store 领域状态。
+- 阶段 A-E、正式聚焦轮和独立终审均已完成；当前仅形成 069 本地最终提交并等待用户决定后续主线整合，不自行 merge 或 push。
 
 ### 本任务剩余步骤
 
-- 在不读取 Plan 073 未提交内容的前提下确认 Git 与资源现场，把指定 `main@62d3ed7` 整合进 069 分支；普通冲突或编译问题可在本任务
-  边界内自主窄修、复验。
-- 复用现有 target，通过 canonical heavy lock/watchdog 运行 ThreadStore persisted cwd、live execution override 和 Durable Team
-  相邻接缝的必要聚焦门禁；若最终实现确实修改 shared core/protocol 并触发就近完整门禁，只在最终边界运行一次，不在调试期重复。
-- 代码与配置稳定后，从全新的任务专用 Session/store 执行一次创建、mutation、durable commit、非 owner committed read、进程退出、
-  同 identity 冷恢复、继续 mutation 与正常 close 的正式链；同轮确认 persisted read 与显式 live cwd/workspace override 各守职责。
-- 对最终代码、范围和正式证据做独立终审；范围内普通 finding 自主窄修并重跑受影响门禁，若变更影响正式链则使用新的领域状态重跑该链。
-- PASS 后窄同步 Plan 069、`doc/WBS.md`、`doc/WBS/durable-team-runtime.md`、`doc/WBS-COMPLETED.md` 和一份精炼日志，形成干净的
-  069 本地提交后停止，等待用户决定是否合入和推送。
+- 无。Plan 069 在本地分支完成后冻结；后续路线只见 `doc/WBS.md` 与 `doc/WBS/durable-team-runtime.md`。
 
 ### 阻塞项
 
-- 当前无已知产品前置或 069 主体 correctness 阻塞。Plan 073 的本地模型、Docker、构建或共享锁占用只构成临时资源等待；等待释放后
-  重试，不干扰其现场。阶段 E 的正式门禁、正式链或终审若未满足，则诚实保持未 PASS。
+- 无产品或 correctness 阻塞。标准全 workspace 尝试的 rusty-v8 404 是已记录的外部构建输入阻断，不改变已完成的 Stage E 正式聚焦
+  验收，也不表述为全 workspace 通过。
 
 ### 当前验收状态
 
-- `IMPLEMENTATION_COMPLETE / PREACCEPTANCE_COMPLETE / STAGE_E_AUTHORIZED`。
+- `STAGE_E_FORMAL_PASS / INDEPENDENT_ACCEPTED / M4_S1_PASS`。
 
 ### 交接边界
 
@@ -306,3 +305,6 @@ Team State、writer authority、Session identity 或只读状态源。
 | 025 | Plan 074 / `#37198` 已由独立任务进入 `main@62d3ed7`；阶段 E 只消费该精确主线事实，不在 069 重做回移或吸收 Plan 073 现场 | 解除最终代码前置，同时维持任务所有权和并行隔离 | Stage E/Git | 已采纳 |
 | 026 | 复用 069 约 59 GiB target；“干净正式轮”以最终代码/配置和全新 Session/store 领域状态定义，不以 clean rebuild 定义 | 已有构建资产与新主线工具链兼容时可避免无意义重建，产品验收关注状态隔离而非删除缓存 | 资源/验收 | 已采纳 |
 | 027 | 最终正式链只在代码与配置稳定后运行；普通失败先窄修、保留已验证进度并重跑受影响切片，影响正式链的修复再用新状态重跑正式轮 | 允许合理调试冗余，同时保证最终证据对应最终实现且不以旧状态冒充 PASS | 执行/证据 | 已采纳 |
+| 028 | Stage E 精确整合 `main@62d3ed7`；Plan 074 persisted cwd/live override 接缝无需 authority adapter，activation retry 用一许可 `Semaphore` 串行完整恢复窗口 | 自动整合无冲突且 read projection 不改变 Root authority；Semaphore 保留单 owner 重试语义并满足 async clippy | Stage E/core | 已采纳 |
+| 029 | 正式验收使用全新任务 namespace，在同一 fresh Session/store 产品链内覆盖非 owner read、异常进程退出、同 identity 冷恢复、继续 mutation 与正常 close | 单条真实链能证明前后状态和 identity 连续，不把分散 fixture 或旧 store 拼成正式结果 | Stage E/验收 | 已采纳 |
+| 030 | shared core 触发的一次标准 `just test` 如实保留为 rusty-v8 默认 archive 404 的测试前阻断，不重复运行第二套完整门禁；最终判定使用通过的直接聚焦正式轮、clippy 与独立终审 | 区分产品证据和外部构建输入，避免把未运行冒充通过，也避免为同一已知 URL 问题重复占用重型资源 | 测试/资源 | 已采纳 |

@@ -1975,3 +1975,40 @@ correctness/functionality `remaining_findings=[]`，路线结论为 `GO`。
   既有 helper 回归 **9/9**、`bash -n` 与 diff 门通过；正式轮后无 active RONDO scope 或 Plan 072 临时目录残留。
 - 未运行 Cargo、Docker、真实模型、GPU、API、训练、性能测评或全量测试；未写入主工作区 ignored 资产，未触碰、合并或推送
   069、071 及其它工作树/分支。
+
+## Persisted CWD Read Consistency 窄回移（Plan 074，2026-08-25）
+
+**状态**：`#37198` 所需能力已按冻结 `v0.147.0` 和当前 RONDO 架构完成窄回移、外部整改复验与本地主线整合；验收通过、
+任务目标完成。实现提交为 `bf8b7da6a7a4bc1db962c1f5a4b97dc55267673c`，整改提交为
+`8c60ad4ae411d6f314c0432dc6531e8bab8d5fb8`。
+
+- ThreadStore read-by-ID/read-by-rollout 只在 canonical rollout lineage 匹配时采用 persisted absolute cwd；空/相对 rollout cwd 可由
+  同 lineage 的可信 metadata 修复，metadata 缺失、不可解析或 mismatch 时仍在最终 projection fail-closed。legacy permission 按最终
+  cwd 自洽重算，state-only list 不会把损坏 cwd 绝对化为进程 cwd。
+- persisted cwd 只代表已持久读取事实；显式 resume cwd/workspace roots 继续按既有优先级决定 live execution 和权限上下文，恢复或
+  投影不会把历史事实冒充 writer binding，也不会扩大执行权限。实现对照官方 exact commit `547080e4d690cdeea12f427a8d9c5165928821ed`，
+  未整体升级上游或引入第二套 ThreadStore、workspace registry、权限或审计体系。
+- 整改后的聚焦证据为 ThreadStore **191/191**、app-server read/list/resume **2/2**、新增 lineage/cwd/permission 回归 **1/1**，
+  ThreadStore clippy、`just fmt` 与 diff 检查通过；外部复验结论 `ACCEPT`，无剩余高/中等级 correctness finding。
+- 069 相邻 mock sampling 的 `/v1/responses` 502 超时和未修改 core 的既有 clippy 阻断已如实记录为非 074 问题，本任务未为其扩大
+  写集或重跑全 workspace。未运行 Docker、真实 API/模型、训练、性能测评、CI/PR，也未执行 Plan 069 阶段 E；因此本条只解除
+  `#37198` 代码前置，不代表 `M4-S1 PASS`。
+
+## M4-S1 Team Session 持久生命周期（Plan 069，2026-08-25）
+
+**状态**：主体实现、六轮独立预验收整改、Plan 074 / `#37198` 精确合流、阶段 E 正式轮与最终独立终审均已完成；结论为
+`M4_S1_PASS`。阶段 E 从 `f970f133cb4613b0b7f9f27db266aa36164fce12` 精确整合
+`main@62d3ed732bf9452014a85722e7ed88c50a63dd94`，未吸收更晚主线或 Plan 073 现场。
+
+- 默认关闭的 Durable Team Session 以 canonical Root ThreadStore authority 为唯一写权威，版本化 checksummed Team snapshot、typed
+  `SessionMeta` lineage、committed read/reconcile、跨进程 cold resume、非 owner read、失败保留 owner 与最小 live-child close
+  barrier 已闭合；缺失、损坏、unknown/unavailable 和 identity mismatch 均 fail-closed，不另建 Team lock、registry 或控制面状态源。
+- 阶段 E 在同一全新 Session/store 产品链中完成 create、mutation、durable commit、非 owner committed read、非优雅进程退出、同
+  Session/Root/TeamInstance cold resume、继续 mutation 与正常 close；Plan 074 的 persisted cwd read 与显式 live cwd/workspace override
+  保持各自职责。最终独立终审结论 `ACCEPT`，无剩余高/中等级 correctness finding。
+- 正式证据为 Durable Team/跨进程链 **3/3**、ThreadStore persisted cwd **2/2**、app-server persisted/live override **2/2**；邻近
+  ThreadStore **191/191**、activation/retry **3/3**、ThreadStore/core clippy、`just fmt` 与 diff 检查通过。所有成功重型轮均由
+  canonical lock/watchdog 执行，`complete`、退出码 0、`stop_reason=none`。
+- shared core 触发的一次标准全 workspace `just test` 在测试前被 rusty-v8 v150.4.0 默认 archive URL 的 HTTP 404 阻断，未产生
+  JUnit，未表述为通过或重复扩大完整轮；既有 checksum-verified 历史完整轮仍为 14,373 项中 14,363 通过、10 项既知相邻失败。
+  本阶段未使用 Docker、真实模型/API、训练、测评、CI/PR，未把 069 合入或推送主线。

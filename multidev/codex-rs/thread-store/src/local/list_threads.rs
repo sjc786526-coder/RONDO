@@ -12,6 +12,7 @@ use super::helpers::resolve_thread_names;
 use super::helpers::resolve_thread_section_metadata;
 use super::helpers::set_thread_name;
 use super::helpers::stored_thread_from_rollout_item;
+use super::helpers::validate_thread_projection_cwd;
 use super::read_thread::stored_thread_from_state_metadata;
 use crate::ListThreadsParams;
 use crate::SortDirection;
@@ -82,6 +83,9 @@ pub(super) async fn list_threads(
             )
         })
         .collect::<Vec<_>>();
+    for thread in &items {
+        validate_thread_projection_cwd(thread.thread_id, thread.cwd.as_path())?;
+    }
 
     let thread_history_modes = items
         .iter()
@@ -226,7 +230,7 @@ async fn list_section_threads(
             let parent_thread_id = parent_thread_ids.get(&metadata.id).copied();
             stored_thread_from_state_metadata(store, metadata, parent_thread_id)
         })
-        .collect();
+        .collect::<ThreadStoreResult<Vec<_>>>()?;
     let next_cursor = next_anchor.and_then(|anchor| {
         anchor.id.map(|thread_id| {
             let position = anchor.ts.timestamp_millis();

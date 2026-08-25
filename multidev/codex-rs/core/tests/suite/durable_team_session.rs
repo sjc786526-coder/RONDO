@@ -15,6 +15,7 @@ use codex_protocol::protocol::ThreadSettingsOverrides;
 use codex_protocol::user_input::UserInput;
 use codex_team_state::DurableTeamIdentity;
 use codex_team_state::TEAM_WORLD_STATE_OPEN_TAG;
+use codex_team_state::TeamStateHandle;
 use codex_team_state::committed_snapshot_generation;
 use codex_thread_store::AppendThreadItemsParams;
 use codex_thread_store::ArchiveThreadParams;
@@ -62,12 +63,13 @@ const IMMEDIATE_CRASH_PROCESS_TEST: &str =
 const IMMEDIATE_CRASH_MODE: &str = "CODEX_DURABLE_TEAM_IMMEDIATE_CRASH_MODE";
 const IMMEDIATE_CRASH_HOME: &str = "CODEX_DURABLE_TEAM_IMMEDIATE_CRASH_HOME";
 const IMMEDIATE_CRASH_THREAD_PREFIX: &str = "DURABLE_TEAM_THREAD=";
+type MarkerLossPaths = Arc<std::sync::Mutex<Option<(PathBuf, PathBuf)>>>;
 
 struct PersistAfterSuccessThreadStore {
     inner: Arc<dyn ThreadStore>,
     persist_failures_remaining: Arc<AtomicUsize>,
     history_read_failures_remaining: Arc<AtomicUsize>,
-    shutdown_marker_loss: Option<Arc<std::sync::Mutex<Option<(PathBuf, PathBuf)>>>>,
+    shutdown_marker_loss: Option<MarkerLossPaths>,
 }
 
 impl PersistAfterSuccessThreadStore {
@@ -109,7 +111,7 @@ impl PersistAfterSuccessThreadStore {
 
     fn with_shutdown_marker_loss(
         inner: Arc<dyn ThreadStore>,
-        shutdown_marker_loss: Arc<std::sync::Mutex<Option<(PathBuf, PathBuf)>>>,
+        shutdown_marker_loss: MarkerLossPaths,
     ) -> Self {
         Self {
             inner,
@@ -262,6 +264,16 @@ async fn durable_team_immediate_crash_is_cold_resumable() -> Result<()> {
             .as_ref()
             .expect("durable Session exposes its canonical rollout");
         assert!(rollout_path.is_file());
+        let responses = mount_sse_sequence_without_request_count_expectation(
+            &server,
+            vec![
+                publish_call("publish-before-immediate-crash", "before immediate crash"),
+                assistant_reply("before-immediate-crash-complete"),
+            ],
+        )
+        .await;
+        submit_turn(&created, "commit before the immediate process exit").await?;
+        assert_eq!(responses.requests().len(), 2);
         println!(
             "{IMMEDIATE_CRASH_THREAD_PREFIX}{}",
             created.session_configured.thread_id
@@ -295,6 +307,20 @@ async fn durable_team_immediate_crash_is_cold_resumable() -> Result<()> {
     let rollout_path = codex_rollout::find_thread_path_by_id_str(home.path(), thread_id, None)
         .await?
         .ok_or_else(|| anyhow::anyhow!("cannot locate immediately-crashed Root {thread_id}"))?;
+    let session_meta = codex_rollout::read_session_meta_line(&rollout_path).await?;
+    let session_id = session_meta.meta.session_id;
+    let thread_id = session_meta.meta.id;
+    let identity = DurableTeamIdentity::new(session_id, thread_id);
+    let committed = std::fs::read(
+        home.path()
+            .join("team-sessions/v1")
+            .join(format!("{thread_id}.team-state")),
+    )?;
+    let non_owner = TeamStateHandle::from_committed_snapshot(identity, &committed)?;
+    let committed_view = non_owner.snapshot_for(thread_id)?;
+    assert_eq!(committed_view.events.len(), 1);
+    assert_eq!(committed_view.events[0].title, "before immediate crash");
+    let team_instance = non_owner.instance();
 
     let server = start_mock_server().await;
     let responses = mount_sse_sequence_without_request_count_expectation(
@@ -309,10 +335,22 @@ async fn durable_team_immediate_crash_is_cold_resumable() -> Result<()> {
     let resumed = builder
         .resume(&server, Arc::new(tempfile::TempDir::new()?), rollout_path)
         .await?;
+    assert_eq!(resumed.session_configured.session_id, session_id);
+    assert_eq!(resumed.session_configured.thread_id, thread_id);
     submit_turn(&resumed, "continue after the immediate process exit").await?;
     let requests = responses.requests();
     assert_eq!(requests.len(), 2);
-    assert!(projection(&requests[1].body_json()).contains("after immediate crash"));
+    let resumed_body = requests[0].body_json();
+    let resumed_projection = projection(&resumed_body);
+    assert_eq!(
+        projection_field(resumed_projection, "team_instance")?,
+        team_instance.to_string()
+    );
+    assert!(resumed_projection.contains("before immediate crash"));
+    let continued_body = requests[1].body_json();
+    let continued_projection = projection(&continued_body);
+    assert!(continued_projection.contains("before immediate crash"));
+    assert!(continued_projection.contains("after immediate crash"));
     resumed.codex.shutdown_and_wait().await?;
     Ok(())
 }
@@ -435,7 +473,7 @@ async fn durable_team_rejects_unknown_root_before_persistence() -> Result<()> {
     assert!(
         WalkDir::new(home.path())
             .into_iter()
-            .filter_map(|entry| entry.ok())
+            .filter_map(std::result::Result::ok)
             .all(|entry| entry.path().extension().and_then(|ext| ext.to_str()) != Some("jsonl")),
         "rejected Unknown Root must not materialize a canonical rollout"
     );

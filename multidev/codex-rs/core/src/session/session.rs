@@ -41,7 +41,7 @@ pub(super) struct DurableRootActivation {
     identity: DurableTeamIdentity,
     marker_ready: AtomicBool,
     complete: AtomicBool,
-    retry: Mutex<()>,
+    retry: Semaphore,
 }
 
 impl DurableRootActivation {
@@ -50,7 +50,7 @@ impl DurableRootActivation {
             identity,
             marker_ready: AtomicBool::new(false),
             complete: AtomicBool::new(false),
-            retry: Mutex::new(()),
+            retry: Semaphore::new(/*permits*/ 1),
         }
     }
 }
@@ -548,7 +548,9 @@ impl Session {
         if activation.complete.load(Ordering::Acquire) {
             return Ok(());
         }
-        let _retry = activation.retry.lock().await;
+        let _retry = activation.retry.acquire().await.map_err(|_| {
+            TeamDurabilityError::unavailable("durable Team activation retry gate is closed")
+        })?;
         if activation.complete.load(Ordering::Acquire) {
             return Ok(());
         }
@@ -739,20 +741,20 @@ impl Session {
                     anyhow::bail!("fresh Session collides with an existing durable Team snapshot");
                 }
             }
-        } else if is_root_session && is_resumed {
-            if resumed_session_meta
+        } else if is_root_session
+            && is_resumed
+            && (resumed_session_meta
                 .as_ref()
                 .and_then(|session_meta| session_meta.durable_team)
                 .is_some()
                 || crate::team::durable::durable_team_snapshot_exists(
                     config.codex_home.as_path(),
                     durable_identity,
-                )?
-            {
-                anyhow::bail!(
-                    "this Session has durable Team state; writable resume requires durable_team_enabled"
-                );
-            }
+                )?)
+        {
+            anyhow::bail!(
+                "this Session has durable Team state; writable resume requires durable_team_enabled"
+            );
         }
         let initial_auto_compact_window_ids = AutoCompactWindowIds::new_initial();
         let agent_control = agent_control.with_session_id(

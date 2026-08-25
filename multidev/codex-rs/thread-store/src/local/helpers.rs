@@ -173,6 +173,21 @@ pub(super) fn permission_profile_from_metadata_value(value: &str, cwd: &Path) ->
         .unwrap_or_else(|_| PermissionProfile::read_only())
 }
 
+pub(super) fn validate_thread_projection_cwd(
+    thread_id: ThreadId,
+    cwd: &Path,
+) -> ThreadStoreResult<()> {
+    if !cwd.as_os_str().is_empty() && cwd.is_absolute() {
+        return Ok(());
+    }
+    Err(ThreadStoreError::Internal {
+        message: format!(
+            "stored metadata for thread {thread_id} has no usable absolute cwd: `{}`",
+            cwd.display()
+        ),
+    })
+}
+
 pub(super) fn permission_profile_to_metadata_value(
     permission_profile: &PermissionProfile,
 ) -> String {

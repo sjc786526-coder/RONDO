@@ -1,7 +1,7 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
 最后更新：2026-08-25 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
-状态：**第一期、第二期、M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、Plan 064、Plan 071 与四期 M4-A、M4-C0 已完成；Plan 060 技术 GO、Plan 064 DATA_GO、Plan 066 正式训练 GO；Plan 071 为 `BASE_COMPARABILITY_GO`，M3-C2 前置已满足但尚未启动或授权；M4-A 为 `M4_A_GO`，M4-C0 为 `M4_C0_PROTOTYPE_PASS`**
+状态：**第一期、第二期、M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、Plan 064、Plan 071 与四期 M4-A、M4-C0 已完成；Plan 060 技术 GO、Plan 064 DATA_GO、Plan 066 正式训练 GO；Plan 071 为 `BASE_COMPARABILITY_GO`，Plan 073 / M3-C2 已在独立工作树实施但尚未完成或进入主线；M4-A 为 `M4_A_GO`，M4-C0 为 `M4_C0_PROTOTYPE_PASS`**
 
 ## 当前定位
 
@@ -266,9 +266,8 @@ threshold 的前提下，以同一冻结规则重验 exact base、C1、C3；唯�
 **宏观验收**：发布质量、False PASS/REWRITE、边界样本、延迟和本地资源开销得到联合比较；最终选择有清晰理由且可由现有
 轻量设施复测，未达标则回到对应工作包迭代而非建立模型退役制度。
 
-**当前状态**：前置已满足，尚未启动或授权。Plan 071 已证明 exact base 与 C1/C3 可在同一资格口径下进入横评；下一步可
-另建 M3-C2 ExecPlan，冻结联合评价、最终模型/threshold 与运行配置选择边界。Plan 071 的 `BASE_COMPARABILITY_GO` 不自动选择模型、
-启用 Critic 或授权 M3-C2/M3-D。
+**当前状态**：前置已满足，Plan 073 已在独立工作树实施但尚未完成或进入主线。该任务承接联合评价、最终模型/threshold 与
+运行配置选择边界；Plan 071 的 `BASE_COMPARABILITY_GO` 本身不自动选择模型、启用 Critic 或授权 M3-D。
 
 ### D 阶段：端到端收口
 
@@ -292,8 +291,8 @@ threshold 的前提下，以同一冻结规则重验 exact base、C1、C3；唯�
   M3-B2a、M3-B2b 均已完成，两链在 M3-C1 前汇合。
 - M3-B1b 是独立付费资格门；Plan 060 `TECHNICAL_GO`、Plan 064 `DATA_GO` 与正式训练授权均已成立，Plan 066 已据此完成训练执行、
   资源终态、final-02 receipt 与独立验收；Plan 068 已完成本地交接、资格运行和远端止费，没有追加训练消费。
-- M3-B1c 与 M3-B2b 前置、Plan 068 / M3-C1 及 Plan 071 base 同口径重验均已完成；base/C1/C3 已取得资格，M3-C2
-  前置满足，下一包可单独规划和授权 M3-C2，M3-D 最后串行收口。
+- M3-B1c 与 M3-B2b 前置、Plan 068 / M3-C1 及 Plan 071 base 同口径重验均已完成；base/C1/C3 已取得资格，Plan 073 / M3-C2
+  已在独立工作树实施但尚未完成或进入主线，M3-D 继续等待其结论后串行收口。
 - RunPod 云端 smoke/训练不占本地 Cargo build lock，可与产品代码、数据整理和四期非冲突开发并行；真实本地模型、
   Docker 与重型 Cargo 仍按根 `AGENTS.md` 全局串行。
 - 三期与已经正式收口的方向 1 没有产品依赖。如果未来重新启动方向 1，普通工作仍可并行安排，但共享 API 预算、
