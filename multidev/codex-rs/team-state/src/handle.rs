@@ -66,6 +66,14 @@ struct DurableRuntime {
     status: Mutex<TeamDurabilityStatus>,
 }
 
+/// Exact committed Team snapshot accepted by a control mutation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TeamMutationPrecondition {
+    pub instance: TeamInstanceId,
+    pub revision: TeamRevision,
+    pub commit_generation: u64,
+}
+
 impl Default for TeamStateHandle {
     fn default() -> Self {
         Self {
@@ -539,6 +547,7 @@ impl TeamStateHandle {
     fn durable_mutate<R>(
         &self,
         notify: bool,
+        precondition: Option<TeamMutationPrecondition>,
         mutate: impl FnOnce(&mut TeamStore) -> Result<R, TeamDurabilityError>,
     ) -> Result<R, TeamDurabilityError> {
         let runtime = self.durable_runtime().ok_or_else(|| {
@@ -579,6 +588,17 @@ impl TeamStateHandle {
         };
 
         let current = self.with_store(|store| store.clone());
+        if let Some(precondition) = precondition
+            && (current.instance() != precondition.instance
+                || current.revision() != precondition.revision
+                || expected_generation != precondition.commit_generation)
+        {
+            return Err(TeamDurabilityError::Domain(TeamError::SnapshotConflict {
+                current_instance: current.instance(),
+                current_revision: current.revision(),
+                current_commit_generation: expected_generation,
+            }));
+        }
         let revision_before = current.revision();
         let mut candidate = current.clone();
         let result = mutate(&mut candidate)?;
@@ -743,7 +763,7 @@ impl TeamStateHandle {
         let identity = self.durable_identity().ok_or_else(|| {
             TeamDurabilityError::conflict("durable registration has no durable identity")
         })?;
-        self.durable_mutate(false, move |store| {
+        self.durable_mutate(false, None, move |store| {
             store.register_durable_participant(identity, thread_id, role, label)
         })
     }
@@ -770,7 +790,7 @@ impl TeamStateHandle {
     ) -> Result<PublishOutcome, TeamError> {
         if self.durable_runtime().is_some() {
             return self
-                .durable_mutate(true, |store| {
+                .durable_mutate(true, None, |store| {
                     store
                         .publish(actor, submission, request)
                         .map_err(Into::into)
@@ -824,7 +844,7 @@ impl TeamStateHandle {
     ) -> Result<LifecycleOutcome, TeamError> {
         if self.durable_runtime().is_some() {
             return self
-                .durable_mutate(true, |store| {
+                .durable_mutate(true, None, |store| {
                     store.update_lifecycle(actor, request).map_err(Into::into)
                 })
                 .map_err(TeamError::from);
@@ -836,6 +856,25 @@ impl TeamStateHandle {
             }
             Ok(outcome)
         })
+    }
+
+    /// Apply a lifecycle update only when the caller's complete committed Team proof is still
+    /// current at the durable mutation linearization point.
+    pub fn update_lifecycle_at_snapshot(
+        &self,
+        actor: ThreadId,
+        precondition: TeamMutationPrecondition,
+        request: LifecycleRequest,
+    ) -> Result<LifecycleOutcome, TeamError> {
+        if self.durable_runtime().is_none() {
+            return Err(TeamError::Durability {
+                reason: "formal Session control requires a durable Team".to_string(),
+            });
+        }
+        self.durable_mutate(true, Some(precondition), |store| {
+            store.update_lifecycle(actor, request).map_err(Into::into)
+        })
+        .map_err(TeamError::from)
     }
 
     /// Commit a route: the visibility grant, and the assignment when work is intended.
@@ -850,7 +889,7 @@ impl TeamStateHandle {
     ) -> Result<RouteOutcome, TeamError> {
         if self.durable_runtime().is_some() {
             return self
-                .durable_mutate(true, |store| {
+                .durable_mutate(true, None, |store| {
                     store.route(actor, submission, request).map_err(Into::into)
                 })
                 .map_err(TeamError::from);
@@ -872,7 +911,7 @@ impl TeamStateHandle {
     ) -> Result<DeliveryOutcome, TeamError> {
         if self.durable_runtime().is_some() {
             return self
-                .durable_mutate(true, |store| {
+                .durable_mutate(true, None, |store| {
                     store
                         .record_delivery(actor, route_id, result)
                         .map_err(Into::into)
@@ -895,7 +934,7 @@ impl TeamStateHandle {
     ) -> Result<EndAssignmentOutcome, TeamError> {
         if self.durable_runtime().is_some() {
             return self
-                .durable_mutate(true, |store| {
+                .durable_mutate(true, None, |store| {
                     store.end_assignment(actor, route_id).map_err(Into::into)
                 })
                 .map_err(TeamError::from);
@@ -917,7 +956,7 @@ impl TeamStateHandle {
     ) -> Result<RetireOutcome, TeamError> {
         if self.durable_runtime().is_some() {
             return self
-                .durable_mutate(true, |store| {
+                .durable_mutate(true, None, |store| {
                     store
                         .retire(actor, submission, request, availability, live_epoch())
                         .map_err(Into::into)
@@ -1042,7 +1081,7 @@ impl TeamStateHandle {
         if self.durable_runtime().is_none() {
             return Ok(self.with_store(|store| store.confirm_observation(producer, item_id)));
         }
-        self.durable_mutate(false, |store| {
+        self.durable_mutate(false, None, |store| {
             Ok(store.confirm_observation(producer, item_id))
         })
         .map_err(TeamError::from)
@@ -1130,7 +1169,7 @@ impl TeamStateHandle {
         if self.durable_runtime().is_none() {
             return Ok(self.with_store(|store| store.consume_wake(participant)));
         }
-        self.durable_mutate(false, |store| Ok(store.consume_wake(participant)))
+        self.durable_mutate(false, None, |store| Ok(store.consume_wake(participant)))
             .map_err(TeamError::from)
     }
 

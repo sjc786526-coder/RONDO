@@ -1191,6 +1191,9 @@ impl MessageProcessor {
             ClientRequest::DurableSessionRead { params, .. } => {
                 self.thread_processor.durable_session_read(params).await
             }
+            ClientRequest::DurableSessionControl { params, .. } => {
+                self.thread_processor.durable_session_control(params).await
+            }
             ClientRequest::ExperimentalSessionList { params, .. } => {
                 self.thread_processor
                     .experimental_session_list(params)

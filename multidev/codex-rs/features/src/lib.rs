@@ -163,6 +163,8 @@ pub enum Feature {
     MultiAgentV2,
     /// Enable the formal read-only Durable Session query product surface.
     DurableSessionQuery,
+    /// Enable the formal Durable Session control product surface.
+    DurableSessionControl,
     /// Enable the experimental Session control product prototype.
     ExperimentalSessionControl,
     /// Removed compatibility flag retained as a no-op.
@@ -1125,6 +1127,18 @@ pub const FEATURES: &[FeatureSpec] = &[
         stage: Stage::Experimental {
             name: "Durable Session query",
             menu_description: "Inspect durable Sessions through the read-only query interface.",
+            // Keep this explicit opt-in out of the process-global startup tooltip pool. The
+            // /experimental menu continues to expose the name and description after opt-in.
+            announcement: "",
+        },
+        default_enabled: false,
+    },
+    FeatureSpec {
+        id: Feature::DurableSessionControl,
+        key: "durable_session_control",
+        stage: Stage::Experimental {
+            name: "Durable Session control",
+            menu_description: "Control durable Sessions through the formal control interface.",
             // Keep this explicit opt-in out of the process-global startup tooltip pool. The
             // /experimental menu continues to expose the name and description after opt-in.
             announcement: "",

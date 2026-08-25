@@ -31,6 +31,7 @@ impl AppServerSession {
         params: DurableSessionListParams,
     ) -> Result<DurableSessionQueryRequest, &'static str> {
         let mut query = self.durable_session_query();
+        self.durable_session_control_retire_for_attachment_change(&mut query);
         query.attach_list(params.clone());
         let ticket = query
             .begin_read()
@@ -43,6 +44,7 @@ impl AppServerSession {
         params: DurableSessionReadParams,
     ) -> Result<DurableSessionQueryRequest, &'static str> {
         let mut query = self.durable_session_query();
+        self.durable_session_control_retire_for_attachment_change(&mut query);
         query.attach_session(params.clone());
         let ticket = query
             .begin_read()
@@ -69,6 +71,7 @@ impl AppServerSession {
             cursor: Some(next_cursor),
             ..params
         };
+        self.durable_session_control_retire_for_attachment_change(&mut query);
         query.attach_list(params.clone());
         let ticket = query
             .begin_read()
@@ -119,20 +122,20 @@ impl AppServerSession {
         self.durable_session_query().apply_read_failure(ticket)
     }
 
-    pub(crate) fn durable_session_on_lagged(&self) {
-        self.durable_session_query().on_lagged();
+    pub(crate) fn durable_session_on_lagged(&self) -> bool {
+        self.durable_session_control_on_lagged()
     }
 
-    pub(crate) fn durable_session_on_disconnected(&self) {
-        self.durable_session_query().on_disconnected();
+    pub(crate) fn durable_session_on_disconnected(&self) -> bool {
+        self.durable_session_control_on_disconnected()
     }
 
-    pub(crate) fn durable_session_on_event_stream_closed(&self) {
-        self.durable_session_query().on_event_stream_closed();
+    pub(crate) fn durable_session_on_event_stream_closed(&self) -> bool {
+        self.durable_session_control_on_event_stream_closed()
     }
 
-    pub(crate) fn durable_session_detach(&self) {
-        self.durable_session_query().detach();
+    pub(crate) fn durable_session_detach(&self) -> bool {
+        self.durable_session_control_detach()
     }
 
     pub(crate) fn durable_session_attachment(
@@ -153,7 +156,7 @@ impl AppServerSession {
         self.durable_session_query().view_freshness()
     }
 
-    fn durable_session_query(&self) -> MutexGuard<'_, DurableSessionQueryClientState> {
+    pub(super) fn durable_session_query(&self) -> MutexGuard<'_, DurableSessionQueryClientState> {
         self.durable_session_query
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)

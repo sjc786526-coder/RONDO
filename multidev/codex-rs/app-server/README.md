@@ -172,6 +172,7 @@ Example with notification opt-out:
 - `thread/loaded/list` — list the thread ids currently loaded in memory.
 - `thread/read` — read a stored thread by id without resuming it; optionally include turns via `includeTurns`. The returned `thread` includes `status` (`ThreadStatus`), defaulting to `notLoaded` when the thread is not currently loaded. For loaded threads, experimental clients can use `canAcceptDirectInput` to determine whether `turn/start` and `turn/steer` are accepted; unloaded stored threads report `null` when that capability is unavailable.
 - `session/list` and `session/read` — query canonical Durable Sessions and their bounded committed Team projections without loading or resuming them. These stable v2 methods use the separate, default-disabled `durable_session_query` product feature and do not require the experimental API capability; see [Durable Session query](#durable-session-query).
+- `session/control` — submit one proof-bound Durable Session operation after a fresh `session/read`. This stable v2 method requires both the default-disabled `durable_session_query` and `durable_session_control` product features, returns typed applied/rejected/partial/unknown outcomes, and does not require the experimental API capability; see [Durable Session control](#durable-session-control).
 - `experimentalSession/list` and `experimentalSession/read` — inspect the experimental Session prototype without loading or resuming a Session. These methods require both `capabilities.experimentalApi = true` and the separate, default-disabled `experimental_session_control` product feature; see [Experimental Session control prototype](#experimental-session-control-prototype).
 - `experimentalSession/updateTeamLifecycle` — submit one optimistic Root-state transition through the currently loaded canonical Session owner. Child, non-owner, unavailable-owner, and conflicting requests fail closed. This method has the same two opt-ins as the prototype reads.
 - `thread/turns/list` — experimental; page through a stored thread’s turn history without resuming it; supports cursor-based pagination with `sortDirection`, `itemsView`, `nextCursor`, and `backwardsCursor`.
@@ -542,6 +543,54 @@ returns a typed `readStatus` and no partial Team. The server rereads canonical l
 snapshot projection and reports `sourceChanged` rather than combining facts across that boundary.
 Neither method obtains writer authority, repairs metadata, opens rollout history, resumes a
 Session, starts an Agent, or calls a model/API.
+
+### Durable Session control
+
+`session/control` is the stable v2 mutation boundary paired with the formal query surface. Both
+`durable_session_query` and the independent, default-disabled `durable_session_control` feature
+must be enabled. The method is not experimental API and does not use the
+`experimentalSession/*` projection or mutation state.
+
+Each request identifies the canonical Session and Root, carries the complete `controlPrecondition`
+from a fresh `session/read`, and selects exactly one operation: `setRootState`, `close`, `archive`,
+`unarchive`, or `delete`. The server rereads canonical metadata and the committed Team projection,
+compares storage, residency, Team instance/revision, commit generation, and fingerprint, and then
+revalidates the loaded Root owner again at the online Team mutation boundary. Stale or mismatched
+proofs return a typed rejection without being reported as applied.
+
+`setRootState` routes only to the currently loaded canonical Root owner. `close` runs the existing
+owner close barrier and reports `ownerClosed` only after that owner is removed; it does not invent
+a whole-Session lifecycle fact, so a later query may continue to report domain lifecycle
+`unknown`. `archive`, `unarchive`, and `delete` reuse the existing Root/subtree ThreadStore
+lifecycle paths. They do not resume or load an Agent, start a turn, or call a model/API.
+
+Responses preserve certainty as `applied`, `rejected`, `partial`, or `unknown`. Archive partial
+progress includes the completed thread ids. Clients must treat response loss, timeout, disconnect,
+or an unclassified transport error after submission as result-unknown and must not automatically
+retry the mutation. A typed response is not a replacement Session projection; issue a new
+`session/read` or `session/list` to rebuild current state and operation availability.
+
+```json
+{ "method": "session/control", "id": 24, "params": {
+    "sessionId": "019c...",
+    "rootThreadId": "019c...",
+    "precondition": {
+        "expectedStorageStatus": "active",
+        "expectedResidency": "notObservedHere",
+        "teamInstanceId": "019c...",
+        "teamRevision": 3,
+        "commitGeneration": 4,
+        "commitFingerprint": "sha256:..."
+    },
+    "operation": { "type": "archive" }
+} }
+{ "id": 24, "result": {
+    "outcome": {
+        "type": "applied",
+        "effect": { "type": "archived", "affectedThreadIds": ["019c..."] }
+    }
+} }
+```
 
 ### Experimental Session control prototype
 

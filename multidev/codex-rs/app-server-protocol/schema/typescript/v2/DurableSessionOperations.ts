@@ -6,4 +6,4 @@ import type { DurableSessionOperation } from "./DurableSessionOperation";
 /**
  * Availability of the Session operations that a query may present.
  */
-export type DurableSessionOperations = { resume: DurableSessionOperation, close: DurableSessionOperation, archive: DurableSessionOperation, unarchive: DurableSessionOperation, delete: DurableSessionOperation, };
+export type DurableSessionOperations = { resume: DurableSessionOperation, setRootState: DurableSessionOperation, close: DurableSessionOperation, archive: DurableSessionOperation, unarchive: DurableSessionOperation, delete: DurableSessionOperation, };

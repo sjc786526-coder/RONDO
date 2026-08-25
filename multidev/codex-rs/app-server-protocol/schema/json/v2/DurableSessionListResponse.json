@@ -1,6 +1,42 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
+    "DurableSessionControlPrecondition": {
+      "description": "Query proof that the server must revalidate before applying a control operation.",
+      "properties": {
+        "commitFingerprint": {
+          "type": "string"
+        },
+        "commitGeneration": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "expectedResidency": {
+          "$ref": "#/definitions/DurableSessionResidency"
+        },
+        "expectedStorageStatus": {
+          "$ref": "#/definitions/DurableSessionStorageStatus"
+        },
+        "teamInstanceId": {
+          "type": "string"
+        },
+        "teamRevision": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "commitFingerprint",
+        "commitGeneration",
+        "expectedResidency",
+        "expectedStorageStatus",
+        "teamInstanceId",
+        "teamRevision"
+      ],
+      "type": "object"
+    },
     "DurableSessionDomainLifecycle": {
       "description": "Domain lifecycle, independent of storage placement and runtime residency.",
       "enum": [
@@ -140,6 +176,8 @@
         "residencyUnknown",
         "ownerUnavailableHere",
         "notObservedHere",
+        "controlDisabled",
+        "alreadyLoaded",
         "alreadyArchived",
         "notArchived",
         "closing",
@@ -165,6 +203,9 @@
         "resume": {
           "$ref": "#/definitions/DurableSessionOperation"
         },
+        "setRootState": {
+          "$ref": "#/definitions/DurableSessionOperation"
+        },
         "unarchive": {
           "$ref": "#/definitions/DurableSessionOperation"
         }
@@ -174,6 +215,7 @@
         "close",
         "delete",
         "resume",
+        "setRootState",
         "unarchive"
       ],
       "type": "object"
@@ -539,6 +581,17 @@
     "DurableSessionView": {
       "description": "Read-only projection of one canonical durable Session.\n\nDurable identity, storage placement, domain lifecycle, server-local runtime residency, operation availability, and read completeness remain independent axes. A caller must not infer one axis from another.",
       "properties": {
+        "controlPrecondition": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/DurableSessionControlPrecondition"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Exact query proof accepted by `session/control`, when the read can prove every required identity, storage, residency, and committed Team fact."
+        },
         "domainLifecycle": {
           "$ref": "#/definitions/DurableSessionDomainLifecycle"
         },

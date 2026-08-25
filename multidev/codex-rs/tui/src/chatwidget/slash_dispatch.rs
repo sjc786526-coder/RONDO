@@ -388,17 +388,13 @@ impl ChatWidget {
                 if self.config.features.enabled(Feature::DurableSessionQuery) {
                     self.app_event_tx
                         .send(AppEvent::DurableSessionQueryCommand(String::new()));
-                } else if self
-                    .config
-                    .features
-                    .enabled(Feature::ExperimentalSessionControl)
-                {
-                    self.app_event_tx
-                        .send(AppEvent::ExperimentalSessionControlCommand(String::new()));
                 }
             }
             SlashCommand::SessionControl => {
-                if self
+                if self.formal_durable_session_control_enabled() {
+                    self.app_event_tx
+                        .send(AppEvent::DurableSessionControlCommand(String::new()));
+                } else if self
                     .config
                     .features
                     .enabled(Feature::ExperimentalSessionControl)
@@ -708,19 +704,13 @@ impl ChatWidget {
                 if self.config.features.enabled(Feature::DurableSessionQuery) {
                     self.app_event_tx
                         .send(AppEvent::DurableSessionQueryCommand(trimmed.to_string()));
-                } else if self
-                    .config
-                    .features
-                    .enabled(Feature::ExperimentalSessionControl)
-                {
-                    self.app_event_tx
-                        .send(AppEvent::ExperimentalSessionControlCommand(
-                            trimmed.to_string(),
-                        ));
                 }
             }
             SlashCommand::SessionControl => {
-                if self
+                if self.formal_durable_session_control_enabled() {
+                    self.app_event_tx
+                        .send(AppEvent::DurableSessionControlCommand(trimmed.to_string()));
+                } else if self
                     .config
                     .features
                     .enabled(Feature::ExperimentalSessionControl)
@@ -1094,6 +1084,12 @@ impl ChatWidget {
         #[cfg(not(target_os = "windows"))]
         let allow_elevate_sandbox = false;
 
+        let formal_session_control_enabled = self.formal_durable_session_control_enabled();
+        let experimental_session_control_enabled = self
+            .config
+            .features
+            .enabled(Feature::ExperimentalSessionControl);
+
         BuiltinCommandFlags {
             collaboration_modes_enabled: self.collaboration_modes_enabled(),
             connectors_enabled: self.connectors_enabled(),
@@ -1102,15 +1098,9 @@ impl ChatWidget {
             goal_command_enabled: self.config.features.enabled(Feature::Goals),
             service_tier_commands_enabled: self.fast_mode_enabled(),
             personality_command_enabled: self.config.features.enabled(Feature::Personality),
-            sessions_command_enabled: self.config.features.enabled(Feature::DurableSessionQuery)
-                || self
-                    .config
-                    .features
-                    .enabled(Feature::ExperimentalSessionControl),
-            session_control_command_enabled: self
-                .config
-                .features
-                .enabled(Feature::ExperimentalSessionControl),
+            sessions_command_enabled: self.config.features.enabled(Feature::DurableSessionQuery),
+            session_control_command_enabled: formal_session_control_enabled
+                || experimental_session_control_enabled,
             allow_elevate_sandbox,
             side_conversation_active: self.active_side_conversation,
         }

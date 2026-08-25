@@ -185,6 +185,7 @@ fn thread_section_store_error(
         ThreadStoreError::InvalidRequest { message } => invalid_params(message),
         error @ (ThreadStoreError::ThreadNotFound { .. }
         | ThreadStoreError::Conflict { .. }
+        | ThreadStoreError::Partial { .. }
         | ThreadStoreError::Internal { .. }) => {
             let action = operation
                 .strip_prefix("threadSection/")

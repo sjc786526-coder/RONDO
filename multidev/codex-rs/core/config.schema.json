@@ -537,6 +537,9 @@
             "deferred_tool_world_state": {
               "type": "boolean"
             },
+            "durable_session_control": {
+              "type": "boolean"
+            },
             "durable_session_query": {
               "type": "boolean"
             },
@@ -5214,6 +5217,9 @@
           "type": "boolean"
         },
         "deferred_tool_world_state": {
+          "type": "boolean"
+        },
+        "durable_session_control": {
           "type": "boolean"
         },
         "durable_session_query": {

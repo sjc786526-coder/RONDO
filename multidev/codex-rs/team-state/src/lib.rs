@@ -48,6 +48,7 @@ pub use evidence::FactView;
 pub use evidence::NotedObservation;
 pub use evidence::ObservationLocator;
 pub use evidence::reported_evidence_refs;
+pub use handle::TeamMutationPrecondition;
 pub use handle::TeamStateHandle;
 pub use handle::TeamWakeWaiter;
 pub use ids::EventId;

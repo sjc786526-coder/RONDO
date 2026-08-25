@@ -5186,6 +5186,21 @@ async fn replace_goal_confirmation_snapshot() {
     );
 }
 
+#[tokio::test]
+async fn durable_session_control_confirmation_snapshot() {
+    let mut app = make_test_app().await;
+    app.chat_widget.show_selection_view(
+        super::durable_session_control::durable_session_control_confirmation_view_params(
+            "permanently delete",
+            Vec::new(),
+        ),
+    );
+    assert_app_snapshot!(
+        "durable_session_control_confirmation",
+        render_bottom_popup(&app.chat_widget, /*width*/ 80)
+    );
+}
+
 fn test_thread_session(thread_id: ThreadId, cwd: PathBuf) -> ThreadSessionState {
     ThreadSessionState {
         thread_id,

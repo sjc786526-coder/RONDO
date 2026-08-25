@@ -43,7 +43,7 @@ const SESSION_LIST_MAX_SCANNED_THREADS: usize = 400;
 const SESSION_LIST_MAX_SOURCE_PAGES: usize = 16;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum StorageScope {
+pub(super) enum StorageScope {
     Active,
     Archived,
 }
@@ -57,7 +57,7 @@ impl StorageScope {
         }
     }
 
-    fn status(self) -> DurableSessionStorageStatus {
+    pub(super) fn status(self) -> DurableSessionStorageStatus {
         match self {
             Self::Active => DurableSessionStorageStatus::Active,
             Self::Archived => DurableSessionStorageStatus::Archived,
@@ -77,7 +77,7 @@ impl StorageScope {
 }
 
 #[derive(Debug)]
-enum CanonicalMetaFailure {
+pub(super) enum CanonicalMetaFailure {
     NotFound,
     Unavailable,
     Unsupported,
@@ -312,6 +312,7 @@ impl ThreadRequestProcessor {
                         self.observed_residency(meta.session_id, root_thread_id)
                             .await,
                         None,
+                        self.config.features.enabled(Feature::DurableSessionControl),
                     ),
                 }
                 .into(),
@@ -334,7 +335,7 @@ impl ThreadRequestProcessor {
         }
     }
 
-    async fn read_canonical_meta_anywhere(
+    pub(super) async fn read_canonical_meta_anywhere(
         &self,
         root_thread_id: ThreadId,
     ) -> Result<(SessionMeta, StorageScope), CanonicalMetaFailure> {
@@ -379,12 +380,13 @@ impl ThreadRequestProcessor {
             .map_err(map_meta_error)
     }
 
-    async fn project_authenticated_session(
+    pub(super) async fn project_authenticated_session(
         &self,
         meta: SessionMeta,
         scope: StorageScope,
         root_thread_id: ThreadId,
     ) -> DurableSessionView {
+        let control_enabled = self.config.features.enabled(Feature::DurableSessionControl);
         let codex_home = self.config.codex_home.to_path_buf();
         let projection_meta = meta.clone();
         let projected = tokio::task::spawn_blocking(move || {
@@ -404,6 +406,7 @@ impl ThreadRequestProcessor {
                 },
                 residency,
                 None,
+                control_enabled,
             );
         }
         match projected {
@@ -413,10 +416,16 @@ impl ThreadRequestProcessor {
                 DurableSessionReadStatus::Available,
                 residency,
                 Some(team_projection(team)),
+                control_enabled,
             ),
-            Ok(Err(error)) => {
-                authenticated_view(&meta, scope, core_read_status(error), residency, None)
-            }
+            Ok(Err(error)) => authenticated_view(
+                &meta,
+                scope,
+                core_read_status(error),
+                residency,
+                None,
+                control_enabled,
+            ),
             Err(error) => {
                 tracing::warn!(%root_thread_id, %error, "Durable Session snapshot task failed");
                 authenticated_view(
@@ -427,6 +436,7 @@ impl ThreadRequestProcessor {
                     },
                     residency,
                     None,
+                    control_enabled,
                 )
             }
         }

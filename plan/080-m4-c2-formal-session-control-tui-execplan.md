@@ -30,42 +30,42 @@ archive、unarchive、delete 等操作只调用 M4-S2/原生 ThreadStore 生命�
 
 ### 完成/验收标准
 
-- [ ] 在修改产品代码前，先于最终合并树补跑 M4-C1 query read seam × M4-S2 lifecycle write seam 聚焦回归；通过后才作为 Plan 080
+- [x] 在修改产品代码前，先于最终合并树补跑 M4-C1 query read seam × M4-S2 lifecycle write seam 聚焦回归；通过后才作为 Plan 080
       基线。若暴露真实接缝缺陷，先形成回归并在 Plan 080 职责内窄修、重跑，不把 078 合流时的静态/格式检查冒充测试通过。
-- [ ] app-server v2 公开正式、typed 的 Durable Session 控制面，让操作者能发起当前领域可证明且 query 允许的在线 canonical
+- [x] app-server v2 公开正式、typed 的 Durable Session 控制面，让操作者能发起当前领域可证明且 query 允许的在线 canonical
       Root owner lifecycle mutation、经 M4-S2 barrier 的显式 Session close，以及 cold archive/unarchive/delete。既有
       `thread/resume` 等正式领域能力可直接复用；不因 query 的 operation availability 字段机械新建一对一 RPC，也不要求保留
       C0 的 RPC、字段、代表性 mutation、固定 timeout 或命令布局。resume 可以有意激活 Root runtime，但不自动开始 model turn/API；
       它不属于下述无激活的 cold 操作。
-- [ ] 控制成功只来自现有 canonical Team/Session/ThreadStore 领域能力的成功边界。app-server、client 与 TUI 都不直接写 Team State、
+- [x] 控制成功只来自现有 canonical Team/Session/ThreadStore 领域能力的成功边界。app-server、client 与 TUI 都不直接写 Team State、
       ThreadStore、rollout、snapshot 或其他持久介质，也不建立第二份 Session lifecycle/control 状态。
-- [ ] 在线 mutation 绑定发起时的正式 query proof（Session/Root/Team lineage 与 instance、committed generation/fingerprint）、目标
+- [x] 在线 mutation 绑定发起时的正式 query proof（Session/Root/Team lineage 与 instance、committed generation/fingerprint）、目标
       expected state/revision，并在 server 端最终重验 current canonical Root owner 及相关 proof。错误 owner、replacement owner、陈旧前置条件或
       读后已变化均不提交成功；client read ticket、Team revision、query committed generation/fingerprint、close/owner generation 不可互相冒充。
-- [ ] cold archive/unarchive/delete 复用 M4-S2 已验收的 Root/subtree/ThreadStore 能力，不为操作加载 Agent、启动 model turn、工具或 API；
+- [x] cold archive/unarchive/delete 复用 M4-S2 已验收的 Root/subtree/ThreadStore 能力，不为操作加载 Agent、启动 model turn、工具或 API；
       active writer、descendant、partial、unknown、unsupported、conflict 与 failure 保留真实结果。delete 的测试只作用于任务专用 fixture。
-- [ ] mutation 已提交后遇到 response loss、timeout、disconnect、lag、EOF 或无法分类的 transport error 时，不自动 replay/retry；客户端进入
+- [x] mutation 已提交后遇到 response loss、timeout、disconnect、lag、EOF 或无法分类的 transport error 时，不自动 replay/retry；客户端进入
       stale/result-unknown（或等强明确状态），迟到 completion 不覆盖更新的 connection/attachment/view。只有新的正式 query 可以恢复
       fresh；已证明未提交的 preflight rejection 可安全修正后重新操作。
-- [ ] 每次操作完成、拒绝或结果未知后，TUI 都从正式 `session/list` / `session/read` 语义重读或明确等待用户重同步；不以 mutation response、
+- [x] 每次操作完成、拒绝或结果未知后，TUI 都从正式 `session/list` / `session/read` 语义重读或明确等待用户重同步；不以 mutation response、
       UI cache 或 C0 projection 维护第三份当前状态。重启后可仅凭持久领域状态重建展示与可用操作。
-- [ ] detach、unsubscribe、切换与即时 disconnect 只解除客户端附着，不改变 Session/Team lifecycle。deferred idle unload、online close 和会
+- [x] detach、unsubscribe、切换与即时 disconnect 只解除客户端附着，不改变 Session/Team lifecycle。deferred idle unload、online close 和会
       移除 owner 的生命周期路径继续经过 M4-S2 close barrier；close failure、mutation-capable descendant、replacement owner 与 late
       completion 均不得伪报 closed、移除唯一可重试 owner或提前释放 authority。
-- [ ] TUI 以权威 query 的 availability/freshness/certainty 驱动展示；领域当前不能从既有 owner/store/barrier 事实证明的状态保持
+- [x] TUI 以权威 query 的 availability/freshness/certainty 驱动展示；领域当前不能从既有 owner/store/barrier 事实证明的状态保持
       typed unknown，不为 UI 新建 whole-Session lifecycle registry。危险或终态操作有清楚确认，成功、拒绝、unknown/stale 与重同步结果对
       操作者可区分；UI 布局与交互方式由执行者自主选择。所有用户可见变化有相称 `insta` snapshot。
-- [ ] 正式 control 独立默认关闭；query-only、control-off、C0 experimental 隔离、legacy/non-durable、单 Agent、普通 V1/V2、Durable
+- [x] 正式 control 独立默认关闭；query-only、control-off、C0 experimental 隔离、legacy/non-durable、单 Agent、普通 V1/V2、Durable
       runtime 与 shared workspace 路径无回归。启用 control 不扩大原有 sandbox/approval，也不自动启用真实模型/API。
-- [ ] public JSON-RPC、client 状态机、TUI 与必要领域测试按职责覆盖 owner/precondition、cold lifecycle、unknown/no replay、显式重读、
+- [x] public JSON-RPC、client 状态机、TUI 与必要领域测试按职责覆盖 owner/precondition、cold lifecycle、unknown/no replay、显式重读、
       detach/close barrier、default-off 与非 Durable 兼容；不为同一语义堆叠重复重型测试或建设新 E2E/审计平台。
-- [ ] 调试全链打通后冻结本轮代码与配置，用新的任务专用 Session/store 完整运行一次正式控制场景。若该轮暴露可修问题，保留未受影响的
+- [x] 调试全链打通后冻结本轮代码与配置，用新的任务专用 Session/store 完整运行一次正式控制场景。若该轮暴露可修问题，保留未受影响的
       已验证进度，修复后用新的领域状态重跑受影响场景；不以 `cargo clean` 定义 fresh。
-- [ ] app-server API 行为同步 `app-server/README.md`；实际受影响的普通/experimental app-server schema、配置 schema、Cargo/Bazel 生成物和
+- [x] app-server API 行为同步 `app-server/README.md`；实际受影响的普通/experimental app-server schema、配置 schema、Cargo/Bazel 生成物和
       TUI snapshots 使用仓库既有工具更新并审查，无遗留 `*.snap.new`、临时 fixture、调试输出或无解释生成差异。
-- [ ] 执行日志精炼记录实际控制集合/写集、首批兼容门、聚焦测试、fresh 正式轮、容量前后值、独立终审和未运行项；WBS 只更新当前阶段
+- [x] 执行日志精炼记录实际控制集合/写集、首批兼容门、聚焦测试、fresh 正式轮、容量前后值、独立终审和未运行项；WBS 只更新当前阶段
       与交接，完成历史只追加到 `doc/WBS-COMPLETED.md`，不在多处复制执行流水账。
-- [ ] 最终检查 `git diff --check`、精确写集、受保护文件、相关测试、项目与 069 target 资源、主工作区和全部 worktree 元数据；只在 080
+- [x] 最终检查 `git diff --check`、精确写集、受保护文件、相关测试、项目与 069 target 资源、主工作区和全部 worktree 元数据；只在 080
       分支形成 clean 本地提交，不合并、不推送、不删除 worktree、不重命名分支。
 
 ## 2. 范围
@@ -269,18 +269,36 @@ codex queue --thread UUID --message 'XXX'
   这些是易漂移快照，执行者须在首次清理/构建前重新实测，并额外确认 Docker/本地模型 owner。
 - 已完成三路只读专项梳理、主审查者复核与独立合同审查；无高/中等级计划 finding。计划未冻结 C0 RPC/UI/timeout
   或具体内部路线，未运行构建、测试或缓存清理。
+- 执行阶段 A 已完成：宿主侧确认无 Cargo/Rust、Docker、RONDO heavy scope 或 GPU compute owner；授权清理前项目/069 target/
+  incremental/deps 为 `262,408,773,632 / 187,705,122,816 / 97,147,797,504 / 91,746,553,856 B`，清理后为
+  `168,019,832,832 / 93,316,182,016 / 102,400 / 91,746,553,856 B`，只移除了 069 `debug/incremental` 内容。
+- 未改产品代码的合并树 query×lifecycle 聚焦门精确选择 45 项；44 项首轮通过，唯一 loopback 场景因 localhost 被代理为 HTTP 502
+  而在 mutation 前失败，随后以新的临时 Session/store、明确 localhost `NO_PROXY` 和 `--retries 0` 复验 `1/1` 通过。两批
+  watchdog 均 `stop=none / cleanup=none`，阶段 A 基线成立。
+- 阶段 B/C 已完成单一稳定 v2 `session/control`：正式 query 提供 control proof/availability，server 在请求执行前重投影并精确比较
+  proof；online `SetRootState` 在 durable mutation 线性化点复验 Team instance/revision/commit generation，`Close` 复用 M4-S2 owner
+  removal barrier，cold archive/unarchive/delete 复用 ThreadStore 原生生命周期。typed Applied/Rejected/Partial/Unknown 贯穿
+  protocol→client→TUI，transport 结果未知不自动重放。
+- 正式 TUI `/session-control` 已完成 query-driven 展示、危险操作确认、accepted-read ticket、15 秒 timeout、late completion 隔离、
+  detach/disconnect/lag/attachment replacement stale/unknown 与操作后自动正式重读；query/control 两个默认关闭 gate 相互独立，双开时
+  正式入口优先，C0 prototype 仍由原 gate 隔离。
+- 阶段 D 已更新 app-server README、stable/experimental app-server schema、config schema 与两份 TUI snapshot；generator、scoped fix、
+  scoped clippy、fmt/fmt-check 和 diff 检查均通过，无 `*.snap.new`。最终正式控制聚焦轮 `17/17`，query×lifecycle 邻接回归
+  `47/47`，均使用 canonical lock/watchdog、指定 069 target、`--retries 0` 且 `stop=none / cleanup=none`。
+- 阶段 E 使用新的任务专用 Session/store 完成 list/read→owner close→query resync→cold archive/unarchive→进程重启→list/read rebuild
+  →delete→SessionNotFound；操作未启动 turn 或模型。该 fresh 场景包含在最终 `17/17` 中。未参与主体实现的只读独立终审未发现
+  high/medium correctness finding。
+- 最终重型轮后的项目/069 target 为 `251,315,224,576 / 176,363,339,776 B`，未触及 270GB 告警线；未运行 Docker、真实 API/模型、
+  训练、测评、benchmark、CI/PR 或 full-workspace 门禁。
 
 ### 当前工作
 
-- Plan 080 任务合同与 WBS 立项指针已在专用 worktree 完成，等待执行者从阶段 A 开始。
+- 产品实现、生成物、fresh 正式轮、聚焦回归和独立终审均已完成；正在同步权威文档、执行日志并形成 080 clean 本地任务提交。
 
 ### 本任务剩余步骤
 
-- 阶段 A：容量/缓存确认及未改产品代码的合并树 query×lifecycle 首批门禁。
-- 阶段 B：正式 protocol/server 与权威领域控制接缝。
-- 阶段 C：client/TUI 控制、结果 certainty 与正式 query 重同步。
-- 阶段 D：相关聚焦回归、生成物、snapshot、lint/fmt 和范围内整改。
-- 阶段 E：fresh 正式链、独立终审、权威文档/日志、clean 本地提交，以及按用户指定模板向审查者发送唯一的跨会话验收消息后停止会话。
+- 完成精确写集/资源/worktree 元数据复核，在 080 分支形成 clean 本地任务提交。
+- 把最终 TUI 汇报原样嵌入用户指定模板，以声明“我是 Plan 080 / M4-C2 执行者”开头发送唯一跨会话验收消息，然后立即停止会话。
 
 ### 阻塞项
 
@@ -289,7 +307,7 @@ codex queue --thread UUID --message 'XXX'
 
 ### 当前验收状态
 
-- `PLAN_READY / WORKTREE_READY / IMPLEMENTATION_NOT_STARTED / HEAVY_GATES_NOT_RUN`。
+- `M4_C2_CONTROL_PASS`：阶段 A--E、fresh 正式轮和独立终审均已完成，无未关闭的高/中 correctness finding。
 
 ### 交接边界
 
@@ -313,3 +331,6 @@ codex queue --thread UUID --message 'XXX'
 | 007 | 所有 tracked 变更留在 080 worktree；唯一预期跨 worktree ignored 写是 069 target | 当前任务不需要主工作区私有配置或其它现场，便于审查和清理 | worktree/ignored | 已采纳 |
 | 008 | 终审只要求关闭高/中 correctness finding；不建设额外审计、可信或机器验收体系 | 关注功能正确性并避免为个人开发制造第二套冗余平台 | review/scope | 已采纳 |
 | 009 | 请示、批示和最终验收交接只使用用户指定的 Codex 跨会话队列，发送后停止会话 | 确保执行者与审查者跨会话消息可靠交付，不用文件、终端或人工提醒绕路 | coordination/handoff | 已采纳 |
+| 010 | 执行者发送的每一条审查者跨会话队列消息都在开头明确声明“我是 Plan 080 / M4-C2 执行者” | 避免跨会话沟通中身份混淆；该要求同样适用于最终验收消息 | coordination/handoff | 已采纳 |
+| 011 | 正式控制采用单一稳定 v2 `session/control`；online Root state/close 与 cold archive/unarchive/delete 共用 query proof 和 typed certainty，resume 复用正式 `thread/resume` | 避免复制 C0 多 RPC/projection，也不为已有 resume 重建一套协议；一个入口便于 server final revalidation 与 client no-replay | protocol/control | 已采纳 |
+| 012 | `Close` 的成功 effect 命名为 `OwnerClosed`，后续正式 query 的 whole-Session lifecycle 仍可为 `Unknown` | M4-S2 能权威证明 loaded canonical Root owner 已经过 barrier 并移除，但没有 whole-Session lifecycle registry；避免为 UI 虚构更强终态或另建状态轴 | lifecycle/UI | 已采纳 |

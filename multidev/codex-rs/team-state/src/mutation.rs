@@ -222,6 +222,14 @@ pub enum TeamError {
     /// The domain mutation was valid but its durable commit did not establish success. The reason
     /// preserves conflict, unavailable and indeterminate distinctions from the storage boundary.
     Durability { reason: String },
+    /// The whole-Team snapshot used by a control caller is no longer current. Unlike a
+    /// target-local lifecycle conflict, this rejects when any committed Team mutation won after
+    /// the caller's read.
+    SnapshotConflict {
+        current_instance: TeamInstanceId,
+        current_revision: TeamRevision,
+        current_commit_generation: u64,
+    },
     /// The caller's session is not a registered participant of this team instance. Team
     /// capabilities are refused rather than defaulted.
     UnknownParticipant,
@@ -288,6 +296,14 @@ impl fmt::Display for TeamError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Durability { reason } => write!(f, "Team durability refused the mutation: {reason}"),
+            Self::SnapshotConflict {
+                current_instance,
+                current_revision,
+                current_commit_generation,
+            } => write!(
+                f,
+                "Team snapshot changed: current instance={current_instance} revision={current_revision} commit_generation={current_commit_generation}"
+            ),
             Self::UnknownParticipant => f.write_str(
                 "this session is not a registered participant of the team; team tools are unavailable",
             ),

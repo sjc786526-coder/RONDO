@@ -29,6 +29,15 @@ impl App {
             AppEvent::DurableSessionQueryCompleted(completion) => {
                 self.handle_durable_session_query_completion(app_server, completion);
             }
+            AppEvent::DurableSessionControlCommand(args) => {
+                self.handle_durable_session_control_command(app_server, &args);
+            }
+            AppEvent::DurableSessionControlConfirmed(confirmation) => {
+                self.handle_durable_session_control_confirmed(app_server, confirmation);
+            }
+            AppEvent::DurableSessionControlCompleted { ticket, result } => {
+                self.handle_durable_session_control_completion(app_server, ticket, result);
+            }
             AppEvent::ExperimentalSessionControlCommand(args) => {
                 self.handle_experimental_session_control_command(app_server, &args)
                     .await;

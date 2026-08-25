@@ -2,6 +2,7 @@ use crate::agent::AgentStatus;
 use crate::config::ConstraintResult;
 use crate::elicitation::ElicitationRegistration;
 use crate::experimental_session_control;
+use crate::experimental_session_control::DurableSessionControlSetRootStateParams;
 use crate::experimental_session_control::ExperimentalSessionControlError;
 use crate::experimental_session_control::ExperimentalSessionControlMutationOutcome;
 use crate::experimental_session_control::ExperimentalSessionControlSetRootStateParams;
@@ -602,6 +603,19 @@ impl CodexThread {
         params: ExperimentalSessionControlSetRootStateParams,
     ) -> Result<ExperimentalSessionControlMutationOutcome, ExperimentalSessionControlError> {
         experimental_session_control::set_loaded_root_state(self.session.as_ref(), params).await
+    }
+
+    /// Apply a formal root-attention transition only at the committed Team snapshot supplied by
+    /// the latest formal Session query.
+    pub async fn durable_session_control_set_root_state(
+        &self,
+        params: DurableSessionControlSetRootStateParams,
+    ) -> Result<ExperimentalSessionControlMutationOutcome, ExperimentalSessionControlError> {
+        experimental_session_control::set_loaded_root_state_at_snapshot(
+            self.session.as_ref(),
+            params,
+        )
+        .await
     }
 
     pub(crate) fn with_experimental_session_control_residency<T>(

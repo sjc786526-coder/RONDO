@@ -5,4 +5,4 @@
 /**
  * Why an operation is unknown or unavailable in this projection.
  */
-export type DurableSessionOperationAvailabilityReason = "readIncomplete" | "identityUnavailable" | "storageUnavailable" | "lifecycleUnknown" | "residencyUnknown" | "ownerUnavailableHere" | "notObservedHere" | "alreadyArchived" | "notArchived" | "closing" | "closed" | "failed" | "childSession" | "unsupported";
+export type DurableSessionOperationAvailabilityReason = "readIncomplete" | "identityUnavailable" | "storageUnavailable" | "lifecycleUnknown" | "residencyUnknown" | "ownerUnavailableHere" | "notObservedHere" | "controlDisabled" | "alreadyLoaded" | "alreadyArchived" | "notArchived" | "closing" | "closed" | "failed" | "childSession" | "unsupported";

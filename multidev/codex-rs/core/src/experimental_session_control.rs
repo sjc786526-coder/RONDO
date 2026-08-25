@@ -17,6 +17,9 @@ use codex_team_state::ParticipantRole;
 use codex_team_state::ProducerState;
 use codex_team_state::RootState;
 use codex_team_state::TeamError;
+use codex_team_state::TeamInstanceId;
+use codex_team_state::TeamMutationPrecondition;
+use codex_team_state::TeamRevision;
 use codex_team_state::TeamSnapshot;
 use codex_team_state::TeamStateHandle;
 use codex_team_state::VersionId;
@@ -110,6 +113,18 @@ pub struct ExperimentalSessionControlSetRootStateParams {
     pub next_root_state: ExperimentalSessionControlRootState,
 }
 
+/// Formal control parameters that bind a lifecycle update to one committed Team snapshot.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DurableSessionControlSetRootStateParams {
+    pub team_instance_id: String,
+    pub team_revision: u64,
+    pub commit_generation: u64,
+    pub version_id: String,
+    pub expected_producer_state: ExperimentalSessionControlProducerState,
+    pub expected_root_state: ExperimentalSessionControlRootState,
+    pub next_root_state: ExperimentalSessionControlRootState,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ExperimentalSessionControlLifecycle {
     pub version_id: String,
@@ -178,6 +193,8 @@ pub enum ExperimentalSessionControlError {
     VersionRetired { version_id: String },
     #[error("canonical Team rejected the operation: {message}")]
     UnexpectedTeamError { message: String },
+    #[error("the committed Team snapshot changed after it was read")]
+    SnapshotConflict,
 }
 
 pub(crate) async fn project_loaded_root(
@@ -191,7 +208,30 @@ pub(crate) async fn set_loaded_root_state(
     params: ExperimentalSessionControlSetRootStateParams,
 ) -> Result<ExperimentalSessionControlMutationOutcome, ExperimentalSessionControlError> {
     with_canonical_loaded_root(session, move |team, root_thread_id| {
-        set_root_state_on_team(team, root_thread_id, params)
+        set_root_state_on_team(team, root_thread_id, params, None)
+    })
+    .await
+}
+
+pub(crate) async fn set_loaded_root_state_at_snapshot(
+    session: &Session,
+    params: DurableSessionControlSetRootStateParams,
+) -> Result<ExperimentalSessionControlMutationOutcome, ExperimentalSessionControlError> {
+    let instance = TeamInstanceId::from_str(&params.team_instance_id)
+        .map_err(|_| ExperimentalSessionControlError::SnapshotConflict)?;
+    let precondition = TeamMutationPrecondition {
+        instance,
+        revision: TeamRevision::from_raw(params.team_revision),
+        commit_generation: params.commit_generation,
+    };
+    let lifecycle = ExperimentalSessionControlSetRootStateParams {
+        version_id: params.version_id,
+        expected_producer_state: params.expected_producer_state,
+        expected_root_state: params.expected_root_state,
+        next_root_state: params.next_root_state,
+    };
+    with_canonical_loaded_root(session, move |team, root_thread_id| {
+        set_root_state_on_team(team, root_thread_id, lifecycle, Some(precondition))
     })
     .await
 }
@@ -200,6 +240,7 @@ fn set_root_state_on_team(
     team: &TeamStateHandle,
     root_thread_id: ThreadId,
     params: ExperimentalSessionControlSetRootStateParams,
+    precondition: Option<TeamMutationPrecondition>,
 ) -> Result<ExperimentalSessionControlMutationOutcome, ExperimentalSessionControlError> {
     let version_id = VersionId::from_str(&params.version_id).map_err(|_| {
         ExperimentalSessionControlError::InvalidVersionId {
@@ -213,19 +254,21 @@ fn set_root_state_on_team(
         .into_iter()
         .flat_map(|event| event.versions)
         .find(|version| version.id == version_id);
-    let outcome = team
-        .update_lifecycle(
-            root_thread_id,
-            LifecycleRequest {
-                targets: vec![LifecycleTarget {
-                    version_id,
-                    expected_producer_state: params.expected_producer_state.into(),
-                    expected_root_state: params.expected_root_state.into(),
-                    change: LifecycleChange::SetRootState(params.next_root_state.into()),
-                }],
-            },
-        )
-        .map_err(|error| map_team_error(root_thread_id, error))?;
+    let request = LifecycleRequest {
+        targets: vec![LifecycleTarget {
+            version_id,
+            expected_producer_state: params.expected_producer_state.into(),
+            expected_root_state: params.expected_root_state.into(),
+            change: LifecycleChange::SetRootState(params.next_root_state.into()),
+        }],
+    };
+    let outcome = match precondition {
+        Some(precondition) => {
+            team.update_lifecycle_at_snapshot(root_thread_id, precondition, request)
+        }
+        None => team.update_lifecycle(root_thread_id, request),
+    }
+    .map_err(|error| map_team_error(root_thread_id, error))?;
     let Some(updated_lifecycle) = outcome.updated.first().copied() else {
         return Err(ExperimentalSessionControlError::UnexpectedTeamError {
             message: "single-target lifecycle response omitted its updated snapshot".to_string(),
@@ -401,6 +444,7 @@ fn map_team_error(root_thread_id: ThreadId, error: TeamError) -> ExperimentalSes
             referenced_instance: referenced_instance.to_string(),
             current_instance: current_instance.to_string(),
         },
+        TeamError::SnapshotConflict { .. } => ExperimentalSessionControlError::SnapshotConflict,
         TeamError::UnknownReference { reference } => {
             ExperimentalSessionControlError::UnknownReference { reference }
         }

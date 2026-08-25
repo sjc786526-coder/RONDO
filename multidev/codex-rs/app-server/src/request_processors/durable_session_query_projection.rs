@@ -1,6 +1,7 @@
 //! Wire projection for the formal Durable Session query.
 
 use super::StorageScope;
+use codex_app_server_protocol::DurableSessionControlPrecondition;
 use codex_app_server_protocol::DurableSessionDomainLifecycle;
 use codex_app_server_protocol::DurableSessionFactProvenance;
 use codex_app_server_protocol::DurableSessionIdentity;
@@ -36,9 +37,23 @@ pub(super) fn authenticated_view(
     read_status: DurableSessionReadStatus,
     residency: DurableSessionResidency,
     team: Option<DurableSessionTeamProjection>,
+    control_enabled: bool,
 ) -> DurableSessionView {
     let read_available = matches!(&read_status, DurableSessionReadStatus::Available);
     let team_available = team.is_some();
+    let control_precondition = (control_enabled && read_available)
+        .then(|| {
+            let team = team.as_ref()?;
+            Some(DurableSessionControlPrecondition {
+                expected_storage_status: scope.status(),
+                expected_residency: residency,
+                team_instance_id: team.team_instance_id.clone(),
+                team_revision: team.revision,
+                commit_generation: team.commit_generation,
+                commit_fingerprint: team.commit_fingerprint.clone(),
+            })
+        })
+        .flatten();
     DurableSessionView {
         identity: DurableSessionIdentity {
             session_id: meta.session_id.to_string(),
@@ -47,7 +62,8 @@ pub(super) fn authenticated_view(
         storage_status: scope.status(),
         domain_lifecycle: DurableSessionDomainLifecycle::Unknown,
         residency,
-        operation_availability: operations(scope, read_available),
+        operation_availability: operations(scope, read_available, residency, control_enabled),
+        control_precondition,
         provenance: DurableSessionProvenance {
             identity: DurableSessionFactProvenance::SessionMeta,
             storage_status: DurableSessionFactProvenance::ThreadStore,
@@ -81,6 +97,7 @@ pub(super) fn unavailable_view(
         operation_availability: unknown_operations(
             DurableSessionOperationAvailabilityReason::IdentityUnavailable,
         ),
+        control_precondition: None,
         provenance: DurableSessionProvenance {
             identity: DurableSessionFactProvenance::Unavailable,
             storage_status: DurableSessionFactProvenance::Unavailable,
@@ -93,21 +110,50 @@ pub(super) fn unavailable_view(
     }
 }
 
-fn operations(scope: StorageScope, read_available: bool) -> DurableSessionOperations {
+fn operations(
+    scope: StorageScope,
+    read_available: bool,
+    residency: DurableSessionResidency,
+    control_enabled: bool,
+) -> DurableSessionOperations {
     if !read_available {
         return unknown_operations(DurableSessionOperationAvailabilityReason::ReadIncomplete);
     }
-    let unknown = || {
+    if !control_enabled {
+        return unavailable_operations(DurableSessionOperationAvailabilityReason::ControlDisabled);
+    }
+    let available = || {
         operation(
-            DurableSessionOperationAvailability::Unknown {
-                reason: DurableSessionOperationAvailabilityReason::Unsupported,
-            },
-            DurableSessionFactProvenance::Unavailable,
+            DurableSessionOperationAvailability::Available,
+            DurableSessionFactProvenance::DerivedPolicy,
         )
     };
-    let (archive, unarchive) = match scope {
+    let (resume, set_root_state, close, archive, unarchive) = match scope {
         StorageScope::Active => (
-            unknown(),
+            match residency {
+                DurableSessionResidency::NotObservedHere => available(),
+                DurableSessionResidency::ObservedOwnerHere => operation(
+                    DurableSessionOperationAvailability::Unavailable {
+                        reason: DurableSessionOperationAvailabilityReason::AlreadyLoaded,
+                    },
+                    DurableSessionFactProvenance::ServerRuntimeObservation,
+                ),
+                DurableSessionResidency::OwnerUnavailableHere => operation(
+                    DurableSessionOperationAvailability::Unavailable {
+                        reason: DurableSessionOperationAvailabilityReason::OwnerUnavailableHere,
+                    },
+                    DurableSessionFactProvenance::ServerRuntimeObservation,
+                ),
+                DurableSessionResidency::Unknown => operation(
+                    DurableSessionOperationAvailability::Unknown {
+                        reason: DurableSessionOperationAvailabilityReason::ResidencyUnknown,
+                    },
+                    DurableSessionFactProvenance::ServerRuntimeObservation,
+                ),
+            },
+            owner_operation(residency),
+            owner_operation(residency),
+            available(),
             operation(
                 DurableSessionOperationAvailability::Unavailable {
                     reason: DurableSessionOperationAvailabilityReason::NotArchived,
@@ -118,24 +164,84 @@ fn operations(scope: StorageScope, read_available: bool) -> DurableSessionOperat
         StorageScope::Archived => (
             operation(
                 DurableSessionOperationAvailability::Unavailable {
+                    reason: DurableSessionOperationAvailabilityReason::Unsupported,
+                },
+                DurableSessionFactProvenance::ThreadStore,
+            ),
+            operation(
+                DurableSessionOperationAvailability::Unavailable {
+                    reason: DurableSessionOperationAvailabilityReason::NotObservedHere,
+                },
+                DurableSessionFactProvenance::ThreadStore,
+            ),
+            operation(
+                DurableSessionOperationAvailability::Unavailable {
+                    reason: DurableSessionOperationAvailabilityReason::NotObservedHere,
+                },
+                DurableSessionFactProvenance::ThreadStore,
+            ),
+            operation(
+                DurableSessionOperationAvailability::Unavailable {
                     reason: DurableSessionOperationAvailabilityReason::AlreadyArchived,
                 },
                 DurableSessionFactProvenance::ThreadStore,
             ),
-            unknown(),
+            available(),
         ),
     };
     DurableSessionOperations {
-        resume: unknown(),
-        close: operation(
-            DurableSessionOperationAvailability::Unknown {
-                reason: DurableSessionOperationAvailabilityReason::LifecycleUnknown,
-            },
-            DurableSessionFactProvenance::Unavailable,
-        ),
+        resume,
+        set_root_state,
+        close,
         archive,
         unarchive,
-        delete: unknown(),
+        delete: available(),
+    }
+}
+
+fn owner_operation(residency: DurableSessionResidency) -> DurableSessionOperation {
+    match residency {
+        DurableSessionResidency::ObservedOwnerHere => operation(
+            DurableSessionOperationAvailability::Available,
+            DurableSessionFactProvenance::ServerRuntimeObservation,
+        ),
+        DurableSessionResidency::OwnerUnavailableHere => operation(
+            DurableSessionOperationAvailability::Unavailable {
+                reason: DurableSessionOperationAvailabilityReason::OwnerUnavailableHere,
+            },
+            DurableSessionFactProvenance::ServerRuntimeObservation,
+        ),
+        DurableSessionResidency::NotObservedHere => operation(
+            DurableSessionOperationAvailability::Unavailable {
+                reason: DurableSessionOperationAvailabilityReason::NotObservedHere,
+            },
+            DurableSessionFactProvenance::ServerRuntimeObservation,
+        ),
+        DurableSessionResidency::Unknown => operation(
+            DurableSessionOperationAvailability::Unknown {
+                reason: DurableSessionOperationAvailabilityReason::ResidencyUnknown,
+            },
+            DurableSessionFactProvenance::ServerRuntimeObservation,
+        ),
+    }
+}
+
+fn unavailable_operations(
+    reason: DurableSessionOperationAvailabilityReason,
+) -> DurableSessionOperations {
+    let unavailable = || {
+        operation(
+            DurableSessionOperationAvailability::Unavailable { reason },
+            DurableSessionFactProvenance::DerivedPolicy,
+        )
+    };
+    DurableSessionOperations {
+        resume: unavailable(),
+        set_root_state: unavailable(),
+        close: unavailable(),
+        archive: unavailable(),
+        unarchive: unavailable(),
+        delete: unavailable(),
     }
 }
 
@@ -150,6 +256,7 @@ fn unknown_operations(
     };
     DurableSessionOperations {
         resume: unknown(),
+        set_root_state: unknown(),
         close: unknown(),
         archive: unknown(),
         unarchive: unknown(),

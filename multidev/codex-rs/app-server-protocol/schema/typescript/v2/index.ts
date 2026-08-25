@@ -99,6 +99,14 @@ export type { ContextCompactedNotification } from "./ContextCompactedNotificatio
 export type { CreditsSnapshot } from "./CreditsSnapshot";
 export type { DeprecationNoticeNotification } from "./DeprecationNoticeNotification";
 export type { DesktopOnboardingEntrypoint } from "./DesktopOnboardingEntrypoint";
+export type { DurableSessionControlEffect } from "./DurableSessionControlEffect";
+export type { DurableSessionControlOperation } from "./DurableSessionControlOperation";
+export type { DurableSessionControlOperationKind } from "./DurableSessionControlOperationKind";
+export type { DurableSessionControlOutcome } from "./DurableSessionControlOutcome";
+export type { DurableSessionControlParams } from "./DurableSessionControlParams";
+export type { DurableSessionControlPrecondition } from "./DurableSessionControlPrecondition";
+export type { DurableSessionControlRejectionReason } from "./DurableSessionControlRejectionReason";
+export type { DurableSessionControlResponse } from "./DurableSessionControlResponse";
 export type { DurableSessionDomainLifecycle } from "./DurableSessionDomainLifecycle";
 export type { DurableSessionFactProvenance } from "./DurableSessionFactProvenance";
 export type { DurableSessionIdentity } from "./DurableSessionIdentity";

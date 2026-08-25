@@ -288,6 +288,7 @@ fn map_snapshot_error(error: TeamDurabilityError) -> DurableSessionReadError {
 fn map_team_error(error: TeamError) -> DurableSessionReadError {
     match error {
         TeamError::Durability { .. }
+        | TeamError::SnapshotConflict { .. }
         | TeamError::UnknownParticipant
         | TeamError::InstanceReset { .. }
         | TeamError::UnknownReference { .. }

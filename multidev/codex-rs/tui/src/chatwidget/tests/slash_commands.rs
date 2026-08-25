@@ -112,7 +112,8 @@ fn next_add_to_history_event(rx: &mut tokio::sync::mpsc::UnboundedReceiver<AppEv
 #[derive(Debug, PartialEq, Eq)]
 enum SessionRouteEvent {
     Query(String),
-    Control(String),
+    FormalControl(String),
+    ExperimentalControl(String),
 }
 
 fn drain_session_route_events(
@@ -121,8 +122,11 @@ fn drain_session_route_events(
     std::iter::from_fn(|| rx.try_recv().ok())
         .filter_map(|event| match event {
             AppEvent::DurableSessionQueryCommand(args) => Some(SessionRouteEvent::Query(args)),
+            AppEvent::DurableSessionControlCommand(args) => {
+                Some(SessionRouteEvent::FormalControl(args))
+            }
             AppEvent::ExperimentalSessionControlCommand(args) => {
-                Some(SessionRouteEvent::Control(args))
+                Some(SessionRouteEvent::ExperimentalControl(args))
             }
             _ => None,
         })
@@ -157,10 +161,7 @@ async fn session_routes_are_gate_specific_and_unambiguous() {
     chat.dispatch_command(SlashCommand::SessionControl);
     assert_eq!(
         drain_session_route_events(&mut rx),
-        vec![
-            SessionRouteEvent::Control("list".to_string()),
-            SessionRouteEvent::Control(String::new()),
-        ]
+        vec![SessionRouteEvent::ExperimentalControl(String::new())]
     );
 
     chat.set_feature_enabled(Feature::ExperimentalSessionControl, /*enabled*/ false);
@@ -214,9 +215,22 @@ async fn session_routes_are_gate_specific_and_unambiguous() {
         vec![
             SessionRouteEvent::Query(String::new()),
             SessionRouteEvent::Query("track root-a version-a open pending resolved".to_string()),
-            SessionRouteEvent::Control(String::new()),
-            SessionRouteEvent::Control("track root-a version-a open pending resolved".to_string()),
+            SessionRouteEvent::ExperimentalControl(String::new()),
+            SessionRouteEvent::ExperimentalControl(
+                "track root-a version-a open pending resolved".to_string()
+            ),
         ]
+    );
+
+    chat.set_feature_enabled(Feature::DurableSessionControl, /*enabled*/ true);
+    chat.dispatch_command_with_args(
+        SlashCommand::SessionControl,
+        "archive".to_string(),
+        Vec::new(),
+    );
+    assert_eq!(
+        drain_session_route_events(&mut rx),
+        vec![SessionRouteEvent::FormalControl("archive".to_string())]
     );
 }
 

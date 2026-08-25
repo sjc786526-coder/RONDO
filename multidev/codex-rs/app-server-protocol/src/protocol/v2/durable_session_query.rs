@@ -1,3 +1,4 @@
+use super::DurableSessionControlPrecondition;
 use crate::JsonSchema;
 use crate::TS;
 use serde::Deserialize;
@@ -81,6 +82,9 @@ pub struct DurableSessionView {
     pub domain_lifecycle: DurableSessionDomainLifecycle,
     pub residency: DurableSessionResidency,
     pub operation_availability: DurableSessionOperations,
+    /// Exact query proof accepted by `session/control`, when the read can prove
+    /// every required identity, storage, residency, and committed Team fact.
+    pub control_precondition: Option<DurableSessionControlPrecondition>,
     pub provenance: DurableSessionProvenance,
     pub read_status: DurableSessionReadStatus,
     /// Present only when one complete committed Team snapshot was projected.
@@ -137,6 +141,7 @@ pub enum DurableSessionResidency {
 #[ts(export_to = "v2/")]
 pub struct DurableSessionOperations {
     pub resume: DurableSessionOperation,
+    pub set_root_state: DurableSessionOperation,
     pub close: DurableSessionOperation,
     pub archive: DurableSessionOperation,
     pub unarchive: DurableSessionOperation,
@@ -179,6 +184,8 @@ pub enum DurableSessionOperationAvailabilityReason {
     ResidencyUnknown,
     OwnerUnavailableHere,
     NotObservedHere,
+    ControlDisabled,
+    AlreadyLoaded,
     AlreadyArchived,
     NotArchived,
     Closing,

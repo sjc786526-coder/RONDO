@@ -43,6 +43,7 @@ fn unknown_operations(
 ) -> DurableSessionOperations {
     DurableSessionOperations {
         resume: unknown_operation(reason),
+        set_root_state: unknown_operation(reason),
         close: unknown_operation(reason),
         archive: unknown_operation(reason),
         unarchive: unknown_operation(reason),
@@ -76,6 +77,7 @@ fn authenticated_operations(
     };
     DurableSessionOperations {
         resume: unknown_operation(DurableSessionOperationAvailabilityReason::Unsupported),
+        set_root_state: unknown_operation(DurableSessionOperationAvailabilityReason::Unsupported),
         close: unknown_operation(DurableSessionOperationAvailabilityReason::LifecycleUnknown),
         archive,
         unarchive,
@@ -93,6 +95,7 @@ fn view(session_id: &str, storage_status: DurableSessionStorageStatus) -> Durabl
         domain_lifecycle: DurableSessionDomainLifecycle::Unknown,
         residency: DurableSessionResidency::NotObservedHere,
         operation_availability: authenticated_operations(storage_status),
+        control_precondition: None,
         provenance: DurableSessionProvenance {
             identity: DurableSessionFactProvenance::SessionMeta,
             storage_status: DurableSessionFactProvenance::ThreadStore,
@@ -149,6 +152,7 @@ fn unavailable_view(session_id: &str, read_status: DurableSessionReadStatus) -> 
         operation_availability: unknown_operations(
             DurableSessionOperationAvailabilityReason::IdentityUnavailable,
         ),
+        control_precondition: None,
         provenance: DurableSessionProvenance {
             identity: DurableSessionFactProvenance::Unavailable,
             storage_status: DurableSessionFactProvenance::Unavailable,

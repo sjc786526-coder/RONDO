@@ -720,6 +720,167 @@
       ],
       "type": "string"
     },
+    "DurableSessionControlOperation": {
+      "description": "Mutation requested from the current canonical Durable Session authority.",
+      "oneOf": [
+        {
+          "properties": {
+            "expected_producer_state": {
+              "$ref": "#/definitions/DurableSessionTeamProducerState"
+            },
+            "expected_root_state": {
+              "$ref": "#/definitions/DurableSessionTeamRootState"
+            },
+            "next_root_state": {
+              "$ref": "#/definitions/DurableSessionTeamRootState"
+            },
+            "type": {
+              "enum": [
+                "setRootState"
+              ],
+              "title": "SetRootStateDurableSessionControlOperationType",
+              "type": "string"
+            },
+            "version_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "expected_producer_state",
+            "expected_root_state",
+            "next_root_state",
+            "type",
+            "version_id"
+          ],
+          "title": "SetRootStateDurableSessionControlOperation",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "close"
+              ],
+              "title": "CloseDurableSessionControlOperationType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "CloseDurableSessionControlOperation",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "archive"
+              ],
+              "title": "ArchiveDurableSessionControlOperationType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "ArchiveDurableSessionControlOperation",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "unarchive"
+              ],
+              "title": "UnarchiveDurableSessionControlOperationType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "UnarchiveDurableSessionControlOperation",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "delete"
+              ],
+              "title": "DeleteDurableSessionControlOperationType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "DeleteDurableSessionControlOperation",
+          "type": "object"
+        }
+      ]
+    },
+    "DurableSessionControlParams": {
+      "description": "Parameters for one authoritative Durable Session control attempt.",
+      "properties": {
+        "operation": {
+          "$ref": "#/definitions/DurableSessionControlOperation"
+        },
+        "precondition": {
+          "$ref": "#/definitions/DurableSessionControlPrecondition"
+        },
+        "rootThreadId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "operation",
+        "precondition",
+        "rootThreadId",
+        "sessionId"
+      ],
+      "type": "object"
+    },
+    "DurableSessionControlPrecondition": {
+      "description": "Query proof that the server must revalidate before applying a control operation.",
+      "properties": {
+        "commitFingerprint": {
+          "type": "string"
+        },
+        "commitGeneration": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "expectedResidency": {
+          "$ref": "#/definitions/DurableSessionResidency"
+        },
+        "expectedStorageStatus": {
+          "$ref": "#/definitions/DurableSessionStorageStatus"
+        },
+        "teamInstanceId": {
+          "type": "string"
+        },
+        "teamRevision": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "commitFingerprint",
+        "commitGeneration",
+        "expectedResidency",
+        "expectedStorageStatus",
+        "teamInstanceId",
+        "teamRevision"
+      ],
+      "type": "object"
+    },
     "DurableSessionListParams": {
       "description": "Parameters for discovering canonical durable Sessions.",
       "properties": {
@@ -763,6 +924,50 @@
         "sessionId"
       ],
       "type": "object"
+    },
+    "DurableSessionResidency": {
+      "description": "Runtime residency observed only by the app-server answering this query.",
+      "enum": [
+        "observedOwnerHere",
+        "ownerUnavailableHere",
+        "notObservedHere",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "DurableSessionStorageStatus": {
+      "description": "Persistent source selected for this Session record.",
+      "oneOf": [
+        {
+          "enum": [
+            "active",
+            "archived"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "The selected durable source could not prove active or archived status.",
+          "enum": [
+            "unknown"
+          ],
+          "type": "string"
+        }
+      ]
+    },
+    "DurableSessionTeamProducerState": {
+      "enum": [
+        "open",
+        "closed"
+      ],
+      "type": "string"
+    },
+    "DurableSessionTeamRootState": {
+      "enum": [
+        "pending",
+        "tracking",
+        "resolved"
+      ],
+      "type": "string"
     },
     "DynamicToolNamespaceTool": {
       "oneOf": [
@@ -6021,6 +6226,30 @@
         "params"
       ],
       "title": "Session/readRequest",
+      "type": "object"
+    },
+    {
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/RequestId"
+        },
+        "method": {
+          "enum": [
+            "session/control"
+          ],
+          "title": "Session/controlRequestMethod",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/DurableSessionControlParams"
+        }
+      },
+      "required": [
+        "id",
+        "method",
+        "params"
+      ],
+      "title": "Session/controlRequest",
       "type": "object"
     },
     {

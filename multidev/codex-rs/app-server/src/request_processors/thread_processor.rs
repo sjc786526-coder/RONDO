@@ -1522,7 +1522,7 @@ impl ThreadRequestProcessor {
         self.thread_archive_response(params).await
     }
 
-    async fn thread_archive_response(
+    pub(super) async fn thread_archive_response(
         &self,
         params: ThreadArchiveParams,
     ) -> Result<(ThreadArchiveResponse, Vec<String>), JSONRPCErrorError> {
@@ -1846,7 +1846,7 @@ impl ThreadRequestProcessor {
         Ok((response, ThreadUnarchivedNotification { thread_id }))
     }
 
-    async fn thread_unarchive_response(
+    pub(super) async fn thread_unarchive_response(
         &self,
         params: ThreadUnarchiveParams,
     ) -> Result<(ThreadUnarchiveResponse, String), JSONRPCErrorError> {
@@ -5240,6 +5240,23 @@ fn thread_store_archive_error(operation: &str, err: ThreadStoreError) -> JSONRPC
         ThreadStoreError::Unsupported {
             operation: unsupported_operation,
         } => unsupported_thread_store_operation(unsupported_operation),
+        ThreadStoreError::Partial {
+            completed_thread_ids,
+            failed_thread_id,
+            message,
+        } => JSONRPCErrorError {
+            code: crate::error_code::INTERNAL_ERROR_CODE,
+            message: format!(
+                "failed to {operation} complete session subtree at {failed_thread_id}: {message}"
+            ),
+            data: Some(serde_json::json!({
+                "type": "partial",
+                "completedThreadIds": completed_thread_ids
+                    .into_iter()
+                    .map(|thread_id| thread_id.to_string())
+                    .collect::<Vec<_>>()
+            })),
+        },
         err => internal_error(format!("failed to {operation} session: {err}")),
     }
 }

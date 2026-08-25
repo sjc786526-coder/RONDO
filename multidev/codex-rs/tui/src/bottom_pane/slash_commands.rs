@@ -237,13 +237,18 @@ mod tests {
     }
 
     #[test]
-    fn session_commands_are_independently_hidden_without_their_product_opt_ins() {
+    fn session_commands_honor_independent_visibility_flags() {
         let mut flags = all_enabled_flags();
         flags.sessions_command_enabled = false;
         assert!(
             builtins_for_input(flags)
                 .iter()
                 .all(|(_, command)| *command != SlashCommand::Sessions)
+        );
+        assert!(
+            builtins_for_input(flags)
+                .iter()
+                .any(|(_, command)| *command == SlashCommand::SessionControl)
         );
 
         flags.sessions_command_enabled = true;
@@ -257,6 +262,12 @@ mod tests {
         assert_eq!(find_builtin_command("sessions", flags), None);
 
         flags.session_control_command_enabled = false;
+        flags.sessions_command_enabled = true;
+        assert!(
+            builtins_for_input(flags)
+                .iter()
+                .any(|(_, command)| *command == SlashCommand::Sessions)
+        );
         assert!(
             builtins_for_input(flags)
                 .iter()

@@ -3,13 +3,29 @@ use app_test_support::create_fake_paginated_rollout;
 use app_test_support::create_fake_parented_rollout_with_source;
 use app_test_support::create_fake_rollout;
 use app_test_support::rollout_path;
+use codex_app_server_client::QueryReadApplyResult;
+use codex_app_server_client::QueryViewFreshness;
 use codex_app_server_protocol::ClientNotification;
 use codex_app_server_protocol::ClientRequest;
+use codex_app_server_protocol::DurableSessionControlEffect;
+use codex_app_server_protocol::DurableSessionControlOperation;
+use codex_app_server_protocol::DurableSessionControlOutcome;
+use codex_app_server_protocol::DurableSessionControlResponse;
+use codex_app_server_protocol::DurableSessionDomainLifecycle;
+use codex_app_server_protocol::DurableSessionListParams;
+use codex_app_server_protocol::DurableSessionListResponse;
+use codex_app_server_protocol::DurableSessionReadIssue;
+use codex_app_server_protocol::DurableSessionReadParams;
+use codex_app_server_protocol::DurableSessionReadResponse;
+use codex_app_server_protocol::DurableSessionReadStatus;
+use codex_app_server_protocol::DurableSessionResidency;
+use codex_app_server_protocol::DurableSessionStorageStatus;
 use codex_app_server_protocol::JSONRPCError;
 use codex_app_server_protocol::JSONRPCErrorError;
 use codex_app_server_protocol::JSONRPCMessage;
 use codex_app_server_protocol::JSONRPCRequest;
 use codex_app_server_protocol::JSONRPCResponse;
+use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::SortDirection;
 use codex_app_server_protocol::ThreadHistoryMode;
 use codex_app_server_protocol::ThreadItemsListParams;
@@ -35,6 +51,7 @@ use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use tokio_tungstenite::accept_async;
 use tokio_tungstenite::tungstenite::Message;
+use uuid::Uuid;
 
 type RecordedRequests = Arc<Mutex<Vec<JSONRPCRequest>>>;
 type RecordingAppServer = (AppServerSession, RecordedRequests, JoinHandle<Result<()>>);
@@ -419,6 +436,255 @@ async fn experimental_session_response_loss_is_bounded_unknown_and_never_replaye
     app_server.shutdown().await?;
     proxy.await??;
     Ok(())
+}
+
+#[tokio::test]
+async fn formal_session_control_fresh_round_resyncs_and_rebuilds_after_restart() -> Result<()> {
+    let (mut app, _app_event_rx, _op_rx) = make_test_app_with_channels().await;
+    for feature in [
+        Feature::MultiAgentV2,
+        Feature::DurableSessionQuery,
+        Feature::DurableSessionControl,
+    ] {
+        app.config
+            .features
+            .set_enabled(feature, /*enabled*/ true)
+            .expect("enable formal Durable Session fixture feature");
+    }
+    app.config.multi_agent_v2.team_state_enabled = true;
+    app.config.multi_agent_v2.durable_team_enabled = true;
+    std::fs::write(
+        app.config.codex_home.join("config.toml"),
+        r#"[features]
+durable_session_query = true
+durable_session_control = true
+
+[features.multi_agent_v2]
+enabled = true
+team_state_enabled = true
+durable_team_enabled = true
+"#,
+    )?;
+
+    let (mut app_server, first_requests, first_proxy) = start_recording_app_server(
+        &app.config,
+        /*blocked_thread_list*/ None,
+        /*failed_thread_name*/ None,
+    )
+    .await?;
+    let root_thread_id = app_server
+        .start_thread(&app.config)
+        .await?
+        .session
+        .thread_id;
+    let root = root_thread_id.to_string();
+
+    let listed = formal_session_list(&app_server, /*archived*/ false).await?;
+    assert!(listed.complete);
+    let loaded = formal_session_read(&app_server, &root).await?;
+    assert_eq!(
+        loaded.session.residency,
+        DurableSessionResidency::ObservedOwnerHere
+    );
+
+    let closed = formal_session_control(&app_server, DurableSessionControlOperation::Close).await?;
+    assert!(matches!(
+        closed.outcome,
+        DurableSessionControlOutcome::Applied {
+            effect: DurableSessionControlEffect::OwnerClosed
+        }
+    ));
+    assert_eq!(
+        app_server.durable_session_view_freshness(),
+        QueryViewFreshness::Stale
+    );
+    let closed_view = formal_session_refresh(&app_server).await?;
+    assert_eq!(
+        closed_view.session.domain_lifecycle,
+        DurableSessionDomainLifecycle::Unknown
+    );
+    assert_eq!(
+        closed_view.session.residency,
+        DurableSessionResidency::NotObservedHere
+    );
+
+    let archived =
+        formal_session_control(&app_server, DurableSessionControlOperation::Archive).await?;
+    assert!(matches!(
+        archived.outcome,
+        DurableSessionControlOutcome::Applied {
+            effect: DurableSessionControlEffect::Archived { .. }
+        }
+    ));
+    let archived_view = formal_session_refresh(&app_server).await?;
+    assert_eq!(
+        archived_view.session.storage_status,
+        DurableSessionStorageStatus::Archived
+    );
+
+    let unarchived =
+        formal_session_control(&app_server, DurableSessionControlOperation::Unarchive).await?;
+    assert!(matches!(
+        unarchived.outcome,
+        DurableSessionControlOutcome::Applied {
+            effect: DurableSessionControlEffect::Unarchived
+        }
+    ));
+    let cold_active = formal_session_refresh(&app_server).await?;
+    assert_eq!(
+        cold_active.session.storage_status,
+        DurableSessionStorageStatus::Active
+    );
+    assert_eq!(
+        cold_active.session.residency,
+        DurableSessionResidency::NotObservedHere
+    );
+    assert_eq!(recorded_params(&first_requests, "session/control").len(), 3);
+
+    app_server.shutdown().await?;
+    first_proxy.await??;
+
+    let (restarted, restarted_requests, restarted_proxy) = start_recording_app_server(
+        &app.config,
+        /*blocked_thread_list*/ None,
+        /*failed_thread_name*/ None,
+    )
+    .await?;
+    let rebuilt = formal_session_list(&restarted, /*archived*/ false).await?;
+    assert!(
+        rebuilt
+            .data
+            .iter()
+            .any(|summary| summary.identity.session_id == root)
+    );
+    let rebuilt_read = formal_session_read(&restarted, &root).await?;
+    assert_eq!(
+        rebuilt_read.session.residency,
+        DurableSessionResidency::NotObservedHere
+    );
+
+    let deleted =
+        formal_session_control(&restarted, DurableSessionControlOperation::Delete).await?;
+    assert!(matches!(
+        deleted.outcome,
+        DurableSessionControlOutcome::Applied {
+            effect: DurableSessionControlEffect::Deleted { .. }
+        }
+    ));
+    let missing = formal_session_refresh(&restarted).await?;
+    assert_eq!(
+        missing.session.read_status,
+        DurableSessionReadStatus::Unavailable {
+            issue: DurableSessionReadIssue::SessionNotFound
+        }
+    );
+    assert_eq!(
+        recorded_params(&restarted_requests, "session/control").len(),
+        1
+    );
+    assert!(
+        recorded_params(&first_requests, "turn/start").is_empty()
+            && recorded_params(&restarted_requests, "turn/start").is_empty(),
+        "the formal control round must not start a model turn"
+    );
+
+    restarted.shutdown().await?;
+    restarted_proxy.await??;
+    Ok(())
+}
+
+async fn formal_session_list(
+    app_server: &AppServerSession,
+    archived: bool,
+) -> Result<DurableSessionListResponse> {
+    let request = app_server
+        .durable_session_begin_list(DurableSessionListParams {
+            cursor: None,
+            limit: Some(25),
+            archived,
+        })
+        .map_err(|error| color_eyre::eyre::eyre!(error))?;
+    let crate::app_server_session::DurableSessionQueryRequest::List { ticket, params } = request
+    else {
+        unreachable!("list begin must produce a list request")
+    };
+    let response = app_server
+        .request_handle()
+        .request_typed::<DurableSessionListResponse>(ClientRequest::DurableSessionList {
+            request_id: RequestId::String(Uuid::new_v4().to_string()),
+            params,
+        })
+        .await?;
+    assert_eq!(
+        app_server.durable_session_apply_list(ticket, response.clone()),
+        QueryReadApplyResult::Applied
+    );
+    Ok(response)
+}
+
+async fn formal_session_read(
+    app_server: &AppServerSession,
+    root: &str,
+) -> Result<DurableSessionReadResponse> {
+    let request = app_server
+        .durable_session_begin_read(DurableSessionReadParams {
+            session_id: root.to_string(),
+            root_thread_id: root.to_string(),
+        })
+        .map_err(|error| color_eyre::eyre::eyre!(error))?;
+    formal_session_apply_read(app_server, request).await
+}
+
+async fn formal_session_refresh(
+    app_server: &AppServerSession,
+) -> Result<DurableSessionReadResponse> {
+    let request = app_server
+        .durable_session_begin_refresh()
+        .map_err(|error| color_eyre::eyre::eyre!(error))?;
+    formal_session_apply_read(app_server, request).await
+}
+
+async fn formal_session_apply_read(
+    app_server: &AppServerSession,
+    request: crate::app_server_session::DurableSessionQueryRequest,
+) -> Result<DurableSessionReadResponse> {
+    let crate::app_server_session::DurableSessionQueryRequest::Session { ticket, params } = request
+    else {
+        unreachable!("session read must keep a Session attachment")
+    };
+    let response = app_server
+        .request_handle()
+        .request_typed::<DurableSessionReadResponse>(ClientRequest::DurableSessionRead {
+            request_id: RequestId::String(Uuid::new_v4().to_string()),
+            params,
+        })
+        .await?;
+    assert_eq!(
+        app_server.durable_session_apply_read(ticket, response.clone()),
+        QueryReadApplyResult::Applied
+    );
+    Ok(response)
+}
+
+async fn formal_session_control(
+    app_server: &AppServerSession,
+    operation: DurableSessionControlOperation,
+) -> Result<DurableSessionControlResponse> {
+    let accepted = app_server
+        .durable_session_control_accepted_read_ticket()
+        .expect("formal control requires an accepted fresh read");
+    let attempt = app_server
+        .durable_session_control_begin(accepted, operation)
+        .expect("fresh proof should start one formal attempt");
+    let response = app_server
+        .request_handle()
+        .request_typed::<DurableSessionControlResponse>(ClientRequest::DurableSessionControl {
+            request_id: RequestId::String(Uuid::new_v4().to_string()),
+            params: attempt.params,
+        })
+        .await?;
+    assert!(app_server.durable_session_control_apply_response(attempt.ticket, response.clone()));
+    Ok(response)
 }
 
 fn create_history_rollout(

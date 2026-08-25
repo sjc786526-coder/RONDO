@@ -134,7 +134,7 @@ fn lifecycle_delegate_enforces_root_role_and_maps_stale_preconditions() {
         next_root_state: ExperimentalSessionControlRootState::Tracking,
     };
 
-    let non_root_error = match set_root_state_on_team(&team, member, params.clone()) {
+    let non_root_error = match set_root_state_on_team(&team, member, params.clone(), None) {
         Err(error) => error,
         Ok(_) => panic!("a member must not own root lifecycle state"),
     };
@@ -143,7 +143,7 @@ fn lifecycle_delegate_enforces_root_role_and_maps_stale_preconditions() {
         ExperimentalSessionControlError::NotPermitted { .. }
     ));
 
-    let outcome = set_root_state_on_team(&team, root, params.clone())
+    let outcome = set_root_state_on_team(&team, root, params.clone(), None)
         .unwrap_or_else(|error| panic!("root mutation should succeed: {error}"));
     assert!(outcome.changed);
     assert_eq!(outcome.updated.author, member);
@@ -153,7 +153,7 @@ fn lifecycle_delegate_enforces_root_role_and_maps_stale_preconditions() {
     );
     assert_eq!(outcome.projection.revision, outcome.mutation_revision);
 
-    let conflict = match set_root_state_on_team(&team, root, params) {
+    let conflict = match set_root_state_on_team(&team, root, params, None) {
         Err(error) => error,
         Ok(_) => panic!("the stale expected root state must be rejected"),
     };
@@ -184,6 +184,7 @@ fn lifecycle_delegate_rejects_a_well_formed_unknown_version() {
             expected_root_state: ExperimentalSessionControlRootState::Pending,
             next_root_state: ExperimentalSessionControlRootState::Tracking,
         },
+        None,
     ) {
         Err(error) => error,
         Ok(_) => panic!("a reference outside the root snapshot must fail closed"),
