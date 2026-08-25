@@ -1,7 +1,7 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
-最后更新：2026-08-24 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
-状态：**第一期、第二期、M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、Plan 064 与四期 M4-A、M4-C0 已完成；Plan 060 技术 GO、Plan 064 DATA_GO、Plan 066 正式训练 GO；M3-C1 有训练候选通过但 base 对照未取得同口径资格，M3-C2 仍锁定；M4-A 为 `M4_A_GO`，M4-C0 为 `M4_C0_PROTOTYPE_PASS`**
+最后更新：2026-08-25 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
+状态：**第一期、第二期、M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、Plan 064、Plan 071 与四期 M4-A、M4-C0 已完成；Plan 060 技术 GO、Plan 064 DATA_GO、Plan 066 正式训练 GO；Plan 071 为 `BASE_COMPARABILITY_GO`，M3-C2 前置已满足但尚未启动或授权；M4-A 为 `M4_A_GO`，M4-C0 为 `M4_C0_PROTOTYPE_PASS`**
 
 ## 当前定位
 
@@ -84,7 +84,7 @@ M3-B1c 正式分阶段训练与工件回收          │
         └──────────────┬───────────────┘
                        ↓
                  M3-C1 本地部署资格（已完成）
-                       ↓ base 对照修正并重验通过后
+                       ↓ Plan 071 base 同口径重验已通过
                  M3-C2 联合横评与最终选择
                        ↓
                  M3-D 端到端收口
@@ -251,9 +251,10 @@ C2 因 ranking 与 direction 门未通过；C1/C3 的 runner/service projected p
 资格运行未读取 unseen-test，也未转换、量化、继续训练或修改冻结权重。
 
 **交接**：本地副本和身份经独立复验接受后，exact RunPod winner 卷 `hi3iaz8rsr` 已永久删除；当前 RunPod 为 0 Pod、
-0 volume，compute/volume 持续费用均为 0，必要本地资产继续保留。Plan 068 的实现与任务流程验收通过，但因 base 对照未在
-同一口径取得资格，`m3_c2_prerequisite_satisfied=false`。三期须先另建任务修正并重验 base 本地部署可比性，不得直接启动
-M3-C2；该修正不得借机改冻结权重、数据、产品语义或最终 threshold。
+0 volume，compute/volume 持续费用均为 0，必要本地资产继续保留。Plan 071 随后在不改冻结权重、数据、产品语义或最终
+threshold 的前提下，以同一冻结规则重验 exact base、C1、C3；唯一有效正式轮
+`plan071-formal-20260825T064600Z-qualification-v5` 给出三者均 `QUALIFIED`，C2 保持 Plan 068 历史
+`NOT_QUALIFIED`。最终独立验收接受 `BASE_COMPARABILITY_GO`，`m3_c2_prerequisite_satisfied=true`。
 
 #### M3-C2：联合横评与最终选择
 
@@ -265,8 +266,9 @@ M3-C2；该修正不得借机改冻结权重、数据、产品语义或最终 th
 **宏观验收**：发布质量、False PASS/REWRITE、边界样本、延迟和本地资源开销得到联合比较；最终选择有清晰理由且可由现有
 轻量设施复测，未达标则回到对应工作包迭代而非建立模型退役制度。
 
-**当前状态**：未启动、未授权。虽然 C1/C3 已取得本地资格，但 base 对照未通过 Plan 068 的同口径资格门；只有 base
-本地部署可比性修正并重新验收通过后，才可另行规划和授权本包。
+**当前状态**：前置已满足，尚未启动或授权。Plan 071 已证明 exact base 与 C1/C3 可在同一资格口径下进入横评；下一步可
+另建 M3-C2 ExecPlan，冻结联合评价、最终模型/threshold 与运行配置选择边界。Plan 071 的 `BASE_COMPARABILITY_GO` 不自动选择模型、
+启用 Critic 或授权 M3-C2/M3-D。
 
 ### D 阶段：端到端收口
 
@@ -290,8 +292,8 @@ M3-C2；该修正不得借机改冻结权重、数据、产品语义或最终 th
   M3-B2a、M3-B2b 均已完成，两链在 M3-C1 前汇合。
 - M3-B1b 是独立付费资格门；Plan 060 `TECHNICAL_GO`、Plan 064 `DATA_GO` 与正式训练授权均已成立，Plan 066 已据此完成训练执行、
   资源终态、final-02 receipt 与独立验收；Plan 068 已完成本地交接、资格运行和远端止费，没有追加训练消费。
-- M3-B1c 与 M3-B2b 前置、Plan 068 / M3-C1 均已完成；C1/C3 已取得资格，但 base 未通过同口径资格，因此 M3-C2 继续等待
-  base 本地部署可比性修正与重验，M3-D 最后串行收口。
+- M3-B1c 与 M3-B2b 前置、Plan 068 / M3-C1 及 Plan 071 base 同口径重验均已完成；base/C1/C3 已取得资格，M3-C2
+  前置满足，下一包可单独规划和授权 M3-C2，M3-D 最后串行收口。
 - RunPod 云端 smoke/训练不占本地 Cargo build lock，可与产品代码、数据整理和四期非冲突开发并行；真实本地模型、
   Docker 与重型 Cargo 仍按根 `AGENTS.md` 全局串行。
 - 三期与已经正式收口的方向 1 没有产品依赖。如果未来重新启动方向 1，普通工作仍可并行安排，但共享 API 预算、
@@ -391,7 +393,7 @@ M3-C2；该修正不得借机改冻结权重、数据、产品语义或最终 th
   S1/S2、外部资源或远端操作。
 - RunPod 创建或计费、模型与数据上传、云端训练、权重下载、真实本地模型加载/推理、Docker 和付费 API 均须在对应任务
   开始前取得明确授权；23 USD 是三期训练的总预算上限，不等于已经授权消费。
-- Plan 068 的一次性授权已随本地交接、真实推理、资格验收和 exact winner 卷删除全部完成，不向后续任务延伸。后续 base
-  本地部署可比性修正、M3-C2/M3-D、云资源、远端上传、真实 API、继续训练或产品启用均须另建任务并取得相应授权。
+- Plan 068 与 Plan 071 的一次性授权已随本地交接、真实推理、资格验收、base 同口径重验和 exact winner 卷删除全部完成，
+  不向后续任务延伸。M3-C2/M3-D、云资源、远端上传、真实 API、继续训练或产品启用均须另建任务并取得相应授权。
 - 训练数据、权重、逐样本输出与私有运行材料留在 `eval-data/` 或仓库外；`training/` 只保存体积合规的轻量合同与数据。
 - 正确性测试随产品能力建设；测评只保留能指导模型选择和产品验收的轻量指标，不建设数据资产审计或可信证明平台。

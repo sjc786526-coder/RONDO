@@ -19,7 +19,12 @@ import time
 from typing import Any, BinaryIO, Mapping, Sequence
 
 from ..identity import canonical_json_bytes, sha256_bytes, sha256_file
-from .qualification import QualificationError, freeze_sha256, validate_freeze
+from .comparability import FREEZE_SCHEMA as PLAN071_FREEZE_SCHEMA
+from .comparability import SERVICE_RESULT_SCHEMA as PLAN071_SERVICE_RESULT_SCHEMA
+from .comparability import validate_freeze as validate_plan071_freeze
+from .qualification import FREEZE_SCHEMA as PLAN068_FREEZE_SCHEMA
+from .qualification import QualificationError, freeze_sha256
+from .qualification import validate_freeze as validate_plan068_freeze
 
 
 RESULT_SCHEMA = "rondo-publication-critic-plan068-service-run-v2"
@@ -84,6 +89,18 @@ class ServiceRunnerError(RuntimeError):
     def __init__(self, code: str) -> None:
         super().__init__(code)
         self.code = code
+
+
+def _freeze_contract(name: str) -> tuple[Any, str, str]:
+    if name == "plan068":
+        return validate_plan068_freeze, PLAN068_FREEZE_SCHEMA, RESULT_SCHEMA
+    if name == "plan071":
+        return (
+            validate_plan071_freeze,
+            PLAN071_FREEZE_SCHEMA,
+            PLAN071_SERVICE_RESULT_SCHEMA,
+        )
+    raise ServiceRunnerError("qualification_contract_invalid")
 
 
 class ExclusiveOutput:
@@ -188,15 +205,20 @@ def _bind_frozen_runtime(
     args: argparse.Namespace,
     descriptor: Mapping[str, Any],
 ) -> tuple[dict[str, Any], dict[str, Any]]:
+    validator, expected_schema, _result_schema = _freeze_contract(
+        args.qualification_contract
+    )
     try:
-        freeze = validate_freeze(_load_json(args.freeze, "freeze"))
+        freeze = validator(_load_json(args.freeze, "freeze"))
     except (QualificationError, ServiceRunnerError):
         raise ServiceRunnerError("freeze_identity_invalid") from None
     digest = freeze_sha256(freeze)
     object_id = descriptor["object_id"]
     service_descriptor = descriptor["service_descriptor"]
     if (
-        freeze["mode"] != args.mode
+        freeze["schema"] != expected_schema
+        or freeze["mode"] != args.mode
+        or object_id not in freeze["qualification_objects"]
         or descriptor["qualification_freeze_sha256"] != digest
         or descriptor["deployment_artifact_sha256"]
         != freeze["artifacts"][object_id]["deployment_artifact_sha256"]
@@ -755,6 +777,11 @@ def build_parser() -> argparse.ArgumentParser:
         description="Run bounded real Publication Critic service qualification"
     )
     parser.add_argument("--mode", choices=("commissioning", "formal"), required=True)
+    parser.add_argument(
+        "--qualification-contract",
+        choices=("plan068", "plan071"),
+        default="plan068",
+    )
     parser.add_argument("--service", type=Path, required=True)
     parser.add_argument("--probe", type=Path, required=True)
     parser.add_argument("--python", type=Path, required=True)
@@ -781,9 +808,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    _validator, _freeze_schema, result_schema = _freeze_contract(
+        args.qualification_contract
+    )
     output: ExclusiveOutput | None = None
     evidence: dict[str, Any] = {
-        "schema": RESULT_SCHEMA,
+        "schema": result_schema,
         "mode": args.mode,
         "latency_scope": "typed_probe_process_e2e",
         "status": "FAILED",

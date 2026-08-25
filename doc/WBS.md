@@ -1,6 +1,6 @@
 # RONDO 长程规划（WBS）
 
-最后更新：2026-08-24（Plan 067 / M4-A、Plan 068 / M3-C1 与 Plan 070 / M4-C0 均已完成并通过独立验收）
+最后更新：2026-08-25（Plan 071 已完成 base 同口径资格重验并通过独立验收）
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段指针、跨方向关系、
 稳定工程边界和授权门；已完成成果与验收见 `doc/WBS-COMPLETED.md`，单次任务合同见 `plan/`，执行细节见
@@ -20,7 +20,7 @@
 | 0：量化测评基准 | 既有设施与首次 schema v7 正式 canary 已完成，当前无 active campaign | 保留设施；历史结果见 COMPLETED，新 campaign 须重新立项与授权 |
 | 1：Harness 优化 | **正式收口；当前无 active 工作包** | 当前不继续新增观测或内核/热路径优化；既有实现、设施与历史结果保留。未来可由用户另行决定是否重新立项，本次收口不作永久禁止 |
 | 2：本地审批模型 | **已收口，今后不再开启** | 最终结论为“保留为实验”；不改生产默认，不再规划后续工作包 |
-| 3：RONDO Multi | 第一、二期及其收口案例、**三期 M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、Plan 064 与四期 M4-A、M4-C0 已完成** | M3-C1 结论为 base/C2 `NOT_QUALIFIED`、C1/C3 `QUALIFIED`；因 base 对照未通过同口径资格，M3-C2 前置为 false，三期下一包须先修正并重验 base 本地部署可比性，不得直接启动 M3-C2。RunPod 已为 0 Pod/0 volume、持续费用为 0；M4-C0 结论为 `M4_C0_PROTOTYPE_PASS`，正式 Session query 等待 M4-S1，正式 control/TUI 再等待 M4-S2 |
+| 3：RONDO Multi | 第一、二期及其收口案例、**三期 M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、Plan 064、Plan 071 与四期 M4-A、M4-C0 已完成** | Plan 071 同口径重验结论为 base/C1/C3 `QUALIFIED`，C2 保持历史 `NOT_QUALIFIED`；M3-C2 的 base + 合格候选前置已满足，三期下一包可另行规划 M3-C2，但尚未启动或授权。RunPod 已为 0 Pod/0 volume、持续费用为 0；M4-C0 结论为 `M4_C0_PROTOTYPE_PASS`，正式 Session query 等待 M4-S1，正式 control/TUI 再等待 M4-S2 |
 
 ### 方向命名口径
 
@@ -63,9 +63,11 @@
   base `NOT_QUALIFIED`、C1 `QUALIFIED`、C2 `NOT_QUALIFIED`、C3 `QUALIFIED`：base 未过 projected drift 与临时 verdict parity，
   C2 未过 ranking/direction，C1/C3 的 runner/service 一致性、稳定性和有界资源门通过；unseen-test 未用于适配或选择。
   本地保留 120/120 个必要对象与正式 checkpoint；RunPod exact winner 卷已删除，当前 0 Pod、0 volume、持续费用为 0。
-- Plan 068 的技术实现与任务流程验收通过，但约定要求 base 对照和至少一个训练候选同口径可比，因此
-  `m3_c2_prerequisite_satisfied=false`。三期下一包应先在不改冻结权重、数据、产品语义或最终 threshold 的前提下，修正并重验
-  base 本地部署可比性；具体路线另建 ExecPlan。M3-C2 与 M3-D 均未启动，也未获实施授权。
+- Plan 071 在不改冻结权重、数据、Plan 054/055/057 产品语义或最终 threshold 的前提下，将 cross-runtime raw/envelope、
+  同 deployment worker parity 与精确 service verdict 分层判断，并以同一规则从干净状态重验 exact base、C1、C3。唯一有效正式轮
+  `plan071-formal-20260825T064600Z-qualification-v5` 给出 base/C1/C3 均 `QUALIFIED`，C2 未重验并保持 Plan 068 历史
+  `NOT_QUALIFIED`；最终独立验收接受 `BASE_COMPARABILITY_GO`，因此 `m3_c2_prerequisite_satisfied=true`。
+  三期下一包可另行建立 M3-C2 ExecPlan，但 M3-C2/M3-D 尚未启动或授权，本结论也不冻结最终模型、threshold 或产品运行配置。
 
 ### 方向 3：Durable Team Runtime 四期
 
