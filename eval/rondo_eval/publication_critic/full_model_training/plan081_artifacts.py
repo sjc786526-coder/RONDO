@@ -36,6 +36,9 @@ _ARTIFACT_ID = re.compile(r"[a-z0-9][a-z0-9-]{0,79}\Z")
 _STAGING_NAME = re.compile(
     r"\.(?P<artifact>[a-z0-9][a-z0-9-]{0,79})\.tmp-[0-9a-f]{32}\Z"
 )
+_PRUNE_TOMBSTONE_NAME = re.compile(
+    r"\.(?P<artifact>[a-z0-9][a-z0-9-]{0,79})\.prune-[0-9a-f]{32}\Z"
+)
 _ATTEMPT_ARTIFACT_ID = re.compile(
     r"(?:observation|snapshot|checkpoint)-attempt-(?P<generation>[0-9]+)-step-[0-9]+\Z"
 )
@@ -178,6 +181,7 @@ class Plan081ArtifactStore:
     ) -> dict[str, list[str]]:
         """Prune only verified task-owned artifacts; observations are untouched."""
 
+        self.recover_incomplete_staging()
         for artifact_id in keep_snapshot_ids | keep_checkpoint_ids:
             _require_artifact_id(artifact_id)
         snapshots = self._artifact_ids("model-snapshots")
@@ -198,23 +202,33 @@ class Plan081ArtifactStore:
         for artifact_id in sorted(effective_checkpoint_ids):
             self.verify_checkpoint(artifact_id)
 
+        # Hide superseded recovery points before pruning their companion
+        # snapshots, so a partial snapshot delete cannot revive stale state.
+        removed_checkpoints: list[str] = []
+        for artifact_id in sorted(
+            checkpoints - effective_checkpoint_ids,
+            key=_checkpoint_position,
+            reverse=True,
+        ):
+            self.verify_checkpoint(artifact_id)
+            _remove_discarded_artifact(
+                self.root / "recovery-checkpoints" / artifact_id
+            )
+            removed_checkpoints.append(artifact_id)
         removed_snapshots: list[str] = []
         for artifact_id in sorted(snapshots - keep_snapshot_ids):
             self.verify_snapshot(artifact_id)
-            _remove_owned_tree(self.root / "model-snapshots" / artifact_id)
+            _remove_discarded_artifact(
+                self.root / "model-snapshots" / artifact_id
+            )
             removed_snapshots.append(artifact_id)
-        removed_checkpoints: list[str] = []
-        for artifact_id in sorted(checkpoints - effective_checkpoint_ids):
-            self.verify_checkpoint(artifact_id)
-            _remove_owned_tree(self.root / "recovery-checkpoints" / artifact_id)
-            removed_checkpoints.append(artifact_id)
         return {
             "removed_snapshots": removed_snapshots,
             "removed_checkpoints": removed_checkpoints,
         }
 
     def recover_incomplete_staging(self) -> list[str]:
-        """Remove only exact task-owned staging trees left before atomic publish."""
+        """Finish only exact task-owned publish staging or prune tombstones."""
 
         removed: list[str] = []
         for kind in (
@@ -229,7 +243,12 @@ class Plan081ArtifactStore:
             for path in sorted(parent.iterdir()):
                 if not path.name.startswith("."):
                     continue
-                if _STAGING_NAME.fullmatch(path.name) is None:
+                is_staging = _STAGING_NAME.fullmatch(path.name) is not None
+                is_prune_tombstone = (
+                    kind in {"model-snapshots", "recovery-checkpoints"}
+                    and _PRUNE_TOMBSTONE_NAME.fullmatch(path.name) is not None
+                )
+                if not is_staging and not is_prune_tombstone:
                     raise FullModelTrainingError("plan081_unknown_hidden_artifact")
                 safe_directory(path)
                 _remove_owned_tree(path)
@@ -314,13 +333,7 @@ class Plan081ArtifactStore:
             raise FullModelTrainingError("plan081_checkpoint_not_found")
         ordered: dict[str, tuple[int, int]] = {}
         for artifact_id in checkpoints:
-            match = _CHECKPOINT_ARTIFACT_ID.fullmatch(artifact_id)
-            if match is None:
-                raise FullModelTrainingError("plan081_checkpoint_id_invalid")
-            ordered[artifact_id] = (
-                int(match.group("generation")),
-                int(match.group("step")),
-            )
+            ordered[artifact_id] = _checkpoint_position(artifact_id)
         return ordered[checkpoint_id] == max(ordered.values())
 
     def reserve_artifact_generation(self, *, after_generation: int) -> int:
@@ -478,6 +491,13 @@ def _require_artifact_id(value: str) -> str:
     return value
 
 
+def _checkpoint_position(artifact_id: str) -> tuple[int, int]:
+    match = _CHECKPOINT_ARTIFACT_ID.fullmatch(artifact_id)
+    if match is None:
+        raise FullModelTrainingError("plan081_checkpoint_id_invalid")
+    return int(match.group("generation")), int(match.group("step"))
+
+
 def _created_payload(staging: Path) -> Path:
     payload = staging / "payload"
     payload.mkdir(mode=0o700)
@@ -516,3 +536,16 @@ def _remove_owned_tree(path: Path) -> None:
         shutil.rmtree(root)
     except OSError as exc:
         raise FullModelTrainingError("plan081_artifact_prune_failed") from exc
+
+
+def _remove_discarded_artifact(path: Path) -> None:
+    """Atomically hide a verified discard before its retryable tree removal."""
+
+    parent = safe_directory(path.parent)
+    root = safe_directory(path)
+    tombstone = parent / f".{path.name}.prune-{uuid.uuid4().hex}"
+    try:
+        os.replace(root, tombstone)
+    except OSError as exc:
+        raise FullModelTrainingError("plan081_artifact_prune_failed") from exc
+    _remove_owned_tree(tombstone)

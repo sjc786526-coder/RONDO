@@ -25,7 +25,18 @@ RNG, and data-cursor state. A failed post-update step is not retried in place:
 the controller enters `recovery_required`, and continuation uses a fresh
 adapter restored from a verified complete checkpoint.
 
+A newly written checkpoint is eligible to replace an older recovery point only
+after its declared reader decodes it and the controller state, four training
+state sections, and data cursor match the checkpoint/update contract. Byte-tree
+integrity alone is not recovery qualification.
+
 Checkpoint retention is complete only after its write-once completion artifact
 has been atomically published. Resume may repair an absent marker only for the
 newest physical checkpoint, before loading or mutating adapter state; a marked
 older best or turning-point checkpoint never reapplies its historical prune.
+Each verified discard is first atomically renamed to a strict task-owned prune
+tombstone, so an interrupted tree deletion can be resumed without treating a
+partial tree as a live artifact. Superseded checkpoints are hidden from newest
+to oldest before their companion snapshots, preventing any interrupted prune
+from exposing a stale checkpoint whose controller state depends on an already
+deleted recovery point or snapshot.

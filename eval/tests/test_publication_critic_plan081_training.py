@@ -5,6 +5,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 
 EVAL_ROOT = Path(__file__).resolve().parents[1]
@@ -12,6 +13,9 @@ REPO_ROOT = EVAL_ROOT.parent
 sys.path.insert(0, str(EVAL_ROOT))
 
 from rondo_eval.publication_critic.full_model_training import checkpoint  # noqa: E402
+from rondo_eval.publication_critic.full_model_training import (  # noqa: E402
+    plan081_artifacts as plan081_artifacts_module,
+)
 from rondo_eval.publication_critic.full_model_training.contract import (  # noqa: E402
     FullModelTrainingError,
     read_json,
@@ -224,6 +228,7 @@ class _FakeAdapter:
         self.validation_failure_steps: set[int] = set()
         self.snapshot_failure_steps: set[int] = set()
         self.checkpoint_writer_failure_steps: set[int] = set()
+        self.checkpoint_writer_modes: dict[int, str] = {}
         self.wrong_validation_identity = False
         self.reader_failure = False
         self.reader_calls = 0
@@ -328,7 +333,16 @@ class _FakeAdapter:
     def write_training_state(self, path: Path, value: dict) -> None:
         if self.step in self.checkpoint_writer_failure_steps:
             raise FullModelTrainingError("fixture_checkpoint_writer_failed")
-        path.write_bytes(b"PLAN081-LITERAL-V1\n" + repr(value).encode("utf-8"))
+        mode = self.checkpoint_writer_modes.get(self.step)
+        if mode == "undecodable":
+            path.write_bytes(b"fixture-undecodable-state")
+            return
+        written = copy.deepcopy(value)
+        if mode == "invalid_structure":
+            written["optimizer"] = []
+        elif mode == "wrong_data_cursor":
+            written["data"] = {"fixture_update": self.step + 100}
+        path.write_bytes(b"PLAN081-LITERAL-V1\n" + repr(written).encode("utf-8"))
 
     def read_training_state(self, path: Path) -> dict:
         self.reader_calls += 1
@@ -850,6 +864,69 @@ class Plan081ControllerTests(unittest.TestCase):
             )
             self.assertEqual(resumed.run(resumed_adapter)["status"], "completed")
 
+    def test_checkpoint_readback_rejects_bad_state_before_retention(self) -> None:
+        observations = {
+            0: _logits(2.0),
+            1: _logits(2.5),
+            2: _logits(2.8),
+            3: _logits(3.0),
+            4: _logits(3.2),
+        }
+        cases = {
+            "undecodable": "plan081_training_state_decode_failed",
+            "invalid_structure": "plan081_training_state_invalid",
+            "wrong_data_cursor": "plan081_data_cursor_checkpoint_mismatch",
+        }
+        for mode, expected_error in cases.items():
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                adapter = _FakeAdapter(observations)
+                controller, store = self._controller(root, adapter)
+                controller.run(adapter, stop_after=2)
+                old_checkpoint = "checkpoint-attempt-000-step-000002"
+                bad_checkpoint = "checkpoint-attempt-000-step-000004"
+                adapter.checkpoint_writer_modes[4] = mode
+
+                with self.assertRaisesRegex(
+                    FullModelTrainingError, expected_error
+                ):
+                    controller.run(adapter)
+                self.assertEqual(controller.state["status"], "recovery_required")
+                self.assertEqual(controller.state["current_step"], 3)
+                self.assertEqual(
+                    controller.state["latest_checkpoint_id"], old_checkpoint
+                )
+                self.assertTrue(store.has_retention_completion(old_checkpoint))
+                self.assertTrue(
+                    (root / "recovery-checkpoints" / old_checkpoint).is_dir()
+                )
+                self.assertTrue(
+                    (root / "recovery-checkpoints" / bad_checkpoint).is_dir()
+                )
+                self.assertFalse(store.has_retention_completion(bad_checkpoint))
+
+                resumed_adapter = _FakeAdapter(observations)
+                resumed = ContinuousTrainingController.resume(
+                    route_contract=load_route_contract(
+                        PLAN081_ROOT / "route-contract-v1.json"
+                    ),
+                    control_plan=_control_plan(),
+                    comparison_policy=ComparisonPolicy(
+                        "boundary_pair_mean_margin", 0.05
+                    ),
+                    training_dataset=_training_dataset(),
+                    validation_dataset=_validation_dataset(),
+                    artifact_store=store,
+                    adapter=resumed_adapter,
+                    checkpoint_id=old_checkpoint,
+                )
+                self.assertEqual(
+                    resumed.run(resumed_adapter)["status"], "completed"
+                )
+                self.assertFalse(
+                    (root / "recovery-checkpoints" / bad_checkpoint).exists()
+                )
+
     def test_postpublish_checkpoint_failure_keeps_new_verified_anchor(self) -> None:
         observations = {
             0: _logits(2.0),
@@ -971,6 +1048,237 @@ class Plan081ControllerTests(unittest.TestCase):
             )
             self.assertTrue(store.has_retention_completion(checkpoint_id))
             self.assertEqual(resumed.run(resumed_adapter)["status"], "completed")
+
+    def test_partial_retention_delete_resumes_from_strict_tombstone(self) -> None:
+        observations = {
+            0: _logits(2.0),
+            1: _logits(2.5),
+            2: _logits(2.8),
+            3: _logits(3.0),
+            4: _logits(3.2),
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            adapter = _FakeAdapter(observations)
+            controller, store = self._controller(root, adapter)
+            controller.run(adapter, stop_after=2)
+            original_rmtree = plan081_artifacts_module.shutil.rmtree
+            failed = False
+
+            def partially_delete_then_fail(path: Path, *args, **kwargs) -> None:
+                nonlocal failed
+                candidate = Path(path)
+                if (
+                    not failed
+                    and candidate.name.startswith(
+                        ".snapshot-attempt-000-step-000002.prune-"
+                    )
+                ):
+                    failed = True
+                    (candidate / "artifact-manifest.json").unlink()
+                    raise OSError("fixture partial retention delete")
+                original_rmtree(path, *args, **kwargs)
+
+            with mock.patch.object(
+                plan081_artifacts_module.shutil,
+                "rmtree",
+                side_effect=partially_delete_then_fail,
+            ):
+                with self.assertRaisesRegex(
+                    FullModelTrainingError, "plan081_artifact_prune_failed"
+                ):
+                    controller.run(adapter)
+            checkpoint_id = "checkpoint-attempt-000-step-000004"
+            old_checkpoint_id = "checkpoint-attempt-000-step-000002"
+            self.assertTrue(failed)
+            self.assertEqual(controller.state["status"], "recovery_required")
+            self.assertEqual(controller.state["latest_checkpoint_id"], checkpoint_id)
+            self.assertFalse(store.has_retention_completion(checkpoint_id))
+            self.assertFalse(
+                (root / "recovery-checkpoints" / old_checkpoint_id).exists()
+            )
+            snapshots = root / "model-snapshots"
+            self.assertFalse(
+                (snapshots / "snapshot-attempt-000-step-000002").exists()
+            )
+            tombstones = [
+                path
+                for path in snapshots.iterdir()
+                if path.name.startswith(
+                    ".snapshot-attempt-000-step-000002.prune-"
+                )
+            ]
+            self.assertEqual(len(tombstones), 1)
+            self.assertFalse(
+                (tombstones[0] / "artifact-manifest.json").exists()
+            )
+
+            stale_adapter = _FakeAdapter(observations)
+            with self.assertRaises(FullModelTrainingError):
+                ContinuousTrainingController.resume(
+                    route_contract=load_route_contract(
+                        PLAN081_ROOT / "route-contract-v1.json"
+                    ),
+                    control_plan=_control_plan(),
+                    comparison_policy=ComparisonPolicy(
+                        "boundary_pair_mean_margin", 0.05
+                    ),
+                    training_dataset=_training_dataset(),
+                    validation_dataset=_validation_dataset(),
+                    artifact_store=store,
+                    adapter=stale_adapter,
+                    checkpoint_id=old_checkpoint_id,
+                )
+            self.assertEqual(stale_adapter.events, [])
+
+            resumed_adapter = _FakeAdapter(observations)
+            resumed = ContinuousTrainingController.resume(
+                route_contract=load_route_contract(
+                    PLAN081_ROOT / "route-contract-v1.json"
+                ),
+                control_plan=_control_plan(),
+                comparison_policy=ComparisonPolicy(
+                    "boundary_pair_mean_margin", 0.05
+                ),
+                training_dataset=_training_dataset(),
+                validation_dataset=_validation_dataset(),
+                artifact_store=store,
+                adapter=resumed_adapter,
+                checkpoint_id=checkpoint_id,
+            )
+            self.assertFalse(any(path.name.startswith(".") for path in snapshots.iterdir()))
+            self.assertTrue(store.has_retention_completion(checkpoint_id))
+            self.assertEqual(resumed.run(resumed_adapter)["status"], "completed")
+
+    def test_multi_checkpoint_prune_fails_from_newest_to_oldest(self) -> None:
+        plan = ControlPlan.from_value(
+            {
+                "maximum_updates": 6,
+                "observation_steps": [1, 2, 3, 4, 5, 6],
+                "checkpoint_steps": [2, 4, 6],
+                "turning_point_limit": 2,
+            }
+        )
+        first_observations = {
+            0: _logits(2.0),
+            1: _logits(3.0),
+            2: _logits(5.0),
+            3: _logits(2.0),
+            4: _logits(3.0),
+            5: _logits(2.0),
+            6: _logits(6.0),
+        }
+        resumed_observations = {**first_observations, 6: _logits(4.0)}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            adapter = _FakeAdapter(first_observations)
+            controller, store = self._controller(
+                root, adapter, control_plan=plan
+            )
+            controller.run(adapter, stop_after=4)
+            checkpoint_two = "checkpoint-attempt-000-step-000002"
+            checkpoint_four = "checkpoint-attempt-000-step-000004"
+            checkpoint_six = "checkpoint-attempt-000-step-000006"
+            original_rmtree = plan081_artifacts_module.shutil.rmtree
+            failed = False
+
+            def fail_newest_discard(path: Path, *args, **kwargs) -> None:
+                nonlocal failed
+                candidate = Path(path)
+                if (
+                    not failed
+                    and candidate.name.startswith(f".{checkpoint_four}.prune-")
+                ):
+                    failed = True
+                    (candidate / "artifact-manifest.json").unlink()
+                    raise OSError("fixture newest checkpoint delete failed")
+                original_rmtree(path, *args, **kwargs)
+
+            with mock.patch.object(
+                plan081_artifacts_module.shutil,
+                "rmtree",
+                side_effect=fail_newest_discard,
+            ):
+                with self.assertRaisesRegex(
+                    FullModelTrainingError, "plan081_artifact_prune_failed"
+                ):
+                    controller.run(adapter)
+            self.assertTrue(failed)
+            self.assertTrue(
+                (root / "recovery-checkpoints" / checkpoint_two).is_dir()
+            )
+            self.assertFalse(
+                (root / "recovery-checkpoints" / checkpoint_four).exists()
+            )
+            self.assertTrue(
+                (root / "recovery-checkpoints" / checkpoint_six).is_dir()
+            )
+            self.assertFalse(store.has_retention_completion(checkpoint_six))
+
+            resumed_adapter = _FakeAdapter(resumed_observations)
+            resumed = ContinuousTrainingController.resume(
+                route_contract=load_route_contract(
+                    PLAN081_ROOT / "route-contract-v1.json"
+                ),
+                control_plan=plan,
+                comparison_policy=ComparisonPolicy(
+                    "boundary_pair_mean_margin", 0.05
+                ),
+                training_dataset=_training_dataset(),
+                validation_dataset=_validation_dataset(),
+                artifact_store=store,
+                adapter=resumed_adapter,
+                checkpoint_id=checkpoint_two,
+            )
+            result = resumed.run(resumed_adapter)
+            self.assertEqual(result["status"], "completed")
+            self.assertEqual(
+                result["selection"]["training_best_snapshot_id"],
+                "snapshot-attempt-000-step-000002",
+            )
+            self.assertTrue(
+                (root / "recovery-checkpoints" / checkpoint_two).is_dir()
+            )
+
+    def test_prune_tombstone_near_miss_remains_fail_closed(self) -> None:
+        observations = {0: _logits(2.0), 1: _logits(2.5), 2: _logits(2.8)}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            adapter = _FakeAdapter(observations)
+            _controller, store = self._controller(root, adapter, maximum=2)
+            hidden = root / "model-snapshots" / ".fixture.prune-not-a-uuid"
+            hidden.mkdir(parents=True)
+            with self.assertRaisesRegex(
+                FullModelTrainingError, "plan081_unknown_hidden_artifact"
+            ):
+                store.recover_incomplete_staging()
+            self.assertTrue(hidden.is_dir())
+
+    def test_prune_direct_retry_finishes_owned_tombstone(self) -> None:
+        observations = {0: _logits(2.0), 1: _logits(2.5), 2: _logits(2.8)}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            adapter = _FakeAdapter(observations)
+            controller, store = self._controller(root, adapter, maximum=2)
+            controller.run(adapter)
+            snapshot_id = "snapshot-attempt-000-step-000002"
+            checkpoint_id = "checkpoint-attempt-000-step-000002"
+            store.verify_snapshot(snapshot_id)
+            snapshot = root / "model-snapshots" / snapshot_id
+            tombstone = snapshot.with_name(
+                f".{snapshot_id}.prune-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            )
+            snapshot.rename(tombstone)
+            (tombstone / "artifact-manifest.json").unlink()
+
+            result = store.prune(
+                keep_snapshot_ids=set(),
+                keep_checkpoint_ids={checkpoint_id},
+            )
+            self.assertEqual(
+                result, {"removed_snapshots": [], "removed_checkpoints": []}
+            )
+            self.assertFalse(tombstone.exists())
 
     def test_retention_marker_prepublish_failure_is_retryable_on_resume(self) -> None:
         observations = {0: _logits(2.0), 1: _logits(2.5), 2: _logits(2.8)}

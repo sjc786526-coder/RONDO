@@ -222,6 +222,8 @@ class ContinuousTrainingController:
         checkpoint_state: dict[str, Any] | None = None
         checkpoint_id: str | None = None
         state_reader: StateReader | None = None
+        qualification_attempted = False
+        checkpoint_qualified = False
         try:
             decision = _scope_decision_for_step(self.state, step)
             if decision is not None:
@@ -290,30 +292,72 @@ class ContinuousTrainingController:
                     },
                     state_writer=state_writer,
                 )
+                qualification_attempted = True
+                self._qualify_checkpoint(
+                    checkpoint_id,
+                    state_reader=state_reader,
+                    expected_controller_state=checkpoint_state,
+                    expected_data_cursor=receipt["data_cursor"],
+                )
+                checkpoint_qualified = True
                 self.state = checkpoint_state
                 self._apply_retention(prune_checkpoints=True)
                 self.artifact_store.mark_retention_complete(checkpoint_id)
             return scope
         except BaseException:
             if checkpoint_state is not None and checkpoint_id is not None:
-                try:
-                    stored_state, _training_state, _model_root = (
-                        self.artifact_store.read_checkpoint(
-                            checkpoint_id, state_reader=state_reader
+                if checkpoint_qualified:
+                    self.state = checkpoint_state
+                elif not qualification_attempted and state_reader is not None:
+                    try:
+                        self._qualify_checkpoint(
+                            checkpoint_id,
+                            state_reader=state_reader,
+                            expected_controller_state=checkpoint_state,
+                            expected_data_cursor=receipt["data_cursor"],
                         )
-                    )
-                except BaseException:
-                    self.state = committed_state
+                    except BaseException:
+                        self.state = committed_state
+                    else:
+                        self.state = checkpoint_state
                 else:
-                    self.state = (
-                        checkpoint_state
-                        if stored_state == checkpoint_state
-                        else committed_state
-                    )
+                    self.state = committed_state
             else:
                 self.state = committed_state
             self.state["status"] = "recovery_required"
             raise
+
+    def _qualify_checkpoint(
+        self,
+        checkpoint_id: str,
+        *,
+        state_reader: StateReader,
+        expected_controller_state: Mapping[str, Any],
+        expected_data_cursor: Mapping[str, Any],
+    ) -> None:
+        """Read back a new checkpoint before it may replace a recovery point."""
+
+        try:
+            controller_state, training_state, _model_root = (
+                self.artifact_store.read_checkpoint(
+                    checkpoint_id, state_reader=state_reader
+                )
+            )
+        except FullModelTrainingError:
+            raise
+        except Exception as exc:
+            raise FullModelTrainingError(
+                "plan081_training_state_decode_failed"
+            ) from exc
+        if controller_state != expected_controller_state:
+            raise FullModelTrainingError(
+                "plan081_checkpoint_controller_state_invalid"
+            )
+        _validate_training_state(training_state)
+        if training_state["data"] != expected_data_cursor:
+            raise FullModelTrainingError(
+                "plan081_data_cursor_checkpoint_mismatch"
+            )
 
     @classmethod
     def resume(

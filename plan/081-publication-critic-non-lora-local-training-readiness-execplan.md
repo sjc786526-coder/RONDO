@@ -223,10 +223,17 @@ XXX用以下内容代替：
 - 2026-08-25：完成 fail-closed step/checkpoint/retention 恢复、严格 training best 与稀疏扩层转折、train/validation cohort 隔离及
   显式非 JSON state codec 整改；Plan 081 24 项与精选历史回归合计 31/31 通过，三路定点复核及一轮全 diff 独立复核均未发现
   剩余或新增 P1/P2。
+- 2026-08-25：整改复验提交 `a21d290` 对整改提交 `ea023e6` 报告 2 个相邻 P2、无 P1：新 checkpoint 在 prune/marker 前缺少
+  绑定 reader 资格验证，discard tree 半删后无法幂等续清；均确认存在且不构成 `REPLAN_REQUIRED`。
+- 2026-08-25：新增 checkpoint 通用恢复不变量读回资格检查，以及严格 task-owned prune tombstone 原子改名/续清；Plan 081 29 项与
+  精选历史回归合计 36/36 通过。内部组合复核继续发现半删 snapshot 后旧 checkpoint 可恢复、多个 discard checkpoint 升序删除会
+  暴露依赖已删旧 best 的 checkpoint 两个 P2；现按数值 chronology 从新到旧隐藏 discard checkpoint，再删除 snapshot，并补
+  cp2/cp4/cp6 故障恢复回归。整改后两路定点复核与全 diff 复核均未发现剩余或新增 P1/P2。
 
 ### 当前工作
 
-- Plan 081 首轮指定审查的全部 finding 已整改，本地门禁、最终 diff/生成物检查与内部独立复核均已完成；整改提交后等待指定审查者复验。
+- Plan 081 整改复验的 2 个 finding 及内部组合复核发现的相邻窗口均已整改；本地门禁、定点/全 diff 独立复核与最终
+  diff/生成物检查均已完成，整改提交后等待再次复验。
 
 ### 本任务剩余步骤
 
@@ -239,7 +246,7 @@ XXX用以下内容代替：
 
 ### 当前验收状态
 
-- `IMPLEMENTATION_COMPLETE / DESIGNATED_REVIEW_REMEDIATED / FOCUSED_LOCAL_GATES_PASS / REACCEPTANCE_PENDING`。
+- `IMPLEMENTATION_COMPLETE / SECOND_REVIEW_REMEDIATED / FOCUSED_LOCAL_GATES_PASS / REACCEPTANCE_PENDING`。
 
 ### 交接边界
 
@@ -268,3 +275,4 @@ XXX用以下内容代替：
 | 011 | base 保持研究 incumbent，训练内部 best 只有同口径优于 base 才成为目标候选；不要求直接产品 GO | 防止把 least-bad checkpoint 误报为研究成功，同时避免在训练开发阶段提前要求产品资格 | selection/handoff | 已采纳 |
 | 012 | Plan 081 使用专用薄层：typed train/validation identity、观测后显式扩大 scope、永久小观测与分层快照/checkpoint，并以持久 reservation 分配恢复 attempt | 旧 Plan 060/066 固定 recipe 不适合连续路线；新边界需避免夹带 holdout、静态预写扩层和同一 checkpoint 多次重放冲突 | local control/recovery | 已采纳 |
 | 013 | post-update 任一失败都进入 `recovery_required` 并从完整 checkpoint 新 adapter 恢复；adapter 显式声明 state codec，retention 以原子 completion artifact 收口 | 模型更新无法由 controller 安全回滚；半提交不得原地重试，非 JSON optimizer/RNG 状态和 checkpoint prune 都需可验证恢复边界 | failure/recovery | 已采纳 |
+| 014 | 新 checkpoint 只有经绑定 reader 读回并核对 controller/training/data cursor 后才能替代旧恢复点；已验证 discard 先原子改名为严格 prune tombstone，checkpoint 按数值 chronology 从新到旧隐藏后再删 snapshot | byte manifest 不等于可恢复；删除意图必须先与 live artifact 分离，中途失败时仍可见的旧 checkpoint 不得依赖已删除恢复点或 snapshot | checkpoint/retention | 已采纳 |
