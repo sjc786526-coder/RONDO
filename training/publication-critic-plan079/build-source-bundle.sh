@@ -18,6 +18,10 @@ git -C "$repo" archive --format=tar --output="$output" "$actual" -- \
   eval/rondo_eval \
   eval/templates/publication-critic \
   eval/manifests/publication-critic \
+  eval/fixtures/publication-critic-v1 \
+  eval/environments/publication-critic-plan054 \
+  eval/pyproject.toml \
+  eval/uv.lock \
   eval/model-locks/publication-critic/skywork-reward-v2-qwen3-1.7b-e51ea3e0.json \
   eval/model-locks/publication-critic/skywork-reward-v2-qwen3-4b-fd958fef.json \
   eval/environments/publication-critic-plan068/uv.lock \
