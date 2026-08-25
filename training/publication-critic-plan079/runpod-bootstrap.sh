@@ -88,6 +88,10 @@ unset HF_TOKEN HUGGING_FACE_HUB_TOKEN HUGGINGFACEHUB_API_TOKEN
 export HF_HOME="$task_root/hf-home"
 export HF_HUB_CACHE="$HF_HOME/hub"
 export HF_HUB_DISABLE_TELEMETRY=1
+# Some RunPod base images enable the legacy hf_transfer fast path globally
+# without installing its Python package.  The frozen Plan 079 environment uses
+# the supported Hub client path and must not inherit that image-local toggle.
+export HF_HUB_ENABLE_HF_TRANSFER=0
 model="$task_root/model-fd958fef"
 "$venv/bin/hf" download Skywork/Skywork-Reward-V2-Qwen3-4B \
   .gitattributes README.md added_tokens.json assets/skywork_logo.png \

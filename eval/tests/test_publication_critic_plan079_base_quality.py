@@ -429,6 +429,14 @@ class RuntimeReceiptContractTest(unittest.TestCase):
             with self.assertRaisesRegex(BaseQualityError, "packages_invalid"):
                 validate_runtime_receipt(drifted)
 
+    def test_bootstrap_disables_unavailable_image_hf_transfer_toggle(self) -> None:
+        script = (
+            REPO_ROOT / "training/publication-critic-plan079/runpod-bootstrap.sh"
+        ).read_text(encoding="utf-8")
+        disable = script.index("export HF_HUB_ENABLE_HF_TRANSFER=0")
+        download = script.index('"$venv/bin/hf" download')
+        self.assertLess(disable, download)
+
 
 class ResultContractTest(unittest.TestCase):
     def test_complete_good_and_bad_quality_get_distinct_terminals(self) -> None:
