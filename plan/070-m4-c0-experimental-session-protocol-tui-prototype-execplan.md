@@ -254,14 +254,20 @@ git-ignored 工作。共享构建锁和监控 target 由仓库既有 `just`/watc
 - 最终六个受影响 crate 的 `just fix` 无警告通过，随后 `just fmt` 通过；最终精确写集、生成物、snapshot 与 worktree metadata 已检查。
 - 正式资源恢复使用单 Cargo job 并五次只清理 070 可再生 `target/debug/incremental`；保留 deps/fingerprint/build/gn/V8 与产品、测试
   二进制。用户授权的 11 个旧 eval 版本共 33 个 bundle 目录也已精确删除，四个里程碑版本保持不变。
+- 用户指定审查者在提交 `1bfdaa0` 记录了 7 项验收 finding；执行者逐项确认均真实存在并完成整改：response-lost 有界退出、Root-only
+  cold unarchive、state DB 查询错误 fail-closed、Root 过滤后有界分页、关闭态 tooltip 隔离、per-attempt mutation 结果，以及一致的
+  ChildOnly/wire 语义。整改没有修改 `team-state`、`thread-store`、`rollout` 或 069 内容，也没有建设通用 reconnect/timeout 平台。
+- 整改后的正式聚焦证据为：protocol/features 327 项通过（1 项跳过）；app-server/client `experimental_session` 23 项通过；TUI
+  `experimental_session` 6 项与独立 tooltip 1 项通过；最终代码形态的真实 response-loss transport 注入 1/1 通过。stable 与
+  experimental schema generator 各 1/1 通过且没有 tracked schema 差异。
 
 ### 当前工作
 
-- 无；本计划已完成并冻结，全部 tracked 交付内容由本节所在的 070 本地提交承载。
+- 无；7 项验收整改的实现、聚焦验证、机械门禁和提交前检查均已完成。
 
 ### 本任务剩余步骤
 
-- 无。
+- 无；tracked 交付已经冻结，本地提交后交回用户指定审查者复验，正式独立验收结论由审查者给出。
 
 ### 阻塞项
 
@@ -269,8 +275,9 @@ git-ignored 工作。共享构建锁和监控 target 由仓库既有 `just`/watc
 
 ### 当前验收状态
 
-- A–E 功能、聚焦证据、schema、完整门禁证据与独立复核均已形成，执行者结论为 `M4_C0_PROTOTYPE_PASS` 候选；完整门禁的 16 项
-  失败已定位到 070 精确写集之外并如实保留。Docker、真实 API/模型、训练、测评、CI/PR、远端状态均未使用。
+- 7 项外部验收 finding 已在 070 所有权内修复并取得相称聚焦证据，最终 scoped `just fix` 与 `just fmt` 通过；执行者在提交干净后
+  重新给出 `M4_C0_PROTOTYPE_PASS` 候选，并等待用户指定审查者复验。先前完整门禁的 16 项范围外失败继续如实保留，不因本次整改重跑
+  14k 门禁。Docker、真实 API/模型、训练、测评、CI/PR、远端状态均未使用。
 
 ### 交接边界
 
@@ -303,3 +310,7 @@ git-ignored 工作。共享构建锁和监控 target 由仓库既有 `just`/watc
 | 017 | 完整门禁在普通 V8 上游资产 404 后改用仓库既有 checksum-verified Codex V8 入口，并以 `CARGO_BUILD_JOBS=1` 从保留缓存完成 | 两个入口共享 build lock/watchdog/Nextest/JUnit；校验资产入口避免外部 404，单作业使内存 PSI 稳定且不改变测试语义 | validation/resources | 已采纳 |
 | 018 | live-owner operation 在 ThreadManager current-entry read lease 内取得 CodexThread 同步 residency lease；shutdown 先以 write lease 标记不可用 | 单独检查 registry 指针会让已停止但尚未移除的 Root 短暂冒充 loaded owner；同步 lease 不跨 await，也不建设第二套 runtime | core/app-server | 已采纳 |
 | 019 | lag、disconnect 与 event-stream EOF 在失效 client view 后立即把 retained projection 作为 `view=stale` 追加到 TUI 历史 | 只改变内部 gate 会让最后一份用户可见投影仍显示 fresh；保留投影既不伪造新事实，也明确要求重连/刷新 | client/TUI | 已采纳 |
+| 020 | discovery 直接观察 `StateRuntime::list_threads` 的 `Result`，按持久化 `SessionSource` 做 Root 过滤并在固定 row/page budget 内追页 | ThreadStore 的 state-DB-only 适配会吞掉 DB 错误，且先分页后过滤会把 child-only 页伪装为空 Session 集合；专用只读 seam 能保持错误和 incomplete 语义且不触碰 069 所有权 | app-server/query | 已采纳 |
+| 021 | cold unarchive 只对 stored metadata 可证明的 canonical Root 开放；直接 child query 同样复核 current/running Root，否则统一投影为 ChildOnly | 既有 `thread/unarchive` 按 id 生效，不替 Session 原型证明 Root；query id 不能改变同一拓扑的 owner 可用性结论 | app-server/lifecycle | 已采纳 |
+| 022 | TUI 为每次 C0 mutation request 使用固定有界 confirmation deadline 和 typed per-attempt 结果；超时/未确认即 stale+unknown，不 retry，不清空诚实的历史 certainty | 活连接上的真实 response loss 不会触发 disconnect；专用 attempt 边界可解除永久 pending，同时避免建设通用 transport 平台或把旧 Unknown 错配给未提交的新操作 | client/TUI | 已采纳 |
+| 023 | 默认关闭的 Session feature 不加入全局 startup tooltip；`prototypeFacts` 缺省按 v2 局部规则显式序列化为 `null` | 关闭态不能产生用户可见宣传，v2 payload 的 optional 字段不能依赖 skip serialization | feature/protocol | 已采纳 |

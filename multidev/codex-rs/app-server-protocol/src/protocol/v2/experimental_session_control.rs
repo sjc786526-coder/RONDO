@@ -47,7 +47,6 @@ pub struct ExperimentalSessionReadParams {
     /// A server that uses any of these facts must report `prototypeInput` for
     /// the corresponding response provenance. These values are never durable
     /// authority and must not be persisted or used to activate a Session.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional = nullable)]
     pub prototype_facts: Option<ExperimentalSessionPrototypeFacts>,
 }

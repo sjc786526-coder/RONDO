@@ -497,9 +497,11 @@ API capability alone never enables the feature, and a disabled product performs 
 query or background synchronization.
 
 `experimentalSession/list` discovers only root candidates already present in the state DB and
-forces the no-repair path; it never scans rollout JSONL to fill missing metadata. If that source is
-unavailable, the response is explicitly `complete: false` with `provenance: "unavailable"`, rather
-than claiming that an empty page is authoritative. `experimentalSession/read` reads stored metadata
+forces the no-repair path; it never scans rollout JSONL to fill missing metadata. Child rows are
+filtered while the server follows state-DB pages under a fixed scan budget, so a child-only source
+page is not reported as `sessions: none`. A query error, an unclassifiable row, or exhausted scan
+budget makes the result incomplete; a query error additionally returns `provenance: "unavailable"`
+instead of claiming an authoritative empty set. `experimentalSession/read` reads stored metadata
 without history and overlays bounded live facts only when a matching runtime is already loaded.
 Neither request obtains a writer, repairs metadata, resumes or restores a Session, or starts an
 Agent, model, or API call.
@@ -521,13 +523,18 @@ close, delete, or authority handoff.
 `experimentalSession/updateTeamLifecycle` can mutate only the canonical Team owned by the proved,
 currently loaded Root. It derives the actor from that live Session, requires the caller's expected
 producer and Root states, and rejects child, non-owner, unavailable-owner, stale-precondition, and
-unknown-reference requests. A transport loss after submission leaves the result unknown: clients
-must obtain a new authoritative read and must not automatically replay the non-idempotent request.
+unknown-reference requests. The prototype TUI bounds each submitted mutation attempt; an
+unconfirmed response leaves the view stale and that attempt's result unknown. It never automatically
+replays the non-idempotent request, and a later explicit authoritative read is required to reconcile
+the view. Historical result certainty is not attributed to a later operation that failed before
+submission.
 
 Cold archive lifecycle remains on the existing authoritative `thread/archive` and
-`thread/unarchive` APIs; the prototype does not write storage directly. `thread/unarchive` restores
-the stored thread as `notLoaded` and does not resume it. Unsubscribe, view switching, or disconnect
-only changes client attachment/synchronization and does not alter Team lifecycle.
+`thread/unarchive` APIs; the prototype does not write storage directly. Session unarchive is offered
+only when stored metadata proves the requested id is the canonical Root, so an archived child cannot
+be restored independently through this prototype. `thread/unarchive` restores the stored Root as
+`notLoaded` and does not resume it. Unsubscribe, view switching, or disconnect only changes client
+attachment/synchronization and does not alter Team lifecycle.
 
 ### Example: Track thread status changes
 

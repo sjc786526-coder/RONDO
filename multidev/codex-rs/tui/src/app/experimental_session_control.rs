@@ -82,11 +82,7 @@ impl App {
                         app_server.experimental_session_mutation_certainty(),
                     )),
                     Err(err) => {
-                        self.render_experimental_session_mutation_error(
-                            app_server,
-                            "track",
-                            &err.to_string(),
-                        );
+                        self.render_experimental_session_mutation_error(app_server, "track", &err);
                     }
                 }
             }
@@ -101,7 +97,7 @@ impl App {
                         self.render_experimental_session_mutation_error(
                             app_server,
                             "unarchive",
-                            &err.to_string(),
+                            &err,
                         );
                     }
                 }
@@ -152,35 +148,36 @@ impl App {
         &mut self,
         app_server: &AppServerSession,
         operation: &str,
-        error: &str,
+        error: &crate::app_server_session::ExperimentalSessionMutationAttemptError,
     ) {
-        let certainty = app_server.experimental_session_mutation_certainty();
-        if certainty
-            == codex_app_server_client::MutationCertainty::Known(
-                codex_app_server_client::KnownMutationOutcome::Rejected,
-            )
-        {
-            self.add_experimental_session_output(render_mutation_status(
-                &format!("{operation} rejected before side effects"),
-                app_server.experimental_session_view_freshness(),
-                certainty,
-            ));
-            self.chat_widget.add_error_message(format!(
-                "Session prototype {operation} was rejected: {error}"
-            ));
-        } else if certainty == codex_app_server_client::MutationCertainty::Unknown {
-            self.add_experimental_session_output(render_mutation_status(
-                &format!("{operation} result is unknown"),
-                app_server.experimental_session_view_freshness(),
-                certainty,
-            ));
-            self.chat_widget.add_error_message(format!(
-                "Session prototype {operation} result is unknown; it was not replayed: {error}"
-            ));
-        } else {
-            self.chat_widget.add_error_message(format!(
-                "Session prototype {operation} was not submitted: {error}"
-            ));
+        match error.outcome() {
+            crate::app_server_session::ExperimentalSessionMutationAttemptOutcome::Rejected => {
+                self.add_experimental_session_output(render_mutation_status(
+                    &format!("{operation} rejected before side effects"),
+                    app_server.experimental_session_view_freshness(),
+                    codex_app_server_client::MutationCertainty::Known(
+                        codex_app_server_client::KnownMutationOutcome::Rejected,
+                    ),
+                ));
+                self.chat_widget.add_error_message(format!(
+                    "Session prototype {operation} was rejected: {error}"
+                ));
+            }
+            crate::app_server_session::ExperimentalSessionMutationAttemptOutcome::ResultUnknown => {
+                self.add_experimental_session_output(render_mutation_status(
+                    &format!("{operation} result is unknown"),
+                    app_server.experimental_session_view_freshness(),
+                    codex_app_server_client::MutationCertainty::Unknown,
+                ));
+                self.chat_widget.add_error_message(format!(
+                    "Session prototype {operation} result is unknown; it was not replayed: {error}"
+                ));
+            }
+            crate::app_server_session::ExperimentalSessionMutationAttemptOutcome::NotSubmitted => {
+                self.chat_widget.add_error_message(format!(
+                    "Session prototype {operation} was not submitted: {error}"
+                ));
+            }
         }
     }
 

@@ -124,6 +124,13 @@ fn response_loss_is_unknown_and_requires_an_explicit_reread() {
     assert!(control.apply_read_success(read, "reconciled"));
     assert_eq!(control.view_freshness(), ViewFreshness::Fresh);
     assert_eq!(control.mutation_certainty(), MutationCertainty::Unknown);
+    assert!(
+        !control.apply_mutation_outcome(mutation, KnownMutationOutcome::Succeeded),
+        "a late response from the lost attempt must not overwrite reconciliation"
+    );
+    assert_eq!(control.projection(), Some(&"reconciled"));
+    assert_eq!(control.view_freshness(), ViewFreshness::Fresh);
+    assert_eq!(control.mutation_certainty(), MutationCertainty::Unknown);
     assert!(control.begin_mutation().is_some());
 }
 

@@ -75,6 +75,15 @@ fn experimental_session_control_is_an_independent_product_opt_in() {
         true,
     )]));
     assert!(features.enabled(Feature::ExperimentalSessionControl));
+    assert_eq!(
+        spec.stage.experimental_menu_name(),
+        Some("Session control prototype")
+    );
+    assert_eq!(
+        spec.stage.experimental_menu_description(),
+        Some("Try the experimental Session discovery and control interface.")
+    );
+    assert_eq!(spec.stage.experimental_announcement(), None);
 }
 
 #[test]

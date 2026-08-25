@@ -84,3 +84,33 @@
 - 交给 WBS 单一整合者的 control/TUI 输入（等待 S2）：保留 loaded-owner 路由、expected-state conflict、结果 unknown/no replay 与显式
   reread；待恢复/close barrier 权威形成后再决定 owner unavailable 的恢复动作、正式 operation enum 和交互布局。cold unarchive 可继续
   复用现有 Thread lifecycle，switch/detach/unsubscribe 仍只改变客户端附着。
+
+## 独立验收整改
+
+- 用户指定审查者的提交 `1bfdaa0` 记录了 7 项真实 correctness/合同 finding。整改后，C0 TUI 对单次 mutation request 使用固定的
+  confirmation deadline；server 已接收但 response 丢失且连接保持在线时有界进入 `stale + result-unknown`，不 retry。每次调用返回
+  typed per-attempt 结果，因此历史 Unknown 保留为旧操作事实，但 preflight 未提交的新操作只显示 `not submitted`。
+- 真实 fault injection 通过 WebSocket 代理转发 `thread/unarchive` 给嵌入式 app-server，确认权威 mutation 已执行后丢弃 response，再在
+  同一连接上执行显式 read 并迟发旧 response。最终代码形态 1/1 通过（run
+  `c88cb4e5-9393-46c7-b7a4-f23ad78ff5e7`）：attempt 未永久 pending、wire 只发送一次、read 恢复 fresh，迟到 response 不覆盖新 view。
+- discovery 改为直接观察 `StateRuntime::list_threads` 的成功/失败，并根据持久化 `SessionSource` 在 400 row/16 page 上限内过滤 Root 后
+  继续分页。DB query error 丢弃 partial data 并返回 `unavailable/incomplete`；分类或预算不足只报告 incomplete，不把 child-only 页显示为
+  authoritative none。没有读取 rollout history、取得 writer、repair metadata 或触碰 069/thread-store/rollout 所有权。
+- cold unarchive 只对 stored metadata 可证明的 canonical Root 开放；archived child 和 identity unavailable fail closed。直接 child
+  query 会复核 canonical Root 是否 current/running，Root 不在 current map 时与 Root-id query 一致投影为
+  `OwnerUnavailable/ChildOnly`，online/cold mutation 均不可用。
+- 默认关闭 feature 的 announcement 为空，不再进入进程全局 startup tooltip pool；`/experimental` 内的 opt-in 名称和说明继续保留。
+  v2 `prototypeFacts` 遵循局部 wire 规则，缺省反序列化为 None、序列化显式为 `null`。
+- 整改聚焦证据：protocol/features 327 项通过、1 项跳过（run `e54f7082-8593-4dc3-ac77-74be1776cdd6`）；app-server/client
+  `experimental_session` 23/23 通过（run `091844aa-8cdc-45e1-8604-a17ce29edc2e`）；TUI `experimental_session` 6/6 通过（run
+  `b5e76c85-dba5-42a3-b375-7022a91e55a6`），tooltip 1/1 通过（run `b0b88cd6-c2b8-44a4-9ae4-ae5e1aeac48e`）。stable 与
+  experimental schema generator 各 1/1 通过（runs `b8d405e2-1cb3-4f09-bed9-6d242a948f01`、
+  `70e57e79-3e84-490e-9b29-1d67f34c2933`），没有 tracked schema 差异或 `*.snap.new`。按审查决策未重跑 14k 完整门禁。
+- 正式拆包输入相应收紧：query 必须保留 source error/incomplete 与 Root-filter 后分页语义；control/TUI 必须保留 Root-only cold operation、
+  bounded per-attempt certainty、unknown 后显式 reread 和 no replay。C0 固定 deadline、`prototypeFacts`、文本 UI 与 state-DB
+  `SessionSource` 分类仍是原型接缝，不应直接冻结为正式 durable read model 或通用 transport 平台。
+- 聚焦测试与 schema 完成后，受影响的 protocol/server/client/features/TUI 五个 crate scoped `just fix` 通过并应用 1 处等价的
+  collapsible-if 整理，随后 `just fmt` 通过；按仓库规则未在 fix/fmt 后重跑测试。最终 clippy 前精确删除 070 可再生的
+  `target/debug/incremental` 15,923,028,986 bytes，保留其余构建产物；clippy 后 RONDO 总占用 248,540,674,571 bytes，低于本轮
+  265 GB 告警线。提交前再次删除 clippy 重建的 4,385,849,609 bytes incremental，最终总占用 244,310,411,952 bytes；未清理
+  `eval-data/uv-cache`。

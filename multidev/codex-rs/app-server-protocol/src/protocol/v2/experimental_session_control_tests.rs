@@ -32,6 +32,30 @@ fn read_params_round_trip_explicit_prototype_lifecycle() {
 }
 
 #[test]
+fn read_params_accept_missing_prototype_facts_but_serialize_null() {
+    let params: ExperimentalSessionReadParams = serde_json::from_value(json!({
+        "sessionId": "01900000-0000-7000-8000-000000000001"
+    }))
+    .expect("omitted prototype facts should deserialize");
+    assert_eq!(params.prototype_facts, None);
+    assert_eq!(
+        serde_json::to_value(ClientRequest::ExperimentalSessionRead {
+            request_id: RequestId::Integer(7),
+            params,
+        })
+        .expect("request should serialize"),
+        json!({
+            "method": "experimentalSession/read",
+            "id": 7,
+            "params": {
+                "sessionId": "01900000-0000-7000-8000-000000000001",
+                "prototypeFacts": null
+            }
+        })
+    );
+}
+
+#[test]
 fn list_response_marks_unavailable_discovery_as_incomplete() {
     let response = ExperimentalSessionListResponse {
         data: Vec::new(),

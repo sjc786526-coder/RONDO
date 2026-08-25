@@ -35,15 +35,14 @@ use codex_core::ExperimentalSessionControlRootState as CoreRootState;
 use codex_core::ExperimentalSessionControlSetRootStateParams as CoreSetRootStateParams;
 use codex_core::ExperimentalSessionControlTeamProjection as CoreTeamProjection;
 use codex_core::ExperimentalSessionControlVersion as CoreVersion;
-use codex_thread_store::ListThreadsParams as StoreListThreadsParams;
 use codex_thread_store::ReadThreadParams as StoreReadThreadParams;
-use codex_thread_store::SortDirection as StoreSortDirection;
 use codex_thread_store::StoredThread;
-use codex_thread_store::ThreadSortKey as StoreThreadSortKey;
 use codex_thread_store::ThreadStoreError;
 
 const SESSION_LIST_DEFAULT_LIMIT: usize = 25;
 const SESSION_LIST_MAX_LIMIT: usize = 100;
+const SESSION_LIST_MAX_SCANNED_THREADS: usize = 400;
+const SESSION_LIST_MAX_SOURCE_PAGES: usize = 16;
 
 impl ThreadRequestProcessor {
     pub(crate) async fn experimental_session_list(
@@ -52,7 +51,7 @@ impl ThreadRequestProcessor {
     ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
         self.ensure_experimental_session_control_enabled()?;
 
-        let Some(_state_db) = self.state_db.as_ref() else {
+        let Some(state_db) = self.state_db.as_ref() else {
             return Ok(Some(
                 ExperimentalSessionListResponse {
                     data: Vec::new(),
@@ -68,35 +67,103 @@ impl ThreadRequestProcessor {
             .map(|limit| limit as usize)
             .unwrap_or(SESSION_LIST_DEFAULT_LIMIT)
             .clamp(1, SESSION_LIST_MAX_LIMIT);
-        let page = self
-            .thread_store
-            .list_threads(StoreListThreadsParams {
-                page_size,
-                cursor: params.cursor,
-                sort_key: StoreThreadSortKey::CreatedAt,
-                sort_direction: StoreSortDirection::Desc,
-                allowed_sources: Vec::new(),
-                model_providers: None,
-                cwd_filters: None,
-                section: None,
-                archived: false,
-                search_term: None,
-                relation_filter: None,
-                use_state_db_only: true,
-            })
-            .await
-            .map_err(session_store_list_error)?;
+        let mut anchor = params
+            .cursor
+            .as_deref()
+            .map(parse_session_list_cursor)
+            .transpose()?;
+        let mut roots = Vec::with_capacity(page_size);
+        let mut scanned = 0usize;
+        let mut source_pages = 0usize;
+        let mut classification_incomplete = false;
+        let mut next_anchor = None;
 
-        let mut data = Vec::with_capacity(page.items.len());
-        for stored in page
-            .items
-            .into_iter()
-            .filter(|thread| thread.parent_thread_id.is_none())
+        while roots.len() < page_size
+            && scanned < SESSION_LIST_MAX_SCANNED_THREADS
+            && source_pages < SESSION_LIST_MAX_SOURCE_PAGES
         {
+            source_pages = source_pages.saturating_add(1);
+            let query_size = (page_size - roots.len())
+                .min(SESSION_LIST_MAX_SCANNED_THREADS - scanned)
+                .max(1);
+            let page = match state_db
+                .list_threads(
+                    query_size,
+                    codex_state::ThreadFilterOptions {
+                        archived_only: false,
+                        allowed_sources: &[],
+                        model_providers: None,
+                        cwd_filters: None,
+                        section: None,
+                        anchor: anchor.as_ref(),
+                        sort_key: codex_state::SortKey::CreatedAt,
+                        sort_direction: codex_state::SortDirection::Desc,
+                        search_term: None,
+                    },
+                )
+                .await
+            {
+                Ok(page) => page,
+                Err(error) => {
+                    tracing::warn!(%error, "experimental Session discovery state DB query failed");
+                    return Ok(Some(
+                        ExperimentalSessionListResponse {
+                            data: Vec::new(),
+                            next_cursor: None,
+                            provenance: ExperimentalSessionFactProvenance::Unavailable,
+                            complete: false,
+                        }
+                        .into(),
+                    ));
+                }
+            };
+            scanned = scanned.saturating_add(page.num_scanned_rows.max(page.items.len()));
+            next_anchor = page.next_anchor;
+
+            for metadata in page.items {
+                match state_metadata_parent_thread_id(&metadata) {
+                    Ok(None) => roots.push((
+                        metadata.id,
+                        SessionStoredFacts {
+                            parent_thread_id: None,
+                            archived: metadata.archived_at.is_some(),
+                        },
+                    )),
+                    Ok(Some(_)) => {}
+                    Err(error) => {
+                        classification_incomplete = true;
+                        tracing::warn!(
+                            thread_id = %metadata.id,
+                            %error,
+                            "experimental Session discovery could not classify persisted thread identity"
+                        );
+                    }
+                }
+            }
+
+            if roots.len() >= page_size || next_anchor.is_none() {
+                break;
+            }
+            anchor = next_anchor.clone();
+        }
+
+        let source_exhausted = next_anchor.is_none();
+        let scan_budget_exhausted = scanned >= SESSION_LIST_MAX_SCANNED_THREADS
+            && roots.len() < page_size
+            && !source_exhausted;
+        let page_budget_exhausted = source_pages >= SESSION_LIST_MAX_SOURCE_PAGES
+            && roots.len() < page_size
+            && !source_exhausted;
+        let complete =
+            !classification_incomplete && !scan_budget_exhausted && !page_budget_exhausted;
+        let next_cursor = next_anchor.as_ref().map(session_list_cursor);
+
+        let mut data = Vec::with_capacity(roots.len());
+        for (thread_id, stored_facts) in roots {
             data.push(
                 self.experimental_session_view(
-                    stored.thread_id,
-                    Some(stored),
+                    thread_id,
+                    Some(stored_facts),
                     /*prototype_lifecycle*/ None,
                     ExperimentalSessionFactProvenance::StateDbPrototype,
                 )
@@ -107,9 +174,9 @@ impl ThreadRequestProcessor {
         Ok(Some(
             ExperimentalSessionListResponse {
                 data,
-                next_cursor: page.next_cursor,
+                next_cursor,
                 provenance: ExperimentalSessionFactProvenance::StateDbPrototype,
-                complete: true,
+                complete,
             }
             .into(),
         ))
@@ -138,10 +205,11 @@ impl ThreadRequestProcessor {
             }
         };
         let prototype_lifecycle = params.prototype_facts.map(|facts| facts.domain_lifecycle);
+        let stored_facts = stored.as_ref().map(SessionStoredFacts::from);
         let session = self
             .experimental_session_view(
                 session_id,
-                stored,
+                stored_facts,
                 prototype_lifecycle,
                 ExperimentalSessionFactProvenance::ThreadStore,
             )
@@ -203,14 +271,12 @@ impl ThreadRequestProcessor {
     async fn experimental_session_view(
         &self,
         query_id: ThreadId,
-        stored: Option<StoredThread>,
+        stored: Option<SessionStoredFacts>,
         prototype_lifecycle: Option<ExperimentalSessionDomainLifecycle>,
         stored_provenance: ExperimentalSessionFactProvenance,
     ) -> ExperimentalSessionView {
         let loaded = self.loaded_session_context(query_id).await;
-        let is_archived = stored
-            .as_ref()
-            .is_some_and(|thread| thread.archived_at.is_some());
+        let is_archived = stored.as_ref().is_some_and(|thread| thread.archived);
         let stored_is_root = stored
             .as_ref()
             .is_some_and(|thread| thread.parent_thread_id.is_none());
@@ -325,11 +391,22 @@ impl ThreadRequestProcessor {
             };
             operation(unavailable(update_unavailable), provenance)
         };
-        let unarchive = if is_archived {
+        let unarchive = if is_archived && stored_is_root {
             operation(
                 ExperimentalSessionOperationAvailability::Available,
                 stored_provenance,
             )
+        } else if is_archived {
+            let reason = match residency {
+                ExperimentalSessionResidency::LoadedNonOwner => {
+                    ExperimentalSessionOperationUnavailableReason::NotOwner
+                }
+                ExperimentalSessionResidency::OwnerUnavailable => {
+                    ExperimentalSessionOperationUnavailableReason::ChildOnly
+                }
+                _ => ExperimentalSessionOperationUnavailableReason::IdentityUnavailable,
+            };
+            operation(unavailable(reason), stored_provenance)
         } else if stored.is_some() {
             operation(
                 unavailable(ExperimentalSessionOperationUnavailableReason::NotArchived),
@@ -365,10 +442,9 @@ impl ThreadRequestProcessor {
     }
 
     async fn loaded_session_context(&self, query_id: ThreadId) -> LoadedSessionContext {
-        if let Ok(thread) = self.thread_manager.get_thread(query_id).await {
-            if !thread.is_running() {
-                return LoadedSessionContext::None;
-            }
+        if let Ok(thread) = self.thread_manager.get_thread(query_id).await
+            && thread.is_running()
+        {
             let configured = thread.session_configured();
             let root_thread_id = ThreadId::from(configured.session_id);
             if configured.parent_thread_id.is_none()
@@ -377,7 +453,10 @@ impl ThreadRequestProcessor {
             {
                 return LoadedSessionContext::Owner(thread);
             }
-            return LoadedSessionContext::NonOwner { root_thread_id };
+            if self.loaded_root_is_current(root_thread_id).await {
+                return LoadedSessionContext::NonOwner { root_thread_id };
+            }
+            return LoadedSessionContext::ChildOnly { root_thread_id };
         }
 
         for loaded_id in self.thread_manager.list_thread_ids().await {
@@ -394,6 +473,34 @@ impl ThreadRequestProcessor {
             }
         }
         LoadedSessionContext::None
+    }
+
+    async fn loaded_root_is_current(&self, root_thread_id: ThreadId) -> bool {
+        let Ok(root) = self.thread_manager.get_thread(root_thread_id).await else {
+            return false;
+        };
+        if !root.is_running() {
+            return false;
+        }
+        let configured = root.session_configured();
+        configured.parent_thread_id.is_none()
+            && configured.thread_id == root_thread_id
+            && ThreadId::from(configured.session_id) == root_thread_id
+    }
+}
+
+#[derive(Clone, Copy)]
+struct SessionStoredFacts {
+    parent_thread_id: Option<ThreadId>,
+    archived: bool,
+}
+
+impl From<&StoredThread> for SessionStoredFacts {
+    fn from(stored: &StoredThread) -> Self {
+        Self {
+            parent_thread_id: stored.parent_thread_id,
+            archived: stored.archived_at.is_some(),
+        }
     }
 }
 
@@ -425,16 +532,39 @@ fn operation(
     }
 }
 
-fn session_store_list_error(error: ThreadStoreError) -> JSONRPCErrorError {
-    match error {
-        ThreadStoreError::InvalidRequest { message } | ThreadStoreError::Conflict { message } => {
-            invalid_request(message)
-        }
-        ThreadStoreError::Unsupported { operation } => {
-            internal_error(format!("Session discovery is unsupported: {operation}"))
-        }
-        error => internal_error(format!("failed to discover Sessions: {error}")),
+fn parse_session_list_cursor(value: &str) -> Result<codex_state::Anchor, JSONRPCErrorError> {
+    let (timestamp, thread_id) = match value.rsplit_once('|') {
+        Some((timestamp, thread_id)) => (
+            timestamp,
+            Some(
+                ThreadId::from_string(thread_id)
+                    .map_err(|error| invalid_request(format!("invalid Session cursor: {error}")))?,
+            ),
+        ),
+        None => (value, None),
+    };
+    let ts = chrono::DateTime::parse_from_rfc3339(timestamp)
+        .map_err(|error| invalid_request(format!("invalid Session cursor: {error}")))?
+        .with_timezone(&chrono::Utc);
+    Ok(codex_state::Anchor { ts, id: thread_id })
+}
+
+fn session_list_cursor(anchor: &codex_state::Anchor) -> String {
+    let timestamp = anchor
+        .ts
+        .to_rfc3339_opts(chrono::SecondsFormat::Nanos, true);
+    match anchor.id {
+        Some(thread_id) => format!("{timestamp}|{thread_id}"),
+        None => timestamp,
     }
+}
+
+fn state_metadata_parent_thread_id(
+    metadata: &codex_state::ThreadMetadata,
+) -> Result<Option<ThreadId>, serde_json::Error> {
+    serde_json::from_str::<codex_protocol::protocol::SessionSource>(&metadata.source)
+        .or_else(|_| serde_json::from_value(serde_json::Value::String(metadata.source.clone())))
+        .map(|source| source.parent_thread_id())
 }
 
 fn control_unavailable_reason(

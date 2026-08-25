@@ -160,6 +160,53 @@ const JSONRPC_METHOD_NOT_FOUND: i64 = -32601;
 const JSONRPC_INVALID_PARAMS: i64 = -32602;
 pub(crate) const EXTERNAL_AGENT_CONFIG_IMPORT_IN_PROGRESS_MESSAGE: &str = "A previous external agent import is still running. Wait for it to finish before importing again.";
 const THREAD_SETTINGS_UPDATE_METHOD: &str = "thread/settings/update";
+const EXPERIMENTAL_SESSION_MUTATION_ATTEMPT_TIMEOUT: Duration = Duration::from_secs(10);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ExperimentalSessionMutationAttemptOutcome {
+    NotSubmitted,
+    Rejected,
+    ResultUnknown,
+}
+
+#[derive(Debug)]
+pub(crate) struct ExperimentalSessionMutationAttemptError {
+    outcome: ExperimentalSessionMutationAttemptOutcome,
+    source: color_eyre::Report,
+}
+
+impl ExperimentalSessionMutationAttemptError {
+    fn not_submitted(source: color_eyre::Report) -> Self {
+        Self {
+            outcome: ExperimentalSessionMutationAttemptOutcome::NotSubmitted,
+            source,
+        }
+    }
+
+    fn rejected(source: color_eyre::Report) -> Self {
+        Self {
+            outcome: ExperimentalSessionMutationAttemptOutcome::Rejected,
+            source,
+        }
+    }
+
+    fn result_unknown(source: color_eyre::Report) -> Self {
+        Self {
+            outcome: ExperimentalSessionMutationAttemptOutcome::ResultUnknown,
+            source,
+        }
+    }
+
+    pub(crate) fn outcome(&self) -> ExperimentalSessionMutationAttemptOutcome {
+        self.outcome
+    }
+}
+
+impl std::fmt::Display for ExperimentalSessionMutationAttemptError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.source.fmt(formatter)
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum ForkGoalContinuation {
@@ -277,6 +324,7 @@ pub(crate) struct AppServerSession {
     next_request_id: i64,
     experimental_session_control:
         Mutex<ExperimentalSessionControl<ExperimentalSessionReadParams, ExperimentalSessionView>>,
+    experimental_session_mutation_attempt_timeout: Duration,
     history_pagination: HashMap<ThreadId, history::ThreadHistoryPagination>,
     remote_cwd_override: Option<PathBuf>,
     thread_params_mode: ThreadParamsMode,
@@ -354,6 +402,8 @@ impl AppServerSession {
             client,
             next_request_id: 1,
             experimental_session_control: Mutex::new(experimental_session_control),
+            experimental_session_mutation_attempt_timeout:
+                EXPERIMENTAL_SESSION_MUTATION_ATTEMPT_TIMEOUT,
             history_pagination: HashMap::new(),
             remote_cwd_override: None,
             thread_params_mode,
@@ -377,6 +427,14 @@ impl AppServerSession {
 
     pub(crate) fn uses_remote_workspace(&self) -> bool {
         matches!(self.thread_params_mode, ThreadParamsMode::Remote)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_experimental_session_mutation_attempt_timeout_for_test(
+        &mut self,
+        timeout: Duration,
+    ) {
+        self.experimental_session_mutation_attempt_timeout = timeout;
     }
 
     pub(crate) fn uses_embedded_app_server(&self) -> bool {
@@ -983,7 +1041,10 @@ impl AppServerSession {
     pub(crate) async fn experimental_session_track(
         &mut self,
         params: ExperimentalSessionUpdateTeamLifecycleParams,
-    ) -> Result<ExperimentalSessionUpdateTeamLifecycleResponse> {
+    ) -> std::result::Result<
+        ExperimentalSessionUpdateTeamLifecycleResponse,
+        ExperimentalSessionMutationAttemptError,
+    > {
         self.require_experimental_session_operation(
             |view| {
                 &view
@@ -992,37 +1053,44 @@ impl AppServerSession {
                     .availability
             },
             "track",
-        )?;
+        )
+        .map_err(ExperimentalSessionMutationAttemptError::not_submitted)?;
         let current_root_thread_id = self
             .experimental_session_control()
             .projection()
             .and_then(|view| view.identity.root_thread_id.clone());
         if current_root_thread_id.as_deref() != Some(params.root_thread_id.as_str()) {
-            return Err(color_eyre::eyre::eyre!(
-                "track rootThreadId must exactly match the current fresh projection owner"
+            return Err(ExperimentalSessionMutationAttemptError::not_submitted(
+                color_eyre::eyre::eyre!(
+                    "track rootThreadId must exactly match the current fresh projection owner"
+                ),
             ));
         }
         let ticket = self
             .experimental_session_control()
             .begin_mutation()
             .ok_or_else(|| {
-                color_eyre::eyre::eyre!("track requires a fresh authoritative Session read")
+                ExperimentalSessionMutationAttemptError::not_submitted(color_eyre::eyre::eyre!(
+                    "track requires a fresh authoritative Session read"
+                ))
             })?;
         let request_id = self.next_request_id();
-        match self
-            .client
-            .request_typed(ClientRequest::ExperimentalSessionUpdateTeamLifecycle {
-                request_id,
-                params,
-            })
-            .await
+        match tokio::time::timeout(
+            self.experimental_session_mutation_attempt_timeout,
+            self.client
+                .request_typed(ClientRequest::ExperimentalSessionUpdateTeamLifecycle {
+                    request_id,
+                    params,
+                }),
+        )
+        .await
         {
-            Ok(response) => {
+            Ok(Ok(response)) => {
                 self.experimental_session_control()
                     .apply_mutation_outcome(ticket, KnownMutationOutcome::Succeeded);
                 Ok(response)
             }
-            Err(err) => {
+            Ok(Err(err)) => {
                 let known_rejection = matches!(
                     &err,
                     TypedRequestError::Server { source, .. }
@@ -1031,63 +1099,102 @@ impl AppServerSession {
                 if known_rejection {
                     self.experimental_session_control()
                         .apply_mutation_outcome(ticket, KnownMutationOutcome::Rejected);
-                    Err(err).wrap_err(
-                        "experimentalSession/updateTeamLifecycle was rejected before side effects",
-                    )
+                    Err(ExperimentalSessionMutationAttemptError::rejected(
+                        color_eyre::eyre::eyre!(
+                            "experimentalSession/updateTeamLifecycle was rejected before side effects: {err}"
+                        ),
+                    ))
                 } else {
                     self.experimental_session_control()
                         .apply_mutation_response_loss(ticket);
-                    Err(err).wrap_err("experimentalSession/updateTeamLifecycle result is unknown")
+                    Err(ExperimentalSessionMutationAttemptError::result_unknown(
+                        color_eyre::eyre::eyre!(
+                            "experimentalSession/updateTeamLifecycle result is unknown: {err}"
+                        ),
+                    ))
                 }
+            }
+            Err(_) => {
+                self.experimental_session_control()
+                    .apply_mutation_response_loss(ticket);
+                Err(ExperimentalSessionMutationAttemptError::result_unknown(
+                    color_eyre::eyre::eyre!(
+                        "experimentalSession/updateTeamLifecycle confirmation deadline elapsed after {:?}; the attempt was not replayed",
+                        self.experimental_session_mutation_attempt_timeout
+                    ),
+                ))
             }
         }
     }
 
-    pub(crate) async fn experimental_session_unarchive(&mut self, session_id: &str) -> Result<()> {
+    pub(crate) async fn experimental_session_unarchive(
+        &mut self,
+        session_id: &str,
+    ) -> std::result::Result<(), ExperimentalSessionMutationAttemptError> {
         let attached_session_id = self
             .experimental_session_control()
             .attachment()
             .map(|params| params.session_id.clone());
         if attached_session_id.as_deref() != Some(session_id) {
-            return Err(color_eyre::eyre::eyre!(
-                "unarchive requires a fresh /sessions read for the same Session"
+            return Err(ExperimentalSessionMutationAttemptError::not_submitted(
+                color_eyre::eyre::eyre!(
+                    "unarchive requires a fresh /sessions read for the same Session"
+                ),
             ));
         }
         self.require_experimental_session_operation(
             |view| &view.operation_availability.unarchive.availability,
             "unarchive",
-        )?;
+        )
+        .map_err(ExperimentalSessionMutationAttemptError::not_submitted)?;
         let thread_id = ThreadId::from_string(session_id)
-            .wrap_err("experimental Session id is not a valid thread id")?;
+            .wrap_err("experimental Session id is not a valid thread id")
+            .map_err(ExperimentalSessionMutationAttemptError::not_submitted)?;
         let ticket = self
             .experimental_session_control()
             .begin_mutation()
             .ok_or_else(|| {
-                color_eyre::eyre::eyre!("unarchive requires a fresh authoritative Session read")
+                ExperimentalSessionMutationAttemptError::not_submitted(color_eyre::eyre::eyre!(
+                    "unarchive requires a fresh authoritative Session read"
+                ))
             })?;
         let request_id = self.next_request_id();
-        match self
-            .client
-            .request_typed::<ThreadUnarchiveResponse>(ClientRequest::ThreadUnarchive {
-                request_id,
-                params: ThreadUnarchiveParams {
-                    thread_id: thread_id.to_string(),
-                },
-            })
-            .await
+        match tokio::time::timeout(
+            self.experimental_session_mutation_attempt_timeout,
+            self.client
+                .request_typed::<ThreadUnarchiveResponse>(ClientRequest::ThreadUnarchive {
+                    request_id,
+                    params: ThreadUnarchiveParams {
+                        thread_id: thread_id.to_string(),
+                    },
+                }),
+        )
+        .await
         {
-            Ok(_) => {
+            Ok(Ok(_)) => {
                 self.experimental_session_control()
                     .apply_mutation_outcome(ticket, KnownMutationOutcome::Succeeded);
                 Ok(())
             }
-            Err(err) => {
+            Ok(Err(err)) => {
                 // Unlike the dedicated optimistic Team RPC, the existing thread/unarchive
                 // contract does not distinguish pre-effect rejection from an error after the
                 // archived rollout was moved. Every post-submission error is therefore unknown.
                 self.experimental_session_control()
                     .apply_mutation_response_loss(ticket);
-                Err(err).wrap_err("thread/unarchive result is unknown")
+                Err(ExperimentalSessionMutationAttemptError::result_unknown(
+                    color_eyre::eyre::eyre!("thread/unarchive result is unknown: {err}"),
+                ))
+            }
+            Err(_) => {
+                self.experimental_session_control()
+                    .apply_mutation_response_loss(ticket);
+                Err(ExperimentalSessionMutationAttemptError::result_unknown(
+                    color_eyre::eyre::eyre!(
+                        "thread/unarchive confirmation deadline elapsed after {:?}; the attempt was not replayed",
+                        self.experimental_session_mutation_attempt_timeout
+                    ),
+                ))
             }
         }
     }

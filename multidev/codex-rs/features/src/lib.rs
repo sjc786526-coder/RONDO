@@ -1123,7 +1123,9 @@ pub const FEATURES: &[FeatureSpec] = &[
         stage: Stage::Experimental {
             name: "Session control prototype",
             menu_description: "Try the experimental Session discovery and control interface.",
-            announcement: "NEW: The Session control prototype is available in /experimental. Restart Codex after enabling it.",
+            // Keep this explicit opt-in out of the process-global startup tooltip pool. The
+            // /experimental menu continues to expose the name and description after opt-in.
+            announcement: "",
         },
         default_enabled: false,
     },
