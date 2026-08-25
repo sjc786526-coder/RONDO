@@ -40,10 +40,6 @@ trap write_status EXIT
 
 printf '%s  %s\n' "$RONDO_PLAN079_SOURCE_SHA256" "$source_archive" | sha256sum --check --status
 printf '%s  %s\n' "$RONDO_PLAN079_VALIDATION_SHA256" "$validation_archive" | sha256sum --check --status
-if [ ! -d "$source_root" ]; then
-  mkdir -m 700 "$source_root"
-  tar --no-same-owner --no-same-permissions -xf "$source_archive" -C "$source_root"
-fi
 bundle="$task_root/validation-bundle"
 if [ ! -d "$bundle" ]; then
   mkdir -m 700 "$bundle"
@@ -52,6 +48,22 @@ fi
 
 export PYTHONDONTWRITEBYTECODE=1
 export PYTHONPATH="$source_root/eval"
+source_receipt="$task_root/source-receipt.json"
+source_receipt_candidate="$task_root/source-receipt.candidate.$$.json"
+"${RONDO_PLAN079_BOOTSTRAP_PYTHON:-python3}" -B -P \
+  -m rondo_eval.publication_critic.base_quality verify-source \
+  --source-archive "$source_archive" \
+  --source-root "$source_root" \
+  --exact-tree \
+  --output "$source_receipt_candidate"
+if [ -e "$source_receipt" ] || [ -L "$source_receipt" ]; then
+  if [ -L "$source_receipt" ] || ! cmp -s "$source_receipt" "$source_receipt_candidate"; then
+    exit 2
+  fi
+  rm -f "$source_receipt_candidate"
+else
+  mv "$source_receipt_candidate" "$source_receipt"
+fi
 python3 -B -P -m rondo_eval.publication_critic.full_model_training verify-bundle \
   --bundle "$bundle"
 venv="$task_root/venv"
@@ -76,13 +88,58 @@ model="$task_root/model-fd958fef"
   tokenizer_config.json vocab.json \
   --revision fd958fef475f323f4e6b195930e3dd918485c668 \
   --local-dir "$model"
+snapshot_receipt="$task_root/snapshot-receipt.json"
+snapshot_receipt_candidate="$task_root/snapshot-receipt.candidate.$$.json"
 "$venv/bin/python" -B -P -m rondo_eval.publication_critic.base_quality verify-snapshot \
   --snapshot "$model" \
   --model-lock "$source_root/eval/model-locks/publication-critic/skywork-reward-v2-qwen3-4b-fd958fef.json" \
-  --output "$task_root/snapshot-receipt.json"
-"$venv/bin/python" -B -m pip freeze --all > "$task_root/dependency-freeze-observed.txt"
-chmod 600 "$task_root/dependency-freeze-observed.txt"
+  --output "$snapshot_receipt_candidate"
+if [ -e "$snapshot_receipt" ] || [ -L "$snapshot_receipt" ]; then
+  if [ -L "$snapshot_receipt" ] || ! cmp -s "$snapshot_receipt" "$snapshot_receipt_candidate"; then
+    exit 2
+  fi
+  rm -f "$snapshot_receipt_candidate"
+else
+  mv "$snapshot_receipt_candidate" "$snapshot_receipt"
+fi
+dependency_freeze="$task_root/dependency-freeze-observed.txt"
+dependency_freeze_candidate="$task_root/dependency-freeze-observed.candidate.$$.txt"
+"$venv/bin/python" -B -m pip freeze --all > "$dependency_freeze_candidate"
+chmod 600 "$dependency_freeze_candidate"
+if [ -e "$dependency_freeze" ] || [ -L "$dependency_freeze" ]; then
+  if [ -L "$dependency_freeze" ] || ! cmp -s "$dependency_freeze" "$dependency_freeze_candidate"; then
+    exit 2
+  fi
+  rm -f "$dependency_freeze_candidate"
+else
+  mv "$dependency_freeze_candidate" "$dependency_freeze"
+fi
+gpu_runtime="$task_root/gpu-runtime-observed.txt"
+gpu_runtime_candidate="$task_root/gpu-runtime-observed.candidate.$$.txt"
 nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader \
-  > "$task_root/gpu-runtime-observed.txt"
-chmod 600 "$task_root/gpu-runtime-observed.txt"
+  > "$gpu_runtime_candidate"
+chmod 600 "$gpu_runtime_candidate"
+if [ -e "$gpu_runtime" ] || [ -L "$gpu_runtime" ]; then
+  if [ -L "$gpu_runtime" ] || ! cmp -s "$gpu_runtime" "$gpu_runtime_candidate"; then
+    exit 2
+  fi
+  rm -f "$gpu_runtime_candidate"
+else
+  mv "$gpu_runtime_candidate" "$gpu_runtime"
+fi
+runtime_receipt="$task_root/runtime-receipt.json"
+runtime_receipt_candidate="$task_root/runtime-receipt.candidate.$$.json"
+"$venv/bin/python" -B -P -m rondo_eval.publication_critic.base_quality observe-runtime \
+  --image-id "$RONDO_PLAN079_IMAGE_ID" \
+  --dependency-freeze "$dependency_freeze" \
+  --environment-lock "$source_root/eval/environments/publication-critic-plan068/uv.lock" \
+  --output "$runtime_receipt_candidate"
+if [ -e "$runtime_receipt" ] || [ -L "$runtime_receipt" ]; then
+  if [ -L "$runtime_receipt" ] || ! cmp -s "$runtime_receipt" "$runtime_receipt_candidate"; then
+    exit 2
+  fi
+  rm -f "$runtime_receipt_candidate"
+else
+  mv "$runtime_receipt_candidate" "$runtime_receipt"
+fi
 printf '%s\n' '{"status":"ready","model":"exact_two_shard_revision_verified"}'

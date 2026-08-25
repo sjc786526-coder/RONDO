@@ -47,11 +47,31 @@ class BaseQualityArchive:
 
         body = pretty_json_bytes(value)
         destination = self.path / name
-        if destination.exists() and not destination.is_symlink():
-            if destination.read_bytes() != body:
+        if destination.exists() or destination.is_symlink():
+            if destination.is_symlink() or not destination.is_file():
+                raise BaseQualityError("commissioning_identity_unsafe")
+            try:
+                existing = destination.read_bytes()
+            except OSError as exc:
+                raise BaseQualityError("commissioning_identity_unreadable") from exc
+            if existing != body:
                 raise BaseQualityError("commissioning_identity_drifted")
             return destination
         return self.write_json(name, value)
+
+    def load_json(self, name: str) -> dict[str, Any] | None:
+        path = self.path / name
+        if not path.exists() and not path.is_symlink():
+            return None
+        if path.is_symlink() or not path.is_file():
+            raise BaseQualityError("run_archive_entry_unsafe")
+        try:
+            value = read_json(path)
+        except Exception as exc:  # noqa: BLE001 - normalize archive parse failures
+            raise BaseQualityError("run_archive_entry_invalid") from exc
+        if not isinstance(value, dict):
+            raise BaseQualityError("run_archive_entry_invalid")
+        return value
 
     def write_json(self, name: str, value: Any) -> Path:
         try:

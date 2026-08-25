@@ -96,6 +96,7 @@ def validate_run_spec(value: Any) -> dict[str, Any]:
             "input",
             "runtime",
             "cloud",
+            "commissioning",
             "quality_floors",
         },
         "run_spec_fields_invalid",
@@ -122,6 +123,7 @@ def validate_run_spec(value: Any) -> dict[str, Any]:
             "source_archive_sha256",
             "environment_lock_path",
             "environment_lock_sha256",
+            "runtime_receipt_sha256",
         },
         "run_spec_source_fields_invalid",
     )
@@ -139,6 +141,9 @@ def validate_run_spec(value: Any) -> dict[str, Any]:
     )
     require_sha256(
         source.get("environment_lock_sha256"), "run_spec_environment_lock_invalid"
+    )
+    require_sha256(
+        source.get("runtime_receipt_sha256"), "run_spec_runtime_receipt_invalid"
     )
     environment_path = require_text(
         source.get("environment_lock_path"), "run_spec_environment_path_invalid"
@@ -228,6 +233,37 @@ def validate_run_spec(value: Any) -> dict[str, Any]:
         require_text(cloud.get(name), f"run_spec_cloud_{name}_invalid")
     if cloud.get("gpu_model") not in GPU_MODELS:
         raise BaseQualityError("run_spec_gpu_model_invalid")
+
+    commissioning = spec["commissioning"]
+    if spec["mode"] == "commissioning":
+        if commissioning is not None:
+            raise BaseQualityError("commissioning_run_binding_invalid")
+    else:
+        binding = _exact(
+            commissioning,
+            {
+                "run_id",
+                "run_spec_sha256",
+                "scores_sha256",
+                "runtime_sha256",
+                "result_sha256",
+            },
+            "formal_commissioning_binding_fields_invalid",
+        )
+        match = (
+            RUN_ID.fullmatch(binding.get("run_id", ""))
+            if isinstance(binding.get("run_id"), str)
+            else None
+        )
+        if match is None or match.group(1) != "commissioning":
+            raise BaseQualityError("formal_commissioning_run_id_invalid")
+        for name in (
+            "run_spec_sha256",
+            "scores_sha256",
+            "runtime_sha256",
+            "result_sha256",
+        ):
+            require_sha256(binding.get(name), f"formal_commissioning_{name}_invalid")
     return dict(spec)
 
 

@@ -13,12 +13,14 @@ from typing import Any
 
 from ..full_model_training.contract import (
     canonical_json_bytes,
+    read_json,
     sha256_bytes,
     sha256_file,
 )
 from ..full_model_training.plan066_bundle import verify_plan066_bundle
 from ..identity import canonical_json_bytes as publication_canonical_json_bytes
 from ..local_deployment.inference import PublicationCriticInference
+from ..scoring import project_logit
 from ..selection.metrics import (
     build_labeled_rows,
     candidate_metrics,
@@ -43,8 +45,11 @@ from .contract import (
     validate_runtime_facts,
 )
 from .snapshot import verify_snapshot
+from .source import verify_source_archive_tree
+from .runtime import runtime_receipt_sha256, verify_runtime_environment
 
 _ATTEMPT_ID = re.compile(r"[a-z0-9][a-z0-9-]{0,47}\Z")
+_FINAL_EVIDENCE_SCHEMA = "rondo-publication-critic-plan079-final-evidence-v1"
 
 
 def prepare_validation_release(
@@ -98,6 +103,13 @@ def validate_score_row(value: Any) -> dict[str, Any]:
             raise BaseQualityError("score_row_number_invalid")
     if not 0.0 <= float(value["score"]) <= 1.0 or float(value["model_elapsed_ms"]) < 0:
         raise BaseQualityError("score_row_number_invalid")
+    if not math.isclose(
+        project_logit(float(value["raw_logit"])),
+        float(value["score"]),
+        rel_tol=0.0,
+        abs_tol=1e-12,
+    ):
+        raise BaseQualityError("score_row_projection_mismatch")
     for name in ("token_count", "dropped_oldest_publications"):
         if type(value.get(name)) is not int or value[name] < 0:
             raise BaseQualityError("score_row_count_invalid")
@@ -226,9 +238,12 @@ def recompute_result(
             gate_failures = quality_gate_failures(search, metrics, 0, QUALITY_FLOORS)
         except Exception as exc:  # noqa: BLE001
             raise BaseQualityError("quality_recompute_failed") from exc
-        terminal = (
-            "4B_BASE_QUALITY_GO" if not gate_failures else "4B_BASE_QUALITY_NO_GO"
-        )
+        if spec["mode"] == "commissioning":
+            terminal = "COMMISSIONING_COMPLETE"
+        else:
+            terminal = (
+                "4B_BASE_QUALITY_GO" if not gate_failures else "4B_BASE_QUALITY_NO_GO"
+            )
     else:
         terminal = "INCONCLUSIVE"
         gate_failures = ["formal_score_cohort_incomplete"]
@@ -272,6 +287,83 @@ def validate_result(
     return recomputed
 
 
+def build_commissioning_binding(
+    spec_value: Any,
+    release_value: Any,
+    scores_value: Any,
+    runtime_value: Any,
+    result_value: Any,
+) -> dict[str, str]:
+    """Validate one completed commissioning run and bind its evidence."""
+
+    spec = validate_run_spec(spec_value)
+    if spec["mode"] != "commissioning":
+        raise BaseQualityError("formal_qualification_mode_invalid")
+    release = validate_release(release_value)
+    scores = validate_scores_document(scores_value, spec, release)
+    runtime = validate_runtime_facts(runtime_value)
+    result = validate_result(result_value, spec, release, scores, runtime)
+    if (
+        result["terminal"] != "COMMISSIONING_COMPLETE"
+        or result["valid_full_quality_run"] is not True
+        or runtime["scored_count"] != 55
+        or runtime["typed_failure_count"] != 0
+    ):
+        raise BaseQualityError("formal_commissioning_not_complete")
+    return {
+        "run_id": spec["run_id"],
+        "run_spec_sha256": run_spec_sha256(spec),
+        "scores_sha256": sha256_bytes(canonical_json_bytes(scores)),
+        "runtime_sha256": sha256_bytes(canonical_json_bytes(runtime)),
+        "result_sha256": sha256_bytes(canonical_json_bytes(result)),
+    }
+
+
+def validate_formal_commissioning(
+    formal_spec_value: Any,
+    formal_release_value: Any,
+    commissioning_spec_value: Any,
+    commissioning_release_value: Any,
+    commissioning_scores_value: Any,
+    commissioning_runtime_value: Any,
+    commissioning_result_value: Any,
+) -> dict[str, str]:
+    """Require formal to preserve every result-related commissioning identity."""
+
+    formal = validate_run_spec(formal_spec_value)
+    if formal["mode"] != "formal":
+        raise BaseQualityError("formal_qualification_target_mode_invalid")
+    formal_release = validate_release(formal_release_value)
+    commissioning_spec = validate_run_spec(commissioning_spec_value)
+    commissioning_release = validate_release(commissioning_release_value)
+    binding = build_commissioning_binding(
+        commissioning_spec,
+        commissioning_release,
+        commissioning_scores_value,
+        commissioning_runtime_value,
+        commissioning_result_value,
+    )
+    if formal["commissioning"] != binding:
+        raise BaseQualityError("formal_commissioning_binding_mismatch")
+    if publication_canonical_json_bytes(formal_release) != (
+        publication_canonical_json_bytes(commissioning_release)
+    ):
+        raise BaseQualityError("formal_commissioning_release_mismatch")
+    for name in ("source", "model", "input", "runtime", "quality_floors"):
+        if formal[name] != commissioning_spec[name]:
+            raise BaseQualityError(f"formal_commissioning_{name}_mismatch")
+    for name in (
+        "network_volume_id",
+        "data_center_id",
+        "gpu_model",
+        "container_image",
+        "cuda_host_version",
+    ):
+        if formal["cloud"][name] != commissioning_spec["cloud"][name]:
+            raise BaseQualityError("formal_commissioning_cloud_mismatch")
+    return binding
+
+
 def run_evaluation(
     *,
     spec_value: Any,
@@ -280,10 +372,14 @@ def run_evaluation(
     model_lock_path: Path,
     source_archive: Path,
     environment_lock: Path,
+    runtime_receipt_path: Path,
+    dependency_freeze: Path,
+    image_id: str,
     bundle_root: Path,
     runs_root: Path,
     repo_root: Path,
     attempt_id: str,
+    commissioning_evidence: tuple[Any, Any, Any, Any, Any] | None = None,
     inference_factory: Callable[..., Any] = PublicationCriticInference,
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     """Score once; commissioning resumes only exact prior successful rows."""
@@ -307,15 +403,76 @@ def run_evaluation(
         or sha256_file(environment_lock) != spec["source"]["environment_lock_sha256"]
     ):
         raise BaseQualityError("source_identity_mismatch")
-    try:
-        bundle = verify_plan066_bundle(bundle_root)
-    except Exception as exc:  # noqa: BLE001
-        raise BaseQualityError("validation_bundle_invalid") from exc
+    verify_source_archive_tree(source_archive, repo_root, exact_tree=True)
+    expected_release, bundle = prepare_validation_release(bundle_root, repo_root)
     if bundle["bundle_manifest_sha256"] != spec["input"]["bundle_manifest_sha256"]:
         raise BaseQualityError("validation_bundle_identity_mismatch")
+    if publication_canonical_json_bytes(release) != publication_canonical_json_bytes(
+        expected_release
+    ):
+        raise BaseQualityError("validation_release_bundle_mismatch")
+    if spec["mode"] == "formal":
+        if commissioning_evidence is None:
+            raise BaseQualityError("formal_commissioning_evidence_missing")
+        validate_formal_commissioning(
+            spec,
+            release,
+            *commissioning_evidence,
+        )
+    elif commissioning_evidence is not None:
+        raise BaseQualityError("commissioning_run_evidence_unexpected")
+    try:
+        runtime_receipt = read_json(runtime_receipt_path)
+    except Exception as exc:  # noqa: BLE001 - normalize receipt parsing
+        raise BaseQualityError("runtime_receipt_invalid") from exc
+    if (
+        runtime_receipt_sha256(runtime_receipt)
+        != spec["source"]["runtime_receipt_sha256"]
+    ):
+        raise BaseQualityError("runtime_receipt_identity_mismatch")
+    runtime_receipt = verify_runtime_environment(
+        runtime_receipt,
+        image_id=image_id,
+        dependency_freeze=dependency_freeze,
+        environment_lock=environment_lock,
+    )
+    if (
+        runtime_receipt["image_id"] != spec["cloud"]["container_image"]
+        or runtime_receipt["cuda_host_version"] != spec["cloud"]["cuda_host_version"]
+        or runtime_receipt["gpu_name"] != spec["cloud"]["gpu_model"]
+    ):
+        raise BaseQualityError("runtime_receipt_cloud_identity_mismatch")
     archive = BaseQualityArchive(runs_root, spec["run_id"], spec["mode"]).create()
     archive.bind_json("run-spec.json", spec)
     archive.bind_json("validation-release.json", release)
+
+    final_evidence = archive.load_json("final-evidence.json")
+    final_names = ("scores.json", "runtime.json", "result.json")
+    if final_evidence is not None:
+        if set(final_evidence) != {"schema", "scores", "runtime", "result"} or (
+            final_evidence.get("schema") != _FINAL_EVIDENCE_SCHEMA
+        ):
+            raise BaseQualityError("run_final_evidence_invalid")
+        recovered_scores = validate_scores_document(
+            final_evidence["scores"], spec, release
+        )
+        recovered_runtime = validate_runtime_facts(final_evidence["runtime"])
+        recovered_result = validate_result(
+            final_evidence["result"],
+            spec,
+            release,
+            recovered_scores,
+            recovered_runtime,
+        )
+        for name, value in zip(
+            final_names,
+            (recovered_scores, recovered_runtime, recovered_result),
+            strict=True,
+        ):
+            archive.bind_json(name, value)
+        return recovered_scores, recovered_runtime, recovered_result
+    if any(archive.load_json(name) is not None for name in final_names):
+        raise BaseQualityError("run_finalization_partial_without_evidence")
 
     items = release["items"]
     rows: list[dict[str, Any]] = []
@@ -333,7 +490,7 @@ def run_evaluation(
     inference: Any | None = None
     inference_loaded = False
     typed_failures: list[dict[str, str]] = []
-    if pending:
+    if pending or (spec["mode"] == "commissioning" and len(rows) == len(items)):
         backend_factory = partial(Plan079CloudBackend, model_lock_path=model_lock_path)
         inference = inference_factory(
             snapshot,
@@ -431,7 +588,16 @@ def run_evaluation(
     )
     scores = build_scores_document(spec, release, ordered, typed_failures)
     result = recompute_result(spec, release, scores, runtime)
-    archive.write_json("scores.json", scores)
-    archive.write_json("runtime.json", runtime)
-    archive.write_json("result.json", result)
+    archive.bind_json(
+        "final-evidence.json",
+        {
+            "schema": _FINAL_EVIDENCE_SCHEMA,
+            "scores": scores,
+            "runtime": runtime,
+            "result": result,
+        },
+    )
+    archive.bind_json("scores.json", scores)
+    archive.bind_json("runtime.json", runtime)
+    archive.bind_json("result.json", result)
     return scores, runtime, result

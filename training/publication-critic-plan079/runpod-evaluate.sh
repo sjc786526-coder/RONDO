@@ -13,6 +13,7 @@ set -eu
 RONDO_PLAN079_MAX_SECONDS="${RONDO_PLAN079_MAX_SECONDS:-7200}"
 case "$RONDO_PLAN079_TASK_ROOT" in /workspace/*) ;; *) exit 2 ;; esac
 case "$RONDO_PLAN079_MAX_SECONDS" in ''|*[!0-9]*) exit 2 ;; esac
+if [ "$RONDO_PLAN079_MAX_SECONDS" -eq 0 ]; then exit 2; fi
 task_root="$(realpath -e -- "$RONDO_PLAN079_TASK_ROOT")"
 case "$task_root" in /workspace/*) ;; *) exit 2 ;; esac
 require_task_path() {
@@ -52,6 +53,17 @@ export HF_HUB_DISABLE_TELEMETRY=1
 export RONDO_PLAN079_CLOUD_RUN=1
 unset HF_TOKEN HUGGING_FACE_HUB_TOKEN HUGGINGFACEHUB_API_TOKEN
 python="$task_root/venv/bin/python"
+commissioning_args=()
+if [ -n "${RONDO_PLAN079_COMMISSIONING_ROOT:-}" ]; then
+  commissioning_root="$(require_task_path "$RONDO_PLAN079_COMMISSIONING_ROOT")" || exit 2
+  commissioning_args=(
+    --commissioning-run-spec "$commissioning_root/run-spec.json"
+    --commissioning-release "$commissioning_root/validation-release.json"
+    --commissioning-scores "$commissioning_root/scores.json"
+    --commissioning-runtime "$commissioning_root/runtime.json"
+    --commissioning-result "$commissioning_root/result.json"
+  )
+fi
 timeout --signal=TERM --kill-after=120 "$RONDO_PLAN079_MAX_SECONDS" \
   "$python" -B -P -m rondo_eval.publication_critic.base_quality run \
   --run-spec "$run_spec" \
@@ -60,7 +72,11 @@ timeout --signal=TERM --kill-after=120 "$RONDO_PLAN079_MAX_SECONDS" \
   --model-lock "$source_root/eval/model-locks/publication-critic/skywork-reward-v2-qwen3-4b-fd958fef.json" \
   --source-archive "$source_archive" \
   --environment-lock "$source_root/eval/environments/publication-critic-plan068/uv.lock" \
+  --runtime-receipt "$task_root/runtime-receipt.json" \
+  --dependency-freeze "$task_root/dependency-freeze-observed.txt" \
+  --image-id "${RONDO_PLAN079_IMAGE_ID:?set observed image identity}" \
   --bundle "$bundle" \
   --runs-root "$runs_root" \
   --repo-root "$source_root" \
-  --attempt-id "$RONDO_PLAN079_ATTEMPT_ID"
+  --attempt-id "$RONDO_PLAN079_ATTEMPT_ID" \
+  "${commissioning_args[@]}"

@@ -21,7 +21,11 @@ volume.
    `build-source-bundle.sh`. It intentionally excludes `multidev/`, mixed v8
    data, ignored assets, secrets, model weights, and unrelated project files.
    Separately tar the already verified Plan 066 bundle contents. Upload only
-   those two archives plus their SHA-256 values into the task root.
+   those two archives plus their SHA-256 values into the task root. Verify the
+   source archive before extracting it into a new, archive-specific source
+   root; never reuse a source root for a different archive. Bootstrap and every
+   evaluation independently compare every archived file with that executing
+   source tree and reject extra, stale, linked, or drifted entries.
 5. Launch `bootstrap` with one unique launch name. It verifies both uploaded
    archives, installs only the locked ordinary dependencies into the persistent
    volume, downloads the exact official two-shard revision, verifies the full
@@ -34,9 +38,13 @@ volume.
    recomputation, and safe result recovery all succeed.
 7. Commit the completed implementation and tests, create a new clean source tar,
    upload and re-bootstrap only if its identity changed, then freeze a formal
-   run spec. Formal uses a new run id and an empty namespace. Any typed failure
-   or missing row is `INCONCLUSIVE`; a complete quality failure is `NO_GO` and
-   is not rerun to seek a better result.
+   run spec. Formal freeze and run both consume the completed commissioning
+   run spec, release, scores, runtime, and result; they require 55 scores, zero
+   typed failures, `COMMISSIONING_COMPLETE`, and the same source/model/input/
+   runtime/GPU-related identity. A replacement Pod ID alone may differ. Formal
+   uses a new run id and an empty namespace. Any typed failure or missing row is
+   `INCONCLUSIVE`; a complete quality failure is `NO_GO` and is not rerun to
+   seek a better result.
 8. Recover only the run spec, validation release, scores, runtime, result,
    bootstrap receipts, dependency freeze, task-root usage, and billing/resource
    facts. Independently run `recompute --expected result.json` outside the Pod.

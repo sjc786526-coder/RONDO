@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import copy
 import json
+import math
 from pathlib import Path
 from types import SimpleNamespace
 import sys
+import tarfile
 import tempfile
 import unittest
 from unittest import mock
@@ -40,15 +42,29 @@ from rondo_eval.publication_critic.base_quality.contract import (  # noqa: E402
     RUNTIME_CONTRACT,
 )
 from rondo_eval.publication_critic.base_quality.runner import (  # noqa: E402
+    build_commissioning_binding,
     build_scores_document,
     prepare_validation_release,
     recompute_result,
     run_evaluation,
+    validate_formal_commissioning,
     validate_result,
+)
+from rondo_eval.publication_critic.base_quality.__main__ import (  # noqa: E402
+    command_freeze,
 )
 from rondo_eval.publication_critic.base_quality.snapshot import (  # noqa: E402
     MODEL_LOCK_SCHEMA,
     verify_snapshot,
+)
+from rondo_eval.publication_critic.base_quality.source import (  # noqa: E402
+    verify_source_archive_tree,
+)
+from rondo_eval.publication_critic.base_quality.runtime import (  # noqa: E402
+    PACKAGE_VERSIONS,
+    RUNTIME_RECEIPT_SCHEMA,
+    runtime_receipt_sha256,
+    validate_runtime_receipt,
 )
 
 
@@ -224,6 +240,17 @@ def _snapshot(root: Path) -> tuple[Path, Path, dict[str, object]]:
     return snapshot, lock_path, verify_snapshot(snapshot, lock_path)
 
 
+def _source_archive(root: Path) -> tuple[Path, Path]:
+    source_root = root / "source-root"
+    source_file = source_root / "eval" / "source-marker.txt"
+    source_file.parent.mkdir(parents=True)
+    source_file.write_text("plan079 source\n", encoding="utf-8")
+    archive = root / "source.tar"
+    with tarfile.open(archive, mode="w") as handle:
+        handle.add(source_file, arcname="eval/source-marker.txt")
+    return archive, source_root
+
+
 def _spec(
     release: dict[str, object],
     receipt: dict[str, object],
@@ -238,10 +265,11 @@ def _spec(
         "run_id": f"plan079-{mode}-20260825T120000Z-{suffix}",
         "source": {
             "git_commit": "1" * 40,
-            "tracked_source_clean": mode == "formal",
+            "tracked_source_clean": True,
             "source_archive_sha256": "2" * 64,
             "environment_lock_path": "eval/environments/publication-critic-plan068/uv.lock",
             "environment_lock_sha256": "3" * 64,
+            "runtime_receipt_sha256": "5" * 64,
         },
         "model": {
             "repository": MODEL_REPOSITORY,
@@ -268,6 +296,17 @@ def _spec(
             "container_image": "runpod/pytorch:test",
             "cuda_host_version": "13.0",
         },
+        "commissioning": (
+            None
+            if mode == "commissioning"
+            else {
+                "run_id": "plan079-commissioning-20260825T110000Z-unit",
+                "run_spec_sha256": "a" * 64,
+                "scores_sha256": "b" * 64,
+                "runtime_sha256": "c" * 64,
+                "result_sha256": "d" * 64,
+            }
+        ),
         "quality_floors": dict(QUALITY_FLOORS),
     }
 
@@ -279,9 +318,9 @@ def _rows(release: dict[str, object], *, good: bool) -> list[dict[str, object]]:
     return [
         {
             "candidate_id": item["candidate_id"],
-            "raw_logit": 2.0
+            "raw_logit": math.log(9.0)
             if good and labels[item["candidate_id"]] == "PASS"
-            else -2.0
+            else -math.log(9.0)
             if good
             else 0.0,
             "score": 0.9
@@ -313,6 +352,27 @@ def _runtime() -> dict[str, object]:
         "gpu_name": "NVIDIA GeForce RTX 4090",
         "gpu_capability": "8.9",
     }
+
+
+def _runtime_receipt(root: Path) -> tuple[Path, Path, dict[str, object]]:
+    dependency_freeze = root / "dependency-freeze.txt"
+    dependency_freeze.write_text("fixture==1\n", encoding="utf-8")
+    receipt: dict[str, object] = {
+        "schema": RUNTIME_RECEIPT_SCHEMA,
+        "image_id": "runpod/pytorch:test",
+        "dependency_freeze_sha256": sha256_file(dependency_freeze),
+        "environment_lock_sha256": "3" * 64,
+        "python_version": "3.12.0",
+        "packages": dict(PACKAGE_VERSIONS),
+        "torch_cuda_runtime_version": "12.8",
+        "cuda_host_version": "13.0",
+        "gpu_name": "NVIDIA GeForce RTX 4090",
+        "gpu_capability": "8.9",
+        "driver_version": "580.0",
+    }
+    path = root / "runtime-receipt.json"
+    path.write_text(json.dumps(receipt), encoding="utf-8")
+    return path, dependency_freeze, receipt
 
 
 class SnapshotContractTest(unittest.TestCase):
@@ -359,6 +419,17 @@ class SnapshotContractTest(unittest.TestCase):
                 verify_snapshot(snapshot, lock)
 
 
+class RuntimeReceiptContractTest(unittest.TestCase):
+    def test_runtime_receipt_binds_image_lock_freeze_and_packages(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            _, _, receipt = _runtime_receipt(Path(directory))
+            self.assertEqual(validate_runtime_receipt(receipt), receipt)
+            drifted = copy.deepcopy(receipt)
+            drifted["packages"]["transformers"] = "4.53.0"
+            with self.assertRaisesRegex(BaseQualityError, "packages_invalid"):
+                validate_runtime_receipt(drifted)
+
+
 class ResultContractTest(unittest.TestCase):
     def test_complete_good_and_bad_quality_get_distinct_terminals(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -377,6 +448,19 @@ class ResultContractTest(unittest.TestCase):
             bad = recompute_result(spec, release, bad_scores, _runtime())
             self.assertEqual(bad["terminal"], "4B_BASE_QUALITY_NO_GO")
             self.assertIn("roc_auc_floor_failed", bad["gate_failures"])
+
+    def test_commissioning_never_emits_a_formal_quality_terminal(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            _, lock, receipt = _snapshot(Path(directory))
+            release = _release()
+            spec = _spec(release, receipt, lock, mode="commissioning")
+            scores = build_scores_document(spec, release, _rows(release, good=True), [])
+            result = recompute_result(spec, release, scores, _runtime())
+            self.assertEqual(result["terminal"], "COMMISSIONING_COMPLETE")
+            self.assertNotIn(
+                result["terminal"],
+                {"4B_BASE_QUALITY_GO", "4B_BASE_QUALITY_NO_GO"},
+            )
 
     def test_incomplete_or_tampered_evidence_is_inconclusive_or_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -405,8 +489,127 @@ class ResultContractTest(unittest.TestCase):
             with self.assertRaises(BaseQualityError):
                 validate_result(tampered, spec, release, scores, runtime)
 
+    def test_score_projection_is_recomputed_from_raw_logit(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            _, lock, receipt = _snapshot(Path(directory))
+            release = _release()
+            spec = _spec(release, receipt, lock)
+            rows = _rows(release, good=True)
+            rows[0]["score"] = 0.8
+            with self.assertRaisesRegex(BaseQualityError, "projection_mismatch"):
+                build_scores_document(spec, release, rows, [])
+
 
 class ArchiveAndRunTest(unittest.TestCase):
+    def test_formal_requires_matching_completed_commissioning(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            _, lock, receipt = _snapshot(Path(directory))
+            release = _release()
+            commissioning = _spec(
+                release, receipt, lock, mode="commissioning", suffix="qualified"
+            )
+            scores = build_scores_document(
+                commissioning, release, _rows(release, good=True), []
+            )
+            runtime = _runtime()
+            result = recompute_result(commissioning, release, scores, runtime)
+            binding = build_commissioning_binding(
+                commissioning, release, scores, runtime, result
+            )
+            formal = _spec(release, receipt, lock, mode="formal", suffix="qualified")
+            formal["commissioning"] = binding
+            self.assertEqual(
+                validate_formal_commissioning(
+                    formal,
+                    release,
+                    commissioning,
+                    release,
+                    scores,
+                    runtime,
+                    result,
+                ),
+                binding,
+            )
+            drifted = copy.deepcopy(formal)
+            drifted["source"]["source_archive_sha256"] = "e" * 64
+            with self.assertRaisesRegex(BaseQualityError, "source_mismatch"):
+                validate_formal_commissioning(
+                    drifted,
+                    release,
+                    commissioning,
+                    release,
+                    scores,
+                    runtime,
+                    result,
+                )
+
+    def test_source_archive_must_match_the_executing_tree(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            archive, source_root = _source_archive(root)
+            receipt = verify_source_archive_tree(archive, source_root, exact_tree=True)
+            self.assertEqual(receipt["file_count"], 1)
+            (source_root / "eval" / "source-marker.txt").write_text(
+                "old source\n", encoding="utf-8"
+            )
+            with self.assertRaisesRegex(BaseQualityError, "source_tree_identity"):
+                verify_source_archive_tree(archive, source_root, exact_tree=True)
+
+    def test_freeze_and_run_rebuild_release_from_the_frozen_bundle(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            release = _release()
+            tampered = copy.deepcopy(release)
+            tampered["supervision"][0]["binary_label"] = "REWRITE"
+            tampered = validate_release(tampered)
+            release_path = root / "release.json"
+            release_path.write_text(json.dumps(tampered), encoding="utf-8")
+            args = SimpleNamespace(
+                release=release_path,
+                bundle=root / "bundle",
+                repo_root=REPO_ROOT,
+            )
+            with mock.patch(
+                "rondo_eval.publication_critic.base_quality.__main__.prepare_validation_release",
+                return_value=(release, {"bundle_manifest_sha256": "4" * 64}),
+            ):
+                with self.assertRaisesRegex(
+                    BaseQualityError, "validation_release_bundle_mismatch"
+                ):
+                    command_freeze(args)
+
+            snapshot, lock, receipt = _snapshot(root / "model")
+            archive, source_root = _source_archive(root)
+            environment_lock = root / "uv.lock"
+            environment_lock.write_bytes(b"environment")
+            runtime_receipt_path = root / "missing-runtime-receipt.json"
+            dependency_freeze = root / "missing-dependency-freeze.txt"
+            spec = _spec(tampered, receipt, lock, mode="formal", suffix="release")
+            spec["source"]["source_archive_sha256"] = sha256_file(archive)
+            spec["source"]["environment_lock_sha256"] = sha256_file(environment_lock)
+            with mock.patch(
+                "rondo_eval.publication_critic.base_quality.runner.prepare_validation_release",
+                return_value=(release, {"bundle_manifest_sha256": "4" * 64}),
+            ):
+                with self.assertRaisesRegex(
+                    BaseQualityError, "validation_release_bundle_mismatch"
+                ):
+                    run_evaluation(
+                        spec_value=spec,
+                        release_value=tampered,
+                        snapshot=snapshot,
+                        model_lock_path=lock,
+                        source_archive=archive,
+                        environment_lock=environment_lock,
+                        runtime_receipt_path=runtime_receipt_path,
+                        dependency_freeze=dependency_freeze,
+                        image_id="runpod/pytorch:test",
+                        bundle_root=root / "bundle",
+                        runs_root=root / "runs",
+                        repo_root=source_root,
+                        attempt_id="release-mismatch",
+                    )
+
     def test_formal_namespace_is_empty_and_commissioning_can_resume(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -421,15 +624,24 @@ class ArchiveAndRunTest(unittest.TestCase):
             commissioning = _spec(
                 release, receipt, lock, mode="commissioning", suffix="resume"
             )
-            source_archive = root / "source.tar"
+            source_archive, source_root = _source_archive(root)
             environment_lock = root / "uv.lock"
-            source_archive.write_bytes(b"source")
             environment_lock.write_bytes(b"environment")
+            runtime_receipt_path, dependency_freeze, runtime_receipt = _runtime_receipt(
+                root
+            )
             commissioning["source"]["source_archive_sha256"] = sha256_file(
                 source_archive
             )
             commissioning["source"]["environment_lock_sha256"] = sha256_file(
                 environment_lock
+            )
+            runtime_receipt["environment_lock_sha256"] = sha256_file(environment_lock)
+            runtime_receipt_path.write_text(
+                json.dumps(runtime_receipt), encoding="utf-8"
+            )
+            commissioning["source"]["runtime_receipt_sha256"] = runtime_receipt_sha256(
+                runtime_receipt
             )
             calls = {"count": 0}
             fail_after = {"value": 10}
@@ -460,7 +672,7 @@ class ArchiveAndRunTest(unittest.TestCase):
                     ):
                         raise RuntimeError("fixture interruption")
                     return SimpleNamespace(
-                        raw_logit=2.0,
+                        raw_logit=math.log(9.0),
                         projected_score=0.9,
                         token_count=100,
                         dropped_oldest_publications=0,
@@ -479,9 +691,15 @@ class ArchiveAndRunTest(unittest.TestCase):
                     "bundle_manifest_sha256"
                 ]
             }
-            with mock.patch(
-                "rondo_eval.publication_critic.base_quality.runner.verify_plan066_bundle",
-                return_value=bundle_receipt,
+            with (
+                mock.patch(
+                    "rondo_eval.publication_critic.base_quality.runner.prepare_validation_release",
+                    return_value=(release, bundle_receipt),
+                ),
+                mock.patch(
+                    "rondo_eval.publication_critic.base_quality.runner.verify_runtime_environment",
+                    return_value=runtime_receipt,
+                ),
             ):
                 with self.assertRaisesRegex(
                     BaseQualityError, "commissioning_incomplete"
@@ -493,28 +711,71 @@ class ArchiveAndRunTest(unittest.TestCase):
                         model_lock_path=lock,
                         source_archive=source_archive,
                         environment_lock=environment_lock,
+                        runtime_receipt_path=runtime_receipt_path,
+                        dependency_freeze=dependency_freeze,
+                        image_id="runpod/pytorch:test",
                         bundle_root=root,
                         runs_root=runs,
-                        repo_root=REPO_ROOT,
+                        repo_root=source_root,
                         attempt_id="resume-one",
                         inference_factory=FakeInference,
                     )
                 fail_after["value"] = None
-                _, runtime, _ = run_evaluation(
+                scores, runtime, result = run_evaluation(
                     spec_value=commissioning,
                     release_value=release,
                     snapshot=snapshot,
                     model_lock_path=lock,
                     source_archive=source_archive,
                     environment_lock=environment_lock,
+                    runtime_receipt_path=runtime_receipt_path,
+                    dependency_freeze=dependency_freeze,
+                    image_id="runpod/pytorch:test",
                     bundle_root=root,
                     runs_root=runs,
-                    repo_root=REPO_ROOT,
+                    repo_root=source_root,
                     attempt_id="resume-two",
                     inference_factory=FakeInference,
                 )
             self.assertEqual(runtime["scored_count"], 55)
             self.assertEqual(calls["count"], 56)
+            run_root = runs / commissioning["run_id"]
+            expected_runtime = (run_root / "runtime.json").read_bytes()
+            (run_root / "runtime.json").unlink()
+
+            class UnexpectedInference:
+                def __init__(self, *args: object, **kwargs: object) -> None:
+                    del args, kwargs
+                    raise AssertionError("completed commissioning must recover")
+
+            with (
+                mock.patch(
+                    "rondo_eval.publication_critic.base_quality.runner.prepare_validation_release",
+                    return_value=(release, bundle_receipt),
+                ),
+                mock.patch(
+                    "rondo_eval.publication_critic.base_quality.runner.verify_runtime_environment",
+                    return_value=runtime_receipt,
+                ),
+            ):
+                recovered = run_evaluation(
+                    spec_value=commissioning,
+                    release_value=release,
+                    snapshot=snapshot,
+                    model_lock_path=lock,
+                    source_archive=source_archive,
+                    environment_lock=environment_lock,
+                    runtime_receipt_path=runtime_receipt_path,
+                    dependency_freeze=dependency_freeze,
+                    image_id="runpod/pytorch:test",
+                    bundle_root=root,
+                    runs_root=runs,
+                    repo_root=source_root,
+                    attempt_id="resume-three",
+                    inference_factory=UnexpectedInference,
+                )
+            self.assertEqual(recovered, (scores, runtime, result))
+            self.assertEqual((run_root / "runtime.json").read_bytes(), expected_runtime)
 
 
 @unittest.skipUnless(
