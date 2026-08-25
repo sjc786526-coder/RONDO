@@ -231,6 +231,19 @@ impl AgentControl {
         Some(Arc::clone(&thread.session))
     }
 
+    /// Run a synchronous operation only while `expected` is the current running registry entry.
+    pub(crate) async fn with_current_running_session<T>(
+        &self,
+        thread_id: ThreadId,
+        expected: &crate::session::session::Session,
+        operation: impl FnOnce() -> T,
+    ) -> Option<T> {
+        let state = self.upgrade().ok()?;
+        state
+            .with_current_running_session(thread_id, expected, operation)
+            .await
+    }
+
     /// Send rich user input items to an existing agent thread.
     pub(crate) async fn send_input(
         &self,

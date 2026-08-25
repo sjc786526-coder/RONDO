@@ -211,6 +211,7 @@ pub(crate) mod app_server_requests;
 mod background_requests;
 mod config_persistence;
 mod event_dispatch;
+mod experimental_session_control;
 mod history_pagination;
 mod history_ui;
 mod input;
@@ -1236,8 +1237,8 @@ See the Codex keymap documentation for supported actions and examples."
                         match app_server_event {
                             Some(event) => app.handle_app_server_event(&app_server, event).await,
                             None => {
+                                app.handle_app_server_event_stream_closed(&app_server);
                                 listen_for_app_server_events = false;
-                                tracing::warn!("app-server event stream closed");
                             }
                         }
                         AppRunControl::Continue

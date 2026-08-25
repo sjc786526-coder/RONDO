@@ -32,6 +32,9 @@ use codex_app_server_protocol::ConfigReadParams;
 use codex_app_server_protocol::ConfigValueWriteParams;
 use codex_app_server_protocol::ConsumeAccountRateLimitResetCreditParams;
 use codex_app_server_protocol::ExperimentalFeatureListParams;
+use codex_app_server_protocol::ExperimentalSessionListParams;
+use codex_app_server_protocol::ExperimentalSessionReadParams;
+use codex_app_server_protocol::ExperimentalSessionUpdateTeamLifecycleParams;
 use codex_app_server_protocol::FsCopyParams;
 use codex_app_server_protocol::FsCreateDirectoryParams;
 use codex_app_server_protocol::FsGetMetadataParams;
@@ -647,6 +650,34 @@ impl TestAppServer {
     ) -> anyhow::Result<i64> {
         let params = Some(serde_json::to_value(params)?);
         self.send_request("thread/read", params).await
+    }
+
+    /// Send an `experimentalSession/list` JSON-RPC request.
+    pub async fn send_experimental_session_list_request(
+        &mut self,
+        params: ExperimentalSessionListParams,
+    ) -> anyhow::Result<i64> {
+        let params = Some(serde_json::to_value(params)?);
+        self.send_request("experimentalSession/list", params).await
+    }
+
+    /// Send an `experimentalSession/read` JSON-RPC request.
+    pub async fn send_experimental_session_read_request(
+        &mut self,
+        params: ExperimentalSessionReadParams,
+    ) -> anyhow::Result<i64> {
+        let params = Some(serde_json::to_value(params)?);
+        self.send_request("experimentalSession/read", params).await
+    }
+
+    /// Send an `experimentalSession/updateTeamLifecycle` JSON-RPC request.
+    pub async fn send_experimental_session_update_team_lifecycle_request(
+        &mut self,
+        params: ExperimentalSessionUpdateTeamLifecycleParams,
+    ) -> anyhow::Result<i64> {
+        let params = Some(serde_json::to_value(params)?);
+        self.send_request("experimentalSession/updateTeamLifecycle", params)
+            .await
     }
 
     /// Send a `thread/turns/list` JSON-RPC request.

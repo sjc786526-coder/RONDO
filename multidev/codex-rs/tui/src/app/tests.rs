@@ -55,6 +55,17 @@ use codex_app_server_protocol::AdditionalPermissionProfile;
 use codex_app_server_protocol::AgentMessageDeltaNotification;
 use codex_app_server_protocol::AskForApproval;
 use codex_app_server_protocol::CommandExecutionRequestApprovalParams;
+use codex_app_server_protocol::ExperimentalSessionDomainLifecycle;
+use codex_app_server_protocol::ExperimentalSessionFactProvenance;
+use codex_app_server_protocol::ExperimentalSessionIdentity;
+use codex_app_server_protocol::ExperimentalSessionOperation;
+use codex_app_server_protocol::ExperimentalSessionOperationAvailability;
+use codex_app_server_protocol::ExperimentalSessionOperationUnavailableReason;
+use codex_app_server_protocol::ExperimentalSessionOperations;
+use codex_app_server_protocol::ExperimentalSessionProvenance;
+use codex_app_server_protocol::ExperimentalSessionReadParams;
+use codex_app_server_protocol::ExperimentalSessionResidency;
+use codex_app_server_protocol::ExperimentalSessionView;
 use codex_app_server_protocol::FileChangeRequestApprovalParams;
 use codex_app_server_protocol::FileUpdateChange;
 use codex_app_server_protocol::ItemStartedNotification;
@@ -4204,6 +4215,88 @@ async fn app_scoped_mcp_startup_notifications_do_not_render_in_active_thread() {
     assert_eq!(
         app.chat_widget.active_cell_transcript_lines(/*width*/ 120),
         None
+    );
+}
+
+#[tokio::test]
+async fn experimental_session_lag_and_eof_render_retained_projection_as_stale() {
+    let (mut app, mut app_event_rx, _op_rx) = make_test_app_with_channels().await;
+    app.config
+        .features
+        .set_enabled(Feature::ExperimentalSessionControl, /*enabled*/ true)
+        .expect("enable experimental Session control");
+    let app_server = crate::start_embedded_app_server_for_picker(app.chat_widget.config_ref())
+        .await
+        .expect("embedded app server");
+    while app_event_rx.try_recv().is_ok() {}
+
+    let params = ExperimentalSessionReadParams {
+        session_id: "11111111-1111-4111-8111-111111111111".to_string(),
+        prototype_facts: None,
+    };
+    let projection = ExperimentalSessionView {
+        identity: ExperimentalSessionIdentity {
+            session_id: params.session_id.clone(),
+            root_thread_id: Some(params.session_id.clone()),
+        },
+        domain_lifecycle: ExperimentalSessionDomainLifecycle::Unknown,
+        residency: ExperimentalSessionResidency::LoadedOwner,
+        operation_availability: ExperimentalSessionOperations {
+            update_team_lifecycle: ExperimentalSessionOperation {
+                availability: ExperimentalSessionOperationAvailability::Available,
+                provenance: ExperimentalSessionFactProvenance::LiveOwner,
+            },
+            archive: ExperimentalSessionOperation {
+                availability: ExperimentalSessionOperationAvailability::Unavailable {
+                    reason: ExperimentalSessionOperationUnavailableReason::Unsupported,
+                },
+                provenance: ExperimentalSessionFactProvenance::Unavailable,
+            },
+            unarchive: ExperimentalSessionOperation {
+                availability: ExperimentalSessionOperationAvailability::Unavailable {
+                    reason: ExperimentalSessionOperationUnavailableReason::NotArchived,
+                },
+                provenance: ExperimentalSessionFactProvenance::ThreadStore,
+            },
+        },
+        provenance: ExperimentalSessionProvenance {
+            identity: ExperimentalSessionFactProvenance::LiveRuntime,
+            domain_lifecycle: ExperimentalSessionFactProvenance::Unavailable,
+            residency: ExperimentalSessionFactProvenance::LiveRuntime,
+            team: ExperimentalSessionFactProvenance::Unavailable,
+        },
+        team: None,
+    };
+
+    app_server.seed_experimental_session_projection_for_test(params.clone(), projection.clone());
+    app.handle_app_server_event(
+        &app_server,
+        codex_app_server_client::AppServerEvent::Lagged { skipped: 3 },
+    )
+    .await;
+    let mut lag_cells = Vec::new();
+    while let Ok(event) = app_event_rx.try_recv() {
+        if let AppEvent::InsertHistoryCell(cell) = event {
+            lag_cells.push(lines_to_single_string(&cell.display_lines(/*width*/ 120)));
+        }
+    }
+    let lag = lag_cells.join("\n");
+
+    app_server.seed_experimental_session_projection_for_test(params, projection);
+    app.handle_app_server_event_stream_closed(&app_server);
+    let mut eof_cells = Vec::new();
+    while let Ok(event) = app_event_rx.try_recv() {
+        if let AppEvent::InsertHistoryCell(cell) = event {
+            eof_cells.push(lines_to_single_string(&cell.display_lines(/*width*/ 120)));
+        }
+    }
+    let eof = eof_cells.join("\n");
+
+    assert!(!lag.contains("view=fresh"));
+    assert!(!eof.contains("view=fresh"));
+    assert_app_snapshot!(
+        "experimental_session_control_transport_invalidation",
+        format!("lag:\n{lag}\n---\neof:\n{eof}"),
     );
 }
 

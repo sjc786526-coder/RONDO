@@ -15,6 +15,7 @@
 //! bridging async `mpsc` channels on both sides. Queues are bounded so overload
 //! surfaces as channel-full errors rather than unbounded memory growth.
 
+mod experimental_session_control;
 mod path;
 mod remote;
 
@@ -63,6 +64,13 @@ use tokio::time::timeout;
 use toml::Value as TomlValue;
 use tracing::warn;
 
+pub use crate::experimental_session_control::ConnectionEpoch;
+pub use crate::experimental_session_control::ExperimentalSessionControl;
+pub use crate::experimental_session_control::KnownMutationOutcome;
+pub use crate::experimental_session_control::MutationCertainty;
+pub use crate::experimental_session_control::MutationTicket;
+pub use crate::experimental_session_control::ReadTicket;
+pub use crate::experimental_session_control::ViewFreshness;
 pub use crate::path::AppServerPath;
 pub use crate::remote::RemoteAppServerClient;
 pub use crate::remote::RemoteAppServerConnectArgs;

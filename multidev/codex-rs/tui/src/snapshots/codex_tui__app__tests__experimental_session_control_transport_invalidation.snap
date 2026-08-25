@@ -1,0 +1,26 @@
+---
+source: tui/src/app/tests.rs
+assertion_line: 4297
+expression: "format!(\"lag:\\n{lag}\\n---\\neof:\\n{eof}\")"
+---
+lag:
+Session control prototype sync lost: app-server event lag; refresh is required
+Session control prototype — facts may be prototype, unknown, or unavailable
+session: 11111111-1111-4111-8111-111111111111
+identity: root=11111111-1111-4111-8111-111111111111 source=live-runtime
+domain lifecycle: unknown (not closed) source=unavailable
+owner/runtime residency: loaded owner source=live-runtime
+operations: track=available[source=live-owner] archive=unavailable(unsupported)[source=unavailable] unarchive=unavailable(not-archived)[source=thread-store]
+client sync: view=stale mutation-result=none
+team prototype: unavailable source=unavailable
+---
+eof:
+Session control prototype sync lost: app-server event stream closed; reconnect and refresh are required
+Session control prototype — facts may be prototype, unknown, or unavailable
+session: 11111111-1111-4111-8111-111111111111
+identity: root=11111111-1111-4111-8111-111111111111 source=live-runtime
+domain lifecycle: unknown (not closed) source=unavailable
+owner/runtime residency: loaded owner source=live-runtime
+operations: track=available[source=live-owner] archive=unavailable(unsupported)[source=unavailable] unarchive=unavailable(not-archived)[source=thread-store]
+client sync: view=stale mutation-result=none
+team prototype: unavailable source=unavailable

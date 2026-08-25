@@ -1889,3 +1889,89 @@ correctness/functionality `remaining_findings=[]`，路线结论为 `GO`。
   可分别建立 ExecPlan；正式 W1 仍等待 W0 binding GO 与 S1 接缝，W 线不阻塞 S/C 核心收口。
 - 验收只使用现行源码、既有测试定义、冻结上游与官方 PR 的静态证据，并通过精确写集、链接、术语和 `git diff --check`；未运行
   Cargo/Rust、Docker、真实 API/模型、训练、测评、全 workspace、CI 或 PR，也未修改 Plan 068 内容。
+
+## Publication Critic 本地部署资格与候选交接（Plan 068 / M3-C1，2026-08-24）
+
+**状态**：本地工件交接、真实模型服务接入、四对象正式资格运行、独立审查整改、远端清理与最终验收均已完成；
+实现和任务流程验收通过。base `NOT_QUALIFIED`、C1 `QUALIFIED`、C2 `NOT_QUALIFIED`、C3 `QUALIFIED`，
+但因 base 对照未取得同口径资格，M3-C2 前置未满足。资格与远端清理提交为
+`261164fb82747b2f175b5f29613bec1a56a756fa`，最终独立验收提交为
+`a0f0220452a1f8f084a0645888e7de5918db84eb`。
+
+- 通过无 Pod RunPod S3 入口安全接收并验证 120/120 个必要对象、24,385,153,354 bytes，覆盖 exact base、
+  C1/C2/C3、正式 checkpoint 与必要恢复环境；本地副本的 bytes/hash/身份闭合，unseen-test 始终封存。
+- 在 Plan 055/057 的既有协议、typed failure 与产品语义上接入真实 scorer，正式部署路径使用原始 safetensors 与
+  CUDA BF16，CPU FP32 作为转换前 reference；没有量化、修改权重、继续训练或另建通用模型服务体系。
+- 调试阶段先用 fresh worker 完成窄 commissioning，再冻结统一 BF16 projected cap `0.005` 和干净正式配置。
+  唯一有效正式轮为 `plan068-formal-20260824T222852Z-qualification-v3`：base 因 projected drift
+  `0.03404159` 和 1 次临时 verdict mismatch 失败；C2 因 ranking/direction 失败；C1/C3 的 runner/service
+  projected parity、0 verdict mismatch、15/15 stress、typed failure、取消与关闭语义通过，本地资源和延迟适合既定有界场景。
+- 正式 evidence、freeze、offline/service observations 与 result 以普通 JSON/SHA-256 绑定；此前调试或基础设施失败轮均明确失效，
+  未拼接成正式结果。相关定向 Python 113/113、Rust 34/34、整改复验 41/41，以及 fmt/lock/compileall/diff 门禁通过；
+  最终清理未改变代码、模型或资格证据，因此未机械重跑真实模型、Cargo 或 Docker。
+- 本地交接经独立审查明确接受后，永久删除 exact RunPod winner 卷 `hi3iaz8rsr`；删除后实时复核为 0 Pod、
+  0 volume，当前 compute/volume 持续费用均为 0。本地候选、正式 checkpoint 与资格证据继续保留。
+- 未运行 unseen-test、真实 API、Docker、云端训练或 Hugging Face 上传，未启动 M3-C2/M3-D，也未默认启用 Critic。
+  任务执行日志见 `agent_log/2026-08-24-210426-plan068-local-qualification.md`，最终独立验收见
+  `agent_log/2026-08-24-185009-plan068-final-review.md`。
+
+## RONDO Multi 实验性 Session 协议与 TUI 原型（Plan 070 / M4-C0，2026-08-24）
+
+**状态**：默认关闭的 experimental app-server v2→app-server client→TUI 纵向原型、两轮独立审查整改与最终复验均已完成；
+验收通过、任务目标完成，结论为 `M4_C0_PROTOTYPE_PASS`。最终实现提交为
+`bb60a04938b2f55c5ceede4fd5820f1e7637b30f`，最终独立验收提交为 `dab5db3d5a938b8f9ee74a238f6294aa1582ac55`，
+主线合并提交为 `5fdd4db5cd65243c93362ae62bf375d934728463`。
+
+- 新能力只位于 v2 experimental surface，并由独立、默认关闭的 `experimental_session_control` product gate 保护；关闭态不显示
+  `/sessions` 原型、不增加后台查询或 startup tooltip，TUI 继续只经 app-server 工作。
+- discovery/read 不取得 writer、不 repair metadata、不加载 Session 或启动 Agent/model/API；identity、domain lifecycle、runtime
+  residency、operation availability、freshness/certainty 与 provenance 分轴，state DB 和 prototype input 不冒充 S1 durable read model。
+- online Team mutation 只路由 current/running canonical Root owner；non-owner、ChildOnly、owner unavailable 与 stale preflight
+  fail closed。cold unarchive 只在 fresh prototype projection 证明 stored Root 后调用既有权威入口，不直接写持久介质。
+- lag、disconnect、EOF 与真实 response loss 会进入 stale/result unknown；非幂等 mutation 不自动重放，显式权威 read 恢复 Fresh，
+  迟到 request-id response 不覆盖新投影。Root filtering 使用 `RecencyAt + thread-id` 稳定双键 cursor，DB error 与扫描预算耗尽明确
+  返回 unavailable/incomplete。
+- 最终聚焦证据覆盖 protocol/features、app-server/client、core、TUI、schema generator、snapshot、真实 loopback response-loss 和
+  26 条同毫秒跨页回归；app-server 最终 `experimental_session` 全集 13/13 通过。历史全 workspace 14,380 项中 16 项失败均被验收
+  判定在 070 写集外，本任务未弱化或掩盖。
+- 正式 Session query 仍等待 M4-S1，以真实 durable read model 替换 prototype input；正式 control/TUI 再等待 M4-S2 的恢复和 close
+  barrier。C0 不冻结正式 RPC、字段、UI、timeout 或通用 `thread/unarchive` authority，也不授权产品启用、S1/S2、外部资源或远端操作。
+
+## Publication Critic base 对照可比性修正与重验（Plan 071，2026-08-25）
+
+**状态**：base 归因、资格口径分层、同口径正式重验、独立审查整改与最终复验均已完成；验收通过、任务目标完成，结论为
+`BASE_COMPARABILITY_GO`。实现与资格边界提交为 `c72edde0f6f7cdd3b944b38fc2a47dbb7ceae65e`、
+`90ce6ba5eb3ba3faa3ffa4db41934c1147e18653`，终态逻辑整改提交为
+`c69868f07d46f7991c6b9bac4904fdaf22dc6088`，最终独立验收提交为
+`5e13251a2fd647e746e6daee34ced1b4a25d494f`。
+
+- Plan 068 的 base 失败来自把 CPU FP32→CUDA BF16 cross-runtime 差异、sigmoid 区域放大、near-threshold 临时 verdict 与
+  同 runtime worker parity 混在同一 projected gate。Plan 071 复用既有真实 scorer/service，将 cross-runtime raw cap 及其
+  stable-sigmoid envelope、同 CUDA BF16 fresh-worker parity 和精确 descriptor threshold 的 service verdict 分层判断；没有改变
+  Plan 054 输入/scalar、Plan 055 服务协议或 Plan 057 发布/fallback/cancel/store 语义。
+- 唯一有效正式轮 `plan071-formal-20260825T064600Z-qualification-v5` 绑定 clean source `90ce6ba...` 和既有 24 条非 unseen
+  cohort。base、C1、C3 均为 `QUALIFIED`，C2 未重验并保持 Plan 068 历史 `NOT_QUALIFIED`；三对象均完成 CPU FP32 reference、
+  CUDA BF16 deployment、fresh-worker parity、18/18 真实 service verdict、15/15 stress 与 clean shutdown，C1 另完成
+  cancel/post-cancel ready/review。
+- 独立验收发现并闭合一个三态终止分支：无 C1/C3 合格锚点时统一返回 `INCONCLUSIVE`，只有存在合格锚点且 base 不合格时才返回
+  `BASE_NOT_COMPARABLE`。最终 41/41 定向 unittest、compileall 与 diff 门禁通过；修复后从 v5 raw 机械重建的
+  observations/result 与正式 archive 完全一致，因此保留 v5，不机械重跑真实模型、Cargo 或 Docker。
+- exact base/C1/C2/C3、完整 checkpoint 与 Plan 068/071 证据继续保留在本地；未读取 unseen-test，未修改权重或数据，未训练、量化、
+  下载 HF 资产、调用真实 API 或写入远端。RunPod 保持 0 Pod/0 volume、持续费用为 0；本任务未启动 M3-C2/M3-D，当前路线只见
+  `doc/WBS.md` 与 `doc/WBS/multi-agent-trusted-evidence.md`。
+
+## 共享重型任务启动前冲突观察门（Plan 072，2026-08-25）
+
+**状态**：共享 wrapper 补丁、独立审查整改、clean-HEAD 正反例与最终复审均已完成；结论为
+`STARTUP_GUARD_ADDED`，`remaining_findings=[]`。正式验收代码 HEAD 为
+`c517896924977fe6f044fdc514edc83586294884`。
+
+- `scripts/with-build-lock.sh` 在成功取得 canonical flock 后、任何 payload 前调用共享 helper；匹配的 RONDO heavy scope
+  仍 `populated=1` 或观察事实不可可靠取得时以 `84` fail-closed，且不等待、kill、清理、接管或调度旧 scope。
+- inactive/failed 历史 unit 只有在无 ControlGroup、明确 `populated=0`，或 cgroup 已消失且终态复读一致时才 clear；非空且
+  populated 的 failed scope 仍是冲突。独立审查发现并推动关闭了过早 clear 的真实缺口。
+- 正式轮从 clean `c517896…` 创建全新 task-owned scope/nonce/PID/marker，聚焦 Python **7/7** 通过：冲突时 contender
+  返回 `84` 且 marker 不存在、旧 scope identity/population 不变；精确 teardown 并确认 gone 后，新 marker 正常执行。
+  既有 helper 回归 **9/9**、`bash -n` 与 diff 门通过；正式轮后无 active RONDO scope 或 Plan 072 临时目录残留。
+- 未运行 Cargo、Docker、真实模型、GPU、API、训练、性能测评或全量测试；未写入主工作区 ignored 资产，未触碰、合并或推送
+  069、071 及其它工作树/分支。

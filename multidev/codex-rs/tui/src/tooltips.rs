@@ -345,6 +345,15 @@ mod tests {
     }
 
     #[test]
+    fn default_tooltip_pool_excludes_opt_in_session_prototype() {
+        assert!(
+            experimental_tooltips()
+                .iter()
+                .all(|tip| !tip.contains("Session control prototype"))
+        );
+    }
+
+    #[test]
     fn paid_tooltip_pool_rotates_between_promos() {
         let mut seen = std::collections::BTreeSet::new();
         for seed in 0..32 {
