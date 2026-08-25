@@ -141,10 +141,10 @@ fn duplicate_protocol_list_response() -> DurableSessionListResponse {
         "domainLifecycle": "unknown",
         "residency": "unknown",
         "operationAvailability": {
-            "resume": operation.clone(),
-            "close": operation.clone(),
-            "archive": operation.clone(),
-            "unarchive": operation.clone(),
+            "resume": operation,
+            "close": operation,
+            "archive": operation,
+            "unarchive": operation,
             "delete": operation
         },
         "provenance": {

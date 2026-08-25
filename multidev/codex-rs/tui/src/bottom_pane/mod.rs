@@ -474,6 +474,11 @@ impl BottomPane {
         self.request_redraw();
     }
 
+    pub fn set_session_control_command_enabled(&mut self, enabled: bool) {
+        self.composer.set_session_control_command_enabled(enabled);
+        self.request_redraw();
+    }
+
     pub(crate) fn set_side_conversation_active(&mut self, active: bool) {
         self.composer.set_side_conversation_active(active);
         self.request_redraw();

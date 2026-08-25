@@ -63,6 +63,7 @@ pub(crate) struct BuiltinCommandFlags {
     pub(crate) goal_command_enabled: bool,
     pub(crate) personality_command_enabled: bool,
     pub(crate) sessions_command_enabled: bool,
+    pub(crate) session_control_command_enabled: bool,
     pub(crate) allow_elevate_sandbox: bool,
     pub(crate) side_conversation_active: bool,
 }
@@ -79,6 +80,9 @@ pub(crate) fn builtins_for_input(flags: BuiltinCommandFlags) -> Vec<(&'static st
         .filter(|(_, cmd)| flags.goal_command_enabled || *cmd != SlashCommand::Goal)
         .filter(|(_, cmd)| flags.personality_command_enabled || *cmd != SlashCommand::Personality)
         .filter(|(_, cmd)| flags.sessions_command_enabled || *cmd != SlashCommand::Sessions)
+        .filter(|(_, cmd)| {
+            flags.session_control_command_enabled || *cmd != SlashCommand::SessionControl
+        })
         .filter(|(_, cmd)| !flags.side_conversation_active || cmd.available_in_side_conversation())
         .collect()
 }
@@ -175,6 +179,7 @@ mod tests {
             goal_command_enabled: true,
             personality_command_enabled: true,
             sessions_command_enabled: true,
+            session_control_command_enabled: true,
             allow_elevate_sandbox: true,
             side_conversation_active: false,
         }
@@ -232,7 +237,7 @@ mod tests {
     }
 
     #[test]
-    fn sessions_command_is_hidden_without_the_product_opt_in() {
+    fn session_commands_are_independently_hidden_without_their_product_opt_ins() {
         let mut flags = all_enabled_flags();
         flags.sessions_command_enabled = false;
         assert!(
@@ -250,6 +255,20 @@ mod tests {
 
         flags.sessions_command_enabled = false;
         assert_eq!(find_builtin_command("sessions", flags), None);
+
+        flags.session_control_command_enabled = false;
+        assert!(
+            builtins_for_input(flags)
+                .iter()
+                .all(|(_, command)| *command != SlashCommand::SessionControl)
+        );
+        assert_eq!(find_builtin_command("session-control", flags), None);
+
+        flags.session_control_command_enabled = true;
+        assert_eq!(
+            find_builtin_command("session-control", flags),
+            Some(SlashCommand::SessionControl)
+        );
     }
 
     #[test]

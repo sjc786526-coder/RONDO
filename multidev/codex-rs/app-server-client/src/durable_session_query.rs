@@ -12,6 +12,7 @@ use codex_app_server_protocol::DurableSessionListResponse;
 use codex_app_server_protocol::DurableSessionReadParams;
 use codex_app_server_protocol::DurableSessionReadResponse;
 use codex_app_server_protocol::DurableSessionReadStatus;
+use codex_app_server_protocol::DurableSessionTeamRole;
 use std::collections::HashMap;
 use std::hash::Hash;
 
@@ -141,6 +142,10 @@ pub enum InvalidSessionListProjection {
     ConflictingRootIdentity,
     /// A view claimed a complete read without carrying its committed Team projection.
     MissingCommittedProjection,
+    /// A view carried a committed Team projection while declaring the read unavailable.
+    UnexpectedCommittedProjection,
+    /// The Team viewer was not the canonical Root named by the outer Session identity.
+    InvalidTeamViewer,
 }
 
 /// Why a protocol Session projection did not match its authoritative read attachment.
@@ -156,6 +161,10 @@ pub enum InvalidSessionReadProjection {
     MissingRootIdentity,
     /// A response claimed a complete read without carrying its committed Team projection.
     MissingCommittedProjection,
+    /// A response carried a committed Team projection while declaring the read unavailable.
+    UnexpectedCommittedProjection,
+    /// The Team viewer was not the canonical Root named by the outer Session identity.
+    InvalidTeamViewer,
 }
 
 /// Result of applying a query completion.
@@ -624,8 +633,18 @@ fn protocol_list_evidence(
         if matches!(&view.read_status, DurableSessionReadStatus::Available) && view.team.is_none() {
             return Err(InvalidSessionListProjection::MissingCommittedProjection);
         }
+        if !matches!(&view.read_status, DurableSessionReadStatus::Available) && view.team.is_some()
+        {
+            return Err(InvalidSessionListProjection::UnexpectedCommittedProjection);
+        }
         if root_thread_id.is_none() && view.team.is_some() {
             return Err(InvalidSessionListProjection::MissingRootIdentity);
+        }
+        if let (Some(root_thread_id), Some(team)) = (root_thread_id.as_deref(), view.team.as_ref())
+            && (team.viewer.thread_id.as_str() != root_thread_id
+                || team.viewer.role != DurableSessionTeamRole::Root)
+        {
+            return Err(InvalidSessionListProjection::InvalidTeamViewer);
         }
         if let Some(root_thread_id) = root_thread_id.as_deref()
             && known_roots
@@ -693,6 +712,11 @@ fn protocol_session_committed_projection(
     {
         return Err(InvalidSessionReadProjection::MissingCommittedProjection);
     }
+    if !matches!(&session.read_status, DurableSessionReadStatus::Available)
+        && session.team.is_some()
+    {
+        return Err(InvalidSessionReadProjection::UnexpectedCommittedProjection);
+    }
     match session.identity.root_thread_id.as_deref() {
         Some(root_thread_id) if root_thread_id != expected.root_thread_id.as_str() => {
             return Err(InvalidSessionReadProjection::RootIdentityMismatch);
@@ -704,7 +728,14 @@ fn protocol_session_committed_projection(
         {
             return Err(InvalidSessionReadProjection::ConflictingRootIdentity);
         }
-        Some(_) => {}
+        Some(root_thread_id) => {
+            if let Some(team) = session.team.as_ref()
+                && (team.viewer.thread_id.as_str() != root_thread_id
+                    || team.viewer.role != DurableSessionTeamRole::Root)
+            {
+                return Err(InvalidSessionReadProjection::InvalidTeamViewer);
+            }
+        }
         None if session.team.is_some() => {
             return Err(InvalidSessionReadProjection::MissingRootIdentity);
         }

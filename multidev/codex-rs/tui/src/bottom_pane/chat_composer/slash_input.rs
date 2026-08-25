@@ -179,6 +179,7 @@ impl<'a> SlashInput<'a> {
                 goal_command_enabled: self.command_flags.goal_command_enabled,
                 personality_command_enabled: self.command_flags.personality_command_enabled,
                 sessions_command_enabled: self.command_flags.sessions_command_enabled,
+                session_control_command_enabled: self.command_flags.session_control_command_enabled,
                 windows_degraded_sandbox_active: self.command_flags.allow_elevate_sandbox,
                 side_conversation_active: self.command_flags.side_conversation_active,
             },

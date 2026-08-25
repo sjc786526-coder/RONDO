@@ -1,4 +1,4 @@
-//! Parsing and deterministic rendering for the experimental `/sessions` UI.
+//! Parsing and deterministic rendering for the experimental `/session-control` UI.
 
 use codex_app_server_client::MutationCertainty;
 use codex_app_server_client::ViewFreshness;
@@ -15,7 +15,7 @@ use codex_app_server_protocol::ExperimentalSessionTeamRootState;
 use codex_app_server_protocol::ExperimentalSessionUpdateTeamLifecycleParams;
 use codex_app_server_protocol::ExperimentalSessionView;
 
-pub(crate) const SESSIONS_USAGE: &str = "Usage: /sessions [list | read <sessionId> [open|closing|closed|archived|failed|partial|unknown] | refresh | track <rootThreadId> <versionId> <open|closed> <pending|tracking|resolved> <pending|tracking|resolved> | unarchive <sessionId> | detach]";
+pub(crate) const SESSION_CONTROL_USAGE: &str = "Usage: /session-control [list | read <sessionId> [open|closing|closed|archived|failed|partial|unknown] | refresh | track <rootThreadId> <versionId> <open|closed> <pending|tracking|resolved> <pending|tracking|resolved> | unarchive <sessionId> | detach]";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum ExperimentalSessionCommand {
@@ -42,7 +42,8 @@ impl ExperimentalSessionCommand {
                 prototype_facts: None,
             })),
             ["read", session_id, lifecycle] => {
-                let domain_lifecycle = parse_domain_lifecycle(lifecycle).ok_or(SESSIONS_USAGE)?;
+                let domain_lifecycle =
+                    parse_domain_lifecycle(lifecycle).ok_or(SESSION_CONTROL_USAGE)?;
                 Ok(Self::Read(ExperimentalSessionReadParams {
                     session_id: (*session_id).to_string(),
                     prototype_facts: Some(
@@ -63,11 +64,12 @@ impl ExperimentalSessionCommand {
                 root_thread_id: (*root_thread_id).to_string(),
                 version_id: (*version_id).to_string(),
                 expected_producer_state: parse_producer_state(expected_producer_state)
-                    .ok_or(SESSIONS_USAGE)?,
-                expected_root_state: parse_root_state(expected_root_state).ok_or(SESSIONS_USAGE)?,
-                next_root_state: parse_root_state(next_root_state).ok_or(SESSIONS_USAGE)?,
+                    .ok_or(SESSION_CONTROL_USAGE)?,
+                expected_root_state: parse_root_state(expected_root_state)
+                    .ok_or(SESSION_CONTROL_USAGE)?,
+                next_root_state: parse_root_state(next_root_state).ok_or(SESSION_CONTROL_USAGE)?,
             })),
-            _ => Err(SESSIONS_USAGE),
+            _ => Err(SESSION_CONTROL_USAGE),
         }
     }
 }
@@ -183,7 +185,7 @@ pub(crate) fn render_mutation_status(
     certainty: MutationCertainty,
 ) -> String {
     format!(
-        "Session control prototype: {label}\nclient sync: view={} mutation-result={}\nRun /sessions refresh before another mutation when the view is stale.",
+        "Session control prototype: {label}\nclient sync: view={} mutation-result={}\nRun /session-control refresh before another mutation when the view is stale.",
         freshness_label(freshness),
         certainty_label(certainty)
     )

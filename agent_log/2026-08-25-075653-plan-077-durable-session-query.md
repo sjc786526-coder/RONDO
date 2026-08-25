@@ -2,8 +2,8 @@
 
 ## 状态
 
-`M4_C1_QUERY_PASS / LOCAL_COMMIT_COMPLETE`。正式 query 纵向链、相称回归、生成物、全部已知独立审查 finding、最新 review-fix 聚焦
-正式轮和 077 本地提交均已完成；独立终审未发现剩余高/中等级实现问题。workspace 非 077 阻断如实保留。
+`M4_C1_QUERY_REMEDIATION_PASS / LOCAL_COMMIT_COMPLETE`。正式 query 纵向链、相称回归、生成物、独立验收整改、最新聚焦正式轮、
+scoped fix 和 077 本地提交均已完成；三路交叉复审未发现剩余高/中等级实现问题。workspace 非 077 阻断如实保留。
 
 ## 实现摘要
 
@@ -16,13 +16,14 @@
   commit generation、完整 snapshot fingerprint 和 Team revision 分轴表达。
 - client 使用 connection/attachment/read ticket、whole-view replacement 和 stale 语义；list/read 共用 generation+fingerprint 高水位，
   并以独立于 Team 可用性的 client-local `Session -> Root` 轴保持已认证 identity。protocol apply 会先验证 request/response Session/Root、
-  跨请求 canonical Root 稳定性与整页 identity 唯一性，再原子推进水位。切换其他 Session、
+  跨请求 canonical Root 稳定性、`Available <=> Team` 与 Team viewer 的 Root identity/role，再原子推进水位。切换其他 Session、
   list、detach/reconnect、错误 response 或换 Root 都不能把回退/同代异 fingerprint 标为 fresh。
 - locator cursor 只保证稳定 keyset 排序，不冒充 source snapshot：cursor continuation 或单 RPC 内跨多个 locator page 时，server 保留
   bounded data/next cursor，但明确 `complete=false/sourceChanged`。
-- TUI 仅提供 `/sessions list [active|archived]`、`next`、`read <session> <root>`、`refresh`；请求经 app-server client 后台执行，
-  固定 15 秒 timeout、无 retry，迟到 completion 经过 ticket 边界拒绝。三组 snapshot 覆盖分页、健康 detail、损坏/身份不匹配、
-  incomplete/unsupported 与 stale retained context。
+- TUI 的 `/sessions` 专用于正式 query；两个 gate 同开时，C0 经独立 `/session-control` 可达，仅启用 C0 时继续兼容旧 `/sessions`
+  alias，不按参数形状或 parse failure 猜测路由。请求经 app-server client 后台执行，固定 15 秒 timeout、无 retry，迟到 completion
+  经过 ticket 边界拒绝。四组正式 query snapshot 覆盖分页、健康 detail、损坏/身份不匹配、incomplete/unsupported、stale retained
+  context，以及 Team authored 文本在 renderer 边界的单行化。
 
 ## `state/` 窄扩展
 
@@ -49,14 +50,22 @@ state DB 不证明 Durable Session/Team identity、lifecycle 或 committed state
 
 ## 精确 write set 核对
 
-当前 write set 共 104 个 tracked/untracked 交付路径：`app-server-protocol` 41、`app-server` 9、`app-server-client` 3、`core` 5、
-`features` 2、`state` 4、`team-state` 2、`thread-store` 10、`tui` 26，以及本 Plan 动态章节和本日志各 1。全部位于批准范围；没有
+最终分支 write set 共 109 个交付路径：`app-server-protocol` 41、`app-server` 9、`app-server-client` 3、`core` 5、`features` 2、
+`state` 4、`team-state` 2、`thread-store` 10、`tui` 30、Plan 1、执行日志 1、独立审查报告 1。全部位于批准范围；没有
 WBS、Cargo/Bazel manifest/lock、根 README 或其他 plan/log 差异。唯一 binary diff 是 schema generator 产生的 stable/experimental
 app-server export 两个 `.json.zst`，可解压为合法 JSON；其余 JSON/schema 均通过只读 parse。没有删除项、`*.snap.new`、`*.rej` 或临时
 备份文件。
 
 ## 已运行验证
 
+- 独立验收整改正式轮（默认 features、dev/local profile、共享 069 target、`CARGO_BUILD_JOBS=2`、临时项目 270/285/290GB 门限）：
+  `codex-thread-store`、`codex-app-server`、`codex-app-server-client`、`codex-tui` 的 8 个直接因果测试 8/8 passed、4838 skipped，
+  JUnit SHA-256 `80d41f5afe70128ae9c3ae3855d2e975bb7e1b4c17c27ec53fe9f81db3543096`。覆盖 InMemory persisted seam
+  fail-closed、app-server `SourceUnsupported`、非法 Team/readStatus/viewer 原子拒绝、双 gate 两入口及 popup gate、C0 usage/refresh
+  提示和 authored 文本单行化 snapshot。此前生成 snapshot 的调试轮 6/6 passed，JUnit SHA-256
+  `bd042bd9c5a363231b74f9f078a2c829d123bf498735a8dfc9bbe18a53fd6866`。
+- 整改后四 crate 单批 scoped `just fix` 通过；只机械删除一个 077 TUI JSON fixture 的 4 个冗余 `Value::clone()`。随后 target-free
+  `UV_CACHE_DIR=.uv-cache just fmt`、`just fmt-check`、`git diff --check` 通过；依 ExecPlan 未在 fix/fmt 后重复测试。
 - target-free：多轮 `git diff --check`、无 `*.snap.new`/`*.rej`；最新 review fixes 后在 `multidev/` 运行
   `UV_CACHE_DIR=.uv-cache just fmt` 与 `just fmt-check` 均通过；全部 app-server JSON/config schema 及两个 zstd export 解压内容只读 parse
   通过。worktree 根一次 `just fmt` 因该 Justfile 无 recipe 立即退出，未触碰 target。
@@ -92,6 +101,19 @@ app-server export 两个 `.json.zst`，可解压为合法 JSON；其余 JSON/sch
   root-boundary 组合和 typed unavailable；TUI 只走 formal protocol wrappers，并保留 rejected projection 为 non-fresh。
 - lower/app-server/client-TUI 与最终合同专项审查者已对上述最新 live diff 复审，无剩余高/中等级 finding；随后 64 项聚焦回归全部通过。
 
+## 独立验收整改
+
+- `InMemoryThreadStore` 不再把易失 history 冒充 canonical persisted `SessionMeta`，恢复 trait 默认 `Unsupported`；公共 app-server
+  回归同时验证 list locator 和 direct read 都映射为 typed `SourceUnsupported`，不能与磁盘 snapshot 拼成 `Available`。
+- formal client 在任何 high-water、canonical Root map 或 view 提交前校验 `Available <=> Team`，并要求 Team viewer 等于外层 canonical
+  Root 且 role 为 Root；非法第二行不会部分提交同页第一行的新 Session，旧 projection 保留但降为 stale。
+- 双 gate 不再由 `/sessions` 全局遮蔽 C0：`/sessions` 固定正式 query，`/session-control` 固定 C0；仅启用 C0 时保留旧 alias。
+  popup、无参/带参 dispatch、usage、refresh 与错误提示均使用同一无歧义边界。
+- Team 的 participant label、version author label 与 summary 仅在正式 renderer 边界把连续 whitespace/control 折叠为单个空格并 trim；
+  canonical snapshot、fingerprint 和存储值不变。恶意 LF/CR/ESC/BEL/Unicode separator snapshot 不能伪造结构化状态行。
+- 三路只读交叉审查分别覆盖 lower/client、TUI routing/renderer 和完整合同，均未发现剩余高/中等级 finding；审查报告
+  `agent_log/2026-08-25-103752-plan-077-independent-review.md` 保持历史原文未修改。
+
 调试期另有两次 watchdog 主动停止：一次 sustained memory PSI、一次运行中出现无法归属的 scope 外 Cargo PID；均未冒充测试通过，
 且停止后释放重型资源。client/TUI 的前一调试轮虽最终 23/23，但含一次临时 SQLite pool timeout 自动重试；正式证据采用后续稳定轮。
 
@@ -124,17 +146,25 @@ workspace `just test` 只运行一次，测试前即被 `v8 = 150.4.0` 请求不
 - 最终纵向重跑：项目 `272,152,424,448 → 277,175,566,336 B`，target 结束 `183,133,495,296 B`，Windows C: 可用
   `79,156,613,120 → 79,156,465,664 B`；memory/nonreclaimable peak `7,392,350,208 / 3,092,865,024 B`，swap `0`，`stop=none`。
   批次完成后无 cargo/rustc/nextest，重型资源已释放。临时门限仅通过本轮环境变量生效，未写入仓库。
+- 独立验收整改正式轮：项目 `281,259,171,840 → 281,416,093,696 B`，target `187,368,755,200 B`，Windows C: 可用
+  `78,852,145,152 → 78,849,191,936 B`；memory/nonreclaimable peak `8,606,568,448 / 3,648,495,616 B`，swap `0`，
+  `stop=none / cleanup=none`。
+- 整改 scoped fix 首轮因 `project_reached_proactive_stop` 于项目 `285,005,111,296 B` 停止，第二轮因瞬时 scope 外 Cargo PID
+  `310544` fail-closed 停止；均未冒充通过且 wrapper 完整回收。只删除 18 个在整改批次前形成、后续测试/clippy 未触碰的可重建
+  incremental hash 目录，删除前测得合计 `6,477,017,088 B`；未删除 `deps`、本轮进度、源码、fixture、snapshot 或 JUnit。
+  第三轮 scoped fix 通过：项目 `282,011,971,584 → 283,521,429,504 B`，target `189,474,492,416 B`，Windows C: 可用
+  `78,276,218,880 → 78,274,510,848 B`，`stop=none / cleanup=none`。随后无 Cargo/rustc/nextest，重型资源已释放。
 
 ## 未运行或未通过
 
 - workspace-wide `just test` 未通过：上述 V8 官方资产 404；不重跑、不规避。
 - core/protocol 全量未通过：上述 scope 外 mock/代理环境阻断后正常中断；077 聚焦与 lower 全量证据独立有效。
-- app-server、app-server-client、TUI 未再运行 crate 全量；Plan 要求的聚焦/fresh-state/snapshot 与 scoped fix 已通过，且 240GB 后不再启动
+- app-server、app-server-client、TUI 未再运行 crate 全量；Plan 要求的聚焦/fresh-state/snapshot 与 scoped fix 已通过，且 270GB 后不再启动
   新宽门禁。
 
 未运行 Docker、真实 API/模型、训练、测评、CI、PR、push、merge、rebase、cherry-pick、发布或远端修改。
 
 ## 任务收口
 
-- 104 路径已只提交到 `worktree-077-m4-c1-durable-session-query`，提交后 worktree clean。本任务范围内无剩余实施步骤；未
+- 109 路径已只提交到 `worktree-077-m4-c1-durable-session-query`，提交后 worktree clean。本任务范围内无剩余实施步骤；未
   merge/rebase/cherry-pick/push/关闭 worktree 或重命名分支，交回用户独立验收。

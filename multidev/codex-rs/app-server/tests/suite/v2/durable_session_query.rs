@@ -155,7 +155,7 @@ async fn durable_session_query_is_stable_and_independent_of_experimental_api() -
 }
 
 #[tokio::test]
-async fn durable_session_list_reports_an_unsupported_locator_source() -> Result<()> {
+async fn durable_session_query_reports_an_unsupported_in_memory_source() -> Result<()> {
     let codex_home = TempDir::new()?;
     let store_id = Uuid::new_v4().to_string();
     MockResponsesConfig::new("http://127.0.0.1:1")
@@ -215,6 +215,27 @@ async fn durable_session_list_reports_an_unsupported_locator_source() -> Result<
         response.incomplete_reason,
         Some(codex_app_server_protocol::DurableSessionListIncompleteReason::SourceUnsupported)
     );
+
+    let root_thread_id = ThreadId::new().to_string();
+    let result = client
+        .request(ClientRequest::DurableSessionRead {
+            request_id: RequestId::Integer(2),
+            params: DurableSessionReadParams {
+                session_id: root_thread_id.clone(),
+                root_thread_id,
+            },
+        })
+        .await?
+        .expect("unsupported metadata source must return an explicit unavailable view");
+    let response: DurableSessionReadResponse = serde_json::from_value(result)?;
+    assert_eq!(
+        response.session.read_status,
+        DurableSessionReadStatus::Unsupported {
+            issue: DurableSessionReadIssue::SourceUnsupported,
+        }
+    );
+    assert_eq!(response.session.identity.root_thread_id, None);
+    assert_eq!(response.session.team, None);
 
     client.shutdown().await?;
     Ok(())

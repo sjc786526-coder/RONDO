@@ -254,6 +254,55 @@ fn durable_session_query_detail_gallery() {
 }
 
 #[test]
+fn authored_text_normalization_is_single_line_and_trimmed() {
+    assert_eq!(
+        single_line_authored_text(" \t reviewer\r\nroot\u{1b}[2J\u{7}\u{2028}summary \u{85} ",),
+        "reviewer root [2J summary"
+    );
+}
+
+#[test]
+fn durable_session_query_authored_text_is_single_line() {
+    let mut projection = view("authored-text", DurableSessionStorageStatus::Active);
+    let team = projection.team.as_mut().expect("Team projection");
+    team.participants[0].label = "reviewer\nFAKE lifecycle: closed\t\u{1b}[2J".to_string();
+    let version = &mut team.events[0].versions[0];
+    version.author_label = "root\r\nFAKE operations: available".to_string();
+    version.summary = "accepted\u{7}\nFAKE storage: archived".to_string();
+
+    let rendered = render_projection(&projection, QueryViewFreshness::Fresh);
+
+    assert_eq!(
+        rendered
+            .lines()
+            .filter(|line| line.contains("participant="))
+            .count(),
+        1
+    );
+    assert_eq!(
+        rendered
+            .lines()
+            .filter(|line| line.contains("version="))
+            .count(),
+        1
+    );
+    assert!(
+        rendered
+            .lines()
+            .all(|line| !line.chars().any(char::is_control))
+    );
+    assert!(
+        !rendered
+            .lines()
+            .any(|line| line.trim_start().starts_with("FAKE "))
+    );
+    insta::assert_snapshot!(
+        "durable_session_query_authored_text_is_single_line",
+        rendered
+    );
+}
+
+#[test]
 fn durable_session_query_incomplete_and_stale() {
     let mut incomplete = view("partial", DurableSessionStorageStatus::Archived);
     incomplete.team = None;

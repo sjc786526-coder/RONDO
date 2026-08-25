@@ -113,6 +113,43 @@ fn protocol_read_response(session: Value) -> DurableSessionReadResponse {
     serde_json::from_value(json!({ "session": session })).expect("valid protocol read fixture")
 }
 
+fn invalid_committed_protocol_views() -> Vec<(
+    Value,
+    InvalidSessionListProjection,
+    InvalidSessionReadProjection,
+)> {
+    let mut unavailable_team =
+        protocol_view("session-a", Some("root-a"), Some((9, "checksum-new")));
+    unavailable_team["readStatus"] = json!({
+        "status": "incomplete",
+        "issue": "teamSnapshotMissing"
+    });
+
+    let mut wrong_viewer = protocol_view("session-a", Some("root-a"), Some((9, "checksum-new")));
+    wrong_viewer["team"]["viewer"]["threadId"] = json!("root-b");
+
+    let mut member_viewer = protocol_view("session-a", Some("root-a"), Some((9, "checksum-new")));
+    member_viewer["team"]["viewer"]["role"] = json!("member");
+
+    vec![
+        (
+            unavailable_team,
+            InvalidSessionListProjection::UnexpectedCommittedProjection,
+            InvalidSessionReadProjection::UnexpectedCommittedProjection,
+        ),
+        (
+            wrong_viewer,
+            InvalidSessionListProjection::InvalidTeamViewer,
+            InvalidSessionReadProjection::InvalidTeamViewer,
+        ),
+        (
+            member_viewer,
+            InvalidSessionListProjection::InvalidTeamViewer,
+            InvalidSessionReadProjection::InvalidTeamViewer,
+        ),
+    ]
+}
+
 fn connected_session() -> Query {
     let mut query = Query::new();
     query.bind_connection();
@@ -551,6 +588,113 @@ fn protocol_read_rejects_wrong_or_missing_root_before_updating_high_water() {
         );
         assert_eq!(query.committed_high_water(), None);
         assert_ne!(query.view_freshness(), QueryViewFreshness::Fresh);
+    }
+}
+
+#[test]
+fn protocol_list_and_read_reject_inconsistent_committed_team_without_state_pollution() {
+    let params = DurableSessionReadParams {
+        session_id: "session-a".to_string(),
+        root_thread_id: "root-a".to_string(),
+    };
+
+    for (invalid_view, list_error, read_error) in invalid_committed_protocol_views() {
+        let accepted_list = protocol_list_response(vec![protocol_view(
+            "session-a",
+            Some("root-a"),
+            Some((4, "checksum-accepted")),
+        )]);
+        let mut list_state = DurableSessionQueryClientState::new();
+        list_state.bind_connection();
+        list_state.attach_list(DurableSessionListParams::default());
+        let initial = list_state.begin_read().expect("initial list read");
+        assert_eq!(
+            list_state.apply_protocol_list_read_success(initial, accepted_list.clone()),
+            QueryReadApplyResult::Applied
+        );
+        assert_eq!(list_state.view_freshness(), QueryViewFreshness::Fresh);
+
+        let refresh = list_state.begin_read().expect("list refresh");
+        assert_eq!(
+            list_state.apply_protocol_list_read_success(
+                refresh,
+                protocol_list_response(vec![
+                    protocol_view("session-b", Some("root-b"), Some((9, "checksum-b"))),
+                    invalid_view.clone(),
+                ]),
+            ),
+            QueryReadApplyResult::RejectedInvalidListProjection(list_error)
+        );
+        assert_eq!(list_state.view_freshness(), QueryViewFreshness::Stale);
+        assert_eq!(
+            list_state.projection(),
+            Some(&DurableSessionQueryProjection::List(accepted_list))
+        );
+        assert_eq!(list_state.committed_high_water_by_session.len(), 1);
+        assert_eq!(
+            list_state
+                .committed_high_water_by_session
+                .get(&params)
+                .map(CommittedProjection::generation),
+            Some(4)
+        );
+        assert_eq!(list_state.canonical_root_by_session.len(), 1);
+        assert!(
+            !list_state
+                .canonical_root_by_session
+                .contains_key("session-b")
+        );
+        assert_eq!(
+            list_state
+                .canonical_root_by_session
+                .get("session-a")
+                .map(String::as_str),
+            Some("root-a")
+        );
+
+        let accepted_read = protocol_read_response(protocol_view(
+            "session-a",
+            Some("root-a"),
+            Some((4, "checksum-accepted")),
+        ));
+        let mut read_state = DurableSessionQueryClientState::new();
+        read_state.bind_connection();
+        read_state.attach_session(params.clone());
+        let initial = read_state.begin_read().expect("initial Session read");
+        assert_eq!(
+            read_state.apply_protocol_session_read_success(initial, accepted_read.clone()),
+            QueryReadApplyResult::Applied
+        );
+        assert_eq!(read_state.view_freshness(), QueryViewFreshness::Fresh);
+
+        let refresh = read_state.begin_read().expect("Session refresh");
+        assert_eq!(
+            read_state.apply_protocol_session_read_success(
+                refresh,
+                protocol_read_response(invalid_view),
+            ),
+            QueryReadApplyResult::RejectedInvalidSessionProjection(read_error)
+        );
+        assert_eq!(read_state.view_freshness(), QueryViewFreshness::Stale);
+        assert_eq!(
+            read_state.projection(),
+            Some(&DurableSessionQueryProjection::Session(accepted_read))
+        );
+        assert_eq!(
+            read_state
+                .committed_high_water()
+                .map(CommittedProjection::generation),
+            Some(4)
+        );
+        assert_eq!(read_state.committed_high_water_by_session.len(), 1);
+        assert_eq!(read_state.canonical_root_by_session.len(), 1);
+        assert_eq!(
+            read_state
+                .canonical_root_by_session
+                .get("session-a")
+                .map(String::as_str),
+            Some("root-a")
+        );
     }
 }
 

@@ -321,13 +321,25 @@ Team Event 历史、历史成员档案或时间旅行查询。
   canonical lock/watchdog、`CARGO_BUILD_JOBS=2` 下通过 64/64：state/thread-store 18/18，app-server/client/TUI 46/46，均 0 failure/error。
   第二组首轮在测试前按 `project_reached_proactive_stop` 主动停止；精确删除 13 个本轮未触碰的陈旧 core/app-server-protocol incremental
   hash 目录 `13,537,357,824 B` 后，同一命令重跑通过。没有删除 `deps`、源码、fixture、JUnit 或其他任务数据。
+- 提交级独立验收报告确认主 query 链成立，但发现四个中等级边界：InMemory 易失 metadata 冒充 persisted seam、client 接受矛盾 Team
+  projection、双 gate 时 C0 被 `/sessions` 遮蔽、Team authored 文本可伪造 TUI 状态行。四项均已按根因窄修：InMemory 回落默认
+  `Unsupported`；client 在提交前强制 `Available <=> Team` 且 viewer 为 canonical Root/Root role；`/sessions` 固定正式 query 并新增
+  C0-only `/session-control`（C0-only 仍兼容旧 alias）；正式 renderer 只在展示边界单行化 label/author/summary，不改 canonical state。
+- 整改代码经 lower/client、TUI 和完整合同三路只读交叉审查，均未发现剩余高/中等级 finding。正式聚焦轮在默认 features、dev/local、
+  共享 069 target 下通过 8/8、4838 skipped，JUnit SHA-256
+  `80d41f5afe70128ae9c3ae3855d2e975bb7e1b4c17c27ec53fe9f81db3543096`；随后四 crate scoped `just fix`、target-free
+  `just fmt`/`fmt-check`/`git diff --check` 通过，依合同未在 fix/fmt 后重复测试。
+- 整改期间 scoped fix 一次因项目到达 285GB 主动停止、一次因瞬时 scope 外 Cargo PID fail-closed；均完整回收且不冒充通过。依用户授权
+  精确删除 18 个在本轮前形成且未被整改测试/clippy 触碰的可重建 incremental hash 目录，删除前测得 `6,477,017,088 B`；未动
+  `deps`、本轮进度、源码或证据。最终 fix 轮 `stop=none / cleanup=none`，结束项目 `283,521,429,504 B`、target
+  `189,474,492,416 B`、Windows `C:` 可用 `78,274,510,848 B`，重型资源已释放。
 
 ### 当前工作
 
-- 产品实现、相称回归、生成物、独立审查、最终聚焦重型复验、104 文件精确 write set 核对和 077 本地提交均已完成；提交后 worktree
-  clean，交付留在 `worktree-077-m4-c1-durable-session-query`，未 merge/rebase/cherry-pick/push/关闭或重命名。最终正式轮结束值：项目
-  `277,175,566,336 B`、069 target `183,133,495,296 B`、Windows `C:` 可用 `79,156,465,664 B`；`stop=none / cleanup=none`，
-  重型资源已释放。
+- 产品实现、相称回归、生成物、独立验收整改、最终聚焦重型复验、109 文件精确分支 write set 核对和 077 本地提交均已完成；提交后
+  worktree clean，交付留在 `worktree-077-m4-c1-durable-session-query`，未 merge/rebase/cherry-pick/push/关闭或重命名。最终 scoped
+  fix 结束值：项目 `283,521,429,504 B`、069 target `189,474,492,416 B`、Windows `C:` 可用 `78,274,510,848 B`；
+  `stop=none / cleanup=none`，重型资源已释放。
 
 ### 本任务剩余步骤
 
@@ -341,8 +353,8 @@ Team Event 历史、历史成员档案或时间旅行查询。
 
 ### 当前验收状态
 
-- `M4_C1_QUERY_PASS / LOCAL_COMMIT_COMPLETE`。最新代码、生成物、独立审查、review-fix 聚焦正式轮与 077 本地提交均完成；workspace
-  非 077 阻断如实保留。
+- `M4_C1_QUERY_REMEDIATION_PASS / LOCAL_COMMIT_COMPLETE`。最新代码、生成物、独立验收整改、聚焦正式轮、scoped fix 与 077 本地提交
+  均完成；workspace 非 077 阻断如实保留。
 
 ### 交接边界
 
@@ -381,3 +393,8 @@ Team Event 历史、历史成员档案或时间旅行查询。
 | 022 | 078 接管重型时段后，077 只做 target-free 整改与审查；最终复验须在 078 释放后重新申请并重新过实时容量门禁 | 遵守用户最新人工调度，避免通过排队/锁空闲推定授权或在临界磁盘继续写 target | 构建/调度 | 已采纳 |
 | 023 | client-local canonical Root 轴独立于 committed Team 高水位；Team unavailable 时可保留已认证 Root，但不能推进 committed，高水位/Root 只在整个 response `Applied` 后原子更新 | canonical SessionMeta identity 不应因 snapshot 失败而遗失，也不能让 typed unavailable 为错误 Root attachment 背书；该内存同步边界不成为 durable authority 或 query cache | client/identity | 已采纳 |
 | 024 | 最终复验仅临时使用用户批准的项目 `270/285/290GB` 门限；触及 stop 后只删除 13 个可重建且在本轮前已陈旧的 incremental hash 目录，再原命令重跑 | 保留 canonical watchdog 和最终代码证据，同时避免清理 `deps`、权威数据或来源不明产物；临时门限不写入仓库 | 资源/清理 | 已采纳 |
+| 025 | InMemory store 不覆盖 canonical persisted `SessionMeta` seam，无法证明持久来源的 store 继承默认 `Unsupported` | 易失 metadata 与磁盘 snapshot 不属于同一 durable read boundary，拼接会伪造 `Available` | thread-store/app-server | 已采纳 |
+| 026 | formal client 在任何 view/high-water/Root-map 提交前强制 `Available <=> Team`，并要求 Team viewer 等于 canonical Root 且 role 为 Root | ticket、generation 或 fingerprint 不能替代完整 projection 结构与 viewer identity 验证 | client/identity | 已采纳 |
+| 027 | 双 gate 时 `/sessions` 固定正式 query、`/session-control` 固定 C0；仅启用 C0 时保留旧 `/sessions` alias，不按参数形状或 parse failure 回退 | 两套 parser 的 `list`、`refresh`、`read` 语义重叠，猜测路由会遮蔽或误触 control | TUI/routing | 已采纳 |
+| 028 | Team authored label/author/summary 仅在正式 TUI renderer 边界折叠 whitespace/control 并 trim | 防止伪造结构化状态行，同时保持 canonical snapshot、fingerprint 与原文存储不变 | TUI/rendering | 已采纳 |
+| 029 | 独立验收整改沿用任务专用临时 270/285/290GB 门限；仅删除 18 个可证明为本轮前形成且未被整改测试/clippy 触碰的 incremental hash 目录 | 保留正式测试与 scoped-fix 进度，在不动 `deps`、源码或证据的前提下完成 watchdog 门内验证 | 资源/清理 | 已采纳 |

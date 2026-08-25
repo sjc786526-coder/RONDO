@@ -1007,7 +1007,7 @@ impl AppServerSession {
             .cloned()
             .ok_or_else(|| {
                 color_eyre::eyre::eyre!(
-                    "no experimental Session is attached; run /sessions read first"
+                    "no experimental Session is attached; run /session-control read first"
                 )
             })?;
         let ticket = self
@@ -1146,7 +1146,7 @@ impl AppServerSession {
         if attached_session_id.as_deref() != Some(session_id) {
             return Err(ExperimentalSessionMutationAttemptError::not_submitted(
                 color_eyre::eyre::eyre!(
-                    "unarchive requires a fresh /sessions read for the same Session"
+                    "unarchive requires a fresh /session-control read for the same Session"
                 ),
             ));
         }

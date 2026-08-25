@@ -397,6 +397,16 @@ impl ChatWidget {
                         .send(AppEvent::ExperimentalSessionControlCommand(String::new()));
                 }
             }
+            SlashCommand::SessionControl => {
+                if self
+                    .config
+                    .features
+                    .enabled(Feature::ExperimentalSessionControl)
+                {
+                    self.app_event_tx
+                        .send(AppEvent::ExperimentalSessionControlCommand(String::new()));
+                }
+            }
             SlashCommand::AutoReview => {
                 self.open_auto_review_denials_popup();
             }
@@ -699,6 +709,18 @@ impl ChatWidget {
                     self.app_event_tx
                         .send(AppEvent::DurableSessionQueryCommand(trimmed.to_string()));
                 } else if self
+                    .config
+                    .features
+                    .enabled(Feature::ExperimentalSessionControl)
+                {
+                    self.app_event_tx
+                        .send(AppEvent::ExperimentalSessionControlCommand(
+                            trimmed.to_string(),
+                        ));
+                }
+            }
+            SlashCommand::SessionControl => {
+                if self
                     .config
                     .features
                     .enabled(Feature::ExperimentalSessionControl)
@@ -1063,7 +1085,7 @@ impl ChatWidget {
         self.queued_command_drain_result(cmd)
     }
 
-    fn builtin_command_flags(&self) -> BuiltinCommandFlags {
+    pub(super) fn builtin_command_flags(&self) -> BuiltinCommandFlags {
         #[cfg(target_os = "windows")]
         let allow_elevate_sandbox = {
             let windows_sandbox_level = crate::windows_sandbox::level_from_config(&self.config);
@@ -1085,6 +1107,10 @@ impl ChatWidget {
                     .config
                     .features
                     .enabled(Feature::ExperimentalSessionControl),
+            session_control_command_enabled: self
+                .config
+                .features
+                .enabled(Feature::ExperimentalSessionControl),
             allow_elevate_sandbox,
             side_conversation_active: self.active_side_conversation,
         }
@@ -1146,6 +1172,7 @@ impl ChatWidget {
             | SlashCommand::SandboxReadRoot
             | SlashCommand::Experimental
             | SlashCommand::Sessions
+            | SlashCommand::SessionControl
             | SlashCommand::AutoReview
             | SlashCommand::Memories
             | SlashCommand::Quit

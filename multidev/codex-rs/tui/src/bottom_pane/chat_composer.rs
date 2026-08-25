@@ -492,6 +492,7 @@ pub(crate) struct ChatComposer {
     goal_command_enabled: bool,
     personality_command_enabled: bool,
     sessions_command_enabled: bool,
+    session_control_command_enabled: bool,
     windows_degraded_sandbox_active: bool,
     side_conversation_active: bool,
     history_search: Option<HistorySearchSession>,
@@ -567,6 +568,7 @@ impl ChatComposer {
             goal_command_enabled: self.goal_command_enabled,
             personality_command_enabled: self.personality_command_enabled,
             sessions_command_enabled: self.sessions_command_enabled,
+            session_control_command_enabled: self.session_control_command_enabled,
             allow_elevate_sandbox: self.windows_degraded_sandbox_active,
             side_conversation_active: self.side_conversation_active,
         }
@@ -677,6 +679,7 @@ impl ChatComposer {
             goal_command_enabled: false,
             personality_command_enabled: false,
             sessions_command_enabled: false,
+            session_control_command_enabled: false,
             windows_degraded_sandbox_active: false,
             side_conversation_active: false,
             history_search: None,
@@ -841,6 +844,10 @@ impl ChatComposer {
 
     pub fn set_sessions_command_enabled(&mut self, enabled: bool) {
         self.sessions_command_enabled = enabled;
+    }
+
+    pub fn set_session_control_command_enabled(&mut self, enabled: bool) {
+        self.session_control_command_enabled = enabled;
     }
 
     /// Replace composer, editor, and footer-hint key bindings from one runtime snapshot.

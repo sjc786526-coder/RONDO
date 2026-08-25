@@ -202,7 +202,7 @@ pub(crate) fn render_projection(
                     "  participant={} | role={} | label={}",
                     participant.thread_id,
                     team_role_label(participant.role),
-                    participant.label
+                    single_line_authored_text(&participant.label)
                 ));
             }
             for event in &team.events {
@@ -215,8 +215,8 @@ pub(crate) fn render_projection(
                         "    version={} | author={} ({}) | summary={} | producer={} | root={} | retired={}",
                         version.version_id,
                         version.author_thread_id,
-                        version.author_label,
-                        version.summary,
+                        single_line_authored_text(&version.author_label),
+                        single_line_authored_text(&version.summary),
                         producer_label(version.producer_state),
                         root_state_label(version.root_state),
                         version.retired
@@ -230,6 +230,23 @@ pub(crate) fn render_projection(
         )),
     }
     lines.join("\n")
+}
+
+fn single_line_authored_text(value: &str) -> String {
+    let mut normalized = String::with_capacity(value.len());
+    let mut separator_pending = false;
+    for character in value.chars() {
+        if character.is_whitespace() || character.is_control() {
+            separator_pending = !normalized.is_empty();
+            continue;
+        }
+        if separator_pending {
+            normalized.push(' ');
+            separator_pending = false;
+        }
+        normalized.push(character);
+    }
+    normalized
 }
 
 pub(crate) fn render_refreshing() -> String {

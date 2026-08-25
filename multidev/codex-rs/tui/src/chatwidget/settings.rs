@@ -300,13 +300,15 @@ impl ChatWidget {
     }
 
     pub(super) fn sync_sessions_command_enabled(&mut self) {
+        let session_control_enabled = self
+            .config
+            .features
+            .enabled(Feature::ExperimentalSessionControl);
         self.bottom_pane.set_sessions_command_enabled(
-            self.config.features.enabled(Feature::DurableSessionQuery)
-                || self
-                    .config
-                    .features
-                    .enabled(Feature::ExperimentalSessionControl),
+            self.config.features.enabled(Feature::DurableSessionQuery) || session_control_enabled,
         );
+        self.bottom_pane
+            .set_session_control_command_enabled(session_control_enabled);
     }
 
     pub(super) fn sync_mentions_v2_enabled(&mut self) {
