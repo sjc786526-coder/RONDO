@@ -17,7 +17,7 @@ import subprocess
 from typing import Any
 
 from ..contract import REPO_ROOT, load_fixed_input_contract
-from ..identity import sha256_file
+from ..identity import canonical_json_bytes, sha256_bytes, sha256_file
 from .archive import SelectionArchive
 from .contract import (
     CANDIDATES,
@@ -32,7 +32,7 @@ from .contract import (
 )
 from .decision import (
     build_selection_lock,
-    evaluate_unseen_confirmation,
+    build_unseen_confirmation,
     evaluate_validation,
     validate_runtime_facts,
     validate_unseen_confirmation,
@@ -519,6 +519,7 @@ def _lock(args: argparse.Namespace) -> int:
         judge_package=_load_json(args.judge_package, "Plan 073 judge package"),
         dataset_root=args.repo_root / freeze["dataset"]["root"],
         bundle_root=args.bundle_root,
+        repo_root=args.repo_root,
     )
     _archive(args.runs_root, freeze).write_json("selection-lock.json", lock)
     return 0
@@ -535,12 +536,26 @@ def _confirm(args: argparse.Namespace) -> int:
     if document["candidate"] != lock["selected"]["candidate"]:
         raise SelectionError("Plan 073 confirmation scored a different candidate")
     observation = {"candidate": document["candidate"], **_observation(document)}
-    judge = (
+    judge_aggregate = (
         _load_json(args.judge_aggregate, "Plan 073 judge aggregate")
         if args.judge_aggregate is not None
         else None
     )
-    result = evaluate_unseen_confirmation(lock, freeze, release, observation, judge)
+    judge_package = (
+        _load_json(args.judge_package, "Plan 073 judge package")
+        if args.judge_package is not None
+        else None
+    )
+    result = build_unseen_confirmation(
+        lock,
+        freeze,
+        release,
+        observation,
+        judge_aggregate,
+        judge_package,
+        dataset_root=args.repo_root / freeze["dataset"]["root"],
+        repo_root=args.repo_root,
+    )
     archive = _archive(args.runs_root, freeze)
     archive.write_json("unseen-release-identity.json", _release_identity(release))
     archive.write_json("unseen-confirmation.json", result)
@@ -610,6 +625,35 @@ def _candidate_report(report: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _report_lock(
+    result: Mapping[str, Any], freeze: Mapping[str, Any], lock_value: Any
+) -> dict[str, Any]:
+    """Bind a report's lock to the exact selected validation result."""
+
+    lock = validate_lock(lock_value)
+    selected = result.get("selected")
+    if result.get("terminal") != "SELECTED" or selected not in CANDIDATES:
+        raise SelectionError(
+            "Plan 073 report cannot attach unseen evidence to an unselected result"
+        )
+    report = result["candidates"][selected]
+    if (
+        lock["validation_result_sha256"]
+        != sha256_bytes(canonical_json_bytes(dict(result)))
+        or lock["selection_freeze_sha256"] != freeze_sha256(freeze)
+        or lock["selected"]["candidate"] != selected
+        or lock["selected"]["deployment_artifact_sha256"]
+        != report["deployment_artifact_sha256"]
+        or lock["selected"]["threshold"]["projected_score"]
+        != float(report["threshold_search"]["threshold"])
+        or lock["selected"]["runtime"] != freeze["runtime"]
+    ):
+        raise SelectionError(
+            "Plan 073 report selection lock is not bound to this validation result"
+        )
+    return lock
+
+
 def _report(args: argparse.Namespace) -> int:
     freeze = validate_freeze(_load_json(args.freeze, "Plan 073 freeze"))
     result = validate_validation_result(
@@ -617,14 +661,62 @@ def _report(args: argparse.Namespace) -> int:
     )
     confirmation = None
     if args.unseen_confirmation is not None:
-        if args.selection_lock is None:
+        if (
+            args.selection_lock is None
+            or args.unseen_release is None
+            or args.unseen_score is None
+        ):
             raise SelectionError(
-                "Plan 073 report needs the selection lock that opened the confirmation"
+                "Plan 073 report needs the lock, release and raw score that produced "
+                "the unseen confirmation"
             )
+        lock = _report_lock(
+            result,
+            freeze,
+            _load_json(args.selection_lock, "Plan 073 selection lock"),
+        )
+        release = validate_release(
+            _load_json(args.unseen_release, "Plan 073 unseen release")
+        )
+        score = _validate_scores(
+            _load_json(args.unseen_score, "Plan 073 unseen score"), freeze, release
+        )
+        if score["candidate"] != lock["selected"]["candidate"]:
+            raise SelectionError("Plan 073 report scored a different locked candidate")
+        observation = {"candidate": score["candidate"], **_observation(score)}
+        judge_aggregate = (
+            _load_json(args.unseen_judge_aggregate, "Plan 073 unseen Judge aggregate")
+            if args.unseen_judge_aggregate is not None
+            else None
+        )
+        judge_package = (
+            _load_json(args.unseen_judge_package, "Plan 073 unseen Judge package")
+            if args.unseen_judge_package is not None
+            else None
+        )
         confirmation = validate_unseen_confirmation(
             _load_json(args.unseen_confirmation, "Plan 073 unseen confirmation"),
             freeze,
-            _load_json(args.selection_lock, "Plan 073 selection lock"),
+            lock,
+            release_value=release,
+            observation=observation,
+            judge_aggregate=judge_aggregate,
+            judge_package=judge_package,
+            dataset_root=args.repo_root / freeze["dataset"]["root"],
+            repo_root=args.repo_root,
+        )
+    elif any(
+        value is not None
+        for value in (
+            args.selection_lock,
+            args.unseen_release,
+            args.unseen_score,
+            args.unseen_judge_aggregate,
+            args.unseen_judge_package,
+        )
+    ):
+        raise SelectionError(
+            "Plan 073 report confirmation evidence was provided without a confirmation"
         )
     document = {
         "schema": REPORT_SCHEMA,
@@ -752,6 +844,7 @@ def build_parser() -> argparse.ArgumentParser:
     confirm.add_argument("--release", type=Path, required=True)
     confirm.add_argument("--score", type=Path, required=True)
     confirm.add_argument("--judge-aggregate", type=Path, default=None)
+    confirm.add_argument("--judge-package", type=Path, default=None)
     confirm.add_argument("--runs-root", type=Path, required=True)
 
     report = subparsers.add_parser("report")
@@ -759,6 +852,10 @@ def build_parser() -> argparse.ArgumentParser:
     report.add_argument("--validation-result", type=Path, required=True)
     report.add_argument("--unseen-confirmation", type=Path, default=None)
     report.add_argument("--selection-lock", type=Path, default=None)
+    report.add_argument("--unseen-release", type=Path, default=None)
+    report.add_argument("--unseen-score", type=Path, default=None)
+    report.add_argument("--unseen-judge-aggregate", type=Path, default=None)
+    report.add_argument("--unseen-judge-package", type=Path, default=None)
     report.add_argument("--output", type=Path, required=True)
     return parser
 

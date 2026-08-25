@@ -113,6 +113,14 @@ Locking now rebuilds the validation release from the frozen dataset and requires
 recomputes the whole comparison from that release, the three raw score sets and the Judge package
 and aggregate, and requires the result being locked to equal that recomputation exactly.
 
+A later re-review tightened the same boundary without changing the result. The validation reader
+now runs the canonical Plan 066 bundle verifier and pins the exact train+validation body digest;
+its containment tests no longer inspect the mixed v8 source. The dormant unseen confirmation path
+now applies the same rule as selection locking: rebuild the lock-authorised release, recompute from
+the raw score and matched Judge package/aggregate, require exact equality, and bind the report's
+lock to the validation result. These paths were verified with synthetic unseen fixtures only; no
+real unseen body was released or read during remediation.
+
 On Judge blinding, this run's item contents carried no reference label, pair direction, model
 identity or score, but the package identifier did contain the literal `validation`: it names the
 split without revealing any answer. Package identifiers may no longer name a split.

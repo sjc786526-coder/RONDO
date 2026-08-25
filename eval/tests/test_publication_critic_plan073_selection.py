@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import json
 from pathlib import Path
+import shutil
 import sys
 import tempfile
 import unittest
@@ -22,6 +23,9 @@ from rondo_eval.publication_critic.identity import (  # noqa: E402
     sha256_bytes,
     sha256_file,
 )
+from rondo_eval.publication_critic.full_model_training.plan066_bundle import (  # noqa: E402
+    verify_plan066_bundle,
+)
 from rondo_eval.publication_critic.selection.archive import SelectionArchive  # noqa: E402
 from rondo_eval.publication_critic.selection.contract import (  # noqa: E402
     CANDIDATES,
@@ -37,11 +41,13 @@ from rondo_eval.publication_critic.selection.contract import (  # noqa: E402
 from rondo_eval.publication_critic.selection.decision import (  # noqa: E402
     VALIDATION_SCHEMA,
     build_selection_lock,
+    build_unseen_confirmation,
     evaluate_unseen_confirmation,
     evaluate_validation,
     validate_unseen_confirmation,
     validate_validation_result,
 )
+from rondo_eval.publication_critic.selection import runner as selection_runner  # noqa: E402
 from rondo_eval.publication_critic.selection import judge as judge_module  # noqa: E402
 from rondo_eval.publication_critic.selection.judge import (  # noqa: E402
     BATCH_SCHEMA,
@@ -78,10 +84,6 @@ V8_ROOT = REPO_ROOT / "training" / "publication-critic-v8"
 BUNDLE_ROOT = (
     Path("/home/sjc/desktop/RONDO/eval-data/publication-critic/plan068/handoff")
     / "bundle-plan066-final-01"
-)
-MIXED_V8_BODY_FILES = tuple(
-    V8_ROOT / name
-    for name in ("packets.jsonl", "supervision.jsonl", "pairs.jsonl", "token-census.jsonl")
 )
 MANIFEST_SHA256 = sha256_file(V8_ROOT / "manifest.json")
 ARTIFACTS = {"base": "a" * 64, "c1": "b" * 64, "c3": "c" * 64}
@@ -350,18 +352,6 @@ class SplitReleaseTest(unittest.TestCase):
 class UnseenContainmentTest(unittest.TestCase):
     """Validation must be read from an asset that holds no unseen row at all."""
 
-    def setUp(self) -> None:
-        supervision = [
-            json.loads(line)
-            for line in (V8_ROOT / "supervision.jsonl").read_text(encoding="utf-8").splitlines()
-        ]
-        self.unseen_ids = {
-            str(row["candidate_id"])
-            for row in supervision
-            if row["proposed_split"] == "unseen_test"
-        }
-        self.assertTrue(self.unseen_ids)
-
     def _recorded_reads(self, run) -> tuple[set[str], object]:
         """Run something while recording every file path it opens."""
 
@@ -387,22 +377,59 @@ class UnseenContainmentTest(unittest.TestCase):
             )
         )
         touched = {Path(path).resolve() for path in opened}
-        mixed = {path.resolve() for path in MIXED_V8_BODY_FILES}
-        self.assertEqual(touched & mixed, set())
+        mixed_root = V8_ROOT.resolve()
+        self.assertFalse(
+            any(path == mixed_root or mixed_root in path.parents for path in touched)
+        )
         self.assertEqual(len(release["items"]), 55)
 
-    def test_validation_source_holds_no_unseen_identifier(self) -> None:
+    def test_validation_source_contains_only_the_frozen_validation_projection(self) -> None:
         source = load_split(
             V8_ROOT, "validation", repo_root=REPO_ROOT, bundle_root=BUNDLE_ROOT
         )
-        held = set(source.packets) | set(source.supervision) | set(
-            source.dropped_oldest_publications
+        self.assertEqual(len(source.supervision), 55)
+        self.assertEqual(len(source.pairs), 26)
+        self.assertEqual(
+            {row["proposed_split"] for row in source.supervision.values()},
+            {"validation"},
         )
-        for row in source.pairs:
-            held.add(str(row["preferred_candidate_id"]))
-            held.add(str(row["dispreferred_candidate_id"]))
-        self.assertEqual(held & self.unseen_ids, set())
         self.assertEqual(source.origin, "plan066-train-validation-bundle-v1")
+
+    def test_self_consistent_rehashed_bundle_substitute_is_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            substitute = Path(directory) / "bundle"
+            shutil.copytree(BUNDLE_ROOT, substitute)
+            data_path = substitute / "data/plan066-v8-train-validation.json"
+            data = json.loads(data_path.read_text(encoding="utf-8"))
+            data["train"]["packets"][0]["packet"]["candidate"]["summary"] += " drift"
+            data_path.write_text(
+                json.dumps(data, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            manifest_path = substitute / "bundle-manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["files"]["data/plan066-v8-train-validation.json"].update(
+                bytes=data_path.stat().st_size,
+                sha256=sha256_file(data_path),
+            )
+            core = {
+                name: value
+                for name, value in manifest.items()
+                if name != "content_sha256"
+            }
+            manifest["content_sha256"] = sha256_bytes(canonical_json_bytes(core))
+            manifest_path.write_text(
+                json.dumps(manifest, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(verify_plan066_bundle(substitute)["status"], "verified")
+            with self.assertRaises(SelectionError):
+                load_split(
+                    V8_ROOT,
+                    "validation",
+                    repo_root=REPO_ROOT,
+                    bundle_root=substitute,
+                )
 
     def test_validation_without_the_unseen_free_bundle_is_refused(self) -> None:
         with self.assertRaises(SelectionError):
@@ -898,6 +925,21 @@ class SelectionLockTest(unittest.TestCase):
         with self.assertRaises(SelectionError):
             _lock(result, other, release, observations, aggregate)
 
+    def test_report_refuses_a_lock_bound_to_a_different_validation_result(self) -> None:
+        release = _frozen_validation_release()
+        package, mapping, responses = _judge(
+            release, package_id="plan073-report-binding"
+        )
+        aggregate = aggregate_batches(package, mapping, responses)
+        observations = _observations(release, {"base": 0, "c1": 0, "c3": 0})
+        result = _evaluate(self.freeze, release, observations, aggregate)
+        lock = _lock(result, self.freeze, release, observations, aggregate)
+        different = copy.deepcopy(result)
+        different["scope_note"] = "a different canonical validation document"
+        validate_validation_result(different, self.freeze)
+        with self.assertRaises(SelectionError):
+            selection_runner._report_lock(different, self.freeze, lock)
+
 
 class UnseenConfirmationTest(unittest.TestCase):
     def setUp(self) -> None:
@@ -910,6 +952,7 @@ class UnseenConfirmationTest(unittest.TestCase):
             lock_sha=lock_sha256(self.lock),
         )
         package, mapping, responses = _judge(self.release, package_id="plan073-blind")
+        self.package = package
         self.aggregate = aggregate_batches(package, mapping, responses)
 
     def _observation(self, flips: int, **runtime: object) -> dict[str, object]:
@@ -922,9 +965,36 @@ class UnseenConfirmationTest(unittest.TestCase):
             "runtime": _runtime_facts(len(self.release["items"]), **runtime),
         }
 
+    def _validate(
+        self,
+        result: dict[str, object],
+        observation: dict[str, object],
+    ) -> dict[str, object]:
+        with mock.patch(
+            "rondo_eval.publication_critic.selection.decision.build_split_release",
+            return_value=self.release,
+        ):
+            return validate_unseen_confirmation(
+                result,
+                self.freeze,
+                self.lock,
+                release_value=self.release,
+                observation=observation,
+                judge_aggregate=self.aggregate,
+                judge_package=self.package,
+                dataset_root=Path("/synthetic-unseen-not-read"),
+                repo_root=REPO_ROOT,
+            )
+
     def test_locked_combination_that_holds_is_a_go(self) -> None:
+        observation = self._observation(0)
         result = evaluate_unseen_confirmation(
-            self.lock, self.freeze, self.release, self._observation(0), self.aggregate
+            self.lock,
+            self.freeze,
+            self.release,
+            observation,
+            self.aggregate,
+            self.package,
         )
         self.assertEqual(result["terminal"], "GO")
         self.assertEqual(result["failed_gates"], [])
@@ -935,7 +1005,12 @@ class UnseenConfirmationTest(unittest.TestCase):
 
     def test_locked_combination_that_fails_a_floor_is_a_no_go(self) -> None:
         result = evaluate_unseen_confirmation(
-            self.lock, self.freeze, self.release, self._observation(8), self.aggregate
+            self.lock,
+            self.freeze,
+            self.release,
+            self._observation(8),
+            self.aggregate,
+            self.package,
         )
         self.assertEqual(result["terminal"], "NO_GO")
         self.assertTrue(result["failed_gates"])
@@ -946,7 +1021,12 @@ class UnseenConfirmationTest(unittest.TestCase):
         observation["deployment_artifact_sha256"] = ARTIFACTS["c1"]
         with self.assertRaises(SelectionError):
             evaluate_unseen_confirmation(
-                self.lock, self.freeze, self.release, observation, self.aggregate
+                self.lock,
+                self.freeze,
+                self.release,
+                observation,
+                self.aggregate,
+                self.package,
             )
 
     def test_confirmation_refuses_a_release_opened_by_another_lock(self) -> None:
@@ -960,11 +1040,17 @@ class UnseenConfirmationTest(unittest.TestCase):
                 foreign,
                 self._observation(0),
                 self.aggregate,
+                self.package,
             )
 
     def test_confirmation_never_refits_the_threshold(self) -> None:
         result = evaluate_unseen_confirmation(
-            self.lock, self.freeze, self.release, self._observation(2), self.aggregate
+            self.lock,
+            self.freeze,
+            self.release,
+            self._observation(2),
+            self.aggregate,
+            self.package,
         )
         self.assertEqual(
             result["metrics"]["threshold"],
@@ -972,13 +1058,16 @@ class UnseenConfirmationTest(unittest.TestCase):
         )
 
     def test_report_grade_validator_binds_and_recomputes(self) -> None:
+        observation = self._observation(0)
         result = evaluate_unseen_confirmation(
-            self.lock, self.freeze, self.release, self._observation(0), self.aggregate
+            self.lock,
+            self.freeze,
+            self.release,
+            observation,
+            self.aggregate,
+            self.package,
         )
-        self.assertEqual(
-            validate_unseen_confirmation(result, self.freeze, self.lock)["terminal"],
-            "GO",
-        )
+        self.assertEqual(self._validate(result, observation)["terminal"], "GO")
         for mutate in (
             lambda doc: doc.update(terminal="GO", failed_gates=[]),
             lambda doc: doc.update(selection_lock_sha256="d" * 64),
@@ -991,11 +1080,17 @@ class UnseenConfirmationTest(unittest.TestCase):
             if broken == result:
                 continue
             with self.assertRaises(SelectionError):
-                validate_unseen_confirmation(broken, self.freeze, self.lock)
+                self._validate(broken, observation)
 
     def test_report_grade_validator_rejects_a_failing_run_relabelled_go(self) -> None:
+        observation = self._observation(8)
         failing = evaluate_unseen_confirmation(
-            self.lock, self.freeze, self.release, self._observation(8), self.aggregate
+            self.lock,
+            self.freeze,
+            self.release,
+            observation,
+            self.aggregate,
+            self.package,
         )
         self.assertEqual(failing["terminal"], "NO_GO")
         relabelled = copy.deepcopy(failing)
@@ -1003,11 +1098,71 @@ class UnseenConfirmationTest(unittest.TestCase):
         relabelled["failed_gates"] = []
         relabelled["reasons"] = ["forged"]
         with self.assertRaises(SelectionError):
-            validate_unseen_confirmation(relabelled, self.freeze, self.lock)
+            self._validate(relabelled, observation)
+
+    def test_report_grade_validator_rejects_a_forged_judge_view(self) -> None:
+        observation = self._observation(0)
+        honest = evaluate_unseen_confirmation(
+            self.lock,
+            self.freeze,
+            self.release,
+            observation,
+            self.aggregate,
+            self.package,
+        )
+        forged = copy.deepcopy(honest)
+        forged["judge"] = {
+            "present": True,
+            "aggregate_sha256": "a" * 64,
+            "model_identity": EXPECTED_JUDGE_IDENTITY,
+            "judged_dates": ["2026-08-25"],
+            "reference_agreement": {"agreement_rate": 0.0},
+            "gate_applicable": False,
+            "gate_reason": "judge_reference_agreement_below_gate_activation_threshold",
+        }
+        forged["judge_agreement"] = None
+        forged["terminal"] = "GO"
+        forged["reasons"] = [
+            "locked_combination_passed_every_frozen_floor_on_unseen_test",
+            "judge_sanity_gate_not_applicable_reference_agreement_too_low",
+        ]
+        with self.assertRaises(SelectionError):
+            self._validate(forged, observation)
+
+    def test_confirmation_requires_the_judge_package_with_its_aggregate(self) -> None:
+        with self.assertRaises(SelectionError):
+            evaluate_unseen_confirmation(
+                self.lock,
+                self.freeze,
+                self.release,
+                self._observation(0),
+                self.aggregate,
+            )
+
+    def test_confirmation_refuses_a_synthetic_release_substitute(self) -> None:
+        actual = _release(
+            "unseen_test",
+            ["PASS", "REWRITE"],
+            lock_sha=lock_sha256(self.lock),
+        )
+        with mock.patch(
+            "rondo_eval.publication_critic.selection.decision.build_split_release",
+            return_value=actual,
+        ), self.assertRaises(SelectionError):
+            build_unseen_confirmation(
+                self.lock,
+                self.freeze,
+                self.release,
+                self._observation(0),
+                self.aggregate,
+                self.package,
+                dataset_root=Path("/synthetic-unseen-not-read"),
+                repo_root=REPO_ROOT,
+            )
 
     def test_missing_judge_evidence_after_release_is_inconclusive(self) -> None:
         result = evaluate_unseen_confirmation(
-            self.lock, self.freeze, self.release, self._observation(0), None
+            self.lock, self.freeze, self.release, self._observation(0), None, None
         )
         self.assertEqual(result["terminal"], "INCONCLUSIVE")
 

@@ -21,7 +21,15 @@ from pathlib import Path
 from typing import Any
 
 from ..contract import REPO_ROOT
-from ..identity import canonical_json_bytes, sha256_bytes, sha256_file
+from ..full_model_training.contract import FullModelTrainingError
+from ..full_model_training.plan066_bundle import verify_plan066_bundle
+from ..full_model_training.plan066_data import (
+    PLAN066_DATA_RELATIVE,
+    PLAN066_DATA_SCHEMA,
+    V8_MANIFEST_SHA256,
+    load_plan066_datasets,
+)
+from ..identity import sha256_file
 from ..training_data.consumer import DatasetConsumer, build_memberships
 from ..training_data.contract import validate_pair_row, validate_supervision_row
 from ..training_data.freeze import verify_freeze_manifest
@@ -45,10 +53,11 @@ _REQUIRED_FILES = (
     CENSUS_RELATIVE,
 )
 
-BUNDLE_MANIFEST_RELATIVE = "bundle-manifest.json"
-BUNDLE_DATA_RELATIVE = "data/plan066-v8-train-validation.json"
-BUNDLE_SCHEMA = "rondo-publication-critic-plan066-bundle-v1"
-BUNDLE_DATA_SCHEMA = "rondo-publication-critic-plan066-data-v1"
+# This is the immutable train+validation projection used by Plan 066 and the
+# Plan 073 formal run.  The canonical bundle verifier binds the complete bundle
+# and its v8 source identity; this digest additionally pins the body projection
+# itself so a self-consistent, re-hashed substitute cannot stand in for it.
+PLAN066_DATA_SHA256 = "5b887f60ec803c29b7711b98614863876df4e60087e942b84f6bdc202af851cf"
 
 
 @dataclass(frozen=True)
@@ -106,15 +115,18 @@ def load_split(
 
 def _load_validation_from_bundle(bundle_root: Path, *, repo_root: Path) -> SplitSource:
     root = _safe_root(bundle_root)
-    manifest_path = root / BUNDLE_MANIFEST_RELATIVE
-    _require_regular_file(manifest_path)
-    manifest = _load_json_object(manifest_path)
-    _verify_bundle_manifest(root, manifest)
+    try:
+        verify_plan066_bundle(root)
+        datasets = load_plan066_datasets(root)
+    except FullModelTrainingError as exc:
+        raise SelectionError("Plan 066 bundle identity is invalid") from exc
+    if datasets.export_sha256 != PLAN066_DATA_SHA256:
+        raise SelectionError("Plan 066 validation projection identity drifted")
 
-    data_path = root / BUNDLE_DATA_RELATIVE
+    data_path = root / PLAN066_DATA_RELATIVE
     _require_regular_file(data_path)
     data = _load_json_object(data_path)
-    if data.get("schema") != BUNDLE_DATA_SCHEMA:
+    if data.get("schema") != PLAN066_DATA_SCHEMA:
         raise SelectionError("Plan 066 bundle data schema is invalid")
     holdout = data.get("holdout")
     if (
@@ -162,7 +174,7 @@ def _load_validation_from_bundle(bundle_root: Path, *, repo_root: Path) -> Split
     return SplitSource(
         split=VALIDATION_SPLIT,
         dataset_revision=dataset_revision,
-        manifest_sha256=str(manifest["source"]["v8_manifest_file_sha256"]),
+        manifest_sha256=V8_MANIFEST_SHA256,
         authorization={"kind": "frozen_protocol_split", "selection_lock_sha256": None},
         origin="plan066-train-validation-bundle-v1",
         packets={
@@ -187,47 +199,6 @@ def _load_validation_from_bundle(bundle_root: Path, *, repo_root: Path) -> Split
             for candidate_id in members
         },
     )
-
-
-def _verify_bundle_manifest(root: Path, manifest: Mapping[str, Any]) -> None:
-    if manifest.get("schema") != BUNDLE_SCHEMA or set(manifest) != {
-        "schema",
-        "created_at",
-        "source",
-        "boundaries",
-        "files",
-        "content_sha256",
-    }:
-        raise SelectionError("Plan 066 bundle manifest identity is invalid")
-    core = {name: value for name, value in manifest.items() if name != "content_sha256"}
-    if sha256_bytes(canonical_json_bytes(core)) != manifest["content_sha256"]:
-        raise SelectionError("Plan 066 bundle manifest content identity drifted")
-    boundaries = manifest["boundaries"]
-    if (
-        not isinstance(boundaries, Mapping)
-        or boundaries.get("unseen_test_rows") != 0
-        or boundaries.get("unseen_test_body_files") != 0
-    ):
-        raise SelectionError("Plan 066 bundle is not an unseen-free asset")
-    source = manifest["source"]
-    if not isinstance(source, Mapping) or not _is_sha256(
-        source.get("v8_manifest_file_sha256")
-    ):
-        raise SelectionError("Plan 066 bundle is not bound to a frozen v8 manifest")
-    files = manifest["files"]
-    if not isinstance(files, Mapping) or BUNDLE_DATA_RELATIVE not in files:
-        raise SelectionError("Plan 066 bundle manifest does not bind its data file")
-    expected = files[BUNDLE_DATA_RELATIVE]
-    path = root / BUNDLE_DATA_RELATIVE
-    _require_regular_file(path)
-    if (
-        not isinstance(expected, Mapping)
-        or not _is_sha256(expected.get("sha256"))
-        or path.stat().st_size != expected.get("bytes")
-        or sha256_file(path) != expected["sha256"]
-    ):
-        raise SelectionError("Plan 066 bundle data identity drifted")
-
 
 def _bundle_section(data: Mapping[str, Any], name: str) -> dict[str, list[Any]]:
     section = data.get(name)
@@ -355,14 +326,6 @@ def _load_unseen_from_frozen_dataset(
 
 
 # -------------------------------------------------------------- utils ----
-
-
-def _is_sha256(value: Any) -> bool:
-    return (
-        isinstance(value, str)
-        and len(value) == 64
-        and all(character in "0123456789abcdef" for character in value)
-    )
 
 
 def _safe_root(root: Path) -> Path:

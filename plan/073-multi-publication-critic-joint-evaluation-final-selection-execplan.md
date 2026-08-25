@@ -202,24 +202,23 @@ linked worktree 不共享主根 ignored `eval-data/`。因此 Plan 073 的模型
 
 ### 当前工作
 
-- `REMEDIATED_R2_AWAITING_RE_REVIEW`：复验（`71525eb`）判定两个原阻塞项未完整关闭，两项均属实并已再次窄修复验；
-  正式 `NO-GO`、指标与冻结底线不变。
+- `REMEDIATED_R3_AWAITING_RE_REVIEW`：中断交接复验（`fca9033`）的三项阻塞均已窄修并完成轻量复验；正式
+  `NO-GO`、指标与冻结底线不变。
 
 ### 本任务剩余步骤
 
-- 无代码剩余。第二轮整改：validation 改从 Plan 066 `train+validation` 冻结 bundle（物理上 0 条 unseen）读取，
-  混合 v8 只在有效 lock 下为 unseen 打开；`build_selection_lock()` 先用冻结数据重建 release 并要求相等，再用真实
-  release/三份 raw score/Judge package+aggregate 重算并要求与待锁 result 逐字节相等；`report` 的 unseen confirmation
-  必须绑定 freeze+lock+locked combination 并从自带 rows 重算。
-- 仅剩文档同步（本节、`agent_log` 第二轮整改小节、tracked 结果说明），已随本轮提交完成。
+- 无代码剩余。validation bundle 同时通过既有 canonical Plan 066 verifier 与正式导出摘要绑定，containment 测试不再读取
+  mixed v8；unseen confirmation/report 必须重建锁下真实 release，并从 raw score 与成对 Judge package/aggregate 重算后
+  canonical 相等，report 还要求 lock 精确绑定其 validation result。
+- 仅待计划制定者独立复验；无需重跑模型、Opus、Cargo、Docker 或 unseen campaign。
 
 ### 阻塞项
 
-- 无。第二轮整改未加载模型、未运行 Cargo/Docker/Opus、未释放 unseen。
+- 无已知阻塞项。本轮未加载模型、未运行 Cargo/Docker/Opus、未释放或读取 unseen body。
 
 ### 当前验收状态
 
-- `EXECUTED / NO-GO RESULT RETAINED / SECOND_RE_REVIEW_FAILED`
+- `EXECUTED / NO-GO RESULT RETAINED / R3 REMEDIATED / PENDING RE_REVIEW`
 
 ### 交接边界
 
@@ -244,5 +243,5 @@ linked worktree 不共享主根 ignored `eval-data/`。因此 Plan 073 的模型
 | 009 | 延迟/资源只作可用性门，不参与排名 | 三候选同架构同尺寸，实测 load/warm/RSS/VRAM 几乎一致，用它排名是伪精度 | 排名规则 | 已采纳 |
 | 010 | Judge 覆盖全部 55 条而非分层抽样 | 规模足够小，全覆盖直接消除抽样偏置与"看到标签后挑案例"的质疑 | Judge | 已采纳 |
 | 011 | 正式 `evaluate` 在冻结 commit 运行；tracked 报告投影在其后的 commit 生成 | 报告是对已归档证据的纯投影，不含判定逻辑；正式证据仍绑定冻结 source，并已用归档 raw 逐字节重算复核 | 证据、交付 | 已采纳 |
-| 012 | validation release 改用 split-scoped 流式 reader，而不是全量 consumer 后过滤 | 全量 consumer 会在 lock 前把 unseen 正文载入正式进程，违反盲验边界；流式读取保留 manifest 与 per-row 校验，不降低完整性 | unseen 边界 | 未关闭：仍打开并解析 mixed-split 源 |
-| 013 | selection lock 前先从 result 自带逐行分数重算 threshold/confusion/AUC/admission/ranking/terminal | 浅校验下一份手改的 `SELECTED` 文档即可开出 unseen；重算用的是既有函数，不引入签名链或审计设施 | lock 门禁 | 部分关闭：浅伪造已拒绝，真实输入/confirmation 未绑定 |
+| 012 | validation 只读物理不含 unseen 的 Plan 066 train+validation bundle，并绑定 canonical bundle 身份与正式导出摘要 | 避免 lock 前读取 mixed v8；固定投影摘要阻止以自洽重哈希替换数据，既有 consumer 继续承担跨行语义校验 | unseen 边界 | 已采纳（复验整改） |
+| 013 | selection lock 与 unseen confirmation 都从冻结数据重建 release，并用 raw score 与成对 Judge package/aggregate 重算后要求 canonical 相等；report 再绑定 validation result | result/confirmation 自带 rows 只能证明内部自洽，不能证明来自正式输入；复用既有 evaluator 即可闭合，无需新建可信设施 | lock、confirmation、report | 已采纳（复验整改） |
