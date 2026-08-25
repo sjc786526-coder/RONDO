@@ -380,15 +380,26 @@ pub(crate) async fn record_retained_tool_facts(
         if session.retained_tool_output(&item_id).await.is_none() {
             continue;
         }
-        if let Some(fact_id) = access
+        match access
             .handle()
-            .confirm_observation(access.actor(), &item_id)
+            .confirm_durable_observation(access.actor(), &item_id)
         {
-            tracing::debug!(
-                %fact_id,
-                item_id,
-                "recorded team evidence for a retained tool result"
-            );
+            Ok(Some(fact_id)) => {
+                tracing::debug!(
+                    %fact_id,
+                    item_id,
+                    "recorded team evidence for a retained tool result"
+                );
+            }
+            Ok(None) => {}
+            Err(error) => {
+                tracing::error!(
+                    %error,
+                    item_id,
+                    "could not durably record retained Team evidence"
+                );
+                break;
+            }
         }
     }
 }

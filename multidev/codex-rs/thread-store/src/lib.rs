@@ -4,6 +4,7 @@
 //! Implementations are responsible for resolving that id to local rollout files, RPC requests, or
 //! any other backing store.
 
+mod authority;
 mod error;
 mod in_memory;
 mod live_thread;
@@ -14,6 +15,9 @@ mod thread_metadata_sync;
 mod thread_sections;
 mod types;
 
+pub use authority::RootClosePermit;
+pub use authority::RootWritePermit;
+pub use authority::RootWriterAuthority;
 pub use codex_state::MAX_QUEUE_ITEMS;
 pub use codex_state::QueuedUserSubmissionRecord;
 pub use error::ThreadStoreError;

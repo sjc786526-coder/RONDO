@@ -147,14 +147,9 @@ impl TeamStore {
         // being told something must never be dressed up as being given work.
         let wake = if matches!(request.intent, RouteIntent::Assign) {
             self.wake.signal(request.target);
-            StoredWake::Signalled {
-                participant: request.target,
-                rule: "assignment_wakes_target",
-            }
+            StoredWake::signalled(request.target, "assignment_wakes_target")
         } else {
-            StoredWake::None {
-                rule: "informational_route_does_not_wake",
-            }
+            StoredWake::none("informational_route_does_not_wake")
         };
         self.push_change(ChangeRecord {
             revision,
@@ -245,9 +240,7 @@ impl TeamStore {
             target: route_id.to_string(),
             before: Some(before),
             after: Some(next.label().to_string()),
-            wake: StoredWake::None {
-                rule: "delivery_does_not_wake",
-            },
+            wake: StoredWake::none("delivery_does_not_wake"),
         });
         Ok(DeliveryOutcome {
             route_id,
@@ -297,9 +290,7 @@ impl TeamStore {
             self.wake_root();
             self.root_wake("member_ended_assignment")
         } else {
-            StoredWake::None {
-                rule: "root_does_not_self_wake",
-            }
+            StoredWake::none("root_does_not_self_wake")
         };
         self.push_change(ChangeRecord {
             revision,

@@ -37,7 +37,7 @@ async fn handle_call(invocation: ToolInvocation) -> Result<Box<dyn ToolOutput>, 
     } = invocation;
     let arguments = function_arguments(payload)?;
     let args: RouteUpdateArgs = parse_arguments(&arguments)?;
-    let access = resolve_access(&session)?;
+    let access = resolve_access(&session).await?;
     let route_id = parse_route_id(&args.route_id)?;
 
     let result = match args.action {
@@ -70,7 +70,8 @@ async fn handle_call(invocation: ToolInvocation) -> Result<Box<dyn ToolOutput>, 
             } else {
                 let recorded =
                     deliver_and_record(&access, &session, &turn, &step_context, &source, &dispatch)
-                        .await;
+                        .await
+                        .map_err(team_error)?;
                 (recorded.delivery, recorded.revision)
             };
             TeamRouteUpdateResult {

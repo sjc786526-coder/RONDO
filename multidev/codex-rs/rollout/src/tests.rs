@@ -1359,6 +1359,7 @@ async fn test_updated_at_uses_file_mtime() -> Result<()> {
                 subagent_history_start_ordinal: None,
                 multi_agent_version: None,
                 context_window: None,
+                durable_team: None,
             },
             git: None,
         }),

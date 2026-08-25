@@ -265,9 +265,7 @@ impl TeamStore {
         self.revision = revision;
 
         let wake = if role.is_root() {
-            StoredWake::None {
-                rule: "root_does_not_self_wake",
-            }
+            StoredWake::none("root_does_not_self_wake")
         } else {
             self.wake_root();
             self.root_wake("member_publish")

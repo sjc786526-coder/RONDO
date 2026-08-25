@@ -11,6 +11,7 @@
 
 use crate::ids::FactId;
 use codex_protocol::ThreadId;
+use serde::Deserialize;
 use serde::Serialize;
 use std::fmt;
 
@@ -33,7 +34,7 @@ pub fn reported_evidence_refs(refs: &[FactId]) -> (&[FactId], usize) {
 /// The first version supports exactly one family — a completed tool call whose retained result is
 /// text — split by what that result reported, because "the check failed" is as much an observation
 /// as "the check passed" and a reader has to be able to tell them apart without fetching the body.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FactCategory {
     ToolResultSuccess,
@@ -54,7 +55,8 @@ impl fmt::Display for FactCategory {
 /// Everything here is a harness fact recorded at capture time. None of it is model input, and none
 /// of it is the observation itself: resolving a locator is the harness's job and happens only when
 /// someone permitted to read the fact asks.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct ObservationLocator {
     /// The identity Codex assigned the retained item, which is what makes this locator resolve to one
     /// observation and no other.
@@ -76,6 +78,7 @@ pub struct ObservationLocator {
 /// Codex reserves the item identity before dispatch so it can pair concurrent results exactly. The
 /// identity is only a locator at this point: no Fact exists until the retention boundary confirms
 /// that the item carrying it was formally kept.
+#[derive(Clone)]
 pub struct NotedObservation {
     /// The identity already reserved for the result item. This is the pairing identity as well as
     /// the eventual locator: unlike a model-provided call id, it is unique per harness invocation.
@@ -90,6 +93,7 @@ pub struct NotedObservation {
 /// Nothing outside this crate can observe a pending entry. It exists so that fact ordering and
 /// existence are decided at the retention boundary, while the pre-reserved item identity pairs that
 /// confirmation back to exactly one completed invocation.
+#[derive(Clone)]
 pub(crate) struct PendingObservation {
     pub(crate) producer: ThreadId,
     pub(crate) noted: NotedObservation,
@@ -103,7 +107,8 @@ pub(crate) struct PendingObservation {
 /// cached answer here would mean writing a reference off on evidence that cannot establish
 /// permanence: an ordinary compaction drops tool results from the window while the rollout still
 /// holds them.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct TeamFact {
     id: FactId,
     /// The participant whose work produced the observation, from the authoritative session identity.

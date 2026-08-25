@@ -620,6 +620,43 @@ async fn emit_thread_stop_lifecycle(sess: &Session) {
 }
 
 pub async fn shutdown(sess: &Arc<Session>, sub_id: String) -> bool {
+    let team = sess.services.agent_control.team();
+    let durable_root = team
+        .durable_identity()
+        .is_some_and(|identity| identity.root_thread_id() == sess.thread_id());
+    let mut durable_lifecycle_close = None;
+    let mut durable_team_close = None;
+    if durable_root {
+        if let Err(error) = sess.ensure_durable_root_activation().await {
+            send_durable_close_error(sess, &sub_id, error.to_string()).await;
+            return false;
+        }
+        let lifecycle_close = match sess
+            .services
+            .agent_control
+            .begin_durable_team_root_close(sess.thread_id())
+        {
+            Ok(close) => close,
+            Err(error) => {
+                send_durable_close_error(sess, &sub_id, error.to_string()).await;
+                return false;
+            }
+        };
+        if let Err(error) = lifecycle_close.ensure_no_live_descendants().await {
+            send_durable_close_error(sess, &sub_id, error.to_string()).await;
+            return false;
+        }
+        let team_close = match team.begin_close().await {
+            Ok(close) => close,
+            Err(error) => {
+                send_durable_close_error(sess, &sub_id, error.to_string()).await;
+                return false;
+            }
+        };
+        durable_lifecycle_close = Some(lifecycle_close);
+        durable_team_close = Some(team_close);
+    }
+
     shutdown_session_runtime(sess).await;
     info!("Shutting down Codex instance");
     let history = sess.clone_history().await;
@@ -642,14 +679,33 @@ pub async fn shutdown(sess: &Arc<Session>, sub_id: String) -> bool {
         && let Err(e) = live_thread.shutdown().await
     {
         warn!("failed to shutdown thread persistence: {e}");
-        let event = Event {
-            id: sub_id.clone(),
-            msg: EventMsg::Error(ErrorEvent {
-                message: "Failed to shutdown thread persistence".to_string(),
-                codex_error_info: Some(CodexErrorInfo::Other),
-            }),
-        };
-        sess.send_event_raw(event).await;
+        if let Some(team_close) = durable_team_close.take()
+            && let Err(abort_error) = team_close.abort().await
+        {
+            warn!("failed to abort durable Team close after persistence failure: {abort_error}");
+        }
+        if let Some(lifecycle_close) = durable_lifecycle_close.take() {
+            lifecycle_close.abort();
+        }
+        send_durable_close_error(
+            sess,
+            &sub_id,
+            "Failed to shutdown thread persistence".to_string(),
+        )
+        .await;
+        if durable_root {
+            return false;
+        }
+    }
+
+    if let Some(team_close) = durable_team_close.take()
+        && let Err(error) = team_close.complete().await
+    {
+        send_durable_close_error(sess, &sub_id, error.to_string()).await;
+        return false;
+    }
+    if let Some(lifecycle_close) = durable_lifecycle_close.take() {
+        lifecycle_close.complete();
     }
 
     let event = Event {
@@ -664,6 +720,17 @@ pub async fn shutdown(sess: &Arc<Session>, sub_id: String) -> bool {
         .rollout_thread_trace
         .record_ended(codex_rollout_trace::RolloutStatus::Completed);
     true
+}
+
+async fn send_durable_close_error(sess: &Session, sub_id: &str, message: String) {
+    let event = Event {
+        id: sub_id.to_string(),
+        msg: EventMsg::Error(ErrorEvent {
+            message,
+            codex_error_info: Some(CodexErrorInfo::Other),
+        }),
+    };
+    sess.send_event_raw(event).await;
 }
 
 pub async fn review(
@@ -863,7 +930,20 @@ pub(super) async fn submission_loop(
     if !shutdown_received {
         shutdown_session_runtime(&sess).await;
         emit_thread_stop_lifecycle(sess.as_ref()).await;
-        if let Some(live_thread) = sess.live_thread()
+        let durable_root = sess
+            .services
+            .agent_control
+            .team()
+            .durable_identity()
+            .is_some_and(|identity| identity.root_thread_id() == sess.thread_id());
+        if durable_root {
+            // Losing the submission task is not a successful durable close. Keep the live Root
+            // writer registered so another process cannot take authority while this process still
+            // owns an unresolved Team lifecycle.
+            warn!(
+                "submission channel closed without a durable Team close; retaining Root writer authority"
+            );
+        } else if let Some(live_thread) = sess.live_thread()
             && let Err(err) = live_thread.shutdown().await
         {
             warn!("failed to shutdown thread persistence after submission channel closed: {err}");

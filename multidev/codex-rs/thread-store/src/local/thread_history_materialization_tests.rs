@@ -989,7 +989,18 @@ async fn prepared_fork_reserves_source_until_child_reference_is_durable() {
 
     let error = delete
         .await
-        .expect_err("durable child reference protects its source");
+        .expect_err("active source writer prevents deletion");
+    assert!(error.to_string().contains("already has an active writer"));
+    store
+        .shutdown_thread(source_thread_id)
+        .await
+        .expect("shutdown source writer");
+    let error = store
+        .delete_thread(DeleteThreadParams {
+            thread_id: source_thread_id,
+        })
+        .await
+        .expect_err("durable child reference protects its closed source");
     assert!(
         error
             .to_string()
@@ -2147,7 +2158,7 @@ async fn shutdown_materializes_items_queued_without_a_flush() {
 }
 
 #[tokio::test]
-async fn delete_waits_for_in_flight_projection_before_removing_rows() {
+async fn delete_waits_for_in_flight_projection_then_rejects_the_live_writer() {
     let home = TempDir::new().expect("temp dir");
     let store = projection_store(home.path()).await;
     let thread_id = ThreadId::default();
@@ -2182,7 +2193,19 @@ async fn delete_waits_for_in_flight_projection_before_removing_rows() {
         .await
         .expect("join append")
         .expect("finish in-flight append");
-    delete.await.expect("join delete").expect("delete thread");
+    let error = delete
+        .await
+        .expect("join delete")
+        .expect_err("live writer must block deletion after projection finishes");
+    assert!(matches!(error, crate::ThreadStoreError::Conflict { .. }));
+    store
+        .shutdown_thread(thread_id)
+        .await
+        .expect("shutdown live writer");
+    store
+        .delete_thread(DeleteThreadParams { thread_id })
+        .await
+        .expect("delete closed thread");
 
     let pool = codex_state::open_thread_history_db(&codex_state::SqliteConfig::new_for_testing(
         home.path().abs(),
@@ -2252,6 +2275,7 @@ async fn create_paginated_subagent_thread(
             forked_from_id: None,
             parent_thread_id: None,
             source: SessionSource::Exec,
+            durable_team: None,
             thread_source: None,
             originator: "test_originator".to_string(),
             base_instructions: BaseInstructions::default(),

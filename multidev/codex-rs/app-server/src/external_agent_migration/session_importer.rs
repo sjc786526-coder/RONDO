@@ -441,6 +441,7 @@ impl ExternalAgentSessionImporter {
             forked_from_id: None,
             parent_thread_id: None,
             source: source.clone(),
+            durable_team: None,
             thread_source: None,
             originator: codex_login::default_client::originator().value,
             base_instructions: BaseInstructions {

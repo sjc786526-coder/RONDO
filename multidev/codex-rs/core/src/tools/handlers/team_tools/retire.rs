@@ -41,7 +41,7 @@ async fn handle_call(invocation: ToolInvocation) -> Result<Box<dyn ToolOutput>, 
     } = invocation;
     let arguments = function_arguments(payload)?;
     let args: RetireArgs = parse_arguments(&arguments)?;
-    let access = resolve_access(&session)?;
+    let access = resolve_access(&session).await?;
     let control = session.services.agent_control.clone();
     let availability = control.producer_availability_snapshot().await;
     let state = control.upgrade().ok();

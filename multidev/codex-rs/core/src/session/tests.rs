@@ -4496,6 +4496,7 @@ async fn open_thread_persistence(session: &mut Session) -> PathBuf {
             forked_from_id: None,
             parent_thread_id: None,
             source: SessionSource::Exec,
+            durable_team: None,
             thread_source: None,
             originator: "test_originator".to_string(),
             base_instructions: BaseInstructions::default(),
@@ -5896,6 +5897,8 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
     );
     let session = Session {
         thread_id,
+        team_participant_identity: None,
+        durable_root_activation: None,
         installation_id: "11111111-1111-4111-8111-111111111111".to_string(),
         tx_event,
         agent_status: agent_status_tx,
@@ -7423,6 +7426,7 @@ async fn shutdown_complete_does_not_append_to_thread_store_after_shutdown() {
             forked_from_id: None,
             parent_thread_id: None,
             source: SessionSource::Exec,
+            durable_team: None,
             thread_source: None,
             originator: "test_originator".to_string(),
             base_instructions: BaseInstructions::default(),
@@ -7502,6 +7506,7 @@ async fn submission_loop_channel_close_runs_full_thread_teardown() {
             forked_from_id: None,
             parent_thread_id: None,
             source: SessionSource::Exec,
+            durable_team: None,
             thread_source: None,
             originator: "test_originator".to_string(),
             base_instructions: BaseInstructions::default(),
@@ -8115,6 +8120,8 @@ where
     ));
     let session = Arc::new(Session {
         thread_id,
+        team_participant_identity: None,
+        durable_root_activation: None,
         installation_id: "11111111-1111-4111-8111-111111111111".to_string(),
         tx_event,
         agent_status: agent_status_tx,
@@ -9868,6 +9875,7 @@ async fn attach_in_memory_thread_store(
             forked_from_id: None,
             parent_thread_id: None,
             source: SessionSource::Exec,
+            durable_team: None,
             thread_source: None,
             originator: "test_originator".to_string(),
             base_instructions: BaseInstructions::default(),

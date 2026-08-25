@@ -2500,6 +2500,7 @@ mod tests {
                 subagent_history_start_ordinal: None,
                 multi_agent_version: None,
                 context_window: None,
+                durable_team: None,
             },
             git: None,
         })];
@@ -2570,6 +2571,7 @@ mod tests {
                 subagent_history_start_ordinal: None,
                 multi_agent_version: None,
                 context_window: None,
+                durable_team: None,
             },
             git: Some(GitInfo {
                 commit_hash: Some(codex_git_utils::GitSha::new("rollout-sha")),

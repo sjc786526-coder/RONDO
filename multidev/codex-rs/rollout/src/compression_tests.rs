@@ -26,6 +26,7 @@ use crate::RolloutRecorder;
 use crate::RolloutRecorderParams;
 use crate::append_rollout_item_to_path;
 use crate::read_session_meta_line;
+use crate::read_session_meta_line_blocking;
 use crate::search_rollout_matches;
 
 #[tokio::test]
@@ -60,8 +61,10 @@ async fn read_session_meta_line_stops_before_invalid_utf8_tail() -> anyhow::Resu
     fs::write(&rollout_path, contents)?;
 
     let session_meta = read_session_meta_line(&rollout_path).await?;
+    let blocking_session_meta = read_session_meta_line_blocking(&rollout_path)?;
 
     assert_eq!(session_meta.meta.id, thread_id);
+    assert_eq!(blocking_session_meta.meta.id, thread_id);
     Ok(())
 }
 
@@ -78,10 +81,37 @@ async fn read_session_meta_line_stops_before_invalid_utf8_compressed_tail() -> a
     compress_now(&rollout_path)?;
 
     let session_meta = read_session_meta_line(&rollout_path).await?;
+    let blocking_session_meta = read_session_meta_line_blocking(&rollout_path)?;
 
     assert_eq!(session_meta.meta.id, thread_id);
+    assert_eq!(blocking_session_meta.meta.id, thread_id);
     assert!(!rollout_path.exists());
     assert!(compressed_rollout_path(&rollout_path).exists());
+    Ok(())
+}
+
+#[test]
+fn blocking_session_meta_head_rejects_oversized_plain_and_compressed_records() -> anyhow::Result<()>
+{
+    let home = TempDir::new()?;
+    let uuid = Uuid::from_u128(19);
+    let rollout_path = rollout_path(home.path(), "2025-01-03T12-00-00", uuid);
+    fs::create_dir_all(rollout_path.parent().expect("rollout parent"))?;
+    fs::write(
+        &rollout_path,
+        vec![b'x'; crate::list::MAX_SESSION_META_HEAD_BYTES + 1],
+    )?;
+
+    let plain_error = read_session_meta_line_blocking(&rollout_path)
+        .expect_err("oversized plain head must fail closed");
+    assert_eq!(plain_error.kind(), std::io::ErrorKind::InvalidData);
+    assert!(plain_error.to_string().contains("SessionMeta limit"));
+
+    compress_now(&rollout_path)?;
+    let compressed_error = read_session_meta_line_blocking(&rollout_path)
+        .expect_err("oversized decompressed head must fail closed");
+    assert_eq!(compressed_error.kind(), std::io::ErrorKind::InvalidData);
+    assert!(compressed_error.to_string().contains("SessionMeta limit"));
     Ok(())
 }
 
@@ -717,6 +747,7 @@ fn write_rollout(path: &std::path::Path, thread_id: ThreadId, message: &str) -> 
             subagent_history_start_ordinal: None,
             multi_agent_version: None,
             context_window: None,
+            durable_team: None,
         },
         git: None,
     };

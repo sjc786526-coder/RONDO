@@ -14,6 +14,7 @@ use crate::ids::RouteId;
 use crate::ids::TeamRevision;
 use crate::ids::VersionId;
 use codex_protocol::ThreadId;
+use serde::Deserialize;
 use serde::Serialize;
 use std::fmt;
 
@@ -70,7 +71,7 @@ pub(crate) fn clamp_retire_reason(value: &str) -> String {
 }
 
 /// What the author of a version currently believes about the matter it describes.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProducerState {
     /// The author still considers this worth attention.
@@ -93,7 +94,7 @@ impl fmt::Display for ProducerState {
 ///
 /// Independent of [`ProducerState`]: the root resolving something does not close the author's
 /// item, and the author closing an item does not consume the root's attention.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RootState {
     /// Not yet explicitly handled by the root.
@@ -122,7 +123,7 @@ impl fmt::Display for RootState {
 }
 
 /// Capability tier of a registered team participant.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ParticipantRole {
     /// The root of the agent tree. Coordinates, and is the only role that owns [`RootState`].
@@ -141,7 +142,8 @@ impl ParticipantRole {
 ///
 /// Registration is derived from the authoritative session/agent registry, never from anything the
 /// model reports about itself.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct Participant {
     pub thread_id: ThreadId,
     pub role: ParticipantRole,
@@ -150,7 +152,8 @@ pub struct Participant {
 }
 
 /// The immutable half of a version: what its author said, at the time they said it.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct AuthoredVersion {
     pub author: ThreadId,
     pub summary: String,
@@ -164,7 +167,8 @@ pub struct AuthoredVersion {
 ///
 /// This is not [`ProducerState::Closed`]: the author never closed the item. It only removes the
 /// producer-open activity reason.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct RetirementRecord {
     pub retired_by: ThreadId,
     pub reason: String,
@@ -174,7 +178,8 @@ pub struct RetirementRecord {
 }
 
 /// One immutable authored entry in an event's chain, plus its two mutable lifecycle states.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct TeamVersion {
     id: VersionId,
     authored: AuthoredVersion,
@@ -252,7 +257,7 @@ impl TeamVersion {
 /// This is only the assignment half of a route. The visibility a route grants is irrevocable and
 /// does not appear here at all, which is what keeps "may read" and "still has work to do" from
 /// collapsing into one flag.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RouteDuty {
     /// Informational: the target may read and contribute, but nothing was asked of it. A notice
@@ -287,7 +292,8 @@ impl fmt::Display for RouteDuty {
 /// The grant and the assignment are already committed whatever this says. Delivery is the side
 /// effect that follows them, so a failure here is a retryable fact about the notice and never a
 /// reason to undo the canonical change.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum DeliveryState {
     /// Committed, not yet reported either way.
@@ -333,7 +339,8 @@ impl fmt::Display for DeliveryState {
 ///
 /// The grant it carries is irrevocable: ending the assignment retires the work, not the target's
 /// right to read what it was shown.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct TeamRoute {
     id: RouteId,
     target: ThreadId,
@@ -408,7 +415,8 @@ impl TeamRoute {
 
 /// A team-level matter. Versions accumulate under it in registration order; the order carries no
 /// causal or superseding meaning of its own.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct TeamEvent {
     id: EventId,
     title: String,

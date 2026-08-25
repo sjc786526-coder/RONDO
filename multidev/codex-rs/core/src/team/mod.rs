@@ -5,6 +5,7 @@
 //! root tree's team gets no team capability at all rather than a default one. That includes leaving
 //! evidence behind: an unidentified session's tool results are not anchored to anything.
 
+pub(crate) mod durable;
 pub(crate) mod evidence;
 mod projection;
 
@@ -44,8 +45,25 @@ impl TeamAccess {
     /// The actor is the session's own thread id. Nothing in the caller's payload can influence who
     /// the harness thinks is acting.
     pub(crate) fn resolve(session: &Session) -> Result<Self, TeamError> {
+        if !session.durable_root_activation_complete() {
+            return Err(codex_team_state::TeamDurabilityError::unavailable(
+                "fresh durable Root activation is still awaiting canonical persistence",
+            )
+            .into());
+        }
         let handle = Arc::clone(session.services.agent_control.team());
+        // A failed durable commit keeps the live Root owner but marks its view Unknown or
+        // Unavailable. The next product access is the retry boundary: reconcile under the same
+        // canonical Root authority before exposing a read or accepting another mutation.
+        handle
+            .ensure_readable_or_reconcile()
+            .map_err(TeamError::from)?;
         let actor = session.thread_id;
+        if handle.participant(actor).is_none()
+            && let Some((role, label)) = session.team_participant_identity.as_ref()
+        {
+            handle.register_durable_participant(actor, *role, label.clone())?;
+        }
         if handle.participant(actor).is_none() {
             return Err(TeamError::UnknownParticipant);
         }

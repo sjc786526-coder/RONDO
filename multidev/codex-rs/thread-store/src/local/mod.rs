@@ -18,7 +18,7 @@ mod thread_history_materialization;
 mod thread_sections;
 mod unarchive_thread;
 mod update_thread_metadata;
-mod writer_lock;
+pub(crate) mod writer_lock;
 
 #[cfg(test)]
 mod test_support;
@@ -60,6 +60,7 @@ use crate::ReadThreadByRolloutPathParams;
 use crate::ReadThreadParams;
 use crate::RenameThreadSectionParams;
 use crate::ResumeThreadParams;
+use crate::RootWriterAuthority;
 use crate::SearchThreadOccurrencesParams;
 use crate::SearchThreadsParams;
 use crate::StoredModelContext;
@@ -76,6 +77,7 @@ use crate::ThreadStoreFuture;
 use crate::ThreadStoreResult;
 use crate::TurnPage;
 use crate::UpdateThreadMetadataParams;
+use crate::authority::RootWriterAuthorityState;
 use crate::local::writer_lock::WriterLockCoordinator;
 use crate::local::writer_lock::WriterLockGuard;
 
@@ -114,7 +116,19 @@ struct LiveRecorderEntry {
     // canonical SessionMeta is durable. Retain the mode captured when live persistence was opened
     // so missing SQLite rows can still be seeded.
     history_mode: ThreadHistoryMode,
-    writer_lock: WriterLockGuard,
+    // Recorder shutdown closes its command channel after a successful drain. A durable Team close
+    // may still fail its final typed-marker check, so retain that prepared state and skip sending a
+    // second Shutdown command when the same owner retries close.
+    shutdown_prepared: bool,
+    // This strong authority owns the OS writer lock. Capabilities handed to Team state are weak,
+    // while an in-flight permit keeps both the authority and lock alive through durable success.
+    root_writer_authority: Arc<RootWriterAuthorityState>,
+}
+
+impl Drop for LiveRecorderEntry {
+    fn drop(&mut self) {
+        self.root_writer_authority.detach_owner();
+    }
 }
 
 #[derive(Default)]
@@ -292,6 +306,7 @@ impl LocalThreadStore {
         history_mode: ThreadHistoryMode,
         writer_lock: WriterLockGuard,
     ) -> ThreadStoreResult<()> {
+        let rollout_path = recorder.rollout_path().to_path_buf();
         match self.live_recorders.lock().await.entry(thread_id) {
             Entry::Occupied(entry) => Err(ThreadStoreError::InvalidRequest {
                 message: format!("thread {} already has a live local writer", entry.key()),
@@ -300,7 +315,12 @@ impl LocalThreadStore {
                 entry.insert(LiveRecorderEntry {
                     recorder,
                     history_mode,
-                    writer_lock,
+                    shutdown_prepared: false,
+                    root_writer_authority: RootWriterAuthorityState::new(
+                        thread_id,
+                        rollout_path,
+                        writer_lock,
+                    ),
                 });
                 Ok(())
             }
@@ -405,6 +425,10 @@ impl ThreadStore for LocalThreadStore {
 
     fn flush_thread(&self, thread_id: ThreadId) -> ThreadStoreFuture<'_, ()> {
         Box::pin(async move { live_writer::flush_thread(self, thread_id).await })
+    }
+
+    fn writer_authority(&self, thread_id: ThreadId) -> ThreadStoreFuture<'_, RootWriterAuthority> {
+        Box::pin(async move { live_writer::writer_authority(self, thread_id).await })
     }
 
     fn shutdown_thread(&self, thread_id: ThreadId) -> ThreadStoreFuture<'_, ()> {
@@ -558,6 +582,7 @@ impl ThreadStore for LocalThreadStore {
 
 #[cfg(test)]
 mod tests {
+    use std::process::Command;
     use std::sync::Arc;
 
     use codex_protocol::ThreadId;
@@ -590,6 +615,12 @@ mod tests {
     use crate::local::test_support::write_archived_session_file;
     use crate::local::test_support::write_session_file;
     use crate::local::test_support::write_session_file_with_history_mode;
+
+    const WRITER_AUTHORITY_PROCESS_TEST: &str =
+        "local::tests::root_writer_authority_survives_competing_process_and_failed_close";
+    const WRITER_AUTHORITY_CHILD_MODE: &str = "CODEX_THREAD_STORE_AUTHORITY_CHILD_MODE";
+    const WRITER_AUTHORITY_CHILD_HOME: &str = "CODEX_THREAD_STORE_AUTHORITY_CHILD_HOME";
+    const WRITER_AUTHORITY_CHILD_THREAD: &str = "CODEX_THREAD_STORE_AUTHORITY_CHILD_THREAD";
 
     #[tokio::test]
     async fn live_writer_lifecycle_writes_and_closes() {
@@ -1375,6 +1406,280 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn root_writer_authority_survives_competing_process_and_failed_close() {
+        if let Ok(mode) = std::env::var(WRITER_AUTHORITY_CHILD_MODE) {
+            let home = std::env::var_os(WRITER_AUTHORITY_CHILD_HOME).expect("child home");
+            let thread_id = ThreadId::from_string(
+                &std::env::var(WRITER_AUTHORITY_CHILD_THREAD).expect("child thread id"),
+            )
+            .expect("valid child thread id");
+            let coordinator = Arc::new(WriterLockCoordinator::new(std::path::Path::new(&home)));
+            match mode.as_str() {
+                "conflict" => {
+                    let error = match coordinator.acquire(thread_id) {
+                        Ok(_) => panic!("live writer must reject the child process"),
+                        Err(error) => error,
+                    };
+                    assert!(matches!(error, ThreadStoreError::Conflict { .. }));
+                }
+                "acquire" => {
+                    let _owner = coordinator
+                        .acquire(thread_id)
+                        .expect("released writer must admit the child process");
+                }
+                other => panic!("unexpected writer authority child mode {other}"),
+            }
+            return;
+        }
+
+        let home = TempDir::new().expect("temp dir");
+        let store = LocalThreadStore::new(test_config(home.path()), /*state_db*/ None);
+        let thread_id = ThreadId::default();
+        store
+            .create_thread(create_thread_params(thread_id))
+            .await
+            .expect("create live root writer");
+        let authority = store
+            .writer_authority(thread_id)
+            .await
+            .expect("derive root writer authority");
+
+        run_writer_authority_child(home.path(), thread_id, "conflict");
+        let close = authority.begin_close().await.expect("start close barrier");
+        close
+            .abort()
+            .expect("abort simulated durable close failure");
+
+        let write = authority
+            .begin_write()
+            .expect("failed close must leave the owner retryable");
+        assert_eq!(write.thread_id(), thread_id);
+        drop(write);
+        run_writer_authority_child(home.path(), thread_id, "conflict");
+
+        let close = authority.begin_close().await.expect("retry close barrier");
+        store
+            .shutdown_thread(thread_id)
+            .await
+            .expect("shutdown under external close permit");
+        assert!(authority.begin_write().is_err());
+        run_writer_authority_child(home.path(), thread_id, "conflict");
+        close.complete().expect("complete external close");
+        run_writer_authority_child(home.path(), thread_id, "acquire");
+    }
+
+    #[tokio::test]
+    async fn external_close_revalidates_marker_before_releasing_owner() {
+        let home = TempDir::new().expect("temp dir");
+        let store = LocalThreadStore::new(test_config(home.path()), /*state_db*/ None);
+        let thread_id = ThreadId::new();
+        let session_id = codex_protocol::SessionId::new();
+        let expected =
+            codex_protocol::protocol::DurableTeamSessionMeta::current(session_id, thread_id);
+        let mut params = create_thread_params(thread_id);
+        params.session_id = session_id;
+        params.durable_team = Some(expected);
+        store
+            .create_thread(params)
+            .await
+            .expect("create durable Root writer");
+        store
+            .persist_thread(thread_id)
+            .await
+            .expect("materialize canonical SessionMeta");
+        let rollout_path = store
+            .live_rollout_path(thread_id)
+            .await
+            .expect("live rollout path");
+        let hidden_path = rollout_path.with_extension("jsonl.hidden-marker");
+        let authority = store
+            .writer_authority(thread_id)
+            .await
+            .expect("derive Root authority");
+
+        let mut close = authority.begin_close().await.expect("start Team close");
+        close
+            .require_session_meta(expected)
+            .expect("register final marker validation");
+        std::fs::rename(&rollout_path, &hidden_path).expect("hide marker during close");
+        let error = store
+            .shutdown_thread(thread_id)
+            .await
+            .expect_err("missing final marker must fail writer shutdown");
+        assert!(
+            error
+                .to_string()
+                .contains("cannot read canonical SessionMeta"),
+            "unexpected close validation error: {error}"
+        );
+        close.abort().expect("failed close reopens owner");
+        std::fs::rename(&hidden_path, &rollout_path).expect("restore canonical marker");
+        let write = authority
+            .begin_write()
+            .expect("marker failure must retain the same Root owner");
+        drop(write);
+
+        let mut retry = authority.begin_close().await.expect("retry Team close");
+        retry
+            .require_session_meta(expected)
+            .expect("register retry marker validation");
+        store
+            .shutdown_thread(thread_id)
+            .await
+            .expect("retry shutdown after marker restoration");
+        retry.complete().expect("complete retry close");
+        assert!(authority.begin_write().is_err());
+    }
+
+    #[tokio::test]
+    async fn external_close_rejects_outer_lineage_mismatch_before_releasing_owner() {
+        let home = TempDir::new().expect("temp dir");
+        let store = LocalThreadStore::new(test_config(home.path()), /*state_db*/ None);
+        let thread_id = ThreadId::new();
+        let session_id = codex_protocol::SessionId::new();
+        let expected =
+            codex_protocol::protocol::DurableTeamSessionMeta::current(session_id, thread_id);
+        let mut params = create_thread_params(thread_id);
+        params.session_id = session_id;
+        params.durable_team = Some(expected);
+        store
+            .create_thread(params)
+            .await
+            .expect("create durable Root writer");
+        store
+            .persist_thread(thread_id)
+            .await
+            .expect("materialize canonical SessionMeta");
+        let rollout_path = store
+            .live_rollout_path(thread_id)
+            .await
+            .expect("live rollout path");
+        let original = std::fs::read_to_string(&rollout_path).expect("read canonical rollout");
+        let authority = store
+            .writer_authority(thread_id)
+            .await
+            .expect("derive Root authority");
+
+        rewrite_session_meta_outer_identity(
+            &rollout_path,
+            &original,
+            Some(codex_protocol::SessionId::new()),
+            None,
+        );
+        let mut close = authority.begin_close().await.expect("start Team close");
+        close
+            .require_session_meta(expected)
+            .expect("register final lineage validation");
+        let error = store
+            .shutdown_thread(thread_id)
+            .await
+            .expect_err("outer Session mismatch must fail writer shutdown");
+        assert!(
+            error
+                .to_string()
+                .contains("no longer matches the expected durable Team lineage"),
+            "unexpected close validation error: {error}"
+        );
+        close.abort().expect("failed close reopens owner");
+        let write = authority
+            .begin_write()
+            .expect("outer Session mismatch must retain the same Root owner");
+        drop(write);
+
+        rewrite_session_meta_outer_identity(&rollout_path, &original, None, Some(ThreadId::new()));
+        let mut retry = authority
+            .begin_close()
+            .await
+            .expect("retry Team close after Session mismatch");
+        retry
+            .require_session_meta(expected)
+            .expect("register retry lineage validation");
+        let error = store
+            .shutdown_thread(thread_id)
+            .await
+            .expect_err("outer Root mismatch must fail writer shutdown");
+        assert!(
+            error
+                .to_string()
+                .contains("no longer matches the expected durable Team lineage"),
+            "unexpected close validation error: {error}"
+        );
+        retry.abort().expect("second failed close reopens owner");
+        let write = authority
+            .begin_write()
+            .expect("outer Root mismatch must retain the same Root owner");
+        drop(write);
+
+        std::fs::write(&rollout_path, &original).expect("restore canonical SessionMeta");
+        let mut final_close = authority
+            .begin_close()
+            .await
+            .expect("retry Team close after lineage restoration");
+        final_close
+            .require_session_meta(expected)
+            .expect("register restored lineage validation");
+        store
+            .shutdown_thread(thread_id)
+            .await
+            .expect("restored lineage permits writer shutdown");
+        final_close.complete().expect("complete restored close");
+        assert!(authority.begin_write().is_err());
+    }
+
+    fn rewrite_session_meta_outer_identity(
+        rollout_path: &std::path::Path,
+        original: &str,
+        session_id: Option<codex_protocol::SessionId>,
+        thread_id: Option<ThreadId>,
+    ) {
+        let (session_meta_line, remaining_rollout) = original
+            .split_once('\n')
+            .expect("canonical rollout contains SessionMeta and a trailing newline");
+        let mut session_meta: serde_json::Value =
+            serde_json::from_str(session_meta_line).expect("parse SessionMeta line");
+        let payload = session_meta
+            .get_mut("payload")
+            .and_then(serde_json::Value::as_object_mut)
+            .expect("SessionMeta line has an object payload");
+        if let Some(session_id) = session_id {
+            payload.insert(
+                "session_id".to_string(),
+                serde_json::Value::String(session_id.to_string()),
+            );
+        }
+        if let Some(thread_id) = thread_id {
+            payload.insert(
+                "id".to_string(),
+                serde_json::Value::String(thread_id.to_string()),
+            );
+        }
+        let rewritten = format!(
+            "{}\n{remaining_rollout}",
+            serde_json::to_string(&session_meta).expect("serialize SessionMeta line")
+        );
+        std::fs::write(rollout_path, rewritten).expect("rewrite SessionMeta outer identity");
+    }
+
+    fn run_writer_authority_child(home: &std::path::Path, thread_id: ThreadId, mode: &str) {
+        let output = Command::new(std::env::current_exe().expect("current test executable"))
+            .arg("--exact")
+            .arg(WRITER_AUTHORITY_PROCESS_TEST)
+            .arg("--nocapture")
+            .env(WRITER_AUTHORITY_CHILD_MODE, mode)
+            .env(WRITER_AUTHORITY_CHILD_HOME, home)
+            .env(WRITER_AUTHORITY_CHILD_THREAD, thread_id.to_string())
+            .output()
+            .expect("run writer authority child process");
+        assert!(
+            output.status.success(),
+            "writer authority child failed: status={:?}\nstdout={}\nstderr={}",
+            output.status.code(),
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
+    }
+
+    #[tokio::test]
     async fn create_thread_rejects_duplicate_live_writer() {
         let home = TempDir::new().expect("temp dir");
         let store = LocalThreadStore::new(test_config(home.path()), /*state_db*/ None);
@@ -1817,6 +2122,7 @@ mod tests {
             forked_from_id: None,
             parent_thread_id: None,
             source: SessionSource::Exec,
+            durable_team: None,
             thread_source: None,
             originator: "test_originator".to_string(),
             base_instructions: BaseInstructions::default(),

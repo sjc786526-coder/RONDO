@@ -25,6 +25,7 @@ use crate::ReadThreadByRolloutPathParams;
 use crate::ReadThreadParams;
 use crate::RenameThreadSectionParams;
 use crate::ResumeThreadParams;
+use crate::RootWriterAuthority;
 use crate::SearchThreadOccurrencesParams;
 use crate::SearchThreadsParams;
 use crate::StoredModelContext;
@@ -73,6 +74,17 @@ pub trait ThreadStore: Any + Send + Sync {
 
     /// Flushes all queued items and returns once they are durable/readable.
     fn flush_thread(&self, thread_id: ThreadId) -> ThreadStoreFuture<'_, ()>;
+
+    /// Returns a weak Team mutation capability backed by this live thread's writer ownership.
+    ///
+    /// Stores without a cross-process canonical writer retain this fail-closed default.
+    fn writer_authority(&self, _thread_id: ThreadId) -> ThreadStoreFuture<'_, RootWriterAuthority> {
+        Box::pin(async {
+            Err(ThreadStoreError::Unsupported {
+                operation: "writer_authority",
+            })
+        })
+    }
 
     /// Flushes pending items and closes the live thread writer.
     fn shutdown_thread(&self, thread_id: ThreadId) -> ThreadStoreFuture<'_, ()>;

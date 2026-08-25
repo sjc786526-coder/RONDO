@@ -32,7 +32,7 @@ async fn handle_call(invocation: ToolInvocation) -> Result<Box<dyn ToolOutput>, 
     } = invocation;
     let arguments = function_arguments(payload)?;
     let args: EvidenceArgs = parse_arguments(&arguments)?;
-    let access = resolve_access(&session)?;
+    let access = resolve_access(&session).await?;
 
     // Permission is decided from the canonical state before anything is fetched: holding an
     // identifier is not access, and a refusal must not be distinguishable by how long it took.

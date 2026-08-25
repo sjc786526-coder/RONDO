@@ -70,12 +70,17 @@ pub(crate) fn is_team_tool(tool_name: &ToolName) -> bool {
 
 /// Team refusals are reported to the model rather than failing the turn: every one of them is
 /// something the model can act on, such as re-reading the active view after a reset or a conflict.
-fn team_error(err: TeamError) -> FunctionCallError {
+pub(crate) fn team_error(err: TeamError) -> FunctionCallError {
     FunctionCallError::RespondToModel(err.to_string())
 }
 
-fn resolve_access(
+async fn resolve_access(
     invocation_session: &crate::session::session::Session,
 ) -> Result<TeamAccess, FunctionCallError> {
+    invocation_session
+        .ensure_durable_root_activation()
+        .await
+        .map_err(TeamError::from)
+        .map_err(team_error)?;
     TeamAccess::resolve(invocation_session).map_err(team_error)
 }

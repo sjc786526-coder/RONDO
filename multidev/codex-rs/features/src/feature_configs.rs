@@ -141,6 +141,11 @@ pub struct MultiAgentV2ConfigToml {
     /// per-sampling active world index.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub team_state_enabled: Option<bool>,
+    /// Persist the canonical Team State across process lifetimes.
+    ///
+    /// This is an explicit opt-in and also requires `team_state_enabled`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub durable_team_enabled: Option<bool>,
     /// Enable the Publication Critic pre-publish cycle with an explicit, identity-bound local
     /// service. Absence keeps the existing publish path fully bypassed.
     #[serde(skip_serializing_if = "Option::is_none")]

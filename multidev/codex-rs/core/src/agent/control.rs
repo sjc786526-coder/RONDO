@@ -41,6 +41,8 @@ use codex_protocol::protocol::ThreadSource;
 use codex_protocol::protocol::TurnEnvironmentSelection;
 use codex_protocol::user_input::UserInput;
 use codex_team_state::ParticipantRole;
+use codex_team_state::TeamDurabilityError;
+use codex_team_state::TeamError;
 use codex_team_state::TeamStateHandle;
 use codex_thread_store::LoadThreadHistoryParams;
 use codex_thread_store::ReadThreadParams;
@@ -54,13 +56,17 @@ use tracing::warn;
 
 pub(crate) use self::execution::AgentExecutionGuard;
 use self::execution::AgentExecutionLimiter;
+use self::lifecycle::DurableTeamLifecycleGate;
 use self::residency::V2Residency;
 
 mod availability;
 mod execution;
 mod legacy;
+mod lifecycle;
 mod residency;
 mod spawn;
+
+pub(crate) use self::lifecycle::DurableTeamRootCloseGuard;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum SpawnAgentForkMode {
@@ -114,6 +120,9 @@ pub(crate) struct AgentControl {
     /// shared by every sub-agent cloned from it, so there is exactly one team instance per live
     /// root tree and it does not depend on which members are currently loaded.
     team: Arc<TeamStateHandle>,
+    /// Root-scoped child admission and close ordering. The close side is only activated by a
+    /// durable Team owner, so legacy and non-durable sessions retain their existing lifecycle.
+    team_lifecycle: Arc<DurableTeamLifecycleGate>,
 }
 
 impl AgentControl {
@@ -150,6 +159,32 @@ impl AgentControl {
         &self.team
     }
 
+    /// Install the Team proven or hydrated by the canonical Root writer.
+    ///
+    /// The outer lock is shared by every child clone, so replacement changes the whole root tree
+    /// atomically rather than leaving already-created handles attached to a fresh placeholder.
+    pub(crate) fn install_team(&self, team: TeamStateHandle) -> Result<(), TeamError> {
+        self.team.install_durable(team).map_err(TeamError::from)
+    }
+
+    /// Atomically stop new child admission before a durable Team root checks its descendants.
+    pub(crate) fn begin_durable_team_root_close(
+        &self,
+        root_thread_id: ThreadId,
+    ) -> CodexResult<DurableTeamRootCloseGuard> {
+        self.team_lifecycle.begin_root_close(
+            root_thread_id,
+            self.manager.clone(),
+            Arc::clone(&self.state),
+        )
+    }
+
+    fn reserve_team_child_admission(
+        &self,
+    ) -> CodexResult<lifecycle::DurableTeamChildAdmissionGuard> {
+        self.team_lifecycle.begin_admission()
+    }
+
     /// Register the calling session as a participant of this root tree's team, if it is one.
     ///
     /// Identity and role come from the session's own thread id and source, never from anything the
@@ -162,10 +197,23 @@ impl AgentControl {
         thread_id: ThreadId,
         session_source: &SessionSource,
     ) {
+        if let Err(error) = self.try_register_team_participant(thread_id, session_source) {
+            tracing::error!(%error, "Team participant registration failed");
+        }
+    }
+
+    /// Fallible activation boundary for a Session joining the canonical Team.
+    pub(crate) fn try_register_team_participant(
+        &self,
+        thread_id: ThreadId,
+        session_source: &SessionSource,
+    ) -> Result<(), TeamDurabilityError> {
         let Some((role, label)) = team_participant_identity(session_source) else {
-            return;
+            return Ok(());
         };
-        self.team.register_participant(thread_id, role, label);
+        self.team()
+            .register_durable_participant_checked(thread_id, role, label)
+            .map(|_| ())
     }
 
     /// The live session of one member of this root tree, if it is currently loaded.
@@ -869,7 +917,9 @@ mod tests;
 /// consolidation and other internal sessions, unknown sources, and spawns without a verifiable
 /// path — gets no team identity at all, so it cannot act as a participant even if the team tools
 /// were somehow reachable from it.
-fn team_participant_identity(session_source: &SessionSource) -> Option<(ParticipantRole, String)> {
+pub(crate) fn team_participant_identity(
+    session_source: &SessionSource,
+) -> Option<(ParticipantRole, String)> {
     match session_source {
         SessionSource::Cli
         | SessionSource::VSCode

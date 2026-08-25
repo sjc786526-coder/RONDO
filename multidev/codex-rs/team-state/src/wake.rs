@@ -4,9 +4,13 @@
 //! is still there when it does, and a change it has already consumed cannot wake it again.
 
 use codex_protocol::ThreadId;
+use serde::Deserialize;
+use serde::Serialize;
 use std::collections::HashMap;
+use std::collections::HashSet;
 
-#[derive(Default)]
+#[derive(Clone, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct WakeLedger {
     signalled: HashMap<ThreadId, u64>,
     consumed: HashMap<ThreadId, u64>,
@@ -38,5 +42,15 @@ impl WakeLedger {
             .unwrap_or_default();
         self.consumed.insert(participant, signalled);
         true
+    }
+
+    pub(crate) fn references_only(&self, participants: &HashSet<ThreadId>) -> bool {
+        self.signalled.keys().all(|id| participants.contains(id))
+            && self.consumed.keys().all(|id| participants.contains(id))
+            && self.consumed.iter().all(|(id, consumed)| {
+                self.signalled
+                    .get(id)
+                    .is_some_and(|signalled| consumed <= signalled)
+            })
     }
 }
