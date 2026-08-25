@@ -336,6 +336,42 @@ class Plan081ArtifactStore:
             ordered[artifact_id] = _checkpoint_position(artifact_id)
         return ordered[checkpoint_id] == max(ordered.values())
 
+    def verified_checkpoint_ids(self) -> tuple[str, ...]:
+        """Return live checkpoint trees in chronology order, ignoring stale markers."""
+
+        self.recover_incomplete_staging()
+        checkpoint_ids = sorted(
+            self._artifact_ids("recovery-checkpoints"),
+            key=_checkpoint_position,
+        )
+        for checkpoint_id in checkpoint_ids:
+            self.verify_checkpoint(checkpoint_id)
+        return tuple(checkpoint_ids)
+
+    def discard_unqualified_checkpoint(self, checkpoint_id: str) -> bool:
+        """Hide and remove a newly published checkpoint that failed qualification."""
+
+        _require_artifact_id(checkpoint_id)
+        self.recover_incomplete_staging()
+        completion_parent = self.root / "retention-completions"
+        if completion_parent.exists() or completion_parent.is_symlink():
+            safe_directory(completion_parent)
+            completion = completion_parent / checkpoint_id
+            if completion.exists() or completion.is_symlink():
+                raise FullModelTrainingError(
+                    "plan081_qualified_checkpoint_discard_forbidden"
+                )
+        checkpoint_parent = self.root / "recovery-checkpoints"
+        if not checkpoint_parent.exists() and not checkpoint_parent.is_symlink():
+            return False
+        safe_directory(checkpoint_parent)
+        checkpoint = checkpoint_parent / checkpoint_id
+        if not checkpoint.exists() and not checkpoint.is_symlink():
+            return False
+        safe_directory(checkpoint)
+        _remove_discarded_artifact(checkpoint)
+        return True
+
     def reserve_artifact_generation(self, *, after_generation: int) -> int:
         """Permanently reserve a fresh attempt generation, including across crashes."""
 

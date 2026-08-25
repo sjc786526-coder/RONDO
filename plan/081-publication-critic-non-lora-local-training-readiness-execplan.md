@@ -234,10 +234,20 @@ XXX用以下内容代替：
 - 2026-08-25：checkpoint 资格与 resume 未完成 marker 路径现均在 retention 前执行完整 adapter load/scope/state/cursor restore；首
   checkpoint 前失败可从原失败 controller 经 fresh exact-base 断言与 base observation 精确匹配进入新 generation；cloud 输入/输出清单
   按冻结 JSON 精确验证。Plan 081 31 项与 7 项精选历史回归合计 38/38 通过；两路定点与一轮全 diff 只读复核无剩余或新增 P1/P2。
+- 2026-08-25：第四轮复验提交 `3d931e5` 对 `ce849a8` 报告 2 个 P2、无 P1/P3：live training adapter 会让 no-op restore 假资格，
+  首 checkpoint 前重启仍依赖原 failed controller 留在内存；均确认存在且不构成 `REPLAN_REQUIRED`。
+- 2026-08-25：checkpoint 替代旧锚前现由 disposable fresh exact-base probe 使用自身 codec reader 完成 model load postcondition 与
+  state restore，并 recapture optimizer/scheduler/RNG/data 四块 state 与解码值深度等值；跨进程可只凭冻结合同、initial scope、store 与 fresh adapter 从固定 base
+  进入新 generation，任何 live verified checkpoint 均先要求 resume，pruned checkpoint 的 stale marker 不阻断。Plan 081 33 项与
+  7 项精选历史回归合计 40/40 通过。
+- 2026-08-25：整改后全差异复核补出 1 个 P2：首个 checkpoint 资格失败后仍留在 live 集合，会同时阻断 resume 与跨进程 base restart。
+  现将无 completion marker 的本次未资格 checkpoint 原子隐藏并删除，旧有效锚与 postpublish 已资格锚不受影响；新增首 checkpoint 失败后
+  丢弃原 controller、同 store exact-base 新 generation 成功回归；独立复审确认该 P2 关闭且无新增 P1/P2。Plan 081 34 项与 7 项精选历史
+  回归合计 41/41 通过。
 
 ### 当前工作
 
-- 第三轮复验的 2 个 P2 与 1 个 P3 均已整改；本地门禁与 diff/生成物检查完成后提交，等待指定审查者再次复验。
+- 第四轮复验的 2 个 P2 及整改后全差异复核补出的 1 个 P2 均已整改；完成最终复核、diff/生成物检查和提交后，等待指定审查者再次复验。
 
 ### 本任务剩余步骤
 
@@ -250,7 +260,7 @@ XXX用以下内容代替：
 
 ### 当前验收状态
 
-- `IMPLEMENTATION_COMPLETE / THIRD_REVIEW_REMEDIATED / FOCUSED_LOCAL_GATES_PASS / REACCEPTANCE_PENDING`。
+- `IMPLEMENTATION_COMPLETE / FOURTH_REVIEW_REMEDIATED / FOCUSED_LOCAL_GATES_PASS / REACCEPTANCE_PENDING`。
 
 ### 交接边界
 
@@ -280,4 +290,6 @@ XXX用以下内容代替：
 | 012 | Plan 081 使用专用薄层：typed train/validation identity、观测后显式扩大 scope、永久小观测与分层快照/checkpoint，并以持久 reservation 分配恢复 attempt | 旧 Plan 060/066 固定 recipe 不适合连续路线；新边界需避免夹带 holdout、静态预写扩层和同一 checkpoint 多次重放冲突 | local control/recovery | 已采纳 |
 | 013 | post-update 任一失败都进入 `recovery_required` 并从完整 checkpoint 新 adapter 恢复；adapter 显式声明 state codec，retention 以原子 completion artifact 收口 | 模型更新无法由 controller 安全回滚；半提交不得原地重试，非 JSON optimizer/RNG 状态和 checkpoint prune 都需可验证恢复边界 | failure/recovery | 已采纳 |
 | 014 | 新 checkpoint 只有经绑定 reader 读回并核对 controller/training/data cursor 后才能替代旧恢复点；已验证 discard 先原子改名为严格 prune tombstone，checkpoint 按数值 chronology 从新到旧隐藏后再删 snapshot | byte manifest 不等于可恢复；删除意图必须先与 live artifact 分离，中途失败时仍可见的旧 checkpoint 不得依赖已删除恢复点或 snapshot | checkpoint/retention | 已采纳 |
-| 015 | checkpoint 替换旧锚前执行 adapter 级完整恢复资格；首 checkpoint 前失败只允许从原失败 controller 以 fresh exact-base 新 attempt 重启；cloud handoff 必要清单精确冻结 | reader 可解码不等于 adapter 可恢复；同 store base 是 write-once，重启必须证明 exact base 且不覆盖旧工件；必要交接项不可静默删改 | recovery/handoff | 已采纳 |
+| 015 | checkpoint 替换旧锚前执行 adapter 级完整恢复资格；首 checkpoint 前失败可从原 controller 或 class/store 入口以 fresh exact-base 新 attempt 重启；cloud handoff 必要清单精确冻结 | reader 可解码不等于 adapter 可恢复；同 store base 是 write-once，跨进程重启也必须证明 exact base 且不覆盖旧工件；必要交接项不可静默删改 | recovery/handoff | 已采纳 |
+| 016 | 新 checkpoint 资格使用 disposable fresh exact-base probe 和 probe 自身 reader，独立证明 model load 后再 restore/recapture 四块 state 深度等值；store 级 base 重启遇任一 live verified checkpoint 时先要求 resume | live adapter 会掩盖 no-op model/state restore；marker 缺失不等于 checkpoint 不可恢复，stale marker 也不代表 live checkpoint | recovery qualification | 已采纳 |
+| 017 | 本次新 checkpoint 未通过资格时，若尚无 completion marker，则以既有 prune tombstone 原子退出 live 集合；旧资格锚和已通过资格的新锚继续保留 | 未资格的首 checkpoint 既不能 resume 又会阻断 exact-base restart；失败产物不得冒充恢复锚 | failed qualification | 已采纳 |

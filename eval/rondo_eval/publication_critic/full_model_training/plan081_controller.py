@@ -176,7 +176,7 @@ class ContinuousTrainingController:
         initial_scope = TrainableScope.from_value(
             self.state["scope_history"][0]["scope"]
         )
-        controller = type(self)(
+        return type(self).restart_store_from_exact_base(
             route_contract=self.route_contract,
             control_plan=self.control_plan,
             initial_scope=initial_scope,
@@ -184,7 +184,37 @@ class ContinuousTrainingController:
             training_dataset=self.training_dataset,
             validation_dataset=self.validation_dataset,
             artifact_store=self.artifact_store,
+            adapter=adapter,
             report_threshold=self.report_threshold,
+        )
+
+    @classmethod
+    def restart_store_from_exact_base(
+        cls,
+        *,
+        route_contract: Mapping[str, Any],
+        control_plan: ControlPlan,
+        initial_scope: TrainableScope,
+        comparison_policy: ComparisonPolicy,
+        training_dataset: PortableTrainingDataset,
+        validation_dataset: ValidationDataset,
+        artifact_store: Plan081ArtifactStore,
+        adapter: Any,
+        report_threshold: float = 0.5,
+    ) -> "ContinuousTrainingController":
+        """Start a new attempt from an existing write-once base after a restart."""
+
+        if artifact_store.verified_checkpoint_ids():
+            raise FullModelTrainingError("plan081_checkpoint_resume_required")
+        controller = cls(
+            route_contract=route_contract,
+            control_plan=control_plan,
+            initial_scope=initial_scope,
+            comparison_policy=comparison_policy,
+            training_dataset=training_dataset,
+            validation_dataset=validation_dataset,
+            artifact_store=artifact_store,
+            report_threshold=report_threshold,
         )
         controller._require_input_identities()
         controller._bind_training_state_codec(adapter)
@@ -194,8 +224,8 @@ class ContinuousTrainingController:
         adapter.assert_trainable_scope(scope)
         observation = controller._base_observation(adapter, scope)
         try:
-            existing = self.artifact_store.read_observation("base-step-000000")
-            reference = self.artifact_store.verify_observation("base-step-000000")
+            existing = artifact_store.read_observation("base-step-000000")
+            reference = artifact_store.verify_observation("base-step-000000")
         except FullModelTrainingError as exc:
             raise FullModelTrainingError(
                 "plan081_base_restart_unavailable"
@@ -204,7 +234,7 @@ class ContinuousTrainingController:
             raise FullModelTrainingError("plan081_base_restart_mismatch")
         controller._accept_base(observation, reference)
         controller.state["artifact_generation"] = (
-            self.artifact_store.reserve_artifact_generation(after_generation=0)
+            artifact_store.reserve_artifact_generation(after_generation=0)
         )
         return controller
 
@@ -356,7 +386,7 @@ class ContinuousTrainingController:
                     checkpoint_id,
                     adapter=adapter,
                     scope=scope,
-                    state_reader=state_reader,
+                    expected_codec_id=codec_id,
                     expected_controller_state=checkpoint_state,
                     expected_data_cursor=receipt["data_cursor"],
                 )
@@ -375,15 +405,21 @@ class ContinuousTrainingController:
                             checkpoint_id,
                             adapter=adapter,
                             scope=scope,
-                            state_reader=state_reader,
+                            expected_codec_id=self.state["training_state_codec"],
                             expected_controller_state=checkpoint_state,
                             expected_data_cursor=receipt["data_cursor"],
                         )
                     except BaseException:
+                        self.artifact_store.discard_unqualified_checkpoint(
+                            checkpoint_id
+                        )
                         self.state = committed_state
                     else:
                         self.state = checkpoint_state
                 else:
+                    self.artifact_store.discard_unqualified_checkpoint(
+                        checkpoint_id
+                    )
                     self.state = committed_state
             else:
                 self.state = committed_state
@@ -396,39 +432,63 @@ class ContinuousTrainingController:
         *,
         adapter: Any,
         scope: TrainableScope,
-        state_reader: StateReader,
+        expected_codec_id: str,
         expected_controller_state: Mapping[str, Any],
         expected_data_cursor: Mapping[str, Any],
     ) -> None:
         """Read back a new checkpoint before it may replace a recovery point."""
 
+        qualified = False
         try:
-            controller_state, training_state, model_root = (
-                self.artifact_store.read_checkpoint(
-                    checkpoint_id, state_reader=state_reader
+            with _checkpoint_recovery_probe(adapter) as probe:
+                if probe is adapter:
+                    raise FullModelTrainingError(
+                        "plan081_checkpoint_probe_not_fresh"
+                    )
+                _assert_fresh_exact_base(probe)
+                codec_id, _state_writer, state_reader = (
+                    _adapter_training_state_codec(probe)
                 )
-            )
+                if codec_id != expected_codec_id:
+                    raise FullModelTrainingError(
+                        "plan081_training_state_codec_mismatch"
+                    )
+                try:
+                    controller_state, training_state, model_root = (
+                        self.artifact_store.read_checkpoint(
+                            checkpoint_id, state_reader=state_reader
+                        )
+                    )
+                except FullModelTrainingError:
+                    raise
+                except Exception as exc:
+                    raise FullModelTrainingError(
+                        "plan081_training_state_decode_failed"
+                    ) from exc
+                if controller_state != expected_controller_state:
+                    raise FullModelTrainingError(
+                        "plan081_checkpoint_controller_state_invalid"
+                    )
+                _validate_training_state(training_state)
+                if training_state["data"] != expected_data_cursor:
+                    raise FullModelTrainingError(
+                        "plan081_data_cursor_checkpoint_mismatch"
+                    )
+                _restore_adapter_checkpoint(
+                    probe,
+                    model_root=model_root,
+                    scope=scope,
+                    training_state=training_state,
+                )
+                qualified = True
+            if not qualified:
+                raise FullModelTrainingError(
+                    "plan081_checkpoint_probe_suppressed_failure"
+                )
         except FullModelTrainingError:
             raise
         except Exception as exc:
-            raise FullModelTrainingError(
-                "plan081_training_state_decode_failed"
-            ) from exc
-        if controller_state != expected_controller_state:
-            raise FullModelTrainingError(
-                "plan081_checkpoint_controller_state_invalid"
-            )
-        _validate_training_state(training_state)
-        if training_state["data"] != expected_data_cursor:
-            raise FullModelTrainingError(
-                "plan081_data_cursor_checkpoint_mismatch"
-            )
-        _restore_adapter_checkpoint(
-            adapter,
-            model_root=model_root,
-            scope=scope,
-            training_state=training_state,
-        )
+            raise FullModelTrainingError("plan081_checkpoint_probe_failed") from exc
 
     @classmethod
     def resume(
@@ -486,6 +546,7 @@ class ContinuousTrainingController:
             raise FullModelTrainingError(
                 "plan081_checkpoint_retention_incomplete"
             )
+        _assert_fresh_exact_base(adapter)
         _restore_adapter_checkpoint(
             adapter,
             model_root=model_root,
@@ -1128,6 +1189,23 @@ def _assert_fresh_exact_base(adapter: Any) -> None:
         raise FullModelTrainingError("plan081_fresh_exact_base_invalid") from exc
 
 
+def _checkpoint_recovery_probe(adapter: Any) -> Any:
+    factory = getattr(adapter, "checkpoint_recovery_probe", None)
+    if not callable(factory):
+        raise FullModelTrainingError("plan081_checkpoint_probe_invalid")
+    try:
+        manager = factory()
+    except FullModelTrainingError:
+        raise
+    except Exception as exc:
+        raise FullModelTrainingError("plan081_checkpoint_probe_failed") from exc
+    if not callable(getattr(manager, "__enter__", None)) or not callable(
+        getattr(manager, "__exit__", None)
+    ):
+        raise FullModelTrainingError("plan081_checkpoint_probe_invalid")
+    return manager
+
+
 def _restore_adapter_checkpoint(
     adapter: Any,
     *,
@@ -1139,17 +1217,37 @@ def _restore_adapter_checkpoint(
 
     try:
         adapter.load_model(model_root)
+        model_assertion = getattr(adapter, "assert_checkpoint_model_loaded", None)
+        if not callable(model_assertion):
+            raise FullModelTrainingError(
+                "plan081_checkpoint_model_assertion_missing"
+            )
+        model_assertion(model_root)
         adapter.configure_trainable_scope(scope)
         adapter.assert_trainable_scope(scope)
         adapter.restore_training_state(training_state)
         adapter.assert_trainable_scope(scope)
         adapter.assert_data_cursor(training_state["data"])
+        restored_state = adapter.capture_training_state()
+        _validate_training_state(restored_state)
+        if not _training_states_equal(restored_state, training_state):
+            raise FullModelTrainingError(
+                "plan081_checkpoint_restore_state_mismatch"
+            )
     except FullModelTrainingError:
         raise
     except Exception as exc:
         raise FullModelTrainingError(
             "plan081_checkpoint_restore_failed"
         ) from exc
+
+
+def _training_states_equal(left: Mapping[str, Any], right: Mapping[str, Any]) -> bool:
+    try:
+        result = left == right
+    except Exception:
+        return False
+    return result is True
 
 
 def _artifact_id(kind: str, generation: int, step: int) -> str:

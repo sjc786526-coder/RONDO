@@ -24,16 +24,27 @@ declare one explicit writer/reader codec for complete optimizer, scheduler,
 RNG, and data-cursor state. A failed post-update step is not retried in place:
 the controller enters `recovery_required`. When a verified complete checkpoint
 exists, continuation uses a fresh adapter restored from it. A failure before
-the first checkpoint can only return through `restart_from_exact_base()` on the
-failed controller: a fresh adapter must assert the exact base, reproduce the
-write-once base observation exactly, and continue in a newly reserved attempt.
+the first checkpoint can return through `restart_from_exact_base()` while the
+failed controller remains available, or through the class/store-level
+`restart_store_from_exact_base()` after a process restart. Both paths require a
+fresh adapter to assert the complete exact-base state, reproduce the write-once
+base observation exactly, and continue in a newly reserved attempt. Any live,
+byte-tree-verified checkpoint requires an explicit resume attempt first; stale
+completion markers for already pruned checkpoints do not block base restart.
 
 A newly written checkpoint is eligible to replace an older recovery point only
-after its declared reader decodes it, the controller state and four training
-state sections match the checkpoint/update contract, and the adapter actually
-loads the model payload and restores optimizer, scheduler, RNG, scope, and data
-cursor state. Byte-tree integrity or decodability alone is not recovery
+after a disposable adapter supplied by `checkpoint_recovery_probe()` proves a
+fresh exact-base starting state, decodes the artifact with its own bound reader,
+loads the model payload and proves the adapter's model-load postcondition before
+any scope/state restore, restores all optimizer/scheduler/RNG/data state, and
+captures four state sections exactly equal to the decoded checkpoint.
+The live training adapter is not used as its own recovery proof. Byte-tree
+integrity, decodability, or a successful restore return alone is not recovery
 qualification.
+If qualification fails, the newly published but never-qualified checkpoint is
+atomically hidden and removed. An earlier qualified recovery point remains
+untouched, and a failed first checkpoint therefore cannot block an exact-base
+restart in a new process.
 
 Checkpoint retention is complete only after its write-once completion artifact
 has been atomically published. Resume may repair an absent marker only for the
