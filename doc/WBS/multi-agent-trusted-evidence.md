@@ -1,7 +1,7 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
 最后更新：2026-08-25 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
-状态：**第一期、第二期、M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、M3-C2、Plan 064、Plan 071、Plan 073、Plan 075 与四期 M4-A、M4-C0、M4-S1 已完成；Plan 060 技术 GO、Plan 064 DATA_GO、Plan 066 正式训练 GO；Plan 071 为 `BASE_COMPARABILITY_GO`，Plan 073 / M3-C2 为 `NO-GO`；Plan 079 Skywork 4B 云端基座质量测评已立项并成为三期当前入口，M3-D 保持锁定；M4-A 为 `M4_A_GO`，M4-C0 为 `M4_C0_PROTOTYPE_PASS`，M4-S1 为 `M4_S1_PASS`**
+状态：**第一期、第二期、M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、M3-C2、Plan 064、Plan 071、Plan 073、Plan 075 与四期 M4-A、M4-C0、M4-S1 已完成；Plan 060 技术 GO、Plan 064 DATA_GO、Plan 066 正式训练 GO；Plan 071 为 `BASE_COMPARABILITY_GO`，Plan 073 / M3-C2 为 `NO-GO`；Plan 079 执行者阶段形成 `4B_BASE_QUALITY_NO_GO`，待计划制定者独立验收；三期当前没有已选定 successor，M3-D 保持锁定；M4-A 为 `M4_A_GO`，M4-C0 为 `M4_C0_PROTOTYPE_PASS`，M4-S1 为 `M4_S1_PASS`**
 
 ## 当前定位
 
@@ -58,8 +58,9 @@ archive/unarchive/delete 跟随 Root 的原生权威生命周期。Team clone/br
 ### 模型与训练边界
 
 - 学生模型冻结为 `Skywork/Skywork-Reward-V2-Qwen3-1.7B`，目标是形成一个可在本地运行的专用发布质量模型。
-- Plan 079 以 exact `Skywork/Skywork-Reward-V2-Qwen3-4B@fd958fef475f323f4e6b195930e3dd918485c668`
-  原始 BF16 base 独立验证更大同家族基座的云端质量；它不改写 1.7B 训练历史，也不在本包训练、量化或授予本地产品资格。
+- Plan 079 已以 exact `Skywork/Skywork-Reward-V2-Qwen3-4B@fd958fef475f323f4e6b195930e3dd918485c668`
+  原始 BF16 base 独立验证更大同家族基座的云端质量，终态为 `4B_BASE_QUALITY_NO_GO`；它没有改写 1.7B 训练历史，也没有训练、
+  量化或授予本地产品资格。
 - 云端训练冻结为单张 RunPod H100 PCIe 80GB 上的 BF16 全参数微调；付费 smoke 与正式训练共用 **23 USD** 总硬上限。
 - FlashOptim/FlashAdamW 是主优化器路径；训练优先利用 80GB 显存保持配置宽松，减少不必要的量化、offload 和重算。
   具体依赖版本、优化器参数、batch、上下文长度、步数与工件格式由相应任务根据实测决定，不在长程 WBS 固定。
@@ -90,7 +91,7 @@ M3-B1c 正式分阶段训练与工件回收          │
                        ↓ Plan 071 base 同口径重验已通过
         M3-C2 联合横评与最终选择（Plan 073 `NO-GO`）
                        ↓
-        Plan 079 Skywork 4B 云端基座质量测评（已立项）
+        Plan 079 Skywork 4B 云端基座质量测评（`4B_BASE_QUALITY_NO_GO`）
                        ╳
                  M3-D 端到端收口（未解锁）
 ```
@@ -275,28 +276,31 @@ threshold 的前提下，以同一冻结规则重验 exact base、C1、C3；唯�
 发布质量底线，终态为 `NO-GO`；没有 selection lock、unseen-test 释放或最终模型/threshold/运行配置。Publication Critic
 保持 default-off，M3-D 保持锁定；Plan 075 已完成原因调研与路线决策，详细历史见 `doc/WBS-COMPLETED.md`。
 
-#### 当前入口：Plan 079 Skywork 4B 云端基座质量测评
+#### Plan 079：Skywork 4B 云端基座质量测评（执行者完成，待独立验收）
 
-**状态**：已建立 [`Plan 079 ExecPlan`](../../plan/079-multi-publication-critic-skywork-4b-base-quality-execplan.md)，成为三期当前工作包。
-Plan 075 的 1.7B 训练动态诊断建议保留为历史路线判断，但当前不排期、不授权 Plan 076；Plan 079 先直接检验同家族更大基座能否通过
-已经冻结的发布质量门。
+**结果**：[`Plan 079 ExecPlan`](../../plan/079-multi-publication-critic-skywork-4b-base-quality-execplan.md) 已完成执行者阶段。exact 4B
+正式轮 `plan079-formal-20260825T175912Z-610d880-r1` 从 clean source 与空 namespace 完成 55/55、零 typed failure，并经本地独立
+复算得到 `4B_BASE_QUALITY_NO_GO`：无 admissible operating point，False PASS `12/21 = 0.5714`、False REWRITE
+`4/34 = 0.1176`、balanced accuracy `0.6555`、ROC AUC `0.6218`、boundary `13/19 = 0.6842`、within-PASS `6/7`。
+精炼结果见
+[`skywork-reward-v2-qwen3-4b-base-quality-v1.md`](../../eval/results/publication-critic/skywork-reward-v2-qwen3-4b-base-quality-v1.md)。
 
-**目标与终态**：在单张 24GB RunPod RTX 4090、RTX 3090 或末位备选 RTX A5000 上，对 exact Skywork 4B 原始 BF16 base
-使用物理不含 unseen-test 的冻结 v8
-train+validation bundle、相同 typed packet/render/16,384 overflow/scalar/pair/指标，完成 commissioning 后从 clean source 与空正式
-namespace 完整运行唯一正式轮。终态为 `4B_BASE_QUALITY_GO`、`4B_BASE_QUALITY_NO_GO` 或 `INCONCLUSIVE`；可靠终态本身即为成功。
+**正式身份**：任务在 `US-IL-1` 的单张 Secure Cloud RTX 4090 上使用物理不含 unseen-test 的冻结 v8 train+validation bundle、
+相同 typed packet/render/16,384 overflow/scalar/pair/指标；commissioning 先形成 `COMMISSIONING_COMPLETE`，随后唯一正式轮绑定 exact
+官方两分片 BF16 snapshot、source、bundle/release、runtime receipt 与同一结果相关配置。4B logits 全为强正值并在 sigmoid 后高度饱和，
+但 NO-GO 由完整 97 点 operating curve 和冻结门限决定，不是共享 threshold 或基础设施失败。
 
 **边界**：不训练、量化、转换、重跑 1.7B/C1/C2/C3、重问 Judge、修改数据/门限、读取 unseen、启用产品或启动 M3-D。
 职责契合时复用 Plan 054/066/073 的输入、bundle、scoring、metrics 与 archive；三候选、单文件或 Judge/selection 语义不契合时可增加
 小型 4B base 专用能力，但不复制第二套评价体系。
 
-**资源**：从任务云资源创建到执行者交付期间，RunPod 的 Pod、GPU、网络卷与存储费用共用 15 USD 硬上限，同时最多一张 GPU。
-任务使用与 Pod 同数据中心的专属网络卷承载模型、环境与进度，允许在同数据中心用同 GPU 型号重建/更换 Pod；交付时释放 Pod 并停止
-GPU 计费，网络卷按用户要求保留且删除须另获批准。交付必须报告累计费用、卷费率、剩余 headroom、预计触线时间和持续计费状态；
-执行者不得自行删卷，也不得把无限期卷费冒充仍受其控制的硬保证。本任务不运行本地重型 Cargo、Docker 或真实本地模型，可与
-Plan 077/078 的非冲突工作并行。GPU 顺序为 4090 → 3090 → A5000；数据中心不受地域限制。网络卷候选先按 Secure Cloud 中同时支持
-RTX 4090、RTX 6000 Ada 与 Standard 卷的支持交集确定，再以创建时实时库存、价格和 CUDA 主机版本选择实际落点；当前确认候选为
-`US-IL-1`。该选址偏好便于未来另行授权的任务复用同一卷，但不授权本任务使用 6000 Ada 或实施微调。
+**资源终态**：任务 Pod `iocp8k8w6zvh4s` 已删除，GPU 持续费用为 0；20 GB Standard 网络卷 `v1us0nmk0p` 按用户指令保留在
+`US-IL-1`，删除前 Plan 079 task root 用量为 8,242,665,809 bytes，删除卷仍须另获批准。任务未运行本地重型 Cargo、Docker 或真实
+本地模型，也未使用 RTX 6000 Ada。卷的实时累计费用、剩余额度和预计触线时间以 Plan 079 执行日志/交付回执为准，不在本长期 WBS
+维护持续变化的计费数字。
+
+**交接**：Plan 079 没有形成训练、量化、本地部署、产品启用或 M3-D 资格；Plan 075 的 1.7B 路线判断仍只作为历史研究。
+三期下一工作包尚未选择，必须根据届时 WBS/独立验收另行立项和授权，不从本 NO-GO 自动推导。
 
 ### D 阶段：端到端收口
 
@@ -314,8 +318,8 @@ RTX 4090、RTX 6000 Ada 与 Standard 卷的支持交集确定，再以创建时�
 - 相关正确性测试纳入既有测试体系，必要测评可复跑并自动归档；
 - 完成证据归档到 `doc/WBS-COMPLETED.md`，本页只保留最终产品事实和后续仍有效的边界。
 
-**当前状态**：Plan 073 / M3-C2 为 `NO-GO`，本阶段未解锁或启动。Plan 079 即使取得 `4B_BASE_QUALITY_GO` 也只形成云端 BF16
-基座质量候选，不直接授予量化、本地部署或产品资格，因而不直接解锁 M3-D；后续仍须另行立项和授权。
+**当前状态**：Plan 073 / M3-C2 为 `NO-GO`，Plan 079 为 `4B_BASE_QUALITY_NO_GO`；本阶段仍未解锁或启动。三期没有最终模型、
+threshold、本地运行配置或产品资格，后续仍须另行立项和授权。
 
 ## 串并行与资源关系
 
@@ -325,8 +329,8 @@ RTX 4090、RTX 6000 Ada 与 Standard 卷的支持交集确定，再以创建时�
   资源终态、final-02 receipt 与独立验收；Plan 068 已完成本地交接、资格运行和远端止费，没有追加训练消费。
 - M3-B1c 与 M3-B2b 前置、Plan 068 / M3-C1、Plan 071 base 同口径重验及 Plan 073 / M3-C2 均已完成；Plan 073
   终态为 `NO-GO`，没有最终锁定组合，M3-D 保持锁定。
-- Plan 079 已作为三期当前入口独立立项，只使用 Publication Critic Python 设施与单张云 GPU；不修改 Plan 077/078 的 `multidev/`
-  工作面、不占本地重型资源槽，可立即并行。模型/bundle 上传与结果回传仍会占用本地网络和磁盘，执行时按实际压力错峰。
+- Plan 079 执行者阶段已只使用 Publication Critic Python 设施与单张云 GPU 完成，没有修改 Plan 077/078 的 `multidev/` 工作面或占用本地重型
+  资源槽；Pod 已止费，保留网络卷继续独立计费。三期当前没有已授权的云计算或本地模型任务。
 - RunPod 云端 smoke/训练不占本地 Cargo build lock，可与产品代码、数据整理和四期非冲突开发并行；真实本地模型、
   Docker 与重型 Cargo 仍按根 `AGENTS.md` 全局串行。
 - 三期与已经正式收口的方向 1 没有产品依赖。如果未来重新启动方向 1，普通工作仍可并行安排，但共享 API 预算、

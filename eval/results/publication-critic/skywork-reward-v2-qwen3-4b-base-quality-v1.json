@@ -1,0 +1,179 @@
+{
+  "schema": "rondo-publication-critic-plan079-base-quality-summary-v1",
+  "terminal": "4B_BASE_QUALITY_NO_GO",
+  "valid_full_quality_run": true,
+  "identity": {
+    "run_id": "plan079-formal-20260825T175912Z-610d880-r1",
+    "source_commit": "610d880312c8ee9c98c28740f8b0b62c4fafb65f",
+    "source_archive_sha256": "078be8a0bfd9817cc425526073b22e01de085f0c95e17b6ea1b430c8038c8287",
+    "model_repository": "Skywork/Skywork-Reward-V2-Qwen3-4B",
+    "model_revision": "fd958fef475f323f4e6b195930e3dd918485c668",
+    "model_lock_sha256": "69ac5308e73d13023d3a511f4a5021a05dadb270bc5e4564c710d41b19783225",
+    "snapshot_content_sha256": "7b2413861c9b3cd7f70ecbb7038bb5478e58b5f33be7690cb9c9a1350da450a4",
+    "bundle_manifest_sha256": "2970c693fa32d1118d3b8e949a04231970bf96dfc27f7c7d14a22f98a4ed2252",
+    "validation_release_sha256": "757dd624c3d47f87dd5683d24f9f1753b1dbbffb42fdeff567c9e3e5e0b71a91",
+    "environment_lock_sha256": "4052d2138401463a1741105e92ebd0875a8872c0ca989f904c479bb445b546df",
+    "runtime_receipt_sha256": "1471ad73a6f651ba01535656921bb376485d4602f1f4e6f11c159bde1954b80e"
+  },
+  "evidence": {
+    "ignored_root": "eval-data/publication-critic/plan079/local/controller/plan079-formal-20260825T175912Z-610d880-r1",
+    "formal_evidence_tar_sha256": "200fa1fb105f0c707388ea4fcf73241effc88cd95add42836728e144283d782e",
+    "run_spec_canonical_sha256": "accf46c7607fd4e7f35d66bfd5640f6f331e43312691fa3584a0cc35a3cb5dd5",
+    "scores_canonical_sha256": "857a7c4764a78f8d28c846be8ec238f1d19562b04e24ab1f84d8b8df0bdadb02",
+    "runtime_canonical_sha256": "7748c2a83831e1af1728bc482a37579ccc5e9faaff7925fa93d4535b74e34eed",
+    "result_canonical_sha256": "1034ee75a0a34e8b14627f587f20502d311d9472d45120825cf21c21c4798ff7",
+    "result_file_sha256": "70c7272afbee9c9af746623245e1fb7045d934a8010c9ece2a36afde0f91911a",
+    "independent_recompute_byte_equal": true
+  },
+  "cohort": {
+    "candidate_count": 55,
+    "pass_count": 34,
+    "rewrite_count": 21,
+    "boundary_pair_count": 19,
+    "within_pass_pair_count": 7,
+    "unseen_test_rows_available": 0,
+    "typed_failure_count": 0
+  },
+  "quality_floors": {
+    "max_false_pass_rate": 0.25,
+    "max_false_rewrite_rate": 0.35,
+    "min_balanced_accuracy": 0.75,
+    "min_roc_auc": 0.8,
+    "min_boundary_pair_strict_win_rate": 0.7,
+    "max_typed_failures": 0
+  },
+  "formal_result": {
+    "gate_failures": [
+      "no_admissible_operating_point",
+      "roc_auc_floor_failed",
+      "boundary_pair_floor_failed"
+    ],
+    "threshold_search": {
+      "feasible": false,
+      "feasible_point_count": 0,
+      "search_point_count": 97,
+      "selected_threshold": 0.9998840806568136
+    },
+    "operating_point": {
+      "false_pass": 12,
+      "false_pass_rate": 0.5714285714285714,
+      "false_rewrite": 4,
+      "false_rewrite_rate": 0.11764705882352941,
+      "true_pass": 30,
+      "true_rewrite": 9,
+      "accuracy": 0.7090909090909091,
+      "balanced_accuracy": 0.6554621848739496
+    },
+    "roc_auc": 0.6218487394957983,
+    "boundary_pairs": {
+      "strict_wins": 13,
+      "count": 19,
+      "strict_win_rate": 0.6842105263157895,
+      "ties": 0
+    },
+    "within_pass_pairs": {
+      "strict_wins": 6,
+      "count": 7,
+      "strict_win_rate": 0.8571428571428571,
+      "ties": 0
+    },
+    "raw_logit_distribution": {
+      "min": 5.03125,
+      "p50": 9.9375,
+      "p95": 13.625,
+      "max": 15.6875
+    },
+    "score_distribution": {
+      "min": 0.9935117304033434,
+      "p50": 0.9999516743618128,
+      "p95": 0.9999987901343165,
+      "max": 0.9999998461826772
+    }
+  },
+  "runtime": {
+    "gpu_name": "NVIDIA GeForce RTX 4090",
+    "gpu_capability": "8.9",
+    "driver_version": "570.195.03",
+    "cuda_host_version": "12.8",
+    "cuda_runtime_version": "12.8",
+    "container_image": "runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404",
+    "python_version": "3.12.3",
+    "torch_version": "2.8.0+cu128",
+    "transformers_version": "4.52.3",
+    "load_seconds": 12.347214472014457,
+    "wall_seconds": 21.8216968200868,
+    "warm_p95_latency_ms": 113.71226597111672,
+    "peak_rss_bytes": 5834690560,
+    "peak_vram_allocated_bytes": 8251679232,
+    "peak_vram_reserved_bytes": 8501854208
+  },
+  "tokenization": {
+    "token_count": {
+      "min": 559,
+      "p50": 697,
+      "p95": 1766,
+      "max": 1777
+    },
+    "rows_with_omission": 0,
+    "dropped_oldest_publications_max": 0
+  },
+  "historical_1_7b_base": {
+    "source": "eval/results/publication-critic/m3-c2-joint-selection-v1.json",
+    "terminal": "NO_GO",
+    "selected_threshold": 0.9496693674025232,
+    "false_pass_rate": 0.2857142857142857,
+    "false_rewrite_rate": 0.38235294117647056,
+    "balanced_accuracy": 0.6659663865546219,
+    "roc_auc": 0.6169467787114846,
+    "boundary_pair_strict_win_rate": 0.7894736842105263,
+    "within_pass_pair_strict_win_rate": 0.8571428571428571,
+    "raw_logit_min": -2.34375,
+    "raw_logit_max": 7.21875
+  },
+  "delta_4b_minus_historical_1_7b": {
+    "false_pass_rate": 0.2857142857142857,
+    "false_rewrite_rate": -0.2647058823529411,
+    "balanced_accuracy": -0.0105042016806723,
+    "roc_auc": 0.0049019607843137,
+    "boundary_pair_strict_win_rate": -0.10526315789473684,
+    "within_pass_pair_strict_win_rate": 0.0
+  },
+  "resources": {
+    "pod_id": "iocp8k8w6zvh4s",
+    "pod_hourly_rate_usd": 0.74,
+    "pod_created_at": "2026-08-25T17:36:40.373Z",
+    "pod_deleted": true,
+    "pod_continuing_cost_usd_per_hour": 0.0,
+    "network_volume_id": "v1us0nmk0p",
+    "network_volume_data_center": "US-IL-1",
+    "network_volume_type": "STANDARD",
+    "network_volume_capacity_gb": 20,
+    "network_volume_observed_task_bytes": 8242665809,
+    "network_volume_hourly_rate_usd": 0.0019444444915279746,
+    "network_volume_retained": true
+  },
+  "billing": {
+    "snapshot_at": "2026-08-25T18:14:05Z",
+    "provider_settled_pod_usd": 0.0,
+    "provider_settled_pod_record_pending": true,
+    "provider_settled_network_volume_usd": 0.0019444444915279746,
+    "pod_runtime_upper_bound_seconds": 1535,
+    "estimated_pod_gpu_usd_ceiling": 0.31552777777777774,
+    "estimated_container_disk_usd_ceiling": 0.0011844135802469135,
+    "network_volume_hours_reserved_in_ceiling": 2,
+    "estimated_total_accrued_usd_ceiling": 0.3206010803410806,
+    "budget_cap_usd": 15.0,
+    "remaining_budget_at_least_usd": 14.679398919658919,
+    "volume_only_hours_to_budget_ceiling_at_least": 7549.404975877516,
+    "volume_only_days_to_budget_ceiling_at_least": 314.5585406615632
+  },
+  "scope": {
+    "judge_called": false,
+    "unseen_test_read": false,
+    "trained": false,
+    "quantized_or_converted": false,
+    "historical_1_7b_rerun": false,
+    "product_enabled": false,
+    "m3_d_unlocked": false
+  }
+}

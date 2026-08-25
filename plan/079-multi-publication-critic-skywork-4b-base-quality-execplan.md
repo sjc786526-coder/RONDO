@@ -191,27 +191,50 @@ linked worktree 不共享主根 ignored `eval-data/`。因此运行输入投影�
   共同 CUDA 主机版本为 13.0，Secure Cloud 参考价分别为 `$0.74/h`、`$0.84/h`。计划据此将“数据中心支持交集”和“创建时实时库存”分层：
   前者定义卷的候选落点，后者只决定候选中的实际部署，执行前仍须重查两者。
 - 2026-08-25：A5000 末位备选和 4090/RTX 6000 Ada 同中心软偏好未引入下游训练授权、多卡运行或库存保证。
+- 2026-08-25：实现并验证 Plan 079 专用 `base_quality` 入口、两分片 snapshot/model lock、exact source tree、Plan 066 bundle 派生
+  validation release、runtime receipt、commissioning/formal gate、write-once archive、独立复算和首个完整正式结果 authority；吸收
+  `3bb1253` 独立审查的三项 P1，commissioning 不再形成正式结论、freeze/run 均重建并比对 release、新 source tar 不再执行旧 source root。
+- 2026-08-25：在 `US-IL-1` 创建 20 GB Standard 卷 `v1us0nmk0p` 和单张 Secure Cloud RTX 4090 Pod
+  `iocp8k8w6zvh4s`（`$0.74/h`、CUDA host 12.8），下载并逐文件核验 exact 官方两分片 BF16 snapshot。镜像遗留
+  `HF_HUB_ENABLE_HF_TRANSFER=1` 与冻结依赖不匹配时，专用 bootstrap 显式隔离该开关并从保留缓存续跑成功。
+- 2026-08-25：commissioning `plan079-commissioning-20260825T175440Z-610d880-r1` 从 55/55、零 typed failure 的完整链路形成
+  `COMMISSIONING_COMPLETE`，本地独立复算与云端结果逐字节一致；随后从 clean `610d880312c8ee9c98c28740f8b0b62c4fafb65f`
+  和新空 namespace 运行唯一正式轮 `plan079-formal-20260825T175912Z-610d880-r1`。
+- 2026-08-25：唯一正式轮 55/55、零 typed failure，形成有效 `4B_BASE_QUALITY_NO_GO`：无 admissible operating point，ROC AUC
+  `0.6218487395 < 0.80`，boundary strict win `13/19 = 0.6842105263 < 0.70`；selected point 的 False PASS 为
+  `12/21 = 0.5714285714`、False REWRITE `4/34 = 0.1176470588`、balanced accuracy `0.6554621849`。formal raw/result 已安全
+  回传，第二次本地复算与正式 `result.json` 逐字节一致，未因 NO-GO 重跑。
+- 2026-08-25：Pod 已删除并按 exact name 复核为零，持续 GPU 费用为 0；卷 `v1us0nmk0p` 按授权保留，容量 20 GB，删除前
+  Plan 079 task root 用量 8,242,665,809 bytes。`2026-08-25T18:14:05Z` 平台已结算卷费 `$0.00194444449`，Pod 账单明细仍延迟；按
+  1,535 秒 Pod 上界、两小时卷费和容器盘费保守计总额不超过 `$0.3207`，至少剩 `$14.6793`，卷单独持续计费约 7,549 小时 / 314.5 天
+  后触及上限。正式摘要已投影到 `eval/results/publication-critic/`，完整 raw 与运行 receipts 保留在物理根 ignored
+  `eval-data/publication-critic/plan079/`。
+- 2026-08-25：把审查者提供的库存监控器及 focused test 纳入本任务；它只处理运行时参数化的 stock poll/create 与 exact-name
+  uncertain-create reconciliation，不接管预算、价格、卷验收、readiness 或资源启停删除。
+- 2026-08-25：正式结果已完整落盘且 authority 已存在后，执行者最终只读复核发现“final evidence 已写、authority 尚未写”崩溃窗口；
+  窄化修复为：其它 formal namespace 遇到待协调 evidence 时 fail-closed，同一 run 可验证恢复并幂等补 claim，既有 authority 允许同 run
+  只读恢复但继续拒绝不同 run。该修复只改变归档崩溃恢复，不改变冻结评分、输入、指标或既有正式结果，因而未重跑有效 NO-GO。
+- 2026-08-25：执行期间一次过宽的只读检索机械遍历到禁止的 mixed v8 路径并输出普通行；未筛选、使用、评分或上传任何该内容，
+  随即停止触碰该路径。正式输入和云端资产始终只来自物理不含 unseen-test 的 Plan 066 train+validation bundle。
 
 ### 当前工作
 
-- `PLANNED / REVIEWED / NOT EXECUTED`：execplan 与三期子 WBS 当前入口已完成并通过成稿复审；数据中心候选口径已按支持交集修订，待交给执行者实施。
+- `EXECUTOR_COMPLETE / PENDING INDEPENDENT ACCEPTANCE`：实现、聚焦测试、真实 commissioning、唯一正式轮、独立复算、Pod 止费、
+  结果/计划/日志/WBS delta 与 task branch 提交均在本任务收口；等待 Plan 079 制定者进行独立验收。
 
 ### 本任务剩余步骤
 
-- 兼容与复用闭合：确定两分片模型身份、backend、validation、metrics、archive 的最小适配，完成直接相关测试。
-- 云端 commissioning：更新双 Ada GPU/Standard 卷支持交集并在候选内实时复核库存，创建同数据中心网络卷与单张
-  4090/3090/A5000 Pod，完整打通下载、核验、55 条评价、
-  聚合、归档和回传。
-- 冻结与正式运行：冻结全部身份，从 clean source 和空 namespace 完整运行唯一正式轮并独立复算。
-- 判定、自检与止费：形成三态结论和精炼证据，释放 Pod，保留并报告网络卷，提交 clean task branch并交计划制定者独立验收。
+- Plan 079 制定者在本 task branch 上独立复核代码、tracked summary、ignored formal evidence、费用/resource 终态与执行者自审；普通 finding
+  可退回本分支窄修。本计划不在执行者阶段安排后续模型、训练、量化、本地部署或 M3-D 工作。
 
 ### 阻塞项
 
-- 当前无代码或路线阻塞。真实执行需要执行者收到随本计划提供的一次性 RunPod/HF/上传/预算授权，并使用项目既有安全凭据入口。
+- 当前无执行阻塞；只等待独立验收。保留卷继续按 Standard 费率计费，删除须用户另行批准。
 
 ### 当前验收状态
 
-- `PLANNED / IMPLEMENTATION NOT STARTED`：未修改实现、未运行测试、未创建云资源、未产生费用、未下载/加载真实模型。
+- `4B_BASE_QUALITY_NO_GO / EXECUTOR VERIFIED`：正式结果有效且已独立复算，Pod 已删除，卷保留；计划制定者独立验收尚未执行，
+  因此本状态不冒充最终接受或 main 整合。
 
 ### 交接边界
 
@@ -233,3 +256,6 @@ linked worktree 不共享主根 ignored `eval-data/`。因此运行输入投影�
 | 006 | Pod 交付时释放；同数据中心任务网络卷保留，删除须用户另行批准；15 USD 统计到执行者交付并报告保留卷预计触线时间 | 用户要求利用持久卷支持同数据中心 Pod 灵活切换并保留删除决定权；无限保留与 lifetime 硬上限不能由执行者同时保证 | RunPod 生命周期、预算与费用回执 | 已采纳 |
 | 007 | Plan 079 分支只窄更新三期子 WBS；顶层 WBS、COMPLETED 与最终整合留给届时最新 main | Plan 077/078 并行推进，共享文档不能由旧基线覆盖 | 文档与交付 | 已采纳 |
 | 008 | base GPU 顺序为 4090 → 3090 → A5000；数据中心候选先按 4090、RTX 6000 Ada 与 Standard 卷的支持交集确定，再以实时库存选实际落点；当前确认 `US-IL-1` | 4090 足够完成 base，A5000 只作末位兜底；支持关系决定长期卷落点，瞬时库存只决定何时能部署；Ada 同代和同卷可降低未来另立微调任务的迁移成本 | RunPod 选卡、数据中心与卷 | 已采纳 |
+| 009 | 采用 Plan 079 专用薄入口复用既有 packet/render/scoring/metrics/bundle 基元，并对 exact source、release、runtime、commissioning 和首个完整 formal 结果增加任务内 fail-closed gate | 旧三候选、Judge、单分片与本地 watchdog 生命周期不适合直接继承；专用入口避免语义扭曲且不复制评价体系 | 评价架构、云端生命周期与正式证据 | 已实施 |
+| 010 | 唯一有效正式结果为 `4B_BASE_QUALITY_NO_GO`，不因结果不理想重跑；4B 不获得训练、量化、本地部署、产品启用或 M3-D 资格 | 55 行完整正式证据没有可同时满足冻结门限的 operating point，属于模型质量失败而非基础设施失败 | Plan 079 终态与三期交接 | 已采纳 |
+| 011 | 库存 monitor 作为可选、参数化的 poll/create 辅助设施纳入任务，但预算/价格/卷/readiness/启停删除仍由执行 controller 管理 | 抢卡需要低延迟自动化，资源资格和生命周期门禁职责不同，不应耦合进同一脚本 | 后续 RunPod 抢卡复用 | 已实施 |

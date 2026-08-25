@@ -444,7 +444,7 @@ def run_evaluation(
         raise BaseQualityError("runtime_receipt_cloud_identity_mismatch")
     archive = BaseQualityArchive(runs_root, spec["run_id"], spec["mode"])
     archive.require_formal_unclaimed()
-    archive.create()
+    archive.create(allow_completed_formal_recovery=True)
     archive.bind_json("run-spec.json", spec)
     archive.bind_json("validation-release.json", release)
 
@@ -472,6 +472,8 @@ def run_evaluation(
             strict=True,
         ):
             archive.bind_json(name, value)
+        if spec["mode"] == "formal" and recovered_result["valid_full_quality_run"]:
+            archive.claim_formal_result(recovered_result)
         return recovered_scores, recovered_runtime, recovered_result
     if any(archive.load_json(name) is not None for name in final_names):
         raise BaseQualityError("run_finalization_partial_without_evidence")

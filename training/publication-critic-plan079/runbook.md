@@ -17,6 +17,12 @@ volume.
    that volume at `/workspace`. Prefer MCP for resource state and billing; use
    `runpodctl pod create` only because the MCP create call cannot attach an
    existing network volume. Recheck the created Pod and volume through MCP.
+   If stock must be polled, `scripts/create-runpod-plan079-initial-when-ready.py`
+   may own only the latency-sensitive poll/create step after the controller has
+   separately approved budget, price, volume, image, CUDA and all runtime
+   arguments. Run at most one monitor for an exact Pod name; after an uncertain
+   create, let its full reconciliation grace finish before another creator may
+   use that name. The monitor never performs readiness, start, stop or delete.
 4. Build the source tar from a clean committed worktree with
    `build-source-bundle.sh`. It intentionally excludes `multidev/`, mixed v8
    data, ignored assets, secrets, model weights, and unrelated project files.

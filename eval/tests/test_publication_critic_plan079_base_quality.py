@@ -795,12 +795,12 @@ class ArchiveAndRunTest(unittest.TestCase):
             )
             first.require_formal_unclaimed()
             first.create()
-            first.claim_formal_result(
-                {
-                    "terminal": "4B_BASE_QUALITY_NO_GO",
-                    "valid_full_quality_run": True,
-                }
-            )
+            result = {
+                "terminal": "4B_BASE_QUALITY_NO_GO",
+                "valid_full_quality_run": True,
+            }
+            marker = first.claim_formal_result(result)
+            self.assertEqual(first.claim_formal_result(result), marker)
             second = BaseQualityArchive(
                 runs,
                 "plan079-formal-20260825T130000Z-second",
@@ -810,6 +810,144 @@ class ArchiveAndRunTest(unittest.TestCase):
                 BaseQualityError, "formal_result_already_authoritative"
             ):
                 second.require_formal_unclaimed()
+            first.path.rmdir()
+            with self.assertRaisesRegex(
+                BaseQualityError, "formal_result_reconciliation_required"
+            ):
+                first.require_formal_unclaimed()
+
+    def test_completed_formal_recovery_claims_authority(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            release = _release()
+            snapshot, lock, receipt = _snapshot(root / "model")
+            source_archive, source_root = _source_archive(root)
+            environment_lock = root / "uv.lock"
+            environment_lock.write_bytes(b"environment")
+            runtime_receipt_path, dependency_freeze, runtime_receipt = _runtime_receipt(
+                root
+            )
+            runtime_receipt["environment_lock_sha256"] = sha256_file(environment_lock)
+            runtime_receipt_path.write_text(
+                json.dumps(runtime_receipt), encoding="utf-8"
+            )
+
+            commissioning = _spec(
+                release, receipt, lock, mode="commissioning", suffix="authority"
+            )
+            commissioning["source"]["source_archive_sha256"] = sha256_file(
+                source_archive
+            )
+            commissioning["source"]["environment_lock_sha256"] = sha256_file(
+                environment_lock
+            )
+            commissioning["source"]["runtime_receipt_sha256"] = runtime_receipt_sha256(
+                runtime_receipt
+            )
+            commissioning_scores = build_scores_document(
+                commissioning, release, _rows(release, good=True), []
+            )
+            commissioning_runtime = _runtime()
+            commissioning_result = recompute_result(
+                commissioning,
+                release,
+                commissioning_scores,
+                commissioning_runtime,
+            )
+            binding = build_commissioning_binding(
+                commissioning,
+                release,
+                commissioning_scores,
+                commissioning_runtime,
+                commissioning_result,
+            )
+
+            formal = _spec(release, receipt, lock, suffix="authority")
+            formal["source"] = copy.deepcopy(commissioning["source"])
+            formal["commissioning"] = binding
+            scores = build_scores_document(
+                formal, release, _rows(release, good=True), []
+            )
+            runtime = _runtime()
+            result = recompute_result(formal, release, scores, runtime)
+            runs = root / "runs"
+            archive = BaseQualityArchive(runs, formal["run_id"], "formal").create()
+            archive.bind_json("run-spec.json", formal)
+            archive.bind_json("validation-release.json", release)
+            archive.bind_json(
+                "final-evidence.json",
+                {
+                    "schema": "rondo-publication-critic-plan079-final-evidence-v1",
+                    "scores": scores,
+                    "runtime": runtime,
+                    "result": result,
+                },
+            )
+            second = BaseQualityArchive(
+                runs,
+                "plan079-formal-20260825T130000Z-other",
+                "formal",
+            )
+            with self.assertRaisesRegex(
+                BaseQualityError, "formal_result_reconciliation_required"
+            ):
+                second.require_formal_unclaimed()
+
+            commissioning_evidence = (
+                commissioning,
+                release,
+                commissioning_scores,
+                commissioning_runtime,
+                commissioning_result,
+            )
+            bundle_receipt = {
+                "bundle_manifest_sha256": formal["input"]["bundle_manifest_sha256"]
+            }
+            with (
+                mock.patch(
+                    "rondo_eval.publication_critic.base_quality.runner.prepare_validation_release",
+                    return_value=(release, bundle_receipt),
+                ),
+                mock.patch(
+                    "rondo_eval.publication_critic.base_quality.runner.verify_runtime_environment",
+                    return_value=runtime_receipt,
+                ),
+            ):
+                recovered = run_evaluation(
+                    spec_value=formal,
+                    release_value=release,
+                    snapshot=snapshot,
+                    model_lock_path=lock,
+                    source_archive=source_archive,
+                    environment_lock=environment_lock,
+                    runtime_receipt_path=runtime_receipt_path,
+                    dependency_freeze=dependency_freeze,
+                    image_id="runpod/pytorch:test",
+                    bundle_root=root,
+                    runs_root=runs,
+                    repo_root=source_root,
+                    attempt_id="authority-recovery",
+                    commissioning_evidence=commissioning_evidence,
+                )
+                recovered_again = run_evaluation(
+                    spec_value=formal,
+                    release_value=release,
+                    snapshot=snapshot,
+                    model_lock_path=lock,
+                    source_archive=source_archive,
+                    environment_lock=environment_lock,
+                    runtime_receipt_path=runtime_receipt_path,
+                    dependency_freeze=dependency_freeze,
+                    image_id="runpod/pytorch:test",
+                    bundle_root=root,
+                    runs_root=runs,
+                    repo_root=source_root,
+                    attempt_id="authority-recovery-again",
+                    commissioning_evidence=commissioning_evidence,
+                )
+            self.assertEqual(recovered, (scores, runtime, result))
+            self.assertEqual(recovered_again, recovered)
+            self.assertTrue((runs / "formal-authority.json").is_file())
 
 
 @unittest.skipUnless(

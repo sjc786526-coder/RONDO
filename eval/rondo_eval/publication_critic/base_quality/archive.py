@@ -15,7 +15,7 @@ from ..full_model_training.contract import (
     write_exclusive,
 )
 from ..write_once import WriteOnceError, WriteOnceNamespace
-from .contract import BaseQualityError, RUN_ID
+from .contract import BaseQualityError, RUN_ID, require_sha256
 
 
 class BaseQualityArchive:
@@ -42,13 +42,61 @@ class BaseQualityArchive:
         return self._archive.runs_root / "formal-authority.json"
 
     def require_formal_unclaimed(self) -> None:
-        """Reject a second formal run after the first complete valid result."""
+        """Reject another formal run while allowing exact-result recovery."""
 
         if self.mode != "formal":
             return
+        authority = self._load_formal_authority()
+        if authority is not None:
+            if authority["run_id"] != self._archive.run_id:
+                raise BaseQualityError("formal_result_already_authoritative")
+            final_evidence = self.path / "final-evidence.json"
+            if (
+                self.path.is_symlink()
+                or not self.path.is_dir()
+                or final_evidence.is_symlink()
+                or not final_evidence.is_file()
+            ):
+                raise BaseQualityError("formal_result_reconciliation_required")
+            return
+        runs_root = self._archive.runs_root
+        if not runs_root.exists() and not runs_root.is_symlink():
+            return
+        if runs_root.is_symlink() or not runs_root.is_dir():
+            raise BaseQualityError("formal_runs_root_unsafe")
+        for candidate in runs_root.iterdir():
+            match = RUN_ID.fullmatch(candidate.name)
+            if candidate == self.path or match is None or match.group(1) != "formal":
+                continue
+            final_evidence = candidate / "final-evidence.json"
+            if final_evidence.exists() or final_evidence.is_symlink():
+                raise BaseQualityError("formal_result_reconciliation_required")
+
+    def _load_formal_authority(self) -> dict[str, Any] | None:
         marker = self._formal_authority_path
-        if marker.exists() or marker.is_symlink():
-            raise BaseQualityError("formal_result_already_authoritative")
+        if not marker.exists() and not marker.is_symlink():
+            return None
+        if marker.is_symlink() or not marker.is_file():
+            raise BaseQualityError("formal_authority_unsafe")
+        try:
+            value = read_json(marker)
+        except Exception as exc:  # noqa: BLE001 - normalize authority parse failures
+            raise BaseQualityError("formal_authority_invalid") from exc
+        run_id = value.get("run_id") if isinstance(value, dict) else None
+        run_id_match = RUN_ID.fullmatch(run_id) if isinstance(run_id, str) else None
+        if (
+            not isinstance(value, dict)
+            or set(value) != {"schema", "run_id", "terminal", "result_sha256"}
+            or value.get("schema")
+            != "rondo-publication-critic-plan079-formal-authority-v1"
+            or run_id_match is None
+            or run_id_match.group(1) != "formal"
+            or value.get("terminal")
+            not in {"4B_BASE_QUALITY_GO", "4B_BASE_QUALITY_NO_GO"}
+        ):
+            raise BaseQualityError("formal_authority_invalid")
+        require_sha256(value["result_sha256"], "formal_authority_invalid")
+        return value
 
     def claim_formal_result(self, result: Any) -> Path:
         """Make this campaign's first complete formal result authoritative."""
@@ -68,16 +116,35 @@ class BaseQualityArchive:
             "terminal": result["terminal"],
             "result_sha256": sha256_bytes(canonical_json_bytes(result)),
         }
+        existing = self._load_formal_authority()
+        if existing is not None:
+            if existing != value:
+                raise BaseQualityError("formal_result_already_authoritative")
+            return marker
         try:
             write_exclusive(marker, pretty_json_bytes(value))
         except (FullModelTrainingError, OSError) as exc:
-            raise BaseQualityError("formal_result_already_authoritative") from exc
+            existing = self._load_formal_authority()
+            if existing != value:
+                raise BaseQualityError("formal_result_already_authoritative") from exc
         return marker
 
-    def create(self) -> "BaseQualityArchive":
+    def create(
+        self, *, allow_completed_formal_recovery: bool = False
+    ) -> "BaseQualityArchive":
         try:
             self._archive.create(exist_ok=self.mode == "commissioning")
         except WriteOnceError as exc:
+            final_evidence = self.path / "final-evidence.json"
+            if (
+                self.mode == "formal"
+                and allow_completed_formal_recovery
+                and self.path.is_dir()
+                and not self.path.is_symlink()
+                and final_evidence.is_file()
+                and not final_evidence.is_symlink()
+            ):
+                return self
             code = (
                 "formal_namespace_not_empty"
                 if self.mode == "formal"
