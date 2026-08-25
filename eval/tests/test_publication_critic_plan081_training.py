@@ -1,3 +1,4 @@
+import ast
 import copy
 import json
 from pathlib import Path
@@ -41,6 +42,7 @@ from rondo_eval.publication_critic.full_model_training.plan081_controller import
 from rondo_eval.publication_critic.full_model_training.plan081_observation import (  # noqa: E402
     build_validation_observation,
     training_identity_sha256,
+    validation_identity_sha256,
 )
 
 
@@ -165,6 +167,35 @@ def _training_dataset() -> PortableTrainingDataset:
     )
 
 
+def _overlapping_training_dataset() -> PortableTrainingDataset:
+    validation = _validation_dataset()
+    supervision = {
+        candidate_id: {
+            **dict(row),
+            "proposed_split": "train",
+        }
+        for candidate_id, row in validation.supervision.items()
+    }
+    return PortableTrainingDataset(
+        dataset_revision="v8",
+        input_identity={"fixture": "overlapping-train"},
+        rubric=validation.rubric,
+        packets=validation.packets,
+        supervision=supervision,
+        pairs=validation.pairs,
+        membership={
+            "schema_version": 1,
+            "dataset_revision": "v8",
+            "stages": {
+                "fixture": {
+                    "candidate_ids": sorted(supervision),
+                    "pair_ids": sorted(validation.pairs),
+                }
+            },
+        },
+    )
+
+
 def _logits(boundary_margin: float, *, within_margin: float = 1.0) -> dict[str, float]:
     return {
         "pass-a": boundary_margin / 2.0,
@@ -175,14 +206,29 @@ def _logits(boundary_margin: float, *, within_margin: float = 1.0) -> dict[str, 
 
 
 class _FakeAdapter:
-    def __init__(self, observations: dict[int, dict[str, float]]) -> None:
+    def __init__(
+        self,
+        observations: dict[int, dict[str, float]],
+        *,
+        codec_id: str = "fixture-python-literal-v1",
+    ) -> None:
         self.observations = observations
+        self.codec_id = codec_id
         self.step = 0
         self.scope = None
         self.events: list[str] = []
         self.validation_calls = 0
         self.update_calls = 0
         self.data_cursor: dict = {"fixture_update": 0}
+        self.invalid_receipt_steps: set[int] = set()
+        self.validation_failure_steps: set[int] = set()
+        self.snapshot_failure_steps: set[int] = set()
+        self.checkpoint_writer_failure_steps: set[int] = set()
+        self.wrong_validation_identity = False
+        self.reader_failure = False
+        self.reader_calls = 0
+        self.received_validation_datasets: list[ValidationDataset] = []
+        self.restored_typed_state = False
 
     def configure_trainable_scope(self, scope: TrainableScope) -> None:
         self.events.append(f"configure:{scope.scope_id}")
@@ -207,7 +253,7 @@ class _FakeAdapter:
         self.update_calls += 1
         self.step = step
         self.data_cursor = {"fixture_update": step}
-        return {
+        receipt = {
             "global_step": step,
             "training_split": "train",
             "validation_candidates_consumed": 0,
@@ -218,20 +264,36 @@ class _FakeAdapter:
             "scope": scope.as_dict(),
             "data_cursor": dict(self.data_cursor),
         }
+        if step in self.invalid_receipt_steps:
+            receipt["training_candidate_count"] += 1
+        return receipt
 
-    def evaluate_validation(self) -> dict:
+    def evaluate_validation(self, dataset: ValidationDataset) -> dict:
         before = (self.step, self.scope)
         self.validation_calls += 1
+        self.received_validation_datasets.append(dataset)
+        if self.step in self.validation_failure_steps:
+            raise FullModelTrainingError("fixture_validation_failed")
         receipt = {
             "raw_logits": dict(self.observations[self.step]),
             "gradient_access": False,
             "training_state_unchanged": True,
+            "validation_identity_sha256": (
+                "0" * 64
+                if self.wrong_validation_identity
+                else validation_identity_sha256(dataset)
+            ),
         }
         if before != (self.step, self.scope):
             raise AssertionError("fixture validation mutated training state")
         return receipt
 
     def save_model(self, root: Path) -> None:
+        if (
+            root.parent.parent.name == "model-snapshots"
+            and self.step in self.snapshot_failure_steps
+        ):
+            raise FullModelTrainingError("fixture_snapshot_failed")
         (root / "fake-model.json").write_text(
             json.dumps(
                 {
@@ -250,11 +312,36 @@ class _FakeAdapter:
 
     def capture_training_state(self) -> dict:
         return {
-            "optimizer": {"step": self.step, "scope_id": self.scope.scope_id},
-            "scheduler": {"step": self.step},
-            "rng": {"fixture_token": self.step * 17},
+            "optimizer": {
+                "step": self.step,
+                "scope_id": self.scope.scope_id,
+                "slots": {7: (b"\x00\xff", self.step)},
+            },
+            "scheduler": {"milestones": (self.step, self.step + 1)},
+            "rng": {"fixture_token": (b"rng", self.step * 17)},
             "data": dict(self.data_cursor),
         }
+
+    def training_state_codec_id(self) -> str:
+        return self.codec_id
+
+    def write_training_state(self, path: Path, value: dict) -> None:
+        if self.step in self.checkpoint_writer_failure_steps:
+            raise FullModelTrainingError("fixture_checkpoint_writer_failed")
+        path.write_bytes(b"PLAN081-LITERAL-V1\n" + repr(value).encode("utf-8"))
+
+    def read_training_state(self, path: Path) -> dict:
+        self.reader_calls += 1
+        if self.reader_failure:
+            raise ValueError("fixture reader failed")
+        raw = path.read_bytes()
+        prefix = b"PLAN081-LITERAL-V1\n"
+        if not raw.startswith(prefix):
+            raise ValueError("fixture codec header invalid")
+        value = ast.literal_eval(raw[len(prefix) :].decode("utf-8"))
+        if not isinstance(value, dict):
+            raise ValueError("fixture state is not a mapping")
+        return value
 
     def restore_training_state(self, value: dict) -> None:
         if self.scope is None:
@@ -262,6 +349,11 @@ class _FakeAdapter:
         if value["optimizer"]["scope_id"] != self.scope.scope_id:
             raise FullModelTrainingError("fixture_optimizer_scope_mismatch")
         self.events.append(f"restore:{self.scope.scope_id}")
+        self.restored_typed_state = (
+            value["optimizer"]["slots"][7] == (b"\x00\xff", self.step)
+            and isinstance(value["scheduler"]["milestones"], tuple)
+            and isinstance(value["rng"]["fixture_token"], tuple)
+        )
         self.step = int(value["optimizer"]["step"])
         self.data_cursor = dict(value["data"])
 
@@ -418,19 +510,151 @@ class Plan081ObservationTests(unittest.TestCase):
 
 
 class Plan081ControllerTests(unittest.TestCase):
-    def _controller(self, root: Path, adapter: _FakeAdapter, *, maximum: int = 4):
+    def _controller(
+        self,
+        root: Path,
+        adapter: _FakeAdapter,
+        *,
+        maximum: int = 4,
+        control_plan: ControlPlan | None = None,
+        comparison_policy: ComparisonPolicy | None = None,
+    ):
         store = Plan081ArtifactStore(root)
         controller = ContinuousTrainingController(
             route_contract=load_route_contract(PLAN081_ROOT / "route-contract-v1.json"),
-            control_plan=_control_plan(maximum=maximum),
+            control_plan=control_plan or _control_plan(maximum=maximum),
             initial_scope=_scope("partial", ("score_head",), 10),
-            comparison_policy=ComparisonPolicy("boundary_pair_mean_margin", 0.05),
+            comparison_policy=comparison_policy
+            or ComparisonPolicy("boundary_pair_mean_margin", 0.05),
             training_dataset=_training_dataset(),
             validation_dataset=_validation_dataset(),
             artifact_store=store,
         )
         controller.initialize(adapter)
         return controller, store
+
+    def test_actual_training_best_is_not_filtered_by_candidate_tolerance(self) -> None:
+        observations = {0: _logits(2.0), 1: _logits(2.04), 2: _logits(2.08)}
+        with tempfile.TemporaryDirectory() as directory:
+            adapter = _FakeAdapter(observations)
+            controller, _store = self._controller(Path(directory), adapter, maximum=2)
+            result = controller.run(adapter)
+            step_two = controller.state["observations"][-1]
+        self.assertEqual(step_two["comparisons"]["base"], "improved")
+        self.assertEqual(
+            result["selection"]["training_best_snapshot_id"],
+            "snapshot-attempt-000-step-000002",
+        )
+        self.assertEqual(
+            result["selection"]["control_candidate_snapshot_id"],
+            "snapshot-attempt-000-step-000002",
+        )
+
+    def test_sparse_observation_retains_first_expanded_scope_turning_point(self) -> None:
+        plan = ControlPlan.from_value(
+            {
+                "maximum_updates": 5,
+                "observation_steps": [1, 4, 5],
+                "checkpoint_steps": [5],
+                "turning_point_limit": 2,
+            }
+        )
+        observations = {
+            0: _logits(2.0),
+            1: _logits(3.0),
+            4: _logits(1.0),
+            5: _logits(2.5),
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            adapter = _FakeAdapter(observations)
+            controller, store = self._controller(
+                root, adapter, control_plan=plan
+            )
+            controller.run(adapter, stop_after=1)
+            controller.schedule_scope_expansion(
+                _scope("expanded", ("score_head", "upper_block"), 20)
+            )
+            result = controller.run(adapter)
+            step_four = next(
+                row
+                for row in controller.state["observations"]
+                if row["global_step"] == 4
+            )
+            self.assertIn(
+                "trainable_scope_expanded", step_four["turning_point_reasons"]
+            )
+            self.assertEqual(
+                {path.name for path in (root / "model-snapshots").iterdir()},
+                {
+                    "snapshot-attempt-000-step-000001",
+                    "snapshot-attempt-000-step-000004",
+                    "snapshot-attempt-000-step-000005",
+                },
+            )
+            resumed_adapter = _FakeAdapter(observations)
+            resumed = ContinuousTrainingController.resume(
+                route_contract=load_route_contract(
+                    PLAN081_ROOT / "route-contract-v1.json"
+                ),
+                control_plan=plan,
+                comparison_policy=ComparisonPolicy(
+                    "boundary_pair_mean_margin", 0.05
+                ),
+                training_dataset=_training_dataset(),
+                validation_dataset=_validation_dataset(),
+                artifact_store=store,
+                adapter=resumed_adapter,
+                checkpoint_id="checkpoint-attempt-000-step-000005",
+            )
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(resumed.run(resumed_adapter)["status"], "completed")
+        self.assertTrue(resumed_adapter.restored_typed_state)
+
+    def test_controller_rejects_train_validation_candidate_overlap(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(
+                FullModelTrainingError, "plan081_train_validation_overlap"
+            ):
+                ContinuousTrainingController(
+                    route_contract=load_route_contract(
+                        PLAN081_ROOT / "route-contract-v1.json"
+                    ),
+                    control_plan=_control_plan(maximum=2),
+                    initial_scope=_scope("partial", ("score_head",), 10),
+                    comparison_policy=ComparisonPolicy(
+                        "boundary_pair_mean_margin", 0.05
+                    ),
+                    training_dataset=_overlapping_training_dataset(),
+                    validation_dataset=_validation_dataset(),
+                    artifact_store=Plan081ArtifactStore(Path(directory)),
+                )
+
+    def test_validation_receipt_binds_typed_declared_cohort(self) -> None:
+        observations = {0: _logits(2.0), 1: _logits(2.5), 2: _logits(3.0)}
+        with tempfile.TemporaryDirectory() as directory:
+            adapter = _FakeAdapter(observations)
+            adapter.wrong_validation_identity = True
+            controller = ContinuousTrainingController(
+                route_contract=load_route_contract(
+                    PLAN081_ROOT / "route-contract-v1.json"
+                ),
+                control_plan=_control_plan(maximum=2),
+                initial_scope=_scope("partial", ("score_head",), 10),
+                comparison_policy=ComparisonPolicy(
+                    "boundary_pair_mean_margin", 0.05
+                ),
+                training_dataset=_training_dataset(),
+                validation_dataset=_validation_dataset(),
+                artifact_store=Plan081ArtifactStore(Path(directory)),
+            )
+            with self.assertRaisesRegex(
+                FullModelTrainingError, "plan081_validation_receipt_invalid"
+            ):
+                controller.initialize(adapter)
+            self.assertIs(
+                adapter.received_validation_datasets[0], controller.validation_dataset
+            )
 
     def test_pause_and_continue_same_instance_keeps_monotonic_progress(self) -> None:
         observations = {0: _logits(2.0), 1: _logits(2.5), 2: _logits(2.8)}
@@ -471,6 +695,579 @@ class Plan081ControllerTests(unittest.TestCase):
         self.assertIsNone(selection["research_candidate_snapshot_id"])
         self.assertFalse(selection["research_candidate_eligible"])
 
+    def test_invalid_update_receipt_requires_fresh_checkpoint_resume(self) -> None:
+        observations = {
+            0: _logits(2.0),
+            1: _logits(2.5),
+            2: _logits(2.8),
+            3: _logits(3.0),
+            4: _logits(3.2),
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            adapter = _FakeAdapter(observations)
+            controller, store = self._controller(root, adapter)
+            controller.run(adapter, stop_after=2)
+            controller.schedule_scope_expansion(
+                _scope("expanded", ("score_head", "upper_block"), 20)
+            )
+            adapter.invalid_receipt_steps.add(3)
+            with self.assertRaisesRegex(
+                FullModelTrainingError, "plan081_update_receipt_invalid"
+            ):
+                controller.run(adapter, stop_after=3)
+            self.assertEqual(controller.state["status"], "recovery_required")
+            self.assertEqual(controller.state["current_step"], 2)
+            self.assertEqual(controller.state["current_scope"]["scope_id"], "partial")
+            update_calls = adapter.update_calls
+            with self.assertRaisesRegex(
+                FullModelTrainingError, "plan081_recovery_required"
+            ):
+                controller.run(adapter)
+            self.assertEqual(adapter.update_calls, update_calls)
+
+            resumed_adapter = _FakeAdapter(observations)
+            resumed = ContinuousTrainingController.resume(
+                route_contract=load_route_contract(
+                    PLAN081_ROOT / "route-contract-v1.json"
+                ),
+                control_plan=_control_plan(),
+                comparison_policy=ComparisonPolicy(
+                    "boundary_pair_mean_margin", 0.05
+                ),
+                training_dataset=_training_dataset(),
+                validation_dataset=_validation_dataset(),
+                artifact_store=store,
+                adapter=resumed_adapter,
+                checkpoint_id="checkpoint-attempt-000-step-000002",
+            )
+            resumed.schedule_scope_expansion(
+                _scope("expanded", ("score_head", "upper_block"), 20)
+            )
+            self.assertEqual(resumed.run(resumed_adapter)["status"], "completed")
+
+    def test_snapshot_failure_keeps_orphan_observation_but_rolls_back_state(self) -> None:
+        observations = {
+            0: _logits(2.0),
+            1: _logits(2.5),
+            2: _logits(2.8),
+            3: _logits(3.0),
+            4: _logits(3.2),
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            adapter = _FakeAdapter(observations)
+            controller, store = self._controller(root, adapter)
+            controller.run(adapter, stop_after=2)
+            adapter.snapshot_failure_steps.add(3)
+            with self.assertRaisesRegex(
+                FullModelTrainingError, "fixture_snapshot_failed"
+            ):
+                controller.run(adapter, stop_after=3)
+            self.assertEqual(controller.state["status"], "recovery_required")
+            self.assertEqual(controller.state["current_step"], 2)
+            self.assertEqual(
+                store.read_observation(
+                    "observation-attempt-000-step-000003"
+                )["global_step"],
+                3,
+            )
+            self.assertFalse(
+                (root / "model-snapshots/snapshot-attempt-000-step-000003").exists()
+            )
+            calls = adapter.update_calls
+            with self.assertRaisesRegex(
+                FullModelTrainingError, "plan081_recovery_required"
+            ):
+                controller.run(adapter)
+            self.assertEqual(adapter.update_calls, calls)
+
+            resumed_adapter = _FakeAdapter(observations)
+            resumed = ContinuousTrainingController.resume(
+                route_contract=load_route_contract(
+                    PLAN081_ROOT / "route-contract-v1.json"
+                ),
+                control_plan=_control_plan(),
+                comparison_policy=ComparisonPolicy(
+                    "boundary_pair_mean_margin", 0.05
+                ),
+                training_dataset=_training_dataset(),
+                validation_dataset=_validation_dataset(),
+                artifact_store=store,
+                adapter=resumed_adapter,
+                checkpoint_id="checkpoint-attempt-000-step-000002",
+            )
+            self.assertEqual(resumed.run(resumed_adapter)["status"], "completed")
+
+    def test_checkpoint_writer_failure_keeps_last_verified_pointer(self) -> None:
+        observations = {
+            0: _logits(2.0),
+            1: _logits(2.5),
+            2: _logits(2.8),
+            3: _logits(3.0),
+            4: _logits(3.2),
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            adapter = _FakeAdapter(observations)
+            controller, store = self._controller(root, adapter)
+            controller.run(adapter, stop_after=2)
+            adapter.checkpoint_writer_failure_steps.add(4)
+            with self.assertRaisesRegex(
+                FullModelTrainingError, "fixture_checkpoint_writer_failed"
+            ):
+                controller.run(adapter)
+            self.assertEqual(controller.state["status"], "recovery_required")
+            self.assertEqual(controller.state["current_step"], 3)
+            self.assertEqual(
+                controller.state["latest_checkpoint_id"],
+                "checkpoint-attempt-000-step-000002",
+            )
+            self.assertFalse(
+                (root / "recovery-checkpoints/checkpoint-attempt-000-step-000004").exists()
+            )
+            self.assertFalse(
+                any(
+                    path.name.startswith(".checkpoint-attempt-000-step-000004")
+                    for path in (root / "recovery-checkpoints").iterdir()
+                )
+            )
+
+            resumed_adapter = _FakeAdapter(observations)
+            resumed = ContinuousTrainingController.resume(
+                route_contract=load_route_contract(
+                    PLAN081_ROOT / "route-contract-v1.json"
+                ),
+                control_plan=_control_plan(),
+                comparison_policy=ComparisonPolicy(
+                    "boundary_pair_mean_margin", 0.05
+                ),
+                training_dataset=_training_dataset(),
+                validation_dataset=_validation_dataset(),
+                artifact_store=store,
+                adapter=resumed_adapter,
+                checkpoint_id="checkpoint-attempt-000-step-000002",
+            )
+            self.assertEqual(resumed.run(resumed_adapter)["status"], "completed")
+
+    def test_postpublish_checkpoint_failure_keeps_new_verified_anchor(self) -> None:
+        observations = {
+            0: _logits(2.0),
+            1: _logits(2.5),
+            2: _logits(2.8),
+            3: _logits(3.0),
+            4: _logits(3.2),
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            adapter = _FakeAdapter(observations)
+            controller, store = self._controller(root, adapter)
+            controller.run(adapter, stop_after=2)
+            original_save = store.save_checkpoint
+
+            def save_then_raise(artifact_id: str, **kwargs) -> dict:
+                result = original_save(artifact_id, **kwargs)
+                if artifact_id.endswith("step-000004"):
+                    raise FullModelTrainingError("fixture_postpublish_failure")
+                return result
+
+            store.save_checkpoint = save_then_raise  # type: ignore[method-assign]
+            with self.assertRaisesRegex(
+                FullModelTrainingError, "fixture_postpublish_failure"
+            ):
+                controller.run(adapter)
+            self.assertEqual(controller.state["status"], "recovery_required")
+            self.assertEqual(controller.state["current_step"], 4)
+            self.assertEqual(
+                controller.state["latest_checkpoint_id"],
+                "checkpoint-attempt-000-step-000004",
+            )
+            store.verify_checkpoint("checkpoint-attempt-000-step-000004")
+            calls = adapter.update_calls
+            with self.assertRaisesRegex(
+                FullModelTrainingError, "plan081_recovery_required"
+            ):
+                controller.run(adapter)
+            self.assertEqual(adapter.update_calls, calls)
+
+            resumed_adapter = _FakeAdapter(observations)
+            resumed = ContinuousTrainingController.resume(
+                route_contract=load_route_contract(
+                    PLAN081_ROOT / "route-contract-v1.json"
+                ),
+                control_plan=_control_plan(),
+                comparison_policy=ComparisonPolicy(
+                    "boundary_pair_mean_margin", 0.05
+                ),
+                training_dataset=_training_dataset(),
+                validation_dataset=_validation_dataset(),
+                artifact_store=store,
+                adapter=resumed_adapter,
+                checkpoint_id="checkpoint-attempt-000-step-000004",
+            )
+            self.assertEqual(resumed.run(resumed_adapter)["status"], "completed")
+            self.assertTrue(
+                store.has_retention_completion(
+                    "checkpoint-attempt-000-step-000004"
+                )
+            )
+
+    def test_retention_failure_cannot_bypass_completion_on_resume(self) -> None:
+        observations = {0: _logits(2.0), 1: _logits(2.5), 2: _logits(2.8)}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            adapter = _FakeAdapter(observations)
+            controller, store = self._controller(root, adapter, maximum=2)
+            original_prune = store.prune
+
+            def fail_retention(**_kwargs) -> dict:
+                raise FullModelTrainingError("fixture_retention_failed")
+
+            store.prune = fail_retention  # type: ignore[method-assign]
+            with self.assertRaisesRegex(
+                FullModelTrainingError, "fixture_retention_failed"
+            ):
+                controller.run(adapter)
+            checkpoint_id = "checkpoint-attempt-000-step-000002"
+            self.assertEqual(controller.state["status"], "recovery_required")
+            self.assertEqual(controller.state["latest_checkpoint_id"], checkpoint_id)
+            self.assertFalse(store.has_retention_completion(checkpoint_id))
+
+            blocked_adapter = _FakeAdapter(observations)
+            with self.assertRaisesRegex(
+                FullModelTrainingError, "fixture_retention_failed"
+            ):
+                ContinuousTrainingController.resume(
+                    route_contract=load_route_contract(
+                        PLAN081_ROOT / "route-contract-v1.json"
+                    ),
+                    control_plan=_control_plan(maximum=2),
+                    comparison_policy=ComparisonPolicy(
+                        "boundary_pair_mean_margin", 0.05
+                    ),
+                    training_dataset=_training_dataset(),
+                    validation_dataset=_validation_dataset(),
+                    artifact_store=store,
+                    adapter=blocked_adapter,
+                    checkpoint_id=checkpoint_id,
+                )
+            self.assertEqual(blocked_adapter.events, [])
+
+            store.prune = original_prune  # type: ignore[method-assign]
+            resumed_adapter = _FakeAdapter(observations)
+            resumed = ContinuousTrainingController.resume(
+                route_contract=load_route_contract(
+                    PLAN081_ROOT / "route-contract-v1.json"
+                ),
+                control_plan=_control_plan(maximum=2),
+                comparison_policy=ComparisonPolicy(
+                    "boundary_pair_mean_margin", 0.05
+                ),
+                training_dataset=_training_dataset(),
+                validation_dataset=_validation_dataset(),
+                artifact_store=store,
+                adapter=resumed_adapter,
+                checkpoint_id=checkpoint_id,
+            )
+            self.assertTrue(store.has_retention_completion(checkpoint_id))
+            self.assertEqual(resumed.run(resumed_adapter)["status"], "completed")
+
+    def test_retention_marker_prepublish_failure_is_retryable_on_resume(self) -> None:
+        observations = {0: _logits(2.0), 1: _logits(2.5), 2: _logits(2.8)}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            adapter = _FakeAdapter(observations)
+            controller, store = self._controller(root, adapter, maximum=2)
+            original_write = store._write_artifact
+
+            def fail_marker_before_publish(
+                kind: str, artifact_id: str, **kwargs
+            ) -> dict:
+                if kind != "retention-completions":
+                    return original_write(kind, artifact_id, **kwargs)
+                populate = kwargs["populate"]
+
+                def populate_then_fail(staging: Path) -> None:
+                    populate(staging)
+                    raise FullModelTrainingError(
+                        "fixture_retention_marker_prepublish_failed"
+                    )
+
+                return original_write(
+                    kind,
+                    artifact_id,
+                    **{**kwargs, "populate": populate_then_fail},
+                )
+
+            store._write_artifact = (  # type: ignore[method-assign]
+                fail_marker_before_publish
+            )
+            with self.assertRaisesRegex(
+                FullModelTrainingError,
+                "fixture_retention_marker_prepublish_failed",
+            ):
+                controller.run(adapter)
+            checkpoint_id = "checkpoint-attempt-000-step-000002"
+            self.assertEqual(controller.state["status"], "recovery_required")
+            self.assertFalse(store.has_retention_completion(checkpoint_id))
+            completion_root = root / "retention-completions"
+            self.assertFalse(
+                any(path.name.startswith(".") for path in completion_root.iterdir())
+            )
+
+            store._write_artifact = original_write  # type: ignore[method-assign]
+            resumed_adapter = _FakeAdapter(observations)
+            resumed = ContinuousTrainingController.resume(
+                route_contract=load_route_contract(
+                    PLAN081_ROOT / "route-contract-v1.json"
+                ),
+                control_plan=_control_plan(maximum=2),
+                comparison_policy=ComparisonPolicy(
+                    "boundary_pair_mean_margin", 0.05
+                ),
+                training_dataset=_training_dataset(),
+                validation_dataset=_validation_dataset(),
+                artifact_store=store,
+                adapter=resumed_adapter,
+                checkpoint_id=checkpoint_id,
+            )
+            self.assertTrue(store.has_retention_completion(checkpoint_id))
+            self.assertEqual(resumed.run(resumed_adapter)["status"], "completed")
+
+    def test_retention_marker_postpublish_failure_does_not_repeat_prune(self) -> None:
+        observations = {0: _logits(2.0), 1: _logits(2.5), 2: _logits(2.8)}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            adapter = _FakeAdapter(observations)
+            controller, store = self._controller(root, adapter, maximum=2)
+            original_mark = store.mark_retention_complete
+
+            def mark_then_raise(checkpoint_id: str) -> dict:
+                result = original_mark(checkpoint_id)
+                raise FullModelTrainingError(
+                    "fixture_retention_marker_postpublish_failed"
+                )
+
+            store.mark_retention_complete = (  # type: ignore[method-assign]
+                mark_then_raise
+            )
+            with self.assertRaisesRegex(
+                FullModelTrainingError,
+                "fixture_retention_marker_postpublish_failed",
+            ):
+                controller.run(adapter)
+            checkpoint_id = "checkpoint-attempt-000-step-000002"
+            self.assertTrue(store.has_retention_completion(checkpoint_id))
+
+            store.mark_retention_complete = original_mark  # type: ignore[method-assign]
+
+            def reject_repeated_prune(**_kwargs) -> dict:
+                raise FullModelTrainingError("fixture_repeated_retention")
+
+            store.prune = reject_repeated_prune  # type: ignore[method-assign]
+            resumed_adapter = _FakeAdapter(observations)
+            resumed = ContinuousTrainingController.resume(
+                route_contract=load_route_contract(
+                    PLAN081_ROOT / "route-contract-v1.json"
+                ),
+                control_plan=_control_plan(maximum=2),
+                comparison_policy=ComparisonPolicy(
+                    "boundary_pair_mean_margin", 0.05
+                ),
+                training_dataset=_training_dataset(),
+                validation_dataset=_validation_dataset(),
+                artifact_store=store,
+                adapter=resumed_adapter,
+                checkpoint_id=checkpoint_id,
+            )
+            self.assertEqual(resumed.run(resumed_adapter)["status"], "completed")
+
+    def test_retention_marker_staging_is_recovered_before_resume(self) -> None:
+        observations = {0: _logits(2.0), 1: _logits(2.5), 2: _logits(2.8)}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            adapter = _FakeAdapter(observations)
+            controller, store = self._controller(root, adapter, maximum=2)
+            original_mark = store.mark_retention_complete
+
+            def fail_marker(_checkpoint_id: str) -> dict:
+                raise FullModelTrainingError("fixture_retention_marker_failed")
+
+            store.mark_retention_complete = fail_marker  # type: ignore[method-assign]
+            with self.assertRaisesRegex(
+                FullModelTrainingError, "fixture_retention_marker_failed"
+            ):
+                controller.run(adapter)
+            checkpoint_id = "checkpoint-attempt-000-step-000002"
+            staging = (
+                root
+                / "retention-completions"
+                / (
+                    f".{checkpoint_id}.tmp-"
+                    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                )
+            )
+            staging.mkdir(parents=True)
+            (staging / "partial").write_text("incomplete", encoding="utf-8")
+
+            store.mark_retention_complete = original_mark  # type: ignore[method-assign]
+            resumed_adapter = _FakeAdapter(observations)
+            resumed = ContinuousTrainingController.resume(
+                route_contract=load_route_contract(
+                    PLAN081_ROOT / "route-contract-v1.json"
+                ),
+                control_plan=_control_plan(maximum=2),
+                comparison_policy=ComparisonPolicy(
+                    "boundary_pair_mean_margin", 0.05
+                ),
+                training_dataset=_training_dataset(),
+                validation_dataset=_validation_dataset(),
+                artifact_store=store,
+                adapter=resumed_adapter,
+                checkpoint_id=checkpoint_id,
+            )
+            self.assertFalse(staging.exists())
+            self.assertTrue(store.has_retention_completion(checkpoint_id))
+            self.assertEqual(resumed.run(resumed_adapter)["status"], "completed")
+
+    def test_resuming_completed_old_checkpoint_does_not_prune_newer_one(self) -> None:
+        observations = {
+            0: _logits(2.0),
+            1: _logits(3.0),
+            2: _logits(4.0),
+            3: _logits(1.0),
+            4: _logits(1.5),
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            adapter = _FakeAdapter(observations)
+            controller, store = self._controller(root, adapter)
+            controller.run(adapter)
+            checkpoint_two = "checkpoint-attempt-000-step-000002"
+            checkpoint_four = "checkpoint-attempt-000-step-000004"
+            self.assertTrue(store.has_retention_completion(checkpoint_two))
+            self.assertTrue(store.has_retention_completion(checkpoint_four))
+            self.assertTrue(
+                (root / "recovery-checkpoints" / checkpoint_four).is_dir()
+            )
+
+            resumed_adapter = _FakeAdapter(observations)
+            resumed = ContinuousTrainingController.resume(
+                route_contract=load_route_contract(
+                    PLAN081_ROOT / "route-contract-v1.json"
+                ),
+                control_plan=_control_plan(),
+                comparison_policy=ComparisonPolicy(
+                    "boundary_pair_mean_margin", 0.05
+                ),
+                training_dataset=_training_dataset(),
+                validation_dataset=_validation_dataset(),
+                artifact_store=store,
+                adapter=resumed_adapter,
+                checkpoint_id=checkpoint_two,
+            )
+            self.assertEqual(resumed.state["current_step"], 2)
+            self.assertTrue(
+                (root / "recovery-checkpoints" / checkpoint_four).is_dir()
+            )
+
+    def test_non_json_codec_round_trip_and_preload_failure_boundaries(self) -> None:
+        observations = {0: _logits(2.0), 1: _logits(2.5), 2: _logits(2.8)}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            adapter = _FakeAdapter(observations)
+            controller, store = self._controller(root, adapter, maximum=2)
+            controller.run(adapter)
+            checkpoint_id = "checkpoint-attempt-000-step-000002"
+            state_path = root / "recovery-checkpoints" / checkpoint_id / "training-state"
+            raw = state_path.read_bytes()
+            self.assertTrue(raw.startswith(b"PLAN081-LITERAL-V1\n"))
+            with self.assertRaises((UnicodeDecodeError, json.JSONDecodeError)):
+                json.loads(raw.decode("utf-8"))
+
+            mismatched = _FakeAdapter(observations, codec_id="different-codec-v1")
+            with self.assertRaisesRegex(
+                FullModelTrainingError, "plan081_training_state_codec_mismatch"
+            ):
+                ContinuousTrainingController.resume(
+                    route_contract=load_route_contract(
+                        PLAN081_ROOT / "route-contract-v1.json"
+                    ),
+                    control_plan=_control_plan(maximum=2),
+                    comparison_policy=ComparisonPolicy(
+                        "boundary_pair_mean_margin", 0.05
+                    ),
+                    training_dataset=_training_dataset(),
+                    validation_dataset=_validation_dataset(),
+                    artifact_store=store,
+                    adapter=mismatched,
+                    checkpoint_id=checkpoint_id,
+                )
+            self.assertEqual(mismatched.reader_calls, 0)
+            self.assertEqual(mismatched.events, [])
+
+            broken_reader = _FakeAdapter(observations)
+            broken_reader.reader_failure = True
+            with self.assertRaisesRegex(
+                FullModelTrainingError, "plan081_training_state_decode_failed"
+            ):
+                ContinuousTrainingController.resume(
+                    route_contract=load_route_contract(
+                        PLAN081_ROOT / "route-contract-v1.json"
+                    ),
+                    control_plan=_control_plan(maximum=2),
+                    comparison_policy=ComparisonPolicy(
+                        "boundary_pair_mean_margin", 0.05
+                    ),
+                    training_dataset=_training_dataset(),
+                    validation_dataset=_validation_dataset(),
+                    artifact_store=store,
+                    adapter=broken_reader,
+                    checkpoint_id=checkpoint_id,
+                )
+            self.assertEqual(broken_reader.reader_calls, 1)
+            self.assertEqual(broken_reader.events, [])
+
+            resumed_adapter = _FakeAdapter(observations)
+            resumed = ContinuousTrainingController.resume(
+                route_contract=load_route_contract(
+                    PLAN081_ROOT / "route-contract-v1.json"
+                ),
+                control_plan=_control_plan(maximum=2),
+                comparison_policy=ComparisonPolicy(
+                    "boundary_pair_mean_margin", 0.05
+                ),
+                training_dataset=_training_dataset(),
+                validation_dataset=_validation_dataset(),
+                artifact_store=store,
+                adapter=resumed_adapter,
+                checkpoint_id=checkpoint_id,
+            )
+            self.assertTrue(resumed_adapter.restored_typed_state)
+            self.assertEqual(resumed.run(resumed_adapter)["status"], "completed")
+
+            state_path.write_bytes(raw[:-1] + bytes([raw[-1] ^ 1]))
+            tampered = _FakeAdapter(observations)
+            with self.assertRaisesRegex(
+                FullModelTrainingError, "plan081_artifact_tree_mismatch"
+            ):
+                ContinuousTrainingController.resume(
+                    route_contract=load_route_contract(
+                        PLAN081_ROOT / "route-contract-v1.json"
+                    ),
+                    control_plan=_control_plan(maximum=2),
+                    comparison_policy=ComparisonPolicy(
+                        "boundary_pair_mean_margin", 0.05
+                    ),
+                    training_dataset=_training_dataset(),
+                    validation_dataset=_validation_dataset(),
+                    artifact_store=store,
+                    adapter=tampered,
+                    checkpoint_id=checkpoint_id,
+                )
+            self.assertEqual(tampered.reader_calls, 0)
+            self.assertEqual(tampered.events, [])
+
     def test_pause_new_instance_resume_scope_history_selection_and_retention(self) -> None:
         observations = {
             0: _logits(2.0),
@@ -493,10 +1290,7 @@ class Plan081ControllerTests(unittest.TestCase):
                 FullModelTrainingError, "plan081_unique_recovery_point_required"
             ):
                 store.prune(
-                    keep_snapshot_ids={
-                        "snapshot-attempt-000-step-000001",
-                        "snapshot-attempt-000-step-000002",
-                    },
+                    keep_snapshot_ids={"snapshot-attempt-000-step-000002"},
                     keep_checkpoint_ids=set(),
                 )
 

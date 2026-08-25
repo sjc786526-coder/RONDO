@@ -28,6 +28,9 @@ from .plan081_observation import OBSERVATION_SCHEMA
 
 SNAPSHOT_SCHEMA = "rondo-publication-critic-plan081-evaluation-snapshot-v1"
 CHECKPOINT_SCHEMA = "rondo-publication-critic-plan081-recovery-checkpoint-v1"
+RETENTION_COMPLETION_SCHEMA = (
+    "rondo-publication-critic-plan081-retention-completion-v1"
+)
 MANIFEST_NAME = "artifact-manifest.json"
 _ARTIFACT_ID = re.compile(r"[a-z0-9][a-z0-9-]{0,79}\Z")
 _STAGING_NAME = re.compile(
@@ -37,6 +40,9 @@ _ATTEMPT_ARTIFACT_ID = re.compile(
     r"(?:observation|snapshot|checkpoint)-attempt-(?P<generation>[0-9]+)-step-[0-9]+\Z"
 )
 _ATTEMPT_RESERVATION = re.compile(r"attempt-(?P<generation>[0-9]+)\Z")
+_CHECKPOINT_ARTIFACT_ID = re.compile(
+    r"checkpoint-attempt-(?P<generation>[0-9]+)-step-(?P<step>[0-9]+)\Z"
+)
 
 
 class Plan081ArtifactStore:
@@ -211,7 +217,11 @@ class Plan081ArtifactStore:
         """Remove only exact task-owned staging trees left before atomic publish."""
 
         removed: list[str] = []
-        for kind in ("model-snapshots", "recovery-checkpoints"):
+        for kind in (
+            "model-snapshots",
+            "recovery-checkpoints",
+            "retention-completions",
+        ):
             parent = self.root / kind
             if not parent.exists():
                 continue
@@ -225,6 +235,93 @@ class Plan081ArtifactStore:
                 _remove_owned_tree(path)
                 removed.append(f"{kind}/{path.name}")
         return removed
+
+    def mark_retention_complete(self, checkpoint_id: str) -> dict[str, Any]:
+        """Publish a small write-once marker only after retention succeeds."""
+
+        checkpoint = self.verify_checkpoint(checkpoint_id)
+        value = {
+            "schema": RETENTION_COMPLETION_SCHEMA,
+            "checkpoint_id": checkpoint_id,
+            "checkpoint_content_sha256": checkpoint["content_sha256"],
+        }
+        return self._write_artifact(
+            "retention-completions",
+            checkpoint_id,
+            schema=RETENTION_COMPLETION_SCHEMA,
+            metadata={
+                "checkpoint_content_sha256": checkpoint["content_sha256"]
+            },
+            populate=lambda staging: write_exclusive(
+                _created_payload(staging) / "completion.json",
+                pretty_json_bytes(value),
+            ),
+        )
+
+    def has_retention_completion(self, checkpoint_id: str) -> bool:
+        _require_artifact_id(checkpoint_id)
+        parent = self.root / "retention-completions"
+        if not parent.exists():
+            return False
+        safe_directory(parent)
+        completion = parent / checkpoint_id
+        if not completion.exists() and not completion.is_symlink():
+            return False
+        self.verify_retention_complete(checkpoint_id)
+        return True
+
+    def verify_retention_complete(self, checkpoint_id: str) -> dict[str, Any]:
+        _require_artifact_id(checkpoint_id)
+        checkpoint = self.verify_checkpoint(checkpoint_id)
+        artifact = self._verify_artifact(
+            "retention-completions",
+            checkpoint_id,
+            RETENTION_COMPLETION_SCHEMA,
+        )
+        if artifact["metadata"] != {
+            "checkpoint_content_sha256": checkpoint["content_sha256"]
+        }:
+            raise FullModelTrainingError(
+                "plan081_retention_completion_invalid"
+            )
+        root = safe_directory(
+            self.root / "retention-completions" / checkpoint_id
+        )
+        path = root / "payload" / "completion.json"
+        value = read_json(path)
+        if value != {
+            "schema": RETENTION_COMPLETION_SCHEMA,
+            "checkpoint_id": checkpoint_id,
+            "checkpoint_content_sha256": checkpoint["content_sha256"],
+        }:
+            raise FullModelTrainingError(
+                "plan081_retention_completion_invalid"
+            )
+        return {
+            "checkpoint_id": checkpoint_id,
+            "relative": (
+                f"retention-completions/{checkpoint_id}/payload/completion.json"
+            ),
+            "sha256": sha256_file(path),
+        }
+
+    def is_latest_checkpoint(self, checkpoint_id: str) -> bool:
+        """Return whether an existing checkpoint is newest by attempt then step."""
+
+        _require_artifact_id(checkpoint_id)
+        checkpoints = self._artifact_ids("recovery-checkpoints")
+        if checkpoint_id not in checkpoints:
+            raise FullModelTrainingError("plan081_checkpoint_not_found")
+        ordered: dict[str, tuple[int, int]] = {}
+        for artifact_id in checkpoints:
+            match = _CHECKPOINT_ARTIFACT_ID.fullmatch(artifact_id)
+            if match is None:
+                raise FullModelTrainingError("plan081_checkpoint_id_invalid")
+            ordered[artifact_id] = (
+                int(match.group("generation")),
+                int(match.group("step")),
+            )
+        return ordered[checkpoint_id] == max(ordered.values())
 
     def reserve_artifact_generation(self, *, after_generation: int) -> int:
         """Permanently reserve a fresh attempt generation, including across crashes."""

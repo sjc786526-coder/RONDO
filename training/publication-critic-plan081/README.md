@@ -18,3 +18,14 @@ load or train a model, prove GPU feasibility or quality, create a research
 candidate, authorize cloud work, unlock M3-D, or establish product GO. Current
 stage and subsequent work are defined only by `doc/WBS.md` and
 `doc/WBS/multi-agent-trusted-evidence.md`.
+
+An adapter must bind validation results to the typed validation dataset and
+declare one explicit writer/reader codec for complete optimizer, scheduler,
+RNG, and data-cursor state. A failed post-update step is not retried in place:
+the controller enters `recovery_required`, and continuation uses a fresh
+adapter restored from a verified complete checkpoint.
+
+Checkpoint retention is complete only after its write-once completion artifact
+has been atomically published. Resume may repair an absent marker only for the
+newest physical checkpoint, before loading or mutating adapter state; a marked
+older best or turning-point checkpoint never reapplies its historical prune.

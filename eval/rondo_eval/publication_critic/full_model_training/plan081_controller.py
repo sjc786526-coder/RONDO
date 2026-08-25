@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 import json
 import math
+from pathlib import Path
+import re
 from typing import Any
 
 from .contract import (
@@ -32,6 +34,9 @@ from .plan081_observation import (
 
 
 CONTROLLER_SCHEMA = "rondo-publication-critic-plan081-controller-state-v1"
+_CODEC_ID = re.compile(r"[a-z0-9][a-z0-9._-]{0,63}\Z")
+StateWriter = Callable[[Path, Mapping[str, Any]], None]
+StateReader = Callable[[Path], Mapping[str, Any]]
 
 
 class ContinuousTrainingController:
@@ -78,13 +83,16 @@ class ContinuousTrainingController:
         self.validation_dataset = validation_dataset
         self.artifact_store = artifact_store
         self.report_threshold = float(report_threshold)
+        validation_identity = validation_identity_sha256(validation_dataset)
+        training_identity = training_identity_sha256(training_dataset)
+        if set(training_dataset.supervision) & set(validation_dataset.supervision):
+            raise FullModelTrainingError("plan081_train_validation_overlap")
         self.state: dict[str, Any] = {
             "schema": CONTROLLER_SCHEMA,
             "route_contract_sha256": sha256_bytes(canonical_json_bytes(validated)),
-            "validation_identity_sha256": validation_identity_sha256(
-                validation_dataset
-            ),
-            "training_identity_sha256": training_identity_sha256(training_dataset),
+            "validation_identity_sha256": validation_identity,
+            "training_identity_sha256": training_identity,
+            "training_state_codec": None,
             "control_plan": control_plan.as_dict(),
             "comparison_policy": comparison_policy.as_dict(),
             "report_threshold": self.report_threshold,
@@ -141,6 +149,7 @@ class ContinuousTrainingController:
         if self.state["status"] != "created" or self.state["base"] is not None:
             raise FullModelTrainingError("plan081_controller_already_initialized")
         self._require_input_identities()
+        self._bind_training_state_codec(adapter)
         scope = TrainableScope.from_value(self.state["current_scope"])
         adapter.configure_trainable_scope(scope)
         adapter.assert_trainable_scope(scope)
@@ -184,14 +193,36 @@ class ContinuousTrainingController:
             or target > self.control_plan.maximum_updates
         ):
             raise FullModelTrainingError("plan081_stop_point_invalid")
-        if self.state["status"] == "completed" and target != current:
-            raise FullModelTrainingError("plan081_controller_completed")
+        if self.state["status"] == "completed":
+            if target != current:
+                raise FullModelTrainingError("plan081_controller_completed")
+        elif self.state["status"] == "recovery_required":
+            raise FullModelTrainingError("plan081_recovery_required")
+        elif self.state["status"] != "paused":
+            raise FullModelTrainingError("plan081_controller_state_invalid")
+        self._bind_training_state_codec(adapter)
         scope = TrainableScope.from_value(self.state["current_scope"])
         adapter.assert_trainable_scope(scope)
         self.state["status"] = "running"
 
         for step in range(current + 1, target + 1):
-            expanded = False
+            scope = self._run_step(adapter, step=step, scope=scope)
+
+        self.state["status"] = (
+            "completed"
+            if target == self.control_plan.maximum_updates
+            else "paused"
+        )
+        return self.archive_summary()
+
+    def _run_step(
+        self, adapter: Any, *, step: int, scope: TrainableScope
+    ) -> TrainableScope:
+        committed_state = json.loads(json.dumps(self.state))
+        checkpoint_state: dict[str, Any] | None = None
+        checkpoint_id: str | None = None
+        state_reader: StateReader | None = None
+        try:
             decision = _scope_decision_for_step(self.state, step)
             if decision is not None:
                 next_scope = TrainableScope.from_value(decision["scope"])
@@ -203,7 +234,6 @@ class ContinuousTrainingController:
                 self.state["scope_history"].append(
                     {"effective_before_update": step, "scope": scope.as_dict()}
                 )
-                expanded = True
 
             receipt = adapter.apply_update(step, scope, self.training_dataset)
             self._accept_update_receipt(receipt, step=step, scope=scope)
@@ -213,9 +243,8 @@ class ContinuousTrainingController:
             observation_record: dict[str, Any] | None = None
             if step in self.control_plan.observation_steps:
                 observation_record = self._record_observation(
-                    adapter, step=step, scope=scope, expanded=expanded
+                    adapter, step=step, scope=scope
                 )
-                self._apply_retention(prune_checkpoints=False)
 
             if step in self.control_plan.checkpoint_steps:
                 if observation_record is None:
@@ -223,35 +252,68 @@ class ContinuousTrainingController:
                 checkpoint_id = _artifact_id(
                     "checkpoint", int(self.state["artifact_generation"]), step
                 )
-                observation_record["checkpoint_id"] = checkpoint_id
-                for turning in self.state["turning_points"]:
-                    if turning["snapshot_id"] == observation_record["snapshot_id"]:
-                        turning["checkpoint_id"] = checkpoint_id
-                self.state["latest_checkpoint_id"] = checkpoint_id
                 training_state = adapter.capture_training_state()
                 _validate_training_state(training_state)
                 if training_state["data"] != receipt["data_cursor"]:
                     raise FullModelTrainingError("plan081_data_cursor_checkpoint_mismatch")
+                codec_id, state_writer, state_reader = _adapter_training_state_codec(
+                    adapter
+                )
+                if codec_id != self.state["training_state_codec"]:
+                    raise FullModelTrainingError(
+                        "plan081_training_state_codec_mismatch"
+                    )
+                checkpoint_state = json.loads(json.dumps(self.state))
+                checkpoint_record = checkpoint_state["observations"][-1]
+                if checkpoint_record["observation_id"] != observation_record[
+                    "observation_id"
+                ]:
+                    raise FullModelTrainingError(
+                        "plan081_checkpoint_observation_history_invalid"
+                    )
+                checkpoint_record["checkpoint_id"] = checkpoint_id
+                for turning in checkpoint_state["turning_points"]:
+                    if turning["snapshot_id"] == checkpoint_record["snapshot_id"]:
+                        turning["checkpoint_id"] = checkpoint_id
+                checkpoint_state["latest_checkpoint_id"] = checkpoint_id
                 self.artifact_store.save_checkpoint(
                     checkpoint_id,
                     model_saver=adapter.save_model,
                     training_state=training_state,
-                    controller_state=self.state,
+                    controller_state=checkpoint_state,
                     metadata={
                         "global_step": step,
                         "scope": scope.as_dict(),
                         "observation_id": observation_record["observation_id"],
                         "artifact_role": "full_recovery_checkpoint",
+                        "training_state_codec": codec_id,
                     },
+                    state_writer=state_writer,
                 )
+                self.state = checkpoint_state
                 self._apply_retention(prune_checkpoints=True)
-
-        self.state["status"] = (
-            "completed"
-            if target == self.control_plan.maximum_updates
-            else "paused"
-        )
-        return self.archive_summary()
+                self.artifact_store.mark_retention_complete(checkpoint_id)
+            return scope
+        except BaseException:
+            if checkpoint_state is not None and checkpoint_id is not None:
+                try:
+                    stored_state, _training_state, _model_root = (
+                        self.artifact_store.read_checkpoint(
+                            checkpoint_id, state_reader=state_reader
+                        )
+                    )
+                except BaseException:
+                    self.state = committed_state
+                else:
+                    self.state = (
+                        checkpoint_state
+                        if stored_state == checkpoint_state
+                        else committed_state
+                    )
+            else:
+                self.state = committed_state
+            self.state["status"] = "recovery_required"
+            raise
 
     @classmethod
     def resume(
@@ -268,9 +330,22 @@ class ContinuousTrainingController:
         report_threshold: float = 0.5,
     ) -> "ContinuousTrainingController":
         artifact_store.recover_incomplete_staging()
-        controller_state, training_state, model_root = artifact_store.read_checkpoint(
-            checkpoint_id
-        )
+        codec_id, _state_writer, state_reader = _adapter_training_state_codec(adapter)
+        checkpoint_metadata = artifact_store.verify_checkpoint(checkpoint_id)["metadata"]
+        if checkpoint_metadata.get("training_state_codec") != codec_id:
+            raise FullModelTrainingError("plan081_training_state_codec_mismatch")
+        try:
+            controller_state, training_state, model_root = (
+                artifact_store.read_checkpoint(
+                    checkpoint_id, state_reader=state_reader
+                )
+            )
+        except FullModelTrainingError:
+            raise
+        except Exception as exc:
+            raise FullModelTrainingError(
+                "plan081_training_state_decode_failed"
+            ) from exc
         if not isinstance(controller_state.get("current_scope"), Mapping):
             raise FullModelTrainingError("plan081_checkpoint_controller_state_invalid")
         scope = TrainableScope.from_value(controller_state["current_scope"])
@@ -285,7 +360,19 @@ class ContinuousTrainingController:
             artifact_store=artifact_store,
             report_threshold=report_threshold,
         )
-        controller._accept_resumed_state(controller_state, checkpoint_id)
+        controller._accept_resumed_state(
+            controller_state, checkpoint_id, training_state_codec=codec_id
+        )
+        _validate_training_state(training_state)
+        if training_state["data"] != controller.state["updates"][-1]["data_cursor"]:
+            raise FullModelTrainingError("plan081_data_cursor_checkpoint_mismatch")
+        if not artifact_store.has_retention_completion(checkpoint_id):
+            if not artifact_store.is_latest_checkpoint(checkpoint_id):
+                raise FullModelTrainingError(
+                    "plan081_checkpoint_retention_incomplete"
+                )
+            controller._apply_retention(prune_checkpoints=True)
+            artifact_store.mark_retention_complete(checkpoint_id)
         fresh_generation = artifact_store.reserve_artifact_generation(
             after_generation=int(controller.state["artifact_generation"])
         )
@@ -295,9 +382,6 @@ class ContinuousTrainingController:
         adapter.load_model(model_root)
         adapter.configure_trainable_scope(scope)
         adapter.assert_trainable_scope(scope)
-        _validate_training_state(training_state)
-        if training_state["data"] != controller.state["updates"][-1]["data_cursor"]:
-            raise FullModelTrainingError("plan081_data_cursor_checkpoint_mismatch")
         adapter.restore_training_state(training_state)
         adapter.assert_trainable_scope(scope)
         adapter.assert_data_cursor(training_state["data"])
@@ -338,16 +422,20 @@ class ContinuousTrainingController:
         self, adapter: Any, *, global_step: int, scope: TrainableScope
     ) -> dict[str, Any]:
         self._require_input_identities()
-        receipt = adapter.evaluate_validation()
+        receipt = adapter.evaluate_validation(self.validation_dataset)
+        self._require_input_identities()
         if (
             not isinstance(receipt, Mapping)
             or set(receipt) != {
                 "raw_logits",
                 "gradient_access",
                 "training_state_unchanged",
+                "validation_identity_sha256",
             }
             or receipt.get("gradient_access") is not False
             or receipt.get("training_state_unchanged") is not True
+            or receipt.get("validation_identity_sha256")
+            != self.state["validation_identity_sha256"]
             or not isinstance(receipt.get("raw_logits"), Mapping)
         ):
             raise FullModelTrainingError("plan081_validation_receipt_invalid")
@@ -361,7 +449,7 @@ class ContinuousTrainingController:
         )
 
     def _record_observation(
-        self, adapter: Any, *, step: int, scope: TrainableScope, expanded: bool
+        self, adapter: Any, *, step: int, scope: TrainableScope
     ) -> dict[str, Any]:
         value = self._evaluate(adapter, global_step=step, scope=scope)
         base = self.state["base"]
@@ -405,7 +493,7 @@ class ContinuousTrainingController:
         )
 
         turning_reasons: list[str] = []
-        if expanded:
+        if _scope_expanded_since_last_observation(self.state, step):
             turning_reasons.append("trainable_scope_expanded")
         if self.state["observations"]:
             prior_trend = self.state["observations"][-1]["comparisons"]["previous"]
@@ -512,7 +600,11 @@ class ContinuousTrainingController:
             raise FullModelTrainingError("plan081_update_receipt_invalid")
 
     def _accept_resumed_state(
-        self, value: Mapping[str, Any], checkpoint_id: str
+        self,
+        value: Mapping[str, Any],
+        checkpoint_id: str,
+        *,
+        training_state_codec: str,
     ) -> None:
         required = set(self.state)
         if (
@@ -524,6 +616,7 @@ class ContinuousTrainingController:
             != self.state["validation_identity_sha256"]
             or value.get("training_identity_sha256")
             != self.state["training_identity_sha256"]
+            or value.get("training_state_codec") != training_state_codec
             or value.get("control_plan") != self.control_plan.as_dict()
             or value.get("comparison_policy") != self.comparison_policy.as_dict()
             or value.get("report_threshold") != self.report_threshold
@@ -540,6 +633,14 @@ class ContinuousTrainingController:
             raise FullModelTrainingError("plan081_checkpoint_controller_state_invalid")
         self._validate_resumed_history(value, checkpoint_id)
         self.state = json.loads(json.dumps(value))
+
+    def _bind_training_state_codec(self, adapter: Any) -> None:
+        codec_id, _state_writer, _state_reader = _adapter_training_state_codec(adapter)
+        current = self.state["training_state_codec"]
+        if current is None:
+            self.state["training_state_codec"] = codec_id
+        elif current != codec_id:
+            raise FullModelTrainingError("plan081_training_state_codec_mismatch")
 
     def _require_input_identities(self) -> None:
         if (
@@ -779,11 +880,10 @@ def _selection_from_records(
 ) -> dict[str, Any]:
     training_best = None
     for record in observations:
-        if training_best is None or compare_values(
-            record["comparison_value"],
-            training_best["comparison_value"],
-            policy,
-        ) == "improved":
+        if (
+            training_best is None
+            or record["comparison_value"] > training_best["comparison_value"]
+        ):
             training_best = record
     return _selection(
         base=base,
@@ -800,10 +900,14 @@ def _turning_points_from_records(
     limit: int,
 ) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
+    previous_observation_step = 0
     for index, record in enumerate(observations):
         reasons: list[str] = []
         step = int(record["global_step"])
-        if step in expansion_steps:
+        if any(
+            previous_observation_step < expansion_step <= step
+            for expansion_step in expansion_steps
+        ):
             reasons.append("trainable_scope_expanded")
         if index:
             prior = observations[index - 1]["comparisons"]["previous"]
@@ -824,6 +928,7 @@ def _turning_points_from_records(
             )
         elif record.get("turning_point_reasons") != []:
             raise FullModelTrainingError("plan081_checkpoint_turning_point_invalid")
+        previous_observation_step = step
     return result[-limit:]
 
 
@@ -866,6 +971,36 @@ def _scope_decision_for_step(
         ),
         None,
     )
+
+
+def _scope_expanded_since_last_observation(
+    state: Mapping[str, Any], step: int
+) -> bool:
+    previous_step = (
+        int(state["observations"][-1]["global_step"])
+        if state["observations"]
+        else 0
+    )
+    return any(
+        previous_step < int(decision["before_update"]) <= step
+        for decision in state["scope_decisions"]
+    )
+
+
+def _adapter_training_state_codec(
+    adapter: Any,
+) -> tuple[str, StateWriter, StateReader]:
+    codec_method = getattr(adapter, "training_state_codec_id", None)
+    state_writer = getattr(adapter, "write_training_state", None)
+    state_reader = getattr(adapter, "read_training_state", None)
+    if not callable(codec_method) or not callable(state_writer) or not callable(
+        state_reader
+    ):
+        raise FullModelTrainingError("plan081_training_state_codec_invalid")
+    codec_id = codec_method()
+    if not isinstance(codec_id, str) or _CODEC_ID.fullmatch(codec_id) is None:
+        raise FullModelTrainingError("plan081_training_state_codec_invalid")
+    return codec_id, state_writer, state_reader
 
 
 def _artifact_id(kind: str, generation: int, step: int) -> str:

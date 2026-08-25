@@ -218,14 +218,19 @@ XXX用以下内容代替：
   identity，不读取 unseen、权重或 checkpoint。
 - 2026-08-25：专用测试与 Plan 060/066/073 focused 回归共 17 项通过；源码 compile 5/5。内部独立审查发现的动态 scope、data cursor、
   typed train-only、same-cohort、staging、连续重放 attempt、公开构造校验等 P2 已逐项补回归并整改，等待指定审查者最终验收。
+- 2026-08-25：指定审查提交 `3f69d41` 对实现提交 `f954d30` 报告 4 个 P2、无 P1，结论为整改后复验；问题均已确认存在，
+  不构成 `REPLAN_REQUIRED`。
+- 2026-08-25：完成 fail-closed step/checkpoint/retention 恢复、严格 training best 与稀疏扩层转折、train/validation cohort 隔离及
+  显式非 JSON state codec 整改；Plan 081 24 项与精选历史回归合计 31/31 通过，三路定点复核及一轮全 diff 独立复核均未发现
+  剩余或新增 P1/P2。
 
 ### 当前工作
 
-- Plan 081 实现、本地门禁、内部独立复核与最终 staged diff 检查已完成；task branch 交付内容已收敛，提交后仅等待指定审查者验收。
+- Plan 081 首轮指定审查的全部 finding 已整改，本地门禁、最终 diff/生成物检查与内部独立复核均已完成；整改提交后等待指定审查者复验。
 
 ### 本任务剩余步骤
 
-- 按用户指定队列通知审查者，由指定审查者独立验收、记录结论并决定是否需要范围内整改。
+- 按用户指定队列通知审查者复验并记录最终结论。
 
 ### 阻塞项
 
@@ -234,7 +239,7 @@ XXX用以下内容代替：
 
 ### 当前验收状态
 
-- `IMPLEMENTATION_COMPLETE / FOCUSED_LOCAL_GATES_PASS / INTERNAL_P2_REMEDIATION_COMPLETE / EXTERNAL_ACCEPTANCE_PENDING`。
+- `IMPLEMENTATION_COMPLETE / DESIGNATED_REVIEW_REMEDIATED / FOCUSED_LOCAL_GATES_PASS / REACCEPTANCE_PENDING`。
 
 ### 交接边界
 
@@ -262,3 +267,4 @@ XXX用以下内容代替：
 | 010 | 请示、批示和最终验收只使用指定 Codex 跨会话队列，每条消息主动声明 Plan 081 执行者身份，发送后停止且不重复 | 满足用户指定的跨会话协作与唤醒方式 | coordination/handoff | 已采纳 |
 | 011 | base 保持研究 incumbent，训练内部 best 只有同口径优于 base 才成为目标候选；不要求直接产品 GO | 防止把 least-bad checkpoint 误报为研究成功，同时避免在训练开发阶段提前要求产品资格 | selection/handoff | 已采纳 |
 | 012 | Plan 081 使用专用薄层：typed train/validation identity、观测后显式扩大 scope、永久小观测与分层快照/checkpoint，并以持久 reservation 分配恢复 attempt | 旧 Plan 060/066 固定 recipe 不适合连续路线；新边界需避免夹带 holdout、静态预写扩层和同一 checkpoint 多次重放冲突 | local control/recovery | 已采纳 |
+| 013 | post-update 任一失败都进入 `recovery_required` 并从完整 checkpoint 新 adapter 恢复；adapter 显式声明 state codec，retention 以原子 completion artifact 收口 | 模型更新无法由 controller 安全回滚；半提交不得原地重试，非 JSON optimizer/RNG 状态和 checkpoint prune 都需可验证恢复边界 | failure/recovery | 已采纳 |
