@@ -232,36 +232,45 @@ git-ignored 工作。共享构建锁和监控 target 由仓库既有 `just`/watc
 
 ### 已完成
 
-- 已确认主工作区 tracked clean，`main` 与 `origin/main` 显示同在 `445b6eae7f1df5bfd106fcd963141173a1292af5`。
-- 已从该提交创建 `.claude/worktrees/070-m4-c0-experimental-session-control` /
-  `worktree-070-m4-c0-experimental-session-control`；070 当前只新增本 ExecPlan。
-- 已完整阅读根/`multidev/` `AGENTS.md`、README、当前 WBS、第四期 WBS、Plan 067、其执行/独立验收日志与 Plan 模板。
-- 已通过元数据确认 069 从同一基线建立，现已在其独立分支提交 Plan 069 ExecPlan（`8535caac`）且 worktree clean；068 的变更限于
-  Publication Critic/eval 专属路径。070 不消费 069 未进入 main 的计划或结果，也未读取两者未提交内容。
-- 已核对当前 app-server v2 thread list/read/lifecycle、experimental gating、app-server-client lag/disconnect/typed error、TUI
-  `AppServerSession`/event loop/response picker/snapshot 和 live Team State 接缝；现有事实足以制定本计划，未运行 Rust 构建或测试。
-- 已确认 git-ignored `codex-source-code/` 不随 linked worktree出现，但本次规划无需从主工作区读取或写入该资产，也没有其他
-  主工作区直写需求。
+- 070 从指定基线建立并完成根/`multidev/`/TUI 就近规则与本计划复核；未读取或吸收 068/069 未提交内容。
+- 阶段 A–D 已完成：state-DB-only discovery、无 history read、loaded Root 窄 Team façade、Root-only `SetRootState`、既有
+  `thread/unarchive` 冷态入口、client freshness/result-certainty 状态机与默认关闭的 `/sessions` 原型已纵向打通。
+- v2 experimental schema 的 stable/experimental 两种生成测试均通过；修正了 nested experimental DTO 向 stable schema 泄漏，
+  stable loose/precomputed 输出无 Session 原型符号，当前仅 experimental precomputed bundle 有预期差异。
+- app-server 公共 JSON-RPC 场景通过 8/8，覆盖双 gate、无 state DB、不激活查询、prototype lifecycle、cold archive/unarchive、
+  loaded child/non-owner 拒绝、loaded owner mutation 与 stale precondition；client 39/39、协议 291/291、TUI 原型 7/7 通过。
+- 四份 TUI snapshot 已逐项读取并接受；fixture 的 operation/provenance 组合已与 server 实际可产生的保守投影对齐，当前无
+  pending snapshot 或 `*.snap.new`。
+- 范围内自审移除了 `loaded owner → open`、`non-owner/child-only → partial` 的 lifecycle 推断；非 archived lifecycle 现在只有显式
+  prototype input 才赋值，否则保持 `unknown/unavailable`，不再用 runtime residency 代替领域事实。修复后 server 8/8、TUI 6/6 复验通过。
+- 阶段 E 的 config schema 已串行生成并审查，差异仅为 managed/regular 两处默认关闭的
+  `experimental_session_control: boolean`；稳定 app-server schema 无 experimental Session 符号泄漏。
+- 单次完整 workspace 门禁已执行至完整汇总：checksum-verified Codex V8 入口编译成功并运行 14,380 项，14,364 通过、1 项重试后
+  通过、16 项失败、24 项跳过。16 项均位于 070 精确写集之外：8 项 Publication Critic 基线/fixture 问题、2 项 sandbox network
+  probe 环境失败、2 项 realtime 超时和 4 项 zsh-fork 超时；070 新增及聚焦门禁没有失败。
+- 独立正确性复核的第一轮两个 finding 已修复并聚焦复验：在线 Team operation 现在由 current map entry 与运行态 residency lease
+  共同保护，已停止但仍映射的 Root fail-closed；lag/disconnect/EOF 会在真实 App 事件路径立即追加 `view=stale` 的保留投影。第二轮
+  只读复核明确 PASS，没有新增 correctness finding。
+- 最终六个受影响 crate 的 `just fix` 无警告通过，随后 `just fmt` 通过；最终精确写集、生成物、snapshot 与 worktree metadata 已检查。
+- 正式资源恢复使用单 Cargo job 并五次只清理 070 可再生 `target/debug/incremental`；保留 deps/fingerprint/build/gn/V8 与产品、测试
+  二进制。用户授权的 11 个旧 eval 版本共 33 个 bundle 目录也已精确删除，四个里程碑版本保持不变。
 
 ### 当前工作
 
-- ExecPlan 已完成 protocol/server、client、TUI 与合同边界四路独立只读复核，并已收敛终审 finding；计划内容已冻结，正在完成
-  精确 diff 检查与本地提交，之后把 worktree 交给后续获授权的执行者。
+- 无；本计划已完成并冻结，全部 tracked 交付内容由本节所在的 070 本地提交承载。
 
 ### 本任务剩余步骤
 
-- 检查写集、`git diff --check` 和 worktree 元数据，提交 070 本地分支；实现工作由后续执行授权启动。
-- 后续执行者在单独实施授权下完成 A–E；本轮规划不实施产品代码。
+- 无。
 
 ### 阻塞项
 
-- 当前无规划阻塞。069 当前仅有自己的已提交 ExecPlan 且 worktree clean；实施开始时仍须重新核对，不能把这一时点事实外推为
-  未来无共享文件冲突，也不能把未进入 main 的 069 合同当作 070 前置。
+- 当前无阻塞；069 已暂停且用户已把共享 config/features/core 编辑权串行授予 070，070 未读取或吸收 069 未提交内容。
 
 ### 当前验收状态
 
-- 仅完成规划与静态源码调查，`M4_C0_PROTOTYPE_PASS` 尚未开始验收。未运行 Cargo/Rust、schema generator、Docker、真实 API/模型、
-  训练、测评、CI/PR，也未修改远端状态。
+- A–E 功能、聚焦证据、schema、完整门禁证据与独立复核均已形成，执行者结论为 `M4_C0_PROTOTYPE_PASS` 候选；完整门禁的 16 项
+  失败已定位到 070 精确写集之外并如实保留。Docker、真实 API/模型、训练、测评、CI/PR、远端状态均未使用。
 
 ### 交接边界
 
@@ -285,3 +294,12 @@ git-ignored 工作。共享构建锁和监控 target 由仓库既有 `just`/watc
 | 008 | 主实现面允许按职责复用或新建专用模块；条件 core/config 接缝只在必要时串行触碰 | 保持设计优雅，同时减少与 069 及共享生成物的并行冲突 | write set | 已采纳 |
 | 009 | 普通实现/测试/snapshot finding 可自主修复重跑，只有原则冲突或授权外扩张才暂停 | 给执行者合理调试余量，不弱化 correctness 边界 | execution | 已采纳 |
 | 010 | 实施只做本地 deterministic/fake/offline 正确性与本地提交，不使用外部资源，也不合并推送 | C0 不需要模型、API、Docker、CI/PR 或远端状态；用户保留整合批准 | resources/Git | 已采纳 |
+| 011 | 产品 opt-in 使用独立 `experimental_session_control` feature，server 与 TUI 都执行 gate | TUI 已默认声明 experimental API capability，capability 不能证明用户启用了产品原型 | feature/config | 已采纳 |
+| 012 | 在线代表操作采用 canonical Team 的 Root-only `SetRootState`，冷态代表操作复用 `thread/unarchive` | 前者可直接验证 owner/预条件，后者不加载 Root 且避免 delete/archive 的额外破坏与 shutdown 语义 | control/lifecycle | 已采纳 |
+| 013 | C0 不新增 Team notification 或通用 transport reconnect；显式权威 read 重建整份 view，connection/attachment epoch 拒绝迟到响应 | 通知只能作为失效提示，完整 reconnect 会越入 S2；C0 需要的是可重复的 stale/result-unknown 与新连接重读接缝 | client/TUI | 已采纳 |
+| 014 | 专用 optimistic Team RPC 的 invalid-request 可归为已知无副作用拒绝；既有 `thread/unarchive` 一旦提交，任何错误都归为 result unknown | Team domain 的参数、owner 与 precondition 错误是原子拒绝；通用 unarchive 可能在介质移动后才报告错误，不能安全声称未执行或重放 | client semantics | 已采纳 |
+| 015 | runtime residency 不推导 domain lifecycle；除 archived 权威事实外，只有显式 prototype input 可填 lifecycle | loaded/child/owner unavailable 只证明运行时驻留或 owner 可达性，不能证明 open、partial、closing 或其他领域状态 | projection/UI | 已采纳 |
+| 016 | operation availability 的 provenance 下沉到每个操作，不用一个聚合来源覆盖 Team 与 ThreadStore 两类事实 | track、archive、unarchive 来自不同职责边界；聚合来源会把 cold lifecycle 误标为 live owner 或反之 | protocol/projection/UI | 已采纳 |
+| 017 | 完整门禁在普通 V8 上游资产 404 后改用仓库既有 checksum-verified Codex V8 入口，并以 `CARGO_BUILD_JOBS=1` 从保留缓存完成 | 两个入口共享 build lock/watchdog/Nextest/JUnit；校验资产入口避免外部 404，单作业使内存 PSI 稳定且不改变测试语义 | validation/resources | 已采纳 |
+| 018 | live-owner operation 在 ThreadManager current-entry read lease 内取得 CodexThread 同步 residency lease；shutdown 先以 write lease 标记不可用 | 单独检查 registry 指针会让已停止但尚未移除的 Root 短暂冒充 loaded owner；同步 lease 不跨 await，也不建设第二套 runtime | core/app-server | 已采纳 |
+| 019 | lag、disconnect 与 event-stream EOF 在失效 client view 后立即把 retained projection 作为 `view=stale` 追加到 TUI 历史 | 只改变内部 gate 会让最后一份用户可见投影仍显示 fresh；保留投影既不伪造新事实，也明确要求重连/刷新 | client/TUI | 已采纳 |

@@ -161,6 +161,8 @@ pub enum Feature {
     Collab,
     /// Enable task-path-based multi-agent routing.
     MultiAgentV2,
+    /// Enable the experimental Session control product prototype.
+    ExperimentalSessionControl,
     /// Removed compatibility flag retained as a no-op.
     MultiAgentMode,
     /// Removed compatibility flag for the deleted agent-job tools.
@@ -1113,6 +1115,16 @@ pub const FEATURES: &[FeatureSpec] = &[
         id: Feature::MultiAgentV2,
         key: "multi_agent_v2",
         stage: Stage::Stable,
+        default_enabled: false,
+    },
+    FeatureSpec {
+        id: Feature::ExperimentalSessionControl,
+        key: "experimental_session_control",
+        stage: Stage::Experimental {
+            name: "Session control prototype",
+            menu_description: "Try the experimental Session discovery and control interface.",
+            announcement: "NEW: The Session control prototype is available in /experimental. Restart Codex after enabling it.",
+        },
         default_enabled: false,
     },
     FeatureSpec {

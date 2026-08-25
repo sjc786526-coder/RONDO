@@ -1185,6 +1185,21 @@ impl MessageProcessor {
             ClientRequest::ThreadRead { params, .. } => {
                 self.thread_processor.thread_read(params).await
             }
+            ClientRequest::ExperimentalSessionList { params, .. } => {
+                self.thread_processor
+                    .experimental_session_list(params)
+                    .await
+            }
+            ClientRequest::ExperimentalSessionRead { params, .. } => {
+                self.thread_processor
+                    .experimental_session_read(params)
+                    .await
+            }
+            ClientRequest::ExperimentalSessionUpdateTeamLifecycle { params, .. } => {
+                self.thread_processor
+                    .experimental_session_update_team_lifecycle(params)
+                    .await
+            }
             ClientRequest::ThreadTurnsList { params, .. } => {
                 self.thread_processor.thread_turns_list(params).await
             }

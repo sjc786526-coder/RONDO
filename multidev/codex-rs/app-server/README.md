@@ -171,6 +171,8 @@ Example with notification opt-out:
 - `threadSection/delete` — delete an existing custom section and atomically return its member threads to the unsectioned list; returns `{}`. The built-in pinned section cannot be deleted.
 - `thread/loaded/list` — list the thread ids currently loaded in memory.
 - `thread/read` — read a stored thread by id without resuming it; optionally include turns via `includeTurns`. The returned `thread` includes `status` (`ThreadStatus`), defaulting to `notLoaded` when the thread is not currently loaded. For loaded threads, experimental clients can use `canAcceptDirectInput` to determine whether `turn/start` and `turn/steer` are accepted; unloaded stored threads report `null` when that capability is unavailable.
+- `experimentalSession/list` and `experimentalSession/read` — inspect the experimental Session prototype without loading or resuming a Session. These methods require both `capabilities.experimentalApi = true` and the separate, default-disabled `experimental_session_control` product feature; see [Experimental Session control prototype](#experimental-session-control-prototype).
+- `experimentalSession/updateTeamLifecycle` — submit one optimistic Root-state transition through the currently loaded canonical Session owner. Child, non-owner, unavailable-owner, and conflicting requests fail closed. This method has the same two opt-ins as the prototype reads.
 - `thread/turns/list` — experimental; page through a stored thread’s turn history without resuming it; supports cursor-based pagination with `sortDirection`, `itemsView`, `nextCursor`, and `backwardsCursor`.
 - `thread/items/list` — experimental; page through persisted thread items without resuming the thread. Pass `turnId` to restrict results to one turn, or omit it to page items across the thread. The active thread store must support item pagination.
 - `thread/searchOccurrences` — experimental; find literal, case-insensitive matches in visible user messages and summary-selected final assistant messages within one paginated thread.
@@ -485,6 +487,47 @@ Enable `capabilities.experimentalApi` during initialization, then use `thread/li
     "data": ["thr_123", "thr_456"]
 } }
 ```
+
+### Experimental Session control prototype
+
+The `experimentalSession/*` surface is an M4-C0 prototype, not a stable Session API. A client must
+set `capabilities.experimentalApi = true` during initialization **and** the product must start with
+the separately configured, default-disabled `experimental_session_control` feature. Experimental
+API capability alone never enables the feature, and a disabled product performs no Session-control
+query or background synchronization.
+
+`experimentalSession/list` discovers only root candidates already present in the state DB and
+forces the no-repair path; it never scans rollout JSONL to fill missing metadata. If that source is
+unavailable, the response is explicitly `complete: false` with `provenance: "unavailable"`, rather
+than claiming that an empty page is authoritative. `experimentalSession/read` reads stored metadata
+without history and overlays bounded live facts only when a matching runtime is already loaded.
+Neither request obtains a writer, repairs metadata, resumes or restores a Session, or starts an
+Agent, model, or API call.
+
+Every returned view keeps these facts independent:
+
+- Session and canonical Root identity;
+- domain lifecycle;
+- owner/runtime residency;
+- per-operation availability with its own provenance; and
+- provenance for the remaining fact axes.
+
+Client freshness and mutation-result certainty are separate client synchronization state, not
+server lifecycle claims. In particular, S1 does not yet provide the durable Team read model needed
+for canonical cold-state lifecycle facts. Values supplied through `prototypeFacts` are reported as
+`prototypeInput`; `unknown`, `partial`, `closing`, or `failed` must not be rendered as a successful
+close, delete, or authority handoff.
+
+`experimentalSession/updateTeamLifecycle` can mutate only the canonical Team owned by the proved,
+currently loaded Root. It derives the actor from that live Session, requires the caller's expected
+producer and Root states, and rejects child, non-owner, unavailable-owner, stale-precondition, and
+unknown-reference requests. A transport loss after submission leaves the result unknown: clients
+must obtain a new authoritative read and must not automatically replay the non-idempotent request.
+
+Cold archive lifecycle remains on the existing authoritative `thread/archive` and
+`thread/unarchive` APIs; the prototype does not write storage directly. `thread/unarchive` restores
+the stored thread as `notLoaded` and does not resume it. Unsubscribe, view switching, or disconnect
+only changes client attachment/synchronization and does not alter Team lifecycle.
 
 ### Example: Track thread status changes
 

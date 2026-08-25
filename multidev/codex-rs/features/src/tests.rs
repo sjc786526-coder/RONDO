@@ -58,6 +58,26 @@ fn executor_capability_discovery_is_an_opt_in_map_feature() {
 }
 
 #[test]
+fn experimental_session_control_is_an_independent_product_opt_in() {
+    let spec = crate::FEATURES
+        .iter()
+        .find(|spec| spec.id == Feature::ExperimentalSessionControl)
+        .expect("Session control feature is registered");
+    assert_eq!(spec.key, "experimental_session_control");
+    assert!(matches!(spec.stage, Stage::Experimental { .. }));
+    assert!(!spec.default_enabled);
+
+    let mut features = Features::with_defaults();
+    assert!(!features.enabled(Feature::ExperimentalSessionControl));
+
+    features.apply_map(&BTreeMap::from([(
+        "experimental_session_control".to_string(),
+        true,
+    )]));
+    assert!(features.enabled(Feature::ExperimentalSessionControl));
+}
+
+#[test]
 fn default_enabled_features_are_stable() {
     for spec in crate::FEATURES {
         if spec.default_enabled {
