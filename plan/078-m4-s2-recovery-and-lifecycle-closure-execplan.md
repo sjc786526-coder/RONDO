@@ -222,24 +222,31 @@ ignored 写入例外；不得手工修改、clean 或删除该缓存。078 自�
   Git 停止边界相互一致。
 - 规划时只读实测项目总量 `169884008448` B（约 158.2 GiB）、069 target `76324540416` B（约 71.1 GiB）、Windows `C:` 可用
   `103033847808` B（约 96.0 GiB）；这些是规划快照，执行者须在每轮重型命令前后刷新，不得当作持续事实。
+- 已按上游 `4996cf05...` 的产品结果完成 `#37847` 窄适配：V2 member reload 把 inherited environment selections 显式传入
+  `StartThreadOptions`，V1、fresh root 与顶层 fork 路径不变。
+- 已把既有 `ensure_v2_agent_loaded` 回归扩展为真实 residency eviction → reload 场景，验证 inherited selection 压过 sender/default
+  fallback、恢复后的默认 turn 仍绑定该环境，且 reload 前后没有新增 thread Op。
+- 最终聚焦门禁 3/3 通过，覆盖 V2 eviction/reload、旧 root/fork environment 合同和 V1 descendant resume；`fmt-check`、`diff --check`
+  通过。独立实现审查无 high、medium 或 low finding，不要求新增测试。
 
 ### 当前工作
 
-- ExecPlan 与 WBS 窄同步已完成并通过独立计划审查，正在完成文档一致性检查与本地提交；尚未开始 `#37847` 或 S2 产品实现。
+- `#37847` 独立前置的源码、聚焦回归与独立审查已完成，正在形成独立本地提交并交由外部审查者验收；尚未开始 S2 正式实现。
 
 ### 本任务剩余步骤
 
-- 阶段 B：实现并独立验收 `#37847` 前置提交，等待用户批准进入本地 `main`。
+- 阶段 B：完成 `#37847` 前置提交的外部验收，等待用户批准进入本地 `main`。
 - 阶段 C-D：在获批消费精确最新主线后实现 S2 生命周期矩阵并完成聚焦/相称扩大门禁。
 - 阶段 E：完成 fresh 正式轮、必要的 077 兼容验收、独立终审、精炼日志与 078 本地提交。
 
 ### 阻塞项
 
-- 产品实现当前未开始。`#37847` 前置完成后存在预期的本地 main 合并授权门；这是明确的阶段边界，不是实现失败。
+- `#37847` 前置在 078 分支完成后存在预期的外部验收与本地 main 合并授权门；这是明确的阶段边界，不是实现失败。
 
 ### 当前验收状态
 
-- `PLAN_READY / IMPLEMENTATION_NOT_STARTED`。未运行 Cargo、Docker、真实 API/模型、训练、测评或外部写入。
+- `PREREQUISITE_IMPLEMENTED / LOCAL_REVIEW_PASS / MAIN_APPROVAL_PENDING`。只运行获批的聚焦 Cargo 测试；未运行 Docker、真实
+  API/模型、训练、测评、CI/PR、push 或 main 合并。
 
 ### 交接边界
 
@@ -261,3 +268,4 @@ ignored 写入例外；不得手工修改、clean 或删除该缓存。078 自�
 | 007 | 077/078 的重型批次须逐批获得用户明确批准并由用户人工调度；获批后复用 069 target、走 canonical wrapper，不新建第二个大型 target | 把串行判断留给用户，同时满足全局互斥与当前磁盘余量，避免重复约 72G 缓存 | 构建/资源 | 已采纳 |
 | 008 | detach 与 deferred idle unload 分离，idle/close/cold removal 都不能在失败时先丢唯一 owner | 即时客户端附着不是领域生命周期；S1 barrier 只有被真实 consumer 正确调用才成立 | lifecycle/authority | 已采纳 |
 | 009 | archive/unarchive 复用原生冷态能力；delete 仅在线程与 Team durable 结果均确认时 terminal，但不预定介质/事务形状 | 闭合产品结果且避免建设 takeover、补偿事务或第二套 registry | cold lifecycle | 已采纳 |
+| 010 | `#37847` 采用上游 5 行产品结果，并在现有 AgentControl fixture 中验证真实 residency 驱逐与恢复，不机械移植上游完整 mock 集成用例 | 当前 disabled/default environment 测试接缝会在协作调用前阻塞；复用既有 residency 能力更窄且直接验证目标语义 | 前置测试 | 已采纳 |

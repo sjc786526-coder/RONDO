@@ -55,6 +55,7 @@ use codex_thread_store::InMemoryThreadStore;
 use codex_thread_store::LocalThreadStore;
 use codex_thread_store::LocalThreadStoreConfig;
 use codex_thread_store::ThreadStore;
+use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_path_uri::PathUri;
 use core_test_support::responses::strip_response_item_ids;
 use pretty_assertions::assert_eq;
@@ -102,6 +103,28 @@ fn assistant_message(text: &str, phase: Option<MessagePhase>) -> ResponseItem {
         phase,
         internal_chat_message_metadata_passthrough: None,
     }
+}
+
+async fn mark_thread_completed_for_residency(thread: &CodexThread, message: &str) {
+    let turn = thread.session.new_default_turn().await;
+    thread
+        .session
+        .send_event(
+            turn.as_ref(),
+            EventMsg::TurnComplete(TurnCompleteEvent {
+                turn_id: turn.sub_id.clone(),
+                started_at: None,
+                last_agent_message: Some(message.to_string()),
+                error: None,
+                completed_at: None,
+                duration_ms: None,
+                time_to_first_token_ms: None,
+            }),
+        )
+        .await;
+    // This harness has no model task runner to clear the terminal turn and release its
+    // execution guard, so mirror the existing residency fixture's terminal transition.
+    *thread.session.active_turn.lock().await = None;
 }
 
 #[test]
@@ -878,9 +901,38 @@ async fn ensure_v2_agent_loaded_reloads_registered_unloaded_agent() {
     let (home, mut config) = test_config().await;
     let _ = config.features.enable(Feature::MultiAgentV2);
     let _ = config.features.enable(Feature::Sqlite);
+    config.multi_agent_v2.max_concurrent_threads_per_session = 2;
     config.model = Some("gpt-5.6-sol".to_string());
     let harness = AgentControlHarness::new_with_config(home, config).await;
-    let (parent_thread_id, _parent_thread) = harness.start_paginated_thread().await;
+    let selected_cwd_dir = TempDir::new().expect("create selected environment cwd");
+    let selected_cwd = AbsolutePathBuf::try_from(selected_cwd_dir.path().to_path_buf())
+        .expect("selected cwd should be absolute");
+    let selected_environment = TurnEnvironmentSelection {
+        environment_id: codex_exec_server::LOCAL_ENVIRONMENT_ID.to_string(),
+        cwd: PathUri::from_abs_path(&selected_cwd),
+        workspace_roots: vec![PathUri::from_abs_path(&selected_cwd)],
+    };
+    let parent = harness
+        .manager
+        .start_thread(StartThreadOptions {
+            history_mode: Some(ThreadHistoryMode::Paginated),
+            environments: Some(vec![selected_environment.clone()]),
+            ..StartThreadOptions::new(harness.config.clone())
+        })
+        .await
+        .expect("start paginated parent thread with selected environment");
+    let parent_thread_id = parent.thread_id;
+    assert_eq!(
+        parent
+            .thread
+            .session
+            .services
+            .turn_environments
+            .snapshot()
+            .await
+            .to_selections(),
+        vec![selected_environment.clone()],
+    );
     let agent_path = AgentPath::try_from("/root/worker").expect("agent path");
     let mut child_config = harness.config.clone();
     child_config.model = Some("gpt-5.6-luna".to_string());
@@ -915,10 +967,12 @@ async fn ensure_v2_agent_loaded_reloads_registered_unloaded_agent() {
         )])
         .await
         .expect("child rollout should persist with v2 metadata");
+    mark_thread_completed_for_residency(child_thread.as_ref(), "child persisted").await;
+    child_thread.ensure_rollout_materialized().await;
     child_thread
-        .shutdown_and_wait()
+        .flush_rollout()
         .await
-        .expect("child thread should shut down");
+        .expect("child rollout should flush before residency eviction");
     let stored_child = child_thread
         .read_thread(
             /*include_archived*/ true, /*include_history*/ false,
@@ -927,13 +981,32 @@ async fn ensure_v2_agent_loaded_reloads_registered_unloaded_agent() {
         .expect("child metadata should be readable");
     assert_eq!(stored_child.history_mode, ThreadHistoryMode::Paginated);
 
-    assert!(
-        harness
-            .manager
-            .remove_thread(&spawned_agent.thread_id)
-            .await
-            .is_some()
-    );
+    let state = harness
+        .control
+        .upgrade()
+        .expect("thread manager should remain available");
+    let replacement_slot = harness
+        .control
+        .reserve_v2_residency_slot(&state, &harness.config, /*protected_thread_id*/ None)
+        .await
+        .expect("replacement residency slot should evict the completed worker");
+    let replacement = state
+        .spawn_new_thread_with_source(
+            harness.config.clone(),
+            harness.control.clone(),
+            SessionSource::SubAgent(SubAgentSource::Other("replacement".to_string())),
+            /*history_mode*/ None,
+            Some(parent_thread_id),
+            /*forked_from_thread_id*/ None,
+            Some(ThreadSource::Subagent),
+            /*metrics_service_name*/ None,
+            /*inherited_environments*/ None,
+            /*inherited_exec_policy*/ None,
+            /*environments*/ None,
+        )
+        .await
+        .expect("spawn replacement resident");
+    replacement_slot.commit(replacement.thread_id);
     match harness.manager.get_thread(spawned_agent.thread_id).await {
         Err(err) => match err.details() {
             CodexErrorDetails::ThreadNotFound(id) => assert_eq!(*id, spawned_agent.thread_id),
@@ -941,6 +1014,8 @@ async fn ensure_v2_agent_loaded_reloads_registered_unloaded_agent() {
         },
         Ok(_) => panic!("expected thread to be removed"),
     }
+    let replacement_thread = replacement.thread;
+    mark_thread_completed_for_residency(replacement_thread.as_ref(), "replacement completed").await;
 
     let mut sender_config = harness.config.clone();
     sender_config.model_provider_id = "ollama".to_string();
@@ -949,6 +1024,10 @@ async fn ensure_v2_agent_loaded_reloads_registered_unloaded_agent() {
         .get("ollama")
         .cloned()
         .expect("ollama provider should be configured");
+    let fallback_cwd_dir = TempDir::new().expect("create sender fallback cwd");
+    sender_config.cwd = AbsolutePathBuf::try_from(fallback_cwd_dir.path().to_path_buf())
+        .expect("fallback cwd should be absolute");
+    let ops_before_reload = harness.manager.captured_ops();
 
     harness
         .control
@@ -981,6 +1060,30 @@ async fn ensure_v2_agent_loaded_reloads_registered_unloaded_agent() {
             harness.config.model_provider.clone()
         ),
         "residency reload must preserve the worker provider instead of inheriting its sender's provider",
+    );
+    assert_eq!(
+        reloaded_child
+            .config_snapshot()
+            .await
+            .environments
+            .environments,
+        vec![selected_environment.clone()],
+        "the inherited environment selection must override the sender/default fallback on reload",
+    );
+    assert_eq!(
+        reloaded_child
+            .session
+            .new_default_turn()
+            .await
+            .environments
+            .to_selections(),
+        vec![selected_environment],
+        "the reloaded worker must bind its default turn to the inherited environment",
+    );
+    assert_eq!(
+        harness.manager.captured_ops(),
+        ops_before_reload,
+        "residency reload must not submit a turn or any other thread operation",
     );
 
     let communication = InterAgentCommunication::new(
