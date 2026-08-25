@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 import hashlib
+import re
 from typing import Any
 
 from ..identity import canonical_json_bytes, sha256_bytes
@@ -34,7 +35,7 @@ VERDICTS = ("PASS", "REWRITE")
 CONFIDENCES = ("high", "medium", "low")
 MAX_REASON_CHARS = 400
 DEFAULT_BATCH_SIZE = 8
-_SPLIT_TOKENS = ("validation", "unseen", "holdout", "train", "test")
+_SPLIT_TOKENS = frozenset({"validation", "unseen", "holdout", "train", "test"})
 
 JUDGE_TASK = (
     "You are an independent reviewer of one team publication at a time. For each item, "
@@ -74,8 +75,8 @@ def build_judge_package(
         raise SelectionError("Plan 073 judge package identity is invalid")
     # Batch identifiers travel with every Judge context, so the package id is
     # part of the blinding surface and must not name the split being judged.
-    lowered = package_id.lower()
-    if any(token in lowered for token in _SPLIT_TOKENS):
+    tokens = set(re.split(r"[^a-z0-9]+", package_id.lower()))
+    if tokens & _SPLIT_TOKENS:
         raise SelectionError("Plan 073 judge package identity must not name a split")
     if type(batch_size) is not int or not 1 <= batch_size <= 32:
         raise SelectionError("Plan 073 judge batch size is invalid")

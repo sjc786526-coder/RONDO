@@ -35,6 +35,7 @@ from .decision import (
     evaluate_unseen_confirmation,
     evaluate_validation,
     validate_runtime_facts,
+    validate_unseen_confirmation,
     validate_validation_result,
 )
 from .judge import (
@@ -53,6 +54,9 @@ LATENCY_SCOPE = "offline_single_packet_model_forward_ms"
 WARMUP_ITEMS = 3
 DEFAULT_ENVIRONMENT_LOCK = "eval/environments/publication-critic-plan068/uv.lock"
 DEFAULT_DATASET_ROOT = "training/publication-critic-v8"
+DEFAULT_BUNDLE_ROOT = (
+    "eval-data/publication-critic/plan068/handoff/bundle-plan066-final-01"
+)
 
 
 def _load_json(path: Path, label: str) -> Any:
@@ -228,6 +232,7 @@ def _release(args: argparse.Namespace) -> int:
         args.repo_root / freeze["dataset"]["root"],
         args.split,
         repo_root=args.repo_root,
+        bundle_root=args.bundle_root,
         selection_lock=lock,
     )
     if release["dataset_manifest_sha256"] != freeze["dataset"]["manifest_sha256"]:
@@ -349,6 +354,35 @@ def _validate_scores(value: Any, freeze: Mapping[str, Any], release: Mapping[str
     return dict(document)
 
 
+# The tokenizer and config files every candidate is loaded with must be the same
+# object, or the three runs are not consuming one input contract.
+_SHARED_SNAPSHOT_FILES = (
+    "tokenizer.json",
+    "tokenizer_config.json",
+    "vocab.json",
+    "merges.txt",
+    "added_tokens.json",
+    "chat_template.jinja",
+    "config.json",
+)
+
+
+def _check_shared_input_identity(documents: Mapping[str, Mapping[str, Any]]) -> None:
+    recorded = {
+        candidate: document["snapshot_files_sha256"]
+        for candidate, document in documents.items()
+        if isinstance(document.get("snapshot_files_sha256"), Mapping)
+    }
+    if len(recorded) != len(documents):
+        return
+    for name in _SHARED_SNAPSHOT_FILES:
+        digests = {files.get(name) for files in recorded.values()}
+        if len(digests) != 1 or None in digests:
+            raise SelectionError(
+                "Plan 073 candidates were loaded with different tokenizer or config identity"
+            )
+
+
 def _observation(document: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "deployment_artifact_sha256": document["deployment_artifact_sha256"],
@@ -403,15 +437,16 @@ def _judge_aggregate(args: argparse.Namespace) -> int:
 # -------------------------------------------------------------- evaluate ----
 
 
-def _evaluate(args: argparse.Namespace) -> int:
-    freeze = validate_freeze(_load_json(args.freeze, "Plan 073 freeze"))
-    if freeze["mode"] == "formal":
-        verify_formal_source(args.repo_root, freeze)
-    release = validate_release(_load_json(args.release, "Plan 073 release"))
-    scores = _mapping_argument(args.score, "score")
+def _observations_from_scores(
+    values: Sequence[str],
+    freeze: Mapping[str, Any],
+    release: Mapping[str, Any],
+) -> dict[str, Any]:
+    scores = _mapping_argument(values, "score")
     if set(scores) != set(CANDIDATES):
         raise SelectionError("Plan 073 evaluation requires all three candidate scores")
-    observations = {}
+    observations: dict[str, Any] = {}
+    documents: dict[str, Mapping[str, Any]] = {}
     for candidate, path in scores.items():
         document = _validate_scores(
             _load_json(Path(path), f"Plan 073 {candidate} scores"), freeze, release
@@ -419,6 +454,17 @@ def _evaluate(args: argparse.Namespace) -> int:
         if document["candidate"] != candidate:
             raise SelectionError("Plan 073 candidate scores identity is mismatched")
         observations[candidate] = _observation(document)
+        documents[candidate] = document
+    _check_shared_input_identity(documents)
+    return observations
+
+
+def _evaluate(args: argparse.Namespace) -> int:
+    freeze = validate_freeze(_load_json(args.freeze, "Plan 073 freeze"))
+    if freeze["mode"] == "formal":
+        verify_formal_source(args.repo_root, freeze)
+    release = validate_release(_load_json(args.release, "Plan 073 release"))
+    observations = _observations_from_scores(args.score, freeze, release)
     judge = (
         _load_json(args.judge_aggregate, "Plan 073 judge aggregate")
         if args.judge_aggregate is not None
@@ -462,8 +508,18 @@ def _release_identity(release: Mapping[str, Any]) -> dict[str, Any]:
 def _lock(args: argparse.Namespace) -> int:
     freeze = validate_freeze(_load_json(args.freeze, "Plan 073 freeze"))
     verify_formal_source(args.repo_root, freeze)
+    release = validate_release(_load_json(args.release, "Plan 073 release"))
     result = _load_json(args.validation_result, "Plan 073 validation result")
-    lock = build_selection_lock(result, freeze)
+    lock = build_selection_lock(
+        result,
+        freeze,
+        release_value=release,
+        observations=_observations_from_scores(args.score, freeze, release),
+        judge_aggregate=_load_json(args.judge_aggregate, "Plan 073 judge aggregate"),
+        judge_package=_load_json(args.judge_package, "Plan 073 judge package"),
+        dataset_root=args.repo_root / freeze["dataset"]["root"],
+        bundle_root=args.bundle_root,
+    )
     _archive(args.runs_root, freeze).write_json("selection-lock.json", lock)
     return 0
 
@@ -559,11 +615,17 @@ def _report(args: argparse.Namespace) -> int:
     result = validate_validation_result(
         _load_json(args.validation_result, "Plan 073 validation result"), freeze
     )
-    confirmation = (
-        _load_json(args.unseen_confirmation, "Plan 073 unseen confirmation")
-        if args.unseen_confirmation is not None
-        else None
-    )
+    confirmation = None
+    if args.unseen_confirmation is not None:
+        if args.selection_lock is None:
+            raise SelectionError(
+                "Plan 073 report needs the selection lock that opened the confirmation"
+            )
+        confirmation = validate_unseen_confirmation(
+            _load_json(args.unseen_confirmation, "Plan 073 unseen confirmation"),
+            freeze,
+            _load_json(args.selection_lock, "Plan 073 selection lock"),
+        )
     document = {
         "schema": REPORT_SCHEMA,
         "run_id": result["run_id"],
@@ -641,6 +703,7 @@ def build_parser() -> argparse.ArgumentParser:
     release.add_argument("--freeze", type=Path, required=True)
     release.add_argument("--split", choices=SPLITS, required=True)
     release.add_argument("--selection-lock", type=Path, default=None)
+    release.add_argument("--bundle-root", type=Path, default=None)
     release.add_argument("--output", type=Path, required=True)
 
     score = subparsers.add_parser("score")
@@ -675,7 +738,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     lock = subparsers.add_parser("lock")
     lock.add_argument("--freeze", type=Path, required=True)
+    lock.add_argument("--release", type=Path, required=True)
+    lock.add_argument("--score", action="append", required=True)
+    lock.add_argument("--judge-aggregate", type=Path, required=True)
+    lock.add_argument("--judge-package", type=Path, required=True)
     lock.add_argument("--validation-result", type=Path, required=True)
+    lock.add_argument("--bundle-root", type=Path, required=True)
     lock.add_argument("--runs-root", type=Path, required=True)
 
     confirm = subparsers.add_parser("confirm")
@@ -690,6 +758,7 @@ def build_parser() -> argparse.ArgumentParser:
     report.add_argument("--freeze", type=Path, required=True)
     report.add_argument("--validation-result", type=Path, required=True)
     report.add_argument("--unseen-confirmation", type=Path, default=None)
+    report.add_argument("--selection-lock", type=Path, default=None)
     report.add_argument("--output", type=Path, required=True)
     return parser
 

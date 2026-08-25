@@ -202,21 +202,20 @@ linked worktree 不共享主根 ignored `eval-data/`。因此 Plan 073 的模型
 
 ### 当前工作
 
-- `SECOND_RE_REVIEW_FAILED / REMEDIATION_REQUIRED`：`02759ae` 拒绝了浅层伪造，但流式 reader 仍打开并解析 mixed-split v8，
-  result validator 仍由同一份 result 自证，且 report 未校验 unseen confirmation；详见
-  `agent_log/2026-08-25-022511-plan073-remediation-reacceptance-review.md`。正式 `NO-GO` 质量事实保留。
+- `REMEDIATED_R2_AWAITING_RE_REVIEW`：复验（`71525eb`）判定两个原阻塞项未完整关闭，两项均属实并已再次窄修复验；
+  正式 `NO-GO`、指标与冻结底线不变。
 
 ### 本任务剩余步骤
 
-- validation 改用物理上不含 unseen body 的冻结输入，并复用相称的跨行/omission 校验；测试证明成功路径不打开或 decode unseen-bearing 源。
-- 构锁时从真实 validation release、三份 raw scores、Judge package/aggregate 复用 evaluator 重算，并与 result canonical equality；
-  aggregate/package 成对必需。report 的 unseen confirmation 必须验证并绑定 freeze、selection lock 与 locked combination。
-- 统一 Judge split 泄漏表述，运行 pure/focused 复验和现有 archive 轻量重建；不重跑模型或 Opus。
+- 无代码剩余。第二轮整改：validation 改从 Plan 066 `train+validation` 冻结 bundle（物理上 0 条 unseen）读取，
+  混合 v8 只在有效 lock 下为 unseen 打开；`build_selection_lock()` 先用冻结数据重建 release 并要求相等，再用真实
+  release/三份 raw score/Judge package+aggregate 重算并要求与待锁 result 逐字节相等；`report` 的 unseen confirmation
+  必须绑定 freeze+lock+locked combination 并从自带 rows 重算。
+- 仅剩文档同步（本节、`agent_log` 第二轮整改小节、tracked 结果说明），已随本轮提交完成。
 
 ### 阻塞项
 
-- lock 前仍读取 unseen-bearing 混合源；selection lock/report 仍未绑定真实 run 输入。这两项关闭前 task branch 不得合并。
-- 重型资源已释放；整改不需要 Docker、重型 Cargo、付费 API、远端资源或新的真实模型/Judge 运行。
+- 无。第二轮整改未加载模型、未运行 Cargo/Docker/Opus、未释放 unseen。
 
 ### 当前验收状态
 

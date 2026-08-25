@@ -99,6 +99,36 @@ scoring 不完整（typed failure 或行数不足）在 validation 与 unseen co
 正式结论不变：`NO-GO`，不生成 selection lock，不释放 unseen，不解锁 M3-D，Publication Critic 保持 default-off。
 整改只收紧门禁与校验，不改变任何指标定义、冻结底线或候选证据。
 
+## 复验整改（第二轮）
+
+复验（`71525eb`）判定第一轮整改未完整关闭两个原阻塞项，两条都属实：
+
+1. **流式 reader 仍会解析 unseen。** 第一轮只做到"不保留"，每条 unseen row 仍被 `json.loads` 进入进程，
+   `verify_freeze_manifest` 还会哈希读取全部混合文件。本轮改为：validation 从 Plan 066 `train+validation` 冻结 bundle
+   读取——该资产物理上 0 条 unseen row、0 个 unseen body file，已用全文扫描确认 45 个 unseen id 一个都不出现；
+   混合 v8 只在有效 lock 下为 unseen 打开。bundle 经 `bundle-manifest.json` 的 `content_sha256`、数据文件 size+sha256、
+   `boundaries.unseen_test_rows/body_files == 0` 与 `source.v8_manifest_file_sha256` 四重校验绑定到同一冻结 v8。
+   跨行完整性不再降级：train+validation 行仍交给既有 `DatasetConsumer`，packet/supervision 投影、pair 语义与
+   omission 可应用性校验全部照常运行。回归用 `Path.open/read_text/read_bytes` 访问 spy 证明 validation 成功路径
+   从未打开四个混合数据文件中的任何一个。
+2. **lock 仍由 result 自证。** 复验演示：真实 freeze + 一份仅声明冻结 manifest hash 的 24 行合成 release，
+   即可走完 `SELECTED` 并开出 lock。本轮 `build_selection_lock()` 先用冻结数据重建 validation release 并要求
+   与传入 release 逐字节相等，再用真实 release + 三份 raw score + Judge package/aggregate 重算，要求与待锁 result
+   逐字节相等。合成 release 与手改 result 两条路径现在都被拒绝，并各有回归。
+
+一并处理：`report --unseen-confirmation` 现在必须同时给出 `--selection-lock`，并经
+`validate_unseen_confirmation()` 校验 freeze/lock/locked combination 绑定后从自带 rows 重算 confusion/AUC/gates/terminal；
+Judge aggregate 与 package 必须成对出现（缺 package 直接拒绝）；split 词改为分隔 token 判断，不再误伤 `contest/latest`；
+三份 score 的 snapshot 摘要若都记录，则校验 tokenizer/config 身份一致。
+
+复验（未加载模型、未跑 Cargo/Docker/Opus、未释放 unseen）：
+
+- bundle 重建的 validation release 与归档逐字节相同（`757dd624…`）。
+- 归档 raw + Judge package 绑定重算 result 与归档逐字节相同（`2b36eb4b…`），通过严格校验器，terminal 仍为 `NO_GO`。
+- tracked JSON 重新生成仍为 `f97fcdcc78c9932dd96eb17c419ef29bf574649d7b67c1c497e861daa2eee8e4`。
+- 测试：Plan 073 focused `55/55`；全部 `test_publication_critic*.py` 共 `312` 项通过、`1` 项 skip
+  （skip 为 bundle 不在本机时的 Plan 073 隔离用例）。
+
 ## 交接建议
 
 `NO-GO` 只关闭"从现有三个候选中选出可发布模型"这条路，不解锁 M3-D，也不改变 Publication Critic 默认关闭状态。证据同时给出两条

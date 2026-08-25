@@ -8,8 +8,10 @@ a fixed lexicographic order, and every floor must hold on its own.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import Any
 
+from ..contract import REPO_ROOT
 from ..identity import canonical_json_bytes, sha256_bytes
 from .contract import (
     CANDIDATES,
@@ -44,7 +46,7 @@ from .metrics import (
     roc_auc,
     select_threshold,
 )
-from .release import release_sha256, validate_release
+from .release import build_split_release, release_sha256, validate_release
 
 
 VALIDATION_SCHEMA = "rondo-publication-critic-plan073-validation-result-v1"
@@ -149,8 +151,10 @@ def _bind_judge_package(
 ) -> None:
     """Tie a judge aggregate to the exact package that was sent out."""
 
-    if aggregate is None:
-        raise SelectionError("Plan 073 judge package binding needs a judge aggregate")
+    if aggregate is None or package_value is None:
+        raise SelectionError(
+            "Plan 073 judge evidence needs both the aggregate and its package"
+        )
     package = validate_package(package_value)
     digest = package_sha256(package)
     if validate_aggregate(aggregate)["package_sha256"] != digest:
@@ -221,7 +225,9 @@ def evaluate_validation(
         raise SelectionError("Plan 073 validation release is not the frozen dataset")
     if set(observations) != set(CANDIDATES):
         raise SelectionError("Plan 073 validation requires all three candidates")
-    if judge_package is not None:
+    if judge_aggregate is not None or judge_package is not None:
+        # Judge evidence is only usable as a matched pair: an aggregate that
+        # cannot be tied back to the package that was sent out proves nothing.
         _bind_judge_package(judge_aggregate, judge_package, release)
 
     protocol = freeze["protocol"]
@@ -350,7 +356,7 @@ def _validation_terminal(
 
 
 def _rows_from_report(report: Mapping[str, Any]) -> tuple[LabeledRow, ...]:
-    """Rebuild scoring rows from a reported result, for independent recomputation."""
+    """Rebuild scoring rows from a reported document, for recomputation."""
 
     rows = report["metrics"]["rows"]
     if not isinstance(rows, list) or not rows:
@@ -512,11 +518,46 @@ def validate_validation_result(
 def build_selection_lock(
     validation_result: Mapping[str, Any],
     freeze_value: Any,
+    *,
+    release_value: Any,
+    observations: Mapping[str, Any],
+    judge_aggregate: Any,
+    judge_package: Any,
+    dataset_root: Path,
+    bundle_root: Path,
 ) -> dict[str, Any]:
-    """Turn a ``SELECTED`` validation result into the one artifact unseen needs."""
+    """Turn a ``SELECTED`` validation result into the one artifact unseen needs.
+
+    The lock is never granted on a document's own say-so.  The release is rebuilt
+    from the frozen dataset and must match the one supplied, the whole comparison
+    is recomputed from that release plus the three raw score sets and the Judge
+    package and aggregate actually used, and the result being locked must equal
+    that recomputation exactly.  A hand-written release or result therefore
+    cannot open unseen-test, however self-consistent it is.
+    """
 
     freeze = validate_freeze(freeze_value)
-    validation_result = validate_validation_result(validation_result, freeze)
+    release = validate_release(release_value)
+    rebuilt_release = build_split_release(
+        dataset_root,
+        "validation",
+        repo_root=REPO_ROOT,
+        bundle_root=bundle_root,
+    )
+    if release_sha256(rebuilt_release) != release_sha256(release):
+        raise SelectionError(
+            "Plan 073 selection lock requires the validation release the frozen "
+            "dataset actually produces"
+        )
+    recomputed = evaluate_validation(
+        freeze, release, observations, judge_aggregate, judge_package
+    )
+    if canonical_json_bytes(recomputed) != canonical_json_bytes(dict(validation_result)):
+        raise SelectionError(
+            "Plan 073 selection lock requires the result to match a recomputation "
+            "from the release, raw scores and Judge evidence it claims"
+        )
+    validation_result = validate_validation_result(recomputed, freeze)
     if validation_result["mode"] != "formal":
         raise SelectionError("Plan 073 selection lock requires a formal validation run")
     if validation_result["terminal"] != "SELECTED":
@@ -601,28 +642,7 @@ def evaluate_unseen_confirmation(
         else None
     )
 
-    overall = metrics["overall"]
-    failures = [
-        name
-        for name, failed in (
-            (
-                "false_pass_floor_failed",
-                overall["false_pass_rate"] is None
-                or overall["false_pass_rate"] > floors["max_false_pass_rate"],
-            ),
-            (
-                "false_rewrite_floor_failed",
-                overall["false_rewrite_rate"] is None
-                or overall["false_rewrite_rate"] > floors["max_false_rewrite_rate"],
-            ),
-            (
-                "balanced_accuracy_floor_failed",
-                overall["balanced_accuracy"] is None
-                or overall["balanced_accuracy"] < floors["min_balanced_accuracy"],
-            ),
-        )
-        if failed
-    ]
+    failures = _floor_failures(metrics["overall"], floors)
     failures += _quality_gate_failures(
         {"feasible": True}, metrics, int(facts["typed_failure_count"]), floors
     )
@@ -654,6 +674,108 @@ def evaluate_unseen_confirmation(
         "reasons": reasons,
         "scope_note": "single_blind_confirmation_of_one_locked_combination",
     }
+
+
+def validate_unseen_confirmation(
+    value: Any,
+    freeze_value: Any,
+    lock_value: Any,
+) -> dict[str, Any]:
+    """Accept a confirmation only if it is bound to the lock and re-derives."""
+
+    freeze = validate_freeze(freeze_value)
+    lock = validate_lock(lock_value)
+    result = require_object(value, "Plan 073 unseen confirmation")
+    require_exact_keys(
+        result,
+        {
+            "schema",
+            "mode",
+            "run_id",
+            "method",
+            "selection_lock_sha256",
+            "selection_freeze_sha256",
+            "release_sha256",
+            "locked_combination",
+            "cohort",
+            "metrics",
+            "runtime",
+            "judge",
+            "judge_agreement",
+            "failed_gates",
+            "terminal",
+            "reasons",
+            "scope_note",
+        },
+        "Plan 073 unseen confirmation",
+    )
+    if (
+        result["schema"] != UNSEEN_SCHEMA
+        or result["mode"] != "formal"
+        or result["method"] != SELECTION_METHOD["unseen_confirmation"]
+        or result["run_id"] != lock["run_id"]
+        or result["selection_lock_sha256"] != lock_sha256(lock)
+        or result["selection_freeze_sha256"] != freeze_sha256(freeze)
+        or result["locked_combination"] != dict(lock["selected"])
+    ):
+        raise SelectionError("Plan 073 unseen confirmation is not bound to this lock")
+    require_sha256(result["release_sha256"], "Plan 073 confirmation release")
+
+    protocol = freeze["protocol"]
+    floors = protocol["quality_floors"]
+    threshold = float(lock["selected"]["threshold"]["projected_score"])
+    metrics = result["metrics"]
+    if metrics["threshold"] != threshold:
+        raise SelectionError("Plan 073 confirmation did not use the locked threshold")
+    rows = _rows_from_report(result)
+    if confusion_at(rows, threshold) != metrics["overall"]["confusion"]:
+        raise SelectionError("Plan 073 confirmation confusion is not reproducible")
+    if roc_auc(rows) != metrics["roc_auc"]:
+        raise SelectionError("Plan 073 confirmation separability is not reproducible")
+
+    facts = validate_runtime_facts(result["runtime"], "Plan 073 confirmation runtime")
+    if facts["typed_failure_count"] or facts["scored_count"] != len(rows):
+        raise SelectionError("Plan 073 confirmation scoring is incomplete")
+    failures = _floor_failures(metrics["overall"], floors)
+    failures += _quality_gate_failures(
+        {"feasible": True}, metrics, int(facts["typed_failure_count"]), floors
+    )
+    failures += _runtime_gate_failures(facts, protocol["runtime_gates"])
+    if list(result["failed_gates"]) != failures:
+        raise SelectionError("Plan 073 confirmation gates do not follow its evidence")
+    terminal, reasons = _confirmation_terminal(
+        failures, result["judge"], result["judge_agreement"], protocol
+    )
+    if result["terminal"] != terminal or list(result["reasons"]) != reasons:
+        raise SelectionError("Plan 073 confirmation terminal does not follow its evidence")
+    return dict(result)
+
+
+def _floor_failures(
+    overall: Mapping[str, Any],
+    floors: Mapping[str, Any],
+) -> list[str]:
+    return [
+        name
+        for name, failed in (
+            (
+                "false_pass_floor_failed",
+                overall["false_pass_rate"] is None
+                or overall["false_pass_rate"] > floors["max_false_pass_rate"],
+            ),
+            (
+                "false_rewrite_floor_failed",
+                overall["false_rewrite_rate"] is None
+                or overall["false_rewrite_rate"] > floors["max_false_rewrite_rate"],
+            ),
+            (
+                "balanced_accuracy_floor_failed",
+                overall["balanced_accuracy"] is None
+                or overall["balanced_accuracy"] < floors["min_balanced_accuracy"],
+            ),
+        )
+        if failed
+    ]
 
 
 def _confirmation_terminal(
@@ -691,5 +813,6 @@ __all__ = [
     "evaluate_validation",
     "require_sha256",
     "validate_runtime_facts",
+    "validate_unseen_confirmation",
     "validate_validation_result",
 ]

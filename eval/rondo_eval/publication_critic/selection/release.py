@@ -1,10 +1,10 @@
 """Split releases for Plan 073, and the gate that keeps unseen-test sealed.
 
-A release is the only input the scoring and judging steps ever read.  Building
-a ``validation`` release needs nothing beyond the frozen dataset; building an
-``unseen_test`` release needs a valid selection lock.  Running the model and the
-Judge from a release therefore means those processes physically never hold the
-unseen bodies before the lock exists.
+A release is the only input the scoring and judging steps ever read.  Which
+source a split may be read from, and what authorises it, belongs to
+``dataset_source``: validation comes from an unseen-free frozen bundle, and the
+mixed frozen dataset is only opened for an unseen-test release under a valid
+selection lock.
 """
 
 from __future__ import annotations
@@ -60,19 +60,21 @@ def build_split_release(
     split: str,
     *,
     repo_root: Path,
+    bundle_root: Path | None = None,
     selection_lock: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Release exactly one frozen split; unseen-test requires a valid lock.
 
-    The split-scoped reader owns the gate and never materialises a split it was
-    not asked for, so building a validation release cannot put unseen-test
-    content into this process in the first place.
+    The reader owns both the gate and the choice of source: validation comes
+    from a frozen bundle that physically holds no unseen row, and only an
+    unseen-test release ever opens the mixed frozen dataset.
     """
 
     source = load_split(
         dataset_root,
         split,
         repo_root=repo_root,
+        bundle_root=bundle_root,
         selection_lock=selection_lock,
     )
     members = source.candidate_ids

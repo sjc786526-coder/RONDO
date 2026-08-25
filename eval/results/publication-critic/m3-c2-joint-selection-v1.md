@@ -102,12 +102,17 @@ The result is exactly recomputable: `evaluate_validation` rebuilt from the archi
 release, per-candidate scores and Judge aggregate reproduces the archived result byte for byte.
 
 Two boundary defects found in independent acceptance were fixed after this run and re-verified
-against the same archived evidence, which reproduces unchanged. First, the release builder used
-the whole-dataset consumer, so it loaded all three splits before filtering down to validation —
-no unseen content reached any release, score, Judge package, archive or tracked result, but the
-process did hold it; releases are now built by a split-scoped reader that discards non-members as
-it streams. Second, a hand-edited `SELECTED` result could open unseen-test; the lock now requires
-the threshold, confusion, separability, admission, ranking and terminal to re-derive from the
-scored rows the document itself carries. The Judge package identifier for this run also contained
-the literal `validation`; that names the split but reveals no answer, and package identifiers may
-no longer name a split.
+against the same archived evidence, which reproduces unchanged.
+
+First, the release builder loaded the whole frozen dataset before filtering down to validation.
+No unseen content reached any release, score, Judge package, archive or tracked result, but the
+process did parse it. Validation is now read from the Plan 066 `train+validation` bundle, a frozen
+asset that physically contains no unseen row; the mixed dataset is only opened for an unseen-test
+release under a valid lock. Second, a `SELECTED` result could open unseen-test on its own say-so.
+Locking now rebuilds the validation release from the frozen dataset and requires it to match, then
+recomputes the whole comparison from that release, the three raw score sets and the Judge package
+and aggregate, and requires the result being locked to equal that recomputation exactly.
+
+On Judge blinding, this run's item contents carried no reference label, pair direction, model
+identity or score, but the package identifier did contain the literal `validation`: it names the
+split without revealing any answer. Package identifiers may no longer name a split.

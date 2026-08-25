@@ -20,6 +20,7 @@ from rondo_eval.publication_critic.training_data.consumer import (  # noqa: E402
 from rondo_eval.publication_critic.identity import (  # noqa: E402
     canonical_json_bytes,
     sha256_bytes,
+    sha256_file,
 )
 from rondo_eval.publication_critic.selection.archive import SelectionArchive  # noqa: E402
 from rondo_eval.publication_critic.selection.contract import (  # noqa: E402
@@ -38,6 +39,7 @@ from rondo_eval.publication_critic.selection.decision import (  # noqa: E402
     build_selection_lock,
     evaluate_unseen_confirmation,
     evaluate_validation,
+    validate_unseen_confirmation,
     validate_validation_result,
 )
 from rondo_eval.publication_critic.selection import judge as judge_module  # noqa: E402
@@ -71,7 +73,17 @@ from rondo_eval.publication_critic.selection.release import (  # noqa: E402
 )
 
 V8_ROOT = REPO_ROOT / "training" / "publication-critic-v8"
-MANIFEST_SHA256 = "0" * 63 + "1"
+# The Plan 066 train+validation bundle is a local ignored asset in the main
+# physical root; the mixed v8 tree is tracked and always present.
+BUNDLE_ROOT = (
+    Path("/home/sjc/desktop/RONDO/eval-data/publication-critic/plan068/handoff")
+    / "bundle-plan066-final-01"
+)
+MIXED_V8_BODY_FILES = tuple(
+    V8_ROOT / name
+    for name in ("packets.jsonl", "supervision.jsonl", "pairs.jsonl", "token-census.jsonl")
+)
+MANIFEST_SHA256 = sha256_file(V8_ROOT / "manifest.json")
 ARTIFACTS = {"base": "a" * 64, "c1": "b" * 64, "c3": "c" * 64}
 
 
@@ -210,6 +222,29 @@ def _freeze(mode: str = "formal") -> dict[str, object]:
     )
 
 
+_PACKAGES: dict[str, dict[str, object]] = {}
+
+
+def _evaluate(freeze, release, observations, aggregate=None):
+    """Evaluate with the Judge package that matches the aggregate."""
+
+    package = None if aggregate is None else _PACKAGES[aggregate["package_id"]]
+    return evaluate_validation(freeze, release, observations, aggregate, package)
+
+
+def _lock(result, freeze, release, observations, aggregate, **overrides):
+    arguments = {
+        "release_value": release,
+        "observations": observations,
+        "judge_aggregate": aggregate,
+        "judge_package": _PACKAGES[aggregate["package_id"]],
+        "dataset_root": V8_ROOT,
+        "bundle_root": BUNDLE_ROOT,
+    }
+    arguments.update(overrides)
+    return build_selection_lock(result, freeze, **arguments)
+
+
 def _judge(
     release: dict[str, object],
     *,
@@ -224,6 +259,7 @@ def _judge(
         package_id=package_id,
         batch_size=4,
     )
+    _PACKAGES[package["package_id"]] = package
     labels = {
         row["candidate_id"]: row["binary_label"] for row in release["supervision"]
     }
@@ -258,9 +294,15 @@ def _judge(
     return package, mapping, responses
 
 
+@unittest.skipUnless(
+    (BUNDLE_ROOT / "bundle-manifest.json").is_file(),
+    "the Plan 066 train+validation bundle is not present locally",
+)
 class SplitReleaseTest(unittest.TestCase):
     def test_validation_release_of_the_frozen_dataset_is_open(self) -> None:
-        release = build_split_release(V8_ROOT, "validation", repo_root=REPO_ROOT)
+        release = build_split_release(
+            V8_ROOT, "validation", repo_root=REPO_ROOT, bundle_root=BUNDLE_ROOT
+        )
         self.assertEqual(release["split"], "validation")
         self.assertEqual(len(release["items"]), 55)
         self.assertEqual(
@@ -287,6 +329,7 @@ class SplitReleaseTest(unittest.TestCase):
                 V8_ROOT,
                 "validation",
                 repo_root=REPO_ROOT,
+                bundle_root=BUNDLE_ROOT,
                 selection_lock=_locked(_freeze()),
             )
 
@@ -300,8 +343,12 @@ class SplitReleaseTest(unittest.TestCase):
             validate_release(release)
 
 
+@unittest.skipUnless(
+    (BUNDLE_ROOT / "bundle-manifest.json").is_file(),
+    "the Plan 066 train+validation bundle is not present locally",
+)
 class UnseenContainmentTest(unittest.TestCase):
-    """The validation path must not be able to open unseen-bearing rows."""
+    """Validation must be read from an asset that holds no unseen row at all."""
 
     def setUp(self) -> None:
         supervision = [
@@ -315,8 +362,39 @@ class UnseenContainmentTest(unittest.TestCase):
         }
         self.assertTrue(self.unseen_ids)
 
-    def test_validation_source_never_retains_an_unseen_row(self) -> None:
-        source = load_split(V8_ROOT, "validation", repo_root=REPO_ROOT)
+    def _recorded_reads(self, run) -> tuple[set[str], object]:
+        """Run something while recording every file path it opens."""
+
+        opened: set[str] = set()
+
+        def spy(method):
+            def wrapper(self, *args, **kwargs):
+                opened.add(str(self))
+                return method(self, *args, **kwargs)
+
+            return wrapper
+
+        with mock.patch.object(Path, "open", spy(Path.open)), mock.patch.object(
+            Path, "read_text", spy(Path.read_text)
+        ), mock.patch.object(Path, "read_bytes", spy(Path.read_bytes)):
+            result = run()
+        return opened, result
+
+    def test_validation_never_opens_a_mixed_dataset_body_file(self) -> None:
+        opened, release = self._recorded_reads(
+            lambda: build_split_release(
+                V8_ROOT, "validation", repo_root=REPO_ROOT, bundle_root=BUNDLE_ROOT
+            )
+        )
+        touched = {Path(path).resolve() for path in opened}
+        mixed = {path.resolve() for path in MIXED_V8_BODY_FILES}
+        self.assertEqual(touched & mixed, set())
+        self.assertEqual(len(release["items"]), 55)
+
+    def test_validation_source_holds_no_unseen_identifier(self) -> None:
+        source = load_split(
+            V8_ROOT, "validation", repo_root=REPO_ROOT, bundle_root=BUNDLE_ROOT
+        )
         held = set(source.packets) | set(source.supervision) | set(
             source.dropped_oldest_publications
         )
@@ -324,16 +402,11 @@ class UnseenContainmentTest(unittest.TestCase):
             held.add(str(row["preferred_candidate_id"]))
             held.add(str(row["dispreferred_candidate_id"]))
         self.assertEqual(held & self.unseen_ids, set())
-        self.assertEqual(len(source.packets), 55)
+        self.assertEqual(source.origin, "plan066-train-validation-bundle-v1")
 
-    def test_validation_path_does_not_use_the_whole_dataset_consumer(self) -> None:
-        with mock.patch.object(
-            DatasetConsumer,
-            "from_frozen_directory",
-            side_effect=AssertionError("the whole-dataset consumer must not be used"),
-        ):
-            release = build_split_release(V8_ROOT, "validation", repo_root=REPO_ROOT)
-        self.assertEqual(len(release["items"]), 55)
+    def test_validation_without_the_unseen_free_bundle_is_refused(self) -> None:
+        with self.assertRaises(SelectionError):
+            load_split(V8_ROOT, "validation", repo_root=REPO_ROOT)
 
     def test_split_source_gate_matches_the_release_gate(self) -> None:
         with self.assertRaises(SelectionError):
@@ -343,6 +416,7 @@ class UnseenContainmentTest(unittest.TestCase):
                 V8_ROOT,
                 "validation",
                 repo_root=REPO_ROOT,
+                bundle_root=BUNDLE_ROOT,
                 selection_lock=_locked(_freeze()),
             )
 
@@ -424,8 +498,14 @@ class JudgeExchangeTest(unittest.TestCase):
             sorted(row["candidate_id"] for row in self.release["supervision"]),
         )
 
+    @unittest.skipUnless(
+        (BUNDLE_ROOT / "bundle-manifest.json").is_file(),
+        "the Plan 066 train+validation bundle is not present locally",
+    )
     def test_real_validation_package_carries_no_dataset_identifier(self) -> None:
-        release = build_split_release(V8_ROOT, "validation", repo_root=REPO_ROOT)
+        release = build_split_release(
+            V8_ROOT, "validation", repo_root=REPO_ROOT, bundle_root=BUNDLE_ROOT
+        )
         package, mapping, _ = _judge(release, package_id="plan073-live")
         bodies = json.dumps(package, ensure_ascii=False)
         # v8 candidate ids encode the pair direction (``-qplus`` / ``-qminus``).
@@ -520,17 +600,21 @@ def _validation_release() -> dict[str, object]:
     )
 
 
-def _locked(freeze: dict[str, object]) -> dict[str, object]:
-    release = _validation_release()
-    package, mapping, responses = _judge(release)
-    aggregate = aggregate_batches(package, mapping, responses)
-    result = evaluate_validation(
-        freeze,
-        release,
-        _observations(release, {"base": 3, "c1": 1, "c3": 0}),
-        aggregate,
+def _frozen_validation_release() -> dict[str, object]:
+    return build_split_release(
+        V8_ROOT, "validation", repo_root=REPO_ROOT, bundle_root=BUNDLE_ROOT
     )
-    return build_selection_lock(result, freeze)
+
+
+def _locked(freeze: dict[str, object]) -> dict[str, object]:
+    """A real lock: the release is the one the frozen dataset produces."""
+
+    release = _frozen_validation_release()
+    package, mapping, responses = _judge(release, package_id="plan073-anchor")
+    aggregate = aggregate_batches(package, mapping, responses)
+    observations = _observations(release, {"base": 0, "c1": 0, "c3": 0})
+    result = _evaluate(freeze, release, observations, aggregate)
+    return _lock(result, freeze, release, observations, aggregate)
 
 
 class ValidationSelectionTest(unittest.TestCase):
@@ -541,7 +625,7 @@ class ValidationSelectionTest(unittest.TestCase):
         self.aggregate = aggregate_batches(package, mapping, responses)
 
     def test_lower_false_pass_wins_before_any_other_key(self) -> None:
-        result = evaluate_validation(
+        result = _evaluate(
             self.freeze,
             self.release,
             _observations(self.release, {"base": 3, "c1": 1, "c3": 0}),
@@ -554,7 +638,7 @@ class ValidationSelectionTest(unittest.TestCase):
         self.assertEqual(result["schema"], VALIDATION_SCHEMA)
 
     def test_equal_evidence_prefers_the_earlier_lineage_stage(self) -> None:
-        result = evaluate_validation(
+        result = _evaluate(
             self.freeze,
             self.release,
             _observations(self.release, {"base": 0, "c1": 0, "c3": 0}),
@@ -564,7 +648,7 @@ class ValidationSelectionTest(unittest.TestCase):
         self.assertEqual(result["ranking"], ["base", "c1", "c3"])
 
     def test_no_admissible_candidate_is_a_no_go_and_keeps_unseen_sealed(self) -> None:
-        result = evaluate_validation(
+        result = _evaluate(
             self.freeze,
             self.release,
             _observations(self.release, {"base": 9, "c1": 9, "c3": 9}),
@@ -573,10 +657,16 @@ class ValidationSelectionTest(unittest.TestCase):
         self.assertEqual(result["terminal"], "NO_GO")
         self.assertIsNone(result["selected"])
         with self.assertRaises(SelectionError):
-            build_selection_lock(result, self.freeze)
+            _lock(
+                result,
+                self.freeze,
+                self.release,
+                _observations(self.release, {"base": 9, "c1": 9, "c3": 9}),
+                self.aggregate,
+            )
 
     def test_runtime_gate_failure_removes_a_candidate_without_ranking_it(self) -> None:
-        result = evaluate_validation(
+        result = _evaluate(
             self.freeze,
             self.release,
             _observations(
@@ -593,7 +683,7 @@ class ValidationSelectionTest(unittest.TestCase):
         self.assertEqual(result["selected"], "c1")
 
     def test_missing_judge_evidence_is_inconclusive(self) -> None:
-        result = evaluate_validation(
+        result = _evaluate(
             self.freeze,
             self.release,
             _observations(self.release, {"base": 3, "c1": 1, "c3": 0}),
@@ -607,7 +697,7 @@ class ValidationSelectionTest(unittest.TestCase):
             self.release, package_id="plan073-noisy", reference_flips=16
         )
         noisy = aggregate_batches(package, mapping, responses)
-        result = evaluate_validation(
+        result = _evaluate(
             self.freeze,
             self.release,
             _observations(self.release, {"base": 3, "c1": 1, "c3": 0}),
@@ -631,7 +721,7 @@ class ValidationSelectionTest(unittest.TestCase):
         for candidate_id in judge_errors:
             row = aggregate["verdicts"][candidate_id]
             row["verdict"] = "REWRITE" if row["verdict"] == "PASS" else "PASS"
-        result = evaluate_validation(
+        result = _evaluate(
             self.freeze,
             self.release,
             _observations(self.release, {"base": 3, "c1": 3, "c3": 3}),
@@ -651,7 +741,7 @@ class ValidationSelectionTest(unittest.TestCase):
             model_identities=["claude-sonnet-5"],
         )
         foreign = aggregate_batches(package, mapping, responses)
-        result = evaluate_validation(
+        result = _evaluate(
             self.freeze,
             self.release,
             _observations(self.release, {"base": 3, "c1": 1, "c3": 0}),
@@ -669,7 +759,7 @@ class ValidationSelectionTest(unittest.TestCase):
         evaluate_validation(
             self.freeze, self.release, observations, aggregate, package
         )
-        other, other_mapping, other_responses = _judge(
+        other, _other_mapping, _other_responses = _judge(
             self.release, package_id="plan073-elsewhere"
         )
         self.assertNotEqual(other["package_id"], package["package_id"])
@@ -677,12 +767,15 @@ class ValidationSelectionTest(unittest.TestCase):
             evaluate_validation(
                 self.freeze, self.release, observations, aggregate, other
             )
+        # An aggregate with no package at all is refused as well.
+        with self.assertRaises(SelectionError):
+            evaluate_validation(self.freeze, self.release, observations, aggregate)
 
     def test_incomplete_scoring_is_refused_rather_than_ranked(self) -> None:
         observations = _observations(self.release, {"base": 0, "c1": 0, "c3": 0})
         observations["c1"]["runtime"]["typed_failure_count"] = 1
         with self.assertRaises(SelectionError):
-            evaluate_validation(
+            _evaluate(
                 self.freeze, self.release, observations, self.aggregate
             )
 
@@ -690,14 +783,14 @@ class ValidationSelectionTest(unittest.TestCase):
         observations = _observations(self.release, {"base": 0, "c1": 0, "c3": 0})
         observations["c1"]["deployment_artifact_sha256"] = "9" * 64
         with self.assertRaises(SelectionError):
-            evaluate_validation(
+            _evaluate(
                 self.freeze, self.release, observations, self.aggregate
             )
 
     def test_validation_requires_the_validation_split(self) -> None:
         unseen = _release("unseen_test", ["PASS", "REWRITE"], lock_sha="d" * 64)
         with self.assertRaises(SelectionError):
-            evaluate_validation(
+            _evaluate(
                 self.freeze, unseen, _observations(unseen, {c: 0 for c in CANDIDATES}), self.aggregate
             )
 
@@ -709,38 +802,45 @@ class SelectionLockTest(unittest.TestCase):
 
     def test_lock_names_one_indivisible_combination(self) -> None:
         validate_lock(self.lock)
-        self.assertEqual(self.lock["selected"]["candidate"], "c3")
+        # All three are equally admissible here, so the frozen final tie-break
+        # picks the earliest lineage stage.
+        self.assertEqual(self.lock["selected"]["candidate"], "base")
         self.assertEqual(
-            self.lock["selected"]["deployment_artifact_sha256"], ARTIFACTS["c3"]
+            self.lock["selected"]["deployment_artifact_sha256"], ARTIFACTS["base"]
         )
         self.assertEqual(self.lock["selected"]["runtime"], default_runtime())
         self.assertTrue(self.lock["unseen_release_authorized"])
+
+    def test_lock_refuses_a_release_the_frozen_dataset_did_not_produce(self) -> None:
+        # A synthetic release that merely claims the frozen manifest hash, with
+        # matching scores and Judge evidence, is still not the frozen cohort.
+        release = _validation_release()
+        self.assertEqual(release["dataset_manifest_sha256"], MANIFEST_SHA256)
+        package, mapping, responses = _judge(release, package_id="plan073-fabricated")
+        aggregate = aggregate_batches(package, mapping, responses)
+        observations = _observations(release, {"base": 0, "c1": 0, "c3": 0})
+        result = _evaluate(self.freeze, release, observations, aggregate)
+        self.assertEqual(result["terminal"], "SELECTED")
+        with self.assertRaises(SelectionError):
+            _lock(result, self.freeze, release, observations, aggregate)
 
     def test_lock_requires_a_formal_validation_run(self) -> None:
         commissioning = _freeze("commissioning")
         release = _validation_release()
         package, mapping, responses = _judge(release, package_id="plan073-comm")
         aggregate = aggregate_batches(package, mapping, responses)
-        result = evaluate_validation(
-            commissioning,
-            release,
-            _observations(release, {"base": 3, "c1": 1, "c3": 0}),
-            aggregate,
-        )
+        observations = _observations(release, {"base": 3, "c1": 1, "c3": 0})
+        result = _evaluate(commissioning, release, observations, aggregate)
         with self.assertRaises(SelectionError):
-            build_selection_lock(result, commissioning)
+            _lock(result, commissioning, release, observations, aggregate)
 
     def test_forged_selected_result_cannot_open_unseen_test(self) -> None:
         release = _validation_release()
         package, mapping, responses = _judge(release, package_id="plan073-forged")
         aggregate = aggregate_batches(package, mapping, responses)
         # Every candidate fails the floors, so the honest terminal is NO_GO.
-        rejected = evaluate_validation(
-            self.freeze,
-            release,
-            _observations(release, {"base": 9, "c1": 9, "c3": 9}),
-            aggregate,
-        )
+        observations = _observations(release, {"base": 9, "c1": 9, "c3": 9})
+        rejected = _evaluate(self.freeze, release, observations, aggregate)
         self.assertEqual(rejected["terminal"], "NO_GO")
 
         forged = copy.deepcopy(rejected)
@@ -749,7 +849,7 @@ class SelectionLockTest(unittest.TestCase):
         forged["ranking"] = ["base"]
         forged["reasons"] = ["forged"]
         with self.assertRaises(SelectionError):
-            build_selection_lock(forged, self.freeze)
+            _lock(forged, self.freeze, release, observations, aggregate)
 
         # Flipping the admission flag as well is still not enough: admission has
         # to follow from the scored rows the document itself carries.
@@ -758,7 +858,7 @@ class SelectionLockTest(unittest.TestCase):
             "failed_gates": [],
         }
         with self.assertRaises(SelectionError):
-            build_selection_lock(forged, self.freeze)
+            _lock(forged, self.freeze, release, observations, aggregate)
         with self.assertRaises(SelectionError):
             validate_validation_result(forged, self.freeze)
 
@@ -766,7 +866,7 @@ class SelectionLockTest(unittest.TestCase):
         release = _validation_release()
         package, mapping, responses = _judge(release, package_id="plan073-tamper")
         aggregate = aggregate_batches(package, mapping, responses)
-        honest = evaluate_validation(
+        honest = _evaluate(
             self.freeze,
             release,
             _observations(release, {"base": 3, "c1": 1, "c3": 0}),
@@ -793,14 +893,10 @@ class SelectionLockTest(unittest.TestCase):
         release = _validation_release()
         package, mapping, responses = _judge(release, package_id="plan073-other")
         aggregate = aggregate_batches(package, mapping, responses)
-        result = evaluate_validation(
-            self.freeze,
-            release,
-            _observations(release, {"base": 3, "c1": 1, "c3": 0}),
-            aggregate,
-        )
+        observations = _observations(release, {"base": 3, "c1": 1, "c3": 0})
+        result = _evaluate(self.freeze, release, observations, aggregate)
         with self.assertRaises(SelectionError):
-            build_selection_lock(result, other)
+            _lock(result, other, release, observations, aggregate)
 
 
 class UnseenConfirmationTest(unittest.TestCase):
@@ -874,6 +970,40 @@ class UnseenConfirmationTest(unittest.TestCase):
             result["metrics"]["threshold"],
             self.lock["selected"]["threshold"]["projected_score"],
         )
+
+    def test_report_grade_validator_binds_and_recomputes(self) -> None:
+        result = evaluate_unseen_confirmation(
+            self.lock, self.freeze, self.release, self._observation(0), self.aggregate
+        )
+        self.assertEqual(
+            validate_unseen_confirmation(result, self.freeze, self.lock)["terminal"],
+            "GO",
+        )
+        for mutate in (
+            lambda doc: doc.update(terminal="GO", failed_gates=[]),
+            lambda doc: doc.update(selection_lock_sha256="d" * 64),
+            lambda doc: doc["locked_combination"].update(candidate="c1"),
+            lambda doc: doc["metrics"]["overall"]["confusion"].update(false_pass=9),
+            lambda doc: doc["metrics"].update(roc_auc=0.5),
+        ):
+            broken = copy.deepcopy(result)
+            mutate(broken)
+            if broken == result:
+                continue
+            with self.assertRaises(SelectionError):
+                validate_unseen_confirmation(broken, self.freeze, self.lock)
+
+    def test_report_grade_validator_rejects_a_failing_run_relabelled_go(self) -> None:
+        failing = evaluate_unseen_confirmation(
+            self.lock, self.freeze, self.release, self._observation(8), self.aggregate
+        )
+        self.assertEqual(failing["terminal"], "NO_GO")
+        relabelled = copy.deepcopy(failing)
+        relabelled["terminal"] = "GO"
+        relabelled["failed_gates"] = []
+        relabelled["reasons"] = ["forged"]
+        with self.assertRaises(SelectionError):
+            validate_unseen_confirmation(relabelled, self.freeze, self.lock)
 
     def test_missing_judge_evidence_after_release_is_inconclusive(self) -> None:
         result = evaluate_unseen_confirmation(
