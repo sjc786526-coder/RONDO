@@ -1,0 +1,48 @@
+---
+source: tui/src/experimental_session_control_tests.rs
+expression: rendered
+---
+Session control prototype — facts may be prototype, unknown, or unavailable
+session: prototype
+identity: root=root-prototype source=thread-store
+domain lifecycle: closing (not closed) source=prototype-input
+owner/runtime residency: unloaded resumable source=thread-store
+operations: track=unavailable(owner-unavailable)[source=thread-store] archive=unavailable(unsupported)[source=unavailable] unarchive=unavailable(not-archived)[source=thread-store]
+client sync: view=fresh mutation-result=none
+team prototype: unavailable source=unavailable
+---
+Session control prototype — facts may be prototype, unknown, or unavailable
+session: prototype
+identity: root=root-prototype source=thread-store
+domain lifecycle: closed source=prototype-input
+owner/runtime residency: unloaded resumable source=thread-store
+operations: track=unavailable(owner-unavailable)[source=thread-store] archive=unavailable(unsupported)[source=unavailable] unarchive=unavailable(not-archived)[source=thread-store]
+client sync: view=fresh mutation-result=none
+team prototype: unavailable source=unavailable
+---
+Session control prototype — facts may be prototype, unknown, or unavailable
+session: prototype
+identity: root=root-prototype source=thread-store
+domain lifecycle: failed (not closed) source=prototype-input
+owner/runtime residency: unloaded resumable source=thread-store
+operations: track=unavailable(owner-unavailable)[source=thread-store] archive=unavailable(unsupported)[source=unavailable] unarchive=unavailable(not-archived)[source=thread-store]
+client sync: view=fresh mutation-result=none
+team prototype: unavailable source=unavailable
+---
+Session control prototype — facts may be prototype, unknown, or unavailable
+session: prototype
+identity: root=root-prototype source=thread-store
+domain lifecycle: partial (not closed) source=prototype-input
+owner/runtime residency: unloaded resumable source=thread-store
+operations: track=unavailable(owner-unavailable)[source=thread-store] archive=unavailable(unsupported)[source=unavailable] unarchive=unavailable(not-archived)[source=thread-store]
+client sync: view=fresh mutation-result=none
+team prototype: unavailable source=unavailable
+---
+Session control prototype — facts may be prototype, unknown, or unavailable
+session: prototype
+identity: root=root-prototype source=thread-store
+domain lifecycle: unknown (not closed) source=prototype-input
+owner/runtime residency: unloaded resumable source=thread-store
+operations: track=unavailable(owner-unavailable)[source=thread-store] archive=unavailable(unsupported)[source=unavailable] unarchive=unavailable(not-archived)[source=thread-store]
+client sync: view=fresh mutation-result=none
+team prototype: unavailable source=unavailable

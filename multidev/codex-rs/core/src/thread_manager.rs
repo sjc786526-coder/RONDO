@@ -1393,6 +1393,28 @@ impl ThreadManagerState {
         }
     }
 
+    /// Run a synchronous operation while the expected live Session remains the current map entry.
+    ///
+    /// The map read lease prevents unload/replacement for the duration of `operation`. Callers that
+    /// also need to exclude explicit shutdown must hold the `CodexThread` runtime residency read
+    /// lease before entering this method.
+    pub(crate) async fn with_current_running_session<T>(
+        &self,
+        thread_id: ThreadId,
+        expected: &Session,
+        operation: impl FnOnce() -> T,
+    ) -> Option<T> {
+        let threads = self.threads.read().await;
+        let thread = threads.get(&thread_id)?;
+        if thread.session_source.is_internal()
+            || !thread.is_running()
+            || !std::ptr::eq(thread.session.as_ref(), expected)
+        {
+            return None;
+        }
+        thread.with_experimental_session_control_residency(operation)
+    }
+
     /// Drop a map-resident thread whose submit channel is already closed.
     ///
     /// Product availability treats this as unloaded, then classifies from stored resume material.

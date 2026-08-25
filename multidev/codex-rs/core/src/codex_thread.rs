@@ -1,6 +1,11 @@
 use crate::agent::AgentStatus;
 use crate::config::ConstraintResult;
 use crate::elicitation::ElicitationRegistration;
+use crate::experimental_session_control;
+use crate::experimental_session_control::ExperimentalSessionControlError;
+use crate::experimental_session_control::ExperimentalSessionControlMutationOutcome;
+use crate::experimental_session_control::ExperimentalSessionControlSetRootStateParams;
+use crate::experimental_session_control::ExperimentalSessionControlTeamProjection;
 use crate::session::SessionIo;
 use crate::session::SessionSettingsUpdate;
 use crate::session::SteerInputError;
@@ -56,6 +61,9 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::RwLock;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use tokio::sync::Mutex;
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
@@ -185,6 +193,13 @@ pub struct CodexThread {
     pub(crate) session: Arc<Session>,
     pub(crate) io: SessionIo,
     pub(crate) session_source: SessionSource,
+    /// Serializes experimental Session-control access with an explicit runtime shutdown.
+    ///
+    /// A read lease is held across the registry proof and synchronous Team operation. Shutdown
+    /// takes the write lease before closing the submission channel, so a stopped-but-still-mapped
+    /// root can never be used as an online owner by the prototype.
+    experimental_session_control_residency: RwLock<()>,
+    experimental_session_control_shutdown_started: AtomicBool,
     session_configured: SessionConfiguredEvent,
     rollout_path: Option<PathBuf>,
     out_of_band_elicitations: Mutex<OutOfBandElicitations>,
@@ -218,6 +233,8 @@ impl CodexThread {
             session,
             io,
             session_source,
+            experimental_session_control_residency: RwLock::new(()),
+            experimental_session_control_shutdown_started: AtomicBool::new(false),
             session_configured,
             rollout_path,
             out_of_band_elicitations: Mutex::new(OutOfBandElicitations::default()),
@@ -234,6 +251,14 @@ impl CodexThread {
     }
 
     pub async fn shutdown_and_wait(&self) -> CodexResult<()> {
+        {
+            let _residency = self
+                .experimental_session_control_residency
+                .write()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            self.experimental_session_control_shutdown_started
+                .store(true, Ordering::Release);
+        }
         self.io.shutdown_and_wait().await
     }
 
@@ -547,7 +572,42 @@ impl CodexThread {
         self.session_configured.clone()
     }
 
-    pub(crate) fn is_running(&self) -> bool {
+    /// Read the bounded canonical Team projection for this thread when it is the currently loaded
+    /// root owner. Child, detached, replaced, and identity-uncertain sessions fail closed.
+    pub async fn experimental_session_control_team_projection(
+        &self,
+    ) -> Result<ExperimentalSessionControlTeamProjection, ExperimentalSessionControlError> {
+        experimental_session_control::project_loaded_root(self.session.as_ref()).await
+    }
+
+    /// Apply one root-attention lifecycle transition through this loaded root's canonical Team.
+    /// The actor is always derived from the Session; callers cannot supply or impersonate it.
+    pub async fn experimental_session_control_set_root_state(
+        &self,
+        params: ExperimentalSessionControlSetRootStateParams,
+    ) -> Result<ExperimentalSessionControlMutationOutcome, ExperimentalSessionControlError> {
+        experimental_session_control::set_loaded_root_state(self.session.as_ref(), params).await
+    }
+
+    pub(crate) fn with_experimental_session_control_residency<T>(
+        &self,
+        operation: impl FnOnce() -> T,
+    ) -> Option<T> {
+        let _residency = self
+            .experimental_session_control_residency
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if self
+            .experimental_session_control_shutdown_started
+            .load(Ordering::Acquire)
+            || !self.is_running()
+        {
+            return None;
+        }
+        Some(operation())
+    }
+
+    pub fn is_running(&self) -> bool {
         !self.io.tx_sub.is_closed()
     }
 

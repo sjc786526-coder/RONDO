@@ -384,6 +384,16 @@ impl ChatWidget {
             SlashCommand::Experimental => {
                 self.open_experimental_popup();
             }
+            SlashCommand::Sessions => {
+                if self
+                    .config
+                    .features
+                    .enabled(Feature::ExperimentalSessionControl)
+                {
+                    self.app_event_tx
+                        .send(AppEvent::ExperimentalSessionControlCommand(String::new()));
+                }
+            }
             SlashCommand::AutoReview => {
                 self.open_auto_review_denials_popup();
             }
@@ -681,6 +691,18 @@ impl ChatWidget {
         } = prepared;
         let trimmed = args.trim();
         match cmd {
+            SlashCommand::Sessions => {
+                if self
+                    .config
+                    .features
+                    .enabled(Feature::ExperimentalSessionControl)
+                {
+                    self.app_event_tx
+                        .send(AppEvent::ExperimentalSessionControlCommand(
+                            trimmed.to_string(),
+                        ));
+                }
+            }
             SlashCommand::Usage => {
                 if self.ensure_usage_command_available() {
                     match tokens::TokenActivityView::parse(trimmed) {
@@ -1052,6 +1074,10 @@ impl ChatWidget {
             goal_command_enabled: self.config.features.enabled(Feature::Goals),
             service_tier_commands_enabled: self.fast_mode_enabled(),
             personality_command_enabled: self.config.features.enabled(Feature::Personality),
+            experimental_session_control_enabled: self
+                .config
+                .features
+                .enabled(Feature::ExperimentalSessionControl),
             allow_elevate_sandbox,
             side_conversation_active: self.active_side_conversation,
         }
@@ -1112,6 +1138,7 @@ impl ChatWidget {
             | SlashCommand::ElevateSandbox
             | SlashCommand::SandboxReadRoot
             | SlashCommand::Experimental
+            | SlashCommand::Sessions
             | SlashCommand::AutoReview
             | SlashCommand::Memories
             | SlashCommand::Quit

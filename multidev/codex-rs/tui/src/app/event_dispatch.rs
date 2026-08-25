@@ -23,6 +23,10 @@ impl App {
         event: AppEvent,
     ) -> Result<AppRunControl> {
         match event {
+            AppEvent::ExperimentalSessionControlCommand(args) => {
+                self.handle_experimental_session_control_command(app_server, &args)
+                    .await;
+            }
             AppEvent::NewSession { name } => {
                 self.start_fresh_session_with_summary_hint(
                     tui, app_server, /*session_start_source*/ None,
