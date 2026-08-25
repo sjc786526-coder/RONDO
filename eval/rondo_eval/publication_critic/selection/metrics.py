@@ -337,3 +337,28 @@ def candidate_metrics(
             for row in rows
         ],
     }
+
+
+def quality_gate_failures(
+    search: Mapping[str, Any],
+    metrics: Mapping[str, Any],
+    typed_failures: int,
+    floors: Mapping[str, Any],
+) -> list[str]:
+    """Apply the shared release-quality gates to one score cohort."""
+
+    failures: list[str] = []
+    if not search["feasible"]:
+        failures.append("no_admissible_operating_point")
+    auc = metrics["roc_auc"]
+    if auc is None or auc < floors["min_roc_auc"]:
+        failures.append("roc_auc_floor_failed")
+    boundary_rate = metrics["boundary_pairs"]["strict_win_rate"]
+    if (
+        boundary_rate is None
+        or boundary_rate < floors["min_boundary_pair_strict_win_rate"]
+    ):
+        failures.append("boundary_pair_floor_failed")
+    if typed_failures > floors["max_typed_failures"]:
+        failures.append("typed_failure_floor_failed")
+    return failures

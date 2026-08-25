@@ -43,6 +43,7 @@ from .metrics import (
     build_labeled_rows,
     candidate_metrics,
     confusion_at,
+    quality_gate_failures,
     roc_auc,
     select_threshold,
 )
@@ -85,12 +86,18 @@ def _runtime_gate_failures(
     return [
         name
         for name, failed in (
-            ("load_time_gate_failed", facts["load_seconds"] > gates["max_load_seconds"]),
+            (
+                "load_time_gate_failed",
+                facts["load_seconds"] > gates["max_load_seconds"],
+            ),
             (
                 "warm_latency_gate_failed",
                 facts["warm_p95_latency_ms"] > gates["max_warm_p95_latency_ms"],
             ),
-            ("peak_rss_gate_failed", facts["peak_rss_bytes"] > gates["max_peak_rss_bytes"]),
+            (
+                "peak_rss_gate_failed",
+                facts["peak_rss_bytes"] > gates["max_peak_rss_bytes"],
+            ),
             (
                 "peak_vram_gate_failed",
                 facts["peak_vram_bytes"] > gates["max_peak_vram_bytes"],
@@ -100,33 +107,8 @@ def _runtime_gate_failures(
     ]
 
 
-def _quality_gate_failures(
-    search: Mapping[str, Any],
-    metrics: Mapping[str, Any],
-    typed_failures: int,
-    floors: Mapping[str, Any],
-) -> list[str]:
-    failures: list[str] = []
-    if not search["feasible"]:
-        failures.append("no_admissible_operating_point")
-    roc_auc = metrics["roc_auc"]
-    if roc_auc is None or roc_auc < floors["min_roc_auc"]:
-        failures.append("roc_auc_floor_failed")
-    boundary_rate = metrics["boundary_pairs"]["strict_win_rate"]
-    if (
-        boundary_rate is None
-        or boundary_rate < floors["min_boundary_pair_strict_win_rate"]
-    ):
-        failures.append("boundary_pair_floor_failed")
-    if typed_failures > floors["max_typed_failures"]:
-        failures.append("typed_failure_floor_failed")
-    return failures
-
-
 def _predictions(metrics: Mapping[str, Any]) -> dict[str, str]:
-    return {
-        str(row["candidate_id"]): str(row["predicted"]) for row in metrics["rows"]
-    }
+    return {str(row["candidate_id"]): str(row["predicted"]) for row in metrics["rows"]}
 
 
 def _ranking_key(report: Mapping[str, Any]) -> tuple[Any, ...]:
@@ -244,9 +226,10 @@ def evaluate_validation(
             {"deployment_artifact_sha256", "scores", "runtime"},
             f"Plan 073 {candidate} observation",
         )
-        if observation["deployment_artifact_sha256"] != freeze["artifacts"][candidate][
-            "deployment_artifact_sha256"
-        ]:
+        if (
+            observation["deployment_artifact_sha256"]
+            != freeze["artifacts"][candidate]["deployment_artifact_sha256"]
+        ):
             raise SelectionError("Plan 073 candidate artifact identity drifted")
         facts = validate_runtime_facts(
             observation["runtime"], f"Plan 073 {candidate} runtime"
@@ -254,7 +237,9 @@ def evaluate_validation(
         # A candidate that could not score the whole cohort yields no
         # comparable evidence. That is an INCONCLUSIVE task terminal, not a
         # quality verdict, so refuse it here rather than ranking a partial run.
-        if facts["typed_failure_count"] or facts["scored_count"] != len(release["items"]):
+        if facts["typed_failure_count"] or facts["scored_count"] != len(
+            release["items"]
+        ):
             raise SelectionError(
                 "Plan 073 candidate scoring is incomplete; the run cannot produce a "
                 "comparable selection and must be reported INCONCLUSIVE"
@@ -269,7 +254,7 @@ def evaluate_validation(
             if judge_view["present"]
             else None
         )
-        failures = _quality_gate_failures(
+        failures = quality_gate_failures(
             search, metrics, int(facts["typed_failure_count"]), floors
         ) + _runtime_gate_failures(facts, protocol["runtime_gates"])
         reports.append(
@@ -366,7 +351,14 @@ def _rows_from_report(report: Mapping[str, Any]) -> tuple[LabeledRow, ...]:
         row = require_object(row_value, "Plan 073 reported row")
         require_exact_keys(
             row,
-            {"candidate_id", "label", "score", "raw_logit", "predicted", "margin_to_threshold"},
+            {
+                "candidate_id",
+                "label",
+                "score",
+                "raw_logit",
+                "predicted",
+                "margin_to_threshold",
+            },
             "Plan 073 reported row",
         )
         if row["label"] not in {PASS, REWRITE}:
@@ -374,8 +366,12 @@ def _rows_from_report(report: Mapping[str, Any]) -> tuple[LabeledRow, ...]:
         rebuilt.append(
             LabeledRow(
                 candidate_id=str(row["candidate_id"]),
-                score=require_finite(row["score"], "Plan 073 reported score", minimum=0.0, maximum=1.0),
-                raw_logit=require_finite(row["raw_logit"], "Plan 073 reported raw logit"),
+                score=require_finite(
+                    row["score"], "Plan 073 reported score", minimum=0.0, maximum=1.0
+                ),
+                raw_logit=require_finite(
+                    row["raw_logit"], "Plan 073 reported raw logit"
+                ),
                 label=str(row["label"]),
                 slices=(),
                 facets={},
@@ -436,14 +432,16 @@ def _recheck_candidate(report: Mapping[str, Any], freeze: Mapping[str, Any]) -> 
     facts = validate_runtime_facts(report["runtime"], "Plan 073 candidate runtime")
     if facts["scored_count"] != len(rows):
         raise SelectionError("Plan 073 candidate scored count does not match its rows")
-    failures = _quality_gate_failures(
+    failures = quality_gate_failures(
         report["threshold_search"], metrics, int(facts["typed_failure_count"]), floors
     ) + _runtime_gate_failures(facts, protocol["runtime_gates"])
     if report["admission"] != {
         "admissible": not failures,
         "failed_gates": failures,
     }:
-        raise SelectionError("Plan 073 candidate admission does not follow its evidence")
+        raise SelectionError(
+            "Plan 073 candidate admission does not follow its evidence"
+        )
 
 
 def validate_validation_result(
@@ -511,7 +509,9 @@ def validate_validation_result(
         or result["runner_up"] != runner_up
         or list(result["reasons"]) != reasons
     ):
-        raise SelectionError("Plan 073 validation terminal does not follow its evidence")
+        raise SelectionError(
+            "Plan 073 validation terminal does not follow its evidence"
+        )
     return dict(result)
 
 
@@ -553,7 +553,9 @@ def build_selection_lock(
     recomputed = evaluate_validation(
         freeze, release, observations, judge_aggregate, judge_package
     )
-    if canonical_json_bytes(recomputed) != canonical_json_bytes(dict(validation_result)):
+    if canonical_json_bytes(recomputed) != canonical_json_bytes(
+        dict(validation_result)
+    ):
         raise SelectionError(
             "Plan 073 selection lock requires the result to match a recomputation "
             "from the release, raw scores and Judge evidence it claims"
@@ -629,7 +631,9 @@ def evaluate_unseen_confirmation(
     protocol = freeze["protocol"]
     floors = protocol["quality_floors"]
     threshold = float(selected["threshold"]["projected_score"])
-    facts = validate_runtime_facts(observation["runtime"], "Plan 073 confirmation runtime")
+    facts = validate_runtime_facts(
+        observation["runtime"], "Plan 073 confirmation runtime"
+    )
     if facts["typed_failure_count"] or facts["scored_count"] != len(release["items"]):
         raise SelectionError(
             "Plan 073 confirmation scoring is incomplete; the blind confirmation is "
@@ -647,7 +651,7 @@ def evaluate_unseen_confirmation(
     )
 
     failures = _floor_failures(metrics["overall"], floors)
-    failures += _quality_gate_failures(
+    failures += quality_gate_failures(
         {"feasible": True}, metrics, int(facts["typed_failure_count"]), floors
     )
     failures += _runtime_gate_failures(facts, protocol["runtime_gates"])

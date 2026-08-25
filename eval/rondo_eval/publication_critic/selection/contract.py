@@ -73,6 +73,21 @@ _JUDGE_KEYS = {
     "min_reference_agreement_for_gate",
     "min_selected_agreement",
 }
+
+
+def publication_quality_floors() -> dict[str, Any]:
+    """Return the shared Publication Critic release-quality floors."""
+
+    return {
+        "max_false_pass_rate": 0.25,
+        "max_false_rewrite_rate": 0.35,
+        "min_balanced_accuracy": 0.75,
+        "min_roc_auc": 0.80,
+        "min_boundary_pair_strict_win_rate": 0.70,
+        "max_typed_failures": 0,
+    }
+
+
 _RUNTIME_KEYS = {
     "device",
     "dtype",
@@ -120,7 +135,9 @@ class SelectionError(ValueError):
     """A body-free invalid Plan 073 freeze, release, evidence or invocation."""
 
 
-def require_exact_keys(value: Mapping[str, Any], expected: set[str], label: str) -> None:
+def require_exact_keys(
+    value: Mapping[str, Any], expected: set[str], label: str
+) -> None:
     if set(value) != expected:
         raise SelectionError(f"{label} fields are invalid")
 
@@ -213,9 +230,10 @@ def validate_runtime(value: Any, label: str = "Plan 073 runtime") -> dict[str, A
     for name in ("deployment_format", "scoring_batch"):
         if not isinstance(runtime[name], str) or not runtime[name].strip():
             raise SelectionError(f"{label} {name} is invalid")
-    if type(runtime["warm_latency_samples"]) is not int or runtime[
-        "warm_latency_samples"
-    ] < 3:
+    if (
+        type(runtime["warm_latency_samples"]) is not int
+        or runtime["warm_latency_samples"] < 3
+    ):
         raise SelectionError(f"{label} warm latency sampling is invalid")
     limits = require_object(runtime["service_limits"], f"{label} service limits")
     require_exact_keys(limits, _SERVICE_LIMIT_KEYS, f"{label} service limits")
@@ -285,7 +303,9 @@ def validate_freeze(value: Any) -> dict[str, Any]:
         "Plan 073 selection freeze",
     )
     run_match = (
-        RUN_ID.fullmatch(freeze["run_id"]) if isinstance(freeze["run_id"], str) else None
+        RUN_ID.fullmatch(freeze["run_id"])
+        if isinstance(freeze["run_id"], str)
+        else None
     )
     if (
         freeze["schema"] != FREEZE_SCHEMA
@@ -380,16 +400,7 @@ def default_protocol() -> dict[str, Any]:
 
     return {
         "method": dict(SELECTION_METHOD),
-        "quality_floors": {
-            # 21 REWRITE rows in validation: at most 5 may slip through.
-            "max_false_pass_rate": 0.25,
-            # 34 PASS rows in validation: at most 11 may be blocked.
-            "max_false_rewrite_rate": 0.35,
-            "min_balanced_accuracy": 0.75,
-            "min_roc_auc": 0.80,
-            "min_boundary_pair_strict_win_rate": 0.70,
-            "max_typed_failures": 0,
-        },
+        "quality_floors": publication_quality_floors(),
         # Identical to the Plan 071 qualification gates: the target deployment
         # runtime is unchanged, so these stay usability gates and are not
         # re-tuned for this task.
