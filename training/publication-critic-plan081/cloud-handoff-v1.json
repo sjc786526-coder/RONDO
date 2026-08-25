@@ -1,0 +1,51 @@
+{
+  "authorization": "not_granted",
+  "claims": {
+    "a40_or_l40s_feasibility_proven": false,
+    "cost_incurred": false,
+    "data_uploaded": false,
+    "inventory_checked": false,
+    "resource_created": false
+  },
+  "hardware_priority": [
+    {
+      "gpu": "NVIDIA A40",
+      "priority": 1,
+      "vram_gb": 48
+    },
+    {
+      "gpu": "NVIDIA L40S",
+      "priority": 2,
+      "vram_gb": 48
+    }
+  ],
+  "limits": {
+    "gpu_count": 1,
+    "maximum_external_cost_usd": 15,
+    "maximum_window_hours": 12
+  },
+  "required_inputs": [
+    "exact_model_and_v8_route_contract",
+    "runtime_selected_trainable_scope_and_expansion_policy",
+    "runtime_selected_optimizer_scheduler_and_update_recipe",
+    "same_validation_cohort_comparison_policy_and_tolerance",
+    "separate_external_action_authorization"
+  ],
+  "required_outputs": [
+    "commissioning_runtime_and_memory_facts",
+    "actual_recipe_and_trainable_inventory",
+    "continuous_validation_observations",
+    "verified_latest_recovery_checkpoint",
+    "base_best_latest_and_turning_point_retention",
+    "better_than_base_candidate_or_no_improvement"
+  ],
+  "retained_plan079_volume": {
+    "guarantees_capacity": false,
+    "required": false,
+    "selects_gpu": false,
+    "selects_region": false,
+    "startup_prerequisite": false
+  },
+  "schema": "rondo-publication-critic-plan081-cloud-handoff-v1",
+  "work": "commissioning_and_training_parameter_development"
+}

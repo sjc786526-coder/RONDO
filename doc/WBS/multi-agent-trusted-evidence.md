@@ -322,6 +322,9 @@ threshold 的前提下，以同一冻结规则重验 exact base、C1、C3；唯�
 不得复制第二套数据/评价/训练平台，不冻结具体层数、LR、batch、更新数或 optimizer。开发期 validation 可驱动观察/选择，
 但不进入梯度、不读取 unseen，也不冒充正式 M3-C2 或产品资格。
 
+**当前状态**：Plan 081 专用薄层、fixture/fake 连续控制、物理无 unseen train+validation 接缝核对与 focused 本地门禁已完成，
+等待指定审查者独立验收；未运行真实模型、GPU 或云端训练，未产生真实质量候选，也未解锁 Plan 082 或 M3-D。
+
 **出口**：独立验收只给出 `LOCAL_TRAINING_READINESS_PASS` 或 `REPLAN_REQUIRED`。普通实现、fixture、依赖或接口问题须在本任务内
 修复重跑；只有原则性冲突才可重规划。PASS 后的 Plan 082 只需完成真实环境 commissioning 和训练参数开发，其云端边界为单张
 A40 48GB 首选、L40S 48GB 备选、单卡窗口不超过 12 小时、外部总费用不超过 15 USD；真实训练的研究成功是形成同口径优于

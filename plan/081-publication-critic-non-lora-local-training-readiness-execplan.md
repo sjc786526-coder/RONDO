@@ -212,18 +212,20 @@ XXX用以下内容代替：
 - 2026-08-25：独立合同审查发现“base incumbent / better-than-base candidate / no-improvement 与无需直接产品 GO”未显式交接的 P2；
   已窄修并复审 `ACCEPT`，无剩余 P1/P2。具体同口径比较策略/容差仍留给真实训练实测，未升级为固定实现路线。
 - 2026-08-25：计划编制未运行 Python 测试、模型、Cargo、Docker、云资源或付费动作，未修改主工作区和其它 worktree。
+- 2026-08-25：新增 Plan 081 专用 route/cloud 合同、typed train/validation identity、连续 update/observation controller、
+  observation-driven scope expansion、评价快照/完整恢复 checkpoint 分层、保留选择与 fixture/fake 归档；Plan 060/066 历史合同未修改。
+- 2026-08-25：从 canonical `final-01-extracted` 物理无 unseen bundle 只读核对 train 128/58 与 validation 55/26 接缝；仅计算小型
+  identity，不读取 unseen、权重或 checkpoint。
+- 2026-08-25：专用测试与 Plan 060/066/073 focused 回归共 17 项通过；源码 compile 5/5。内部独立审查发现的动态 scope、data cursor、
+  typed train-only、same-cohort、staging、连续重放 attempt、公开构造校验等 P2 已逐项补回归并整改，等待指定审查者最终验收。
 
 ### 当前工作
 
-- Plan 081 任务合同与三期 WBS 立项口径已在专用 worktree 成稿，等待执行者开始本地轻量实现。
+- Plan 081 实现、本地门禁、内部独立复核与最终 staged diff 检查已完成；task branch 交付内容已收敛，提交后仅等待指定审查者验收。
 
 ### 本任务剩余步骤
 
-- 收敛 route-neutral/Plan 081 合同与既有训练/评价 seam，保持旧计划合同不变。
-- 用 fixture/fake 打通多更新、多观测、参数范围变化和质量趋势判断。
-- 闭合模型快照/完整 checkpoint 分层、base/best/latest/turning-point 保留、better-than-base/no-improvement 选择、恢复续跑与小型结果归档。
-- 固化后续云端 handoff 边界，更新任务状态/WBS/精炼日志并运行相称轻量门禁。
-- 完成 task branch 提交后按用户指定队列通知审查者，由审查者独立验收、记录结论并决定是否需要范围内整改。
+- 按用户指定队列通知审查者，由指定审查者独立验收、记录结论并决定是否需要范围内整改。
 
 ### 阻塞项
 
@@ -232,7 +234,7 @@ XXX用以下内容代替：
 
 ### 当前验收状态
 
-- `PLAN_READY / WORKTREE_READY / IMPLEMENTATION_NOT_STARTED / LOCAL_GATES_NOT_RUN`。
+- `IMPLEMENTATION_COMPLETE / FOCUSED_LOCAL_GATES_PASS / INTERNAL_P2_REMEDIATION_COMPLETE / EXTERNAL_ACCEPTANCE_PENDING`。
 
 ### 交接边界
 
@@ -259,3 +261,4 @@ XXX用以下内容代替：
 | 009 | 普通问题自主修复重跑；只有原则冲突才候选 `REPLAN_REQUIRED`，终审聚焦高/中 correctness | 避免窄故障导致整组报废，也不引入复杂审计/可信/机器验收体系 | failure/review | 已采纳 |
 | 010 | 请示、批示和最终验收只使用指定 Codex 跨会话队列，每条消息主动声明 Plan 081 执行者身份，发送后停止且不重复 | 满足用户指定的跨会话协作与唤醒方式 | coordination/handoff | 已采纳 |
 | 011 | base 保持研究 incumbent，训练内部 best 只有同口径优于 base 才成为目标候选；不要求直接产品 GO | 防止把 least-bad checkpoint 误报为研究成功，同时避免在训练开发阶段提前要求产品资格 | selection/handoff | 已采纳 |
+| 012 | Plan 081 使用专用薄层：typed train/validation identity、观测后显式扩大 scope、永久小观测与分层快照/checkpoint，并以持久 reservation 分配恢复 attempt | 旧 Plan 060/066 固定 recipe 不适合连续路线；新边界需避免夹带 holdout、静态预写扩层和同一 checkpoint 多次重放冲突 | local control/recovery | 已采纳 |
