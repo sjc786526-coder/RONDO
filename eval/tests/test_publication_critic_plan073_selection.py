@@ -934,11 +934,35 @@ class SelectionLockTest(unittest.TestCase):
         observations = _observations(release, {"base": 0, "c1": 0, "c3": 0})
         result = _evaluate(self.freeze, release, observations, aggregate)
         lock = _lock(result, self.freeze, release, observations, aggregate)
+        self.assertEqual(selection_runner._report_lock(result, self.freeze, lock), lock)
+
         different = copy.deepcopy(result)
         different["scope_note"] = "a different canonical validation document"
         validate_validation_result(different, self.freeze)
         with self.assertRaises(SelectionError):
             selection_runner._report_lock(different, self.freeze, lock)
+
+        replacement_runner_up = next(
+            candidate
+            for candidate in CANDIDATES
+            if candidate not in {result["selected"], result["runner_up"]}
+        )
+        for path, replacement in (
+            (("run_id",), "plan073-formal-20260825T120001Z-metadata"),
+            (("runner_up",), replacement_runner_up),
+            (("reasons",), ["different but well-formed reason"]),
+            (
+                ("selected", "threshold", "method"),
+                "different_but_well_formed_threshold_rule",
+            ),
+        ):
+            altered = copy.deepcopy(lock)
+            target = altered
+            for key in path[:-1]:
+                target = target[key]
+            target[path[-1]] = replacement
+            with self.assertRaises(SelectionError, msg=str(path)):
+                selection_runner._report_lock(result, self.freeze, altered)
 
 
 class UnseenConfirmationTest(unittest.TestCase):

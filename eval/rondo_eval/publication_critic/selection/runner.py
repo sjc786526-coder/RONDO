@@ -641,12 +641,17 @@ def _report_lock(
         lock["validation_result_sha256"]
         != sha256_bytes(canonical_json_bytes(dict(result)))
         or lock["selection_freeze_sha256"] != freeze_sha256(freeze)
+        or lock["run_id"] != result["run_id"]
         or lock["selected"]["candidate"] != selected
         or lock["selected"]["deployment_artifact_sha256"]
         != report["deployment_artifact_sha256"]
         or lock["selected"]["threshold"]["projected_score"]
         != float(report["threshold_search"]["threshold"])
+        or lock["selected"]["threshold"]["method"]
+        != result["method"]["threshold_rule"]
         or lock["selected"]["runtime"] != freeze["runtime"]
+        or lock["runner_up"] != result["runner_up"]
+        or lock["reasons"] != result["reasons"]
     ):
         raise SelectionError(
             "Plan 073 report selection lock is not bound to this validation result"
