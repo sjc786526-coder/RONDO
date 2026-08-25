@@ -2125,3 +2125,20 @@ formal retry 整改为 `d29e857`，最终独立验收提交为 `43cf0eeb3e1b4826
   `py_compile`、shell syntax、JSON 与 diff checks 通过。最终独立复验无剩余 correctness/functionality finding。
 - 结果见 `eval/results/publication-critic/skywork-reward-v2-qwen3-4b-base-quality-v1.{json,md}`，执行与验收细节见对应 Plan 079
   `agent_log`。本任务没有形成后继任务授权；三期当前状态与后续选择只由 `doc/WBS.md` 及三期子 WBS 维护。
+
+## Publication Critic 1.7B 非 LoRA 本地训练就绪（Plan 081，2026-08-25）
+
+**状态**：实现、五轮指定验收整改与最终复验均已完成；验收通过、任务目标完成，终态为
+`LOCAL_TRAINING_READINESS_PASS`。最终实现提交为 `87929a50bb031f418ef5e1f55784e1d5b538dd23`。
+
+- exact 1.7B、冻结 pair/input/v8、非 LoRA/QLoRA 与 unseen 隔离保持不变；新增专用轻量 route/cloud 合同、连续
+  update/observation、观测驱动 scope 扩大、候选/no-improvement、评价 snapshot、完整恢复 checkpoint、retention 与归档闭环，
+  未放松 Plan 060/066 历史合同或复制第二套数据/评价体系。
+- checkpoint 只有经 fresh exact-base probe 完成模型载入及 controller、scope、optimizer/scheduler/RNG/data/cursor 恢复资格核对后，
+  才能替代旧锚、执行 prune 或发布 completion marker；类型感知 state 等值和 task-owned tombstone 保证合法 Tensor-like state、
+  资格失败、清理中断及跨进程恢复均保持保守且可续。
+- cloud handoff 冻结 A40 48GB 首选、L40S 48GB 备选、单卡不超过 12 小时、外部总费用不超过 15 USD，Plan 079 保留卷非前置。
+  本地 fixture/fake 只证明控制闭环，不证明真实显存、吞吐、数值稳定、训练质量或预算可行性。
+- 最终独立验收复跑 Plan 081 36/36 与 Plan 060/066/073 精选历史回归 9/9，合计 45/45；主审与三路独立复核无剩余
+  P1/P2/P3。未运行真实模型、GPU、云端、Docker、Cargo、全 workspace 或 unseen，也未启用 Publication Critic 或解锁 M3-D。
+- Plan 082 是下一三期工作包但仍须另行立项授权；当前路线、顺序和授权边界只由 `doc/WBS.md` 与三期子 WBS 维护。

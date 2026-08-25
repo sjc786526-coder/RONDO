@@ -1,7 +1,8 @@
 # RONDO 长程规划（WBS）
 
 最后更新：2026-08-25（Plan 079 已完成 Skywork 4B BF16 base 正式质量测评并取得 `4B_BASE_QUALITY_NO_GO`；
-Plan 081 已作为三期当前工作包立项，只做 exact 1.7B 非 LoRA 训练路线的本地收敛与云端就绪，M3-D 保持锁定；
+Plan 081 已完成 exact 1.7B 非 LoRA 训练路线本地收敛与云端就绪并取得 `LOCAL_TRAINING_READINESS_PASS`，
+下一三期工作包 Plan 082 仍须另行立项授权，M3-D 保持锁定；
 Plan 077 / M4-C1 与 Plan 078 / M4-S2 已分别取得
 `M4_C1_QUERY_PASS`、`M4_S2_PASS`，正式 Session Control/TUI 已具备立项前置）
 
@@ -23,7 +24,7 @@ Plan 077 / M4-C1 与 Plan 078 / M4-S2 已分别取得
 | 0：量化测评基准 | 既有设施与首次 schema v7 正式 canary 已完成，当前无 active campaign | 保留设施；历史结果见 COMPLETED，新 campaign 须重新立项与授权 |
 | 1：Harness 优化 | **正式收口；当前无 active 工作包** | 当前不继续新增观测或内核/热路径优化；既有实现、设施与历史结果保留。未来可由用户另行决定是否重新立项，本次收口不作永久禁止 |
 | 2：本地审批模型 | **已收口，今后不再开启** | 最终结论为“保留为实验”；不改生产默认，不再规划后续工作包 |
-| 3：RONDO Multi | 第一、二期及其收口案例、**三期 M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、M3-C2、Plan 064、Plan 071、Plan 073、Plan 075、Plan 079 与四期 M4-A、M4-C0、M4-S1、M4-C1、M4-S2、Plan 074 已完成**；Plan 081 已立项 | Plan 081 是三期当前工作包：继续 exact 1.7B 与冻结 pair/input/v8，禁止 LoRA/QLoRA，以可按训练动态扩大的部分参数直接更新为首选，在本地轻量闭合连续观测/checkpoint/恢复/归档；后续研究目标是形成同口径优于 base 的候选，不要求直接产品 GO。本任务不运行真实模型或云端。Critic 保持 default-off，M3-D 保持锁定。Plan 077 / M4-C1 与 Plan 078 / M4-S2 已完成 shared read/write 接缝收敛；下一项四期必成主线是另行立项正式 Session Control/TUI，首批获批重型门禁补跑合并树 query×lifecycle 聚焦回归 |
+| 3：RONDO Multi | 第一、二期及其收口案例、**三期 M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、M3-C2、Plan 064、Plan 071、Plan 073、Plan 075、Plan 079、Plan 081 与四期 M4-A、M4-C0、M4-S1、M4-C1、M4-S2、Plan 074 已完成** | Plan 081 已以 exact 1.7B、冻结 pair/input/v8、非 LoRA 和可动态扩大部分参数直接更新的路线取得本地训练就绪；Plan 082 是下一三期工作包，但真实模型、GPU、云端、费用与训练仍须另行立项授权。研究目标仍是形成同口径优于 base 的候选，不要求直接产品 GO；Critic 保持 default-off，M3-D 保持锁定。Plan 077 / M4-C1 与 Plan 078 / M4-S2 已完成 shared read/write 接缝收敛；下一项四期必成主线是另行立项正式 Session Control/TUI，首批获批重型门禁补跑合并树 query×lifecycle 聚焦回归 |
 
 ### 方向命名口径
 
@@ -40,8 +41,8 @@ Plan 077 / M4-C1 与 Plan 078 / M4-S2 已分别取得
 
 ## 2. 下一工作包与顺序
 
-方向 3 是当前唯一仍在推进的产品线。三期当前工作包是 Plan 081；只有独立验收取得
-`LOCAL_TRAINING_READINESS_PASS`，才按三期子 WBS 进入另行授权的真实云端 commissioning/训练参数开发。四期下一必成工作包是
+方向 3 是当前唯一仍在推进的产品线。Plan 081 已取得 `LOCAL_TRAINING_READINESS_PASS`；三期下一工作包是另行立项授权的
+Plan 082 真实云端 commissioning/训练参数开发。四期下一必成工作包是
 另行立项正式 Session Control/TUI，
 M4-W0 继续按自身价值门条件推进。
 方向 1 已正式收口，不作为方向 3 的前置或旁支。
@@ -81,7 +82,7 @@ M4-W0 继续按自身价值门条件推进。
   退化，但现有单 recipe/seed/run 不能把 LR、裁剪、objective、optimizer、数据或底模之一确定为单一根因。Plan 079 随后对 exact
   `Skywork/Skywork-Reward-V2-Qwen3-4B@fd958fef475f323f4e6b195930e3dd918485c668` 原始 BF16 base 完成冻结 validation 正式测评：
   55/55、零 typed failure，但完整 operating curve 不存在满足全部质量门的点，终态为 `4B_BASE_QUALITY_NO_GO`。该结果未产生训练、
-  量化、本地部署或产品资格。Plan 081 随后成为三期当前工作包：继续 exact 1.7B、冻结 pair/input/v8，禁止 LoRA/QLoRA，
+  量化、本地部署或产品资格。Plan 081 随后完成 exact 1.7B、冻结 pair/input/v8、禁止 LoRA/QLoRA 的本地路线准备，
   以可按训练动态扩大的部分参数直接更新为当前首选，并在不运行真实模型/GPU/云端的前提下闭合连续质量观察、checkpoint、恢复与归档；
   它不预先冻结具体层数、学习率、batch、更新数或优化器。后续真实训练以形成同口径优于 exact 1.7B base 的候选为研究目标，
   不要求直接取得产品 GO；未优于 base 时保留 no-improvement 结论。任务 Pod 已删除，20 GB Standard 网络卷

@@ -26,32 +26,32 @@ C1/C2/C3 单阶段单次更新语义写死时，应提取中性能力或建立�
 
 ### 完成/验收标准
 
-- [ ] 路线合同继续绑定 exact
+- [x] 路线合同继续绑定 exact
       `Skywork/Skywork-Reward-V2-Qwen3-1.7B@e51ea3e08fb81326c3b812a7ff0cb9cee83e59cc`；冻结 pair 设计、
       packet/render/tokenization/scalar 方向、label 语义和 v8 train/validation/unseen split 不变，明确禁止 LoRA、QLoRA 与其它 PEFT 路线。
-- [ ] 当前首选是从部分参数直接更新开始，并允许依据训练动态扩大可训练范围；合同能够表达和恢复实际更新范围，但不在本任务预先冻结
+- [x] 当前首选是从部分参数直接更新开始，并允许依据训练动态扩大可训练范围；合同能够表达和恢复实际更新范围，但不在本任务预先冻结
       具体层数/模块名、学习率、batch、更新数、优化器、scheduler 或扩大策略细节，也不把全参数更新继续写成强制路线。
-- [ ] 本地控制链支持多个连续更新点和可配置观测点，不再依赖 Plan 066 的固定 C1→C2→C3、每阶段恰好一次 update 或固定 recipe；
+- [x] 本地控制链支持多个连续更新点和可配置观测点，不再依赖 Plan 066 的固定 C1→C2→C3、每阶段恰好一次 update 或固定 recipe；
       fixture/fake 能证明一次运行内的连续进度、停止/继续和恢复后续跑。
-- [ ] 每个观测点使用既有同口径 validation 输入与质量定义，至少保留完整聚合指标、逐 pair 方向与 margin，并能相对 base/previous/best
+- [x] 每个观测点使用既有同口径 validation 输入与质量定义，至少保留完整聚合指标、逐 pair 方向与 margin，并能相对 base/previous/best
       诚实标记改善、退化或停滞；这些开发期 validation 观察不得冒充正式 M3-C2、unseen 或产品资格证据。
-- [ ] 选择状态明确区分 `base incumbent`、`better-than-base candidate` 与 `no-improvement`；一个训练 checkpoint 即使是训练序列中的
+- [x] 选择状态明确区分 `base incumbent`、`better-than-base candidate` 与 `no-improvement`；一个训练 checkpoint 即使是训练序列中的
       least-bad/best，也不能在未优于 base 时冒充研究目标候选。具体同口径比较策略与容差由后续实测收敛，不在本计划预冻。
-- [ ] checkpoint 生命周期区分“用于质量评价的模型快照”和“用于恢复训练的完整 checkpoint”。每个观测点永久保留小型指标与 pair margin；
+- [x] checkpoint 生命周期区分“用于质量评价的模型快照”和“用于恢复训练的完整 checkpoint”。每个观测点永久保留小型指标与 pair margin；
       长期模型/恢复工件只需 base、best、latest 和少量有理由的关键转折点，不要求每个 update 永久保存完整权重。
-- [ ] 从完整 checkpoint 恢复时，进度、实际参数更新范围、必要 optimizer/scheduler/RNG 状态、观测历史、best/latest 选择和保留策略连续；
+- [x] 从完整 checkpoint 恢复时，进度、实际参数更新范围、必要 optimizer/scheduler/RNG 状态、观测历史、best/latest 选择和保留策略连续；
       删除 superseded 工件不得破坏唯一可恢复点或已保留的小型观察记录。
-- [ ] route/controller、checkpoint/retention、evaluation/archive 的 fake/fixture 集成测试覆盖改善、退化/停滞、关键转折点保留和中断恢复；
+- [x] route/controller、checkpoint/retention、evaluation/archive 的 fake/fixture 集成测试覆盖改善、退化/停滞、关键转折点保留和中断恢复；
       既有 Plan 060/066 数据隔离、方向语义、checkpoint 与 Plan 073 指标聚焦回归通过。
-- [ ] 三期 WBS 将 H100 全参数 + FlashAdamW 降为 Plan 060/066 历史事实，把 Plan 081 的 exact 1.7B 非 LoRA 路线记录为当前工作包；
+- [x] 三期 WBS 将 H100 全参数 + FlashAdamW 降为 Plan 060/066 历史事实，把 Plan 081 的 exact 1.7B 非 LoRA 路线记录为当前工作包；
       顶层 WBS 与 Plan 080 的并行改动只做三期窄同步，最终整合者基于最新 main 手工合并，不 whole-file 覆盖。
-- [ ] 形成一份后续云端任务可直接消费的轻量训练/运行边界：单张 A40 48GB 首选、L40S 48GB 备选，单卡窗口不超过 12 小时，
+- [x] 形成一份后续云端任务可直接消费的轻量训练/运行边界：单张 A40 48GB 首选、L40S 48GB 备选，单卡窗口不超过 12 小时，
       外部总费用不超过 15 USD；Plan 079 保留卷不是显卡、区域、容量或启动前置。本任务只准备合同，不查询库存、不创建资源、不上传或计费。
-- [ ] 相关 Python 单元/集成测试、编译检查、必要格式/静态检查、改动脚本的 `bash -n` 与 `git diff --check` 通过；未运行项如实记录，
+- [x] 相关 Python 单元/集成测试、编译检查、必要格式/静态检查、改动脚本的 `bash -n` 与 `git diff --check` 通过；未运行项如实记录，
       不运行 Cargo、Docker、全 workspace、真实模型或云端门禁。
-- [ ] 执行者完成范围内实现、文档、精炼日志和自检后提交 Plan 081 task branch 并保持 worktree clean；独立审查关闭所有高/中等级
+- [x] 执行者完成范围内实现、文档、精炼日志和自检后提交 Plan 081 task branch 并保持 worktree clean；独立审查关闭所有高/中等级
       correctness/functionality finding。普通可修问题不得直接形成 `REPLAN_REQUIRED`，应先在本任务边界内修复重跑。
-- [ ] 独立审查最终只给出 `LOCAL_TRAINING_READINESS_PASS` 或 `REPLAN_REQUIRED`。前者仅表示可按 WBS 进入后续真实环境 commissioning/
+- [x] 独立审查最终只给出 `LOCAL_TRAINING_READINESS_PASS` 或 `REPLAN_REQUIRED`。前者仅表示可按 WBS 进入后续真实环境 commissioning/
       训练参数开发；不表示模型质量 GO、云端授权、产品启用或 M3-D 解锁。
 
 ## 2. 范围
@@ -249,14 +249,17 @@ XXX用以下内容代替：
 - 2026-08-25：codec adapter 现显式提供类型感知 `training_states_equal()`，probe/resume 使用各自 comparator 核对 decoded/captured/restored
   state，异常、非原生 bool 或任一 restore 值漂移均 fail-closed；未资格 discard 前先恢复 committed state，清理错误仍如实上抛并保留
   `recovery_required`。Plan 081 36 项与 7 项精选历史回归合计 43/43 通过。
+- 2026-08-25：指定审查者对最终实现 `87929a50bb031f418ef5e1f55784e1d5b538dd23` 完成主审与三路独立复核，未发现
+  剩余 P1/P2/P3；复跑 Plan 081 36 项与 Plan 060/066/073 精选历史回归 9 项，合计 45/45 通过。最终结论为
+  `LOCAL_TRAINING_READINESS_PASS`，验收通过、任务目标完成。
 
 ### 当前工作
 
-- 第五轮复验的 2 个 P2 均已整改；完成最终复核、diff/生成物检查和提交后，等待指定审查者再次复验。
+- 无；Plan 081 已完成、验收并冻结，后续路线只以 WBS 为准。
 
 ### 本任务剩余步骤
 
-- 按用户指定队列通知审查者复验并记录最终结论。
+- 无。合并、推送、分支归档和 worktree 清理由用户另行批准。
 
 ### 阻塞项
 
@@ -265,7 +268,7 @@ XXX用以下内容代替：
 
 ### 当前验收状态
 
-- `IMPLEMENTATION_COMPLETE / FIFTH_REVIEW_REMEDIATED / FOCUSED_LOCAL_GATES_PASS / REACCEPTANCE_PENDING`。
+- `LOCAL_TRAINING_READINESS_PASS / COMPLETE / FOCUSED_LOCAL_GATES_PASS`。
 
 ### 交接边界
 
