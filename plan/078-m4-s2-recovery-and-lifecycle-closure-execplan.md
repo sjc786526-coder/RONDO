@@ -25,7 +25,7 @@ Session/Team 状态源、writer authority、registry 或控制平台。
 
 ### 完成/验收标准
 
-- [ ] **`#37847` 独立前置**：V2 member 在 residency eviction 后按需 reload 时保留继承的 environment selections，已有显式 override
+- [x] **`#37847` 独立前置**：V2 member 在 residency eviction 后按需 reload 时保留继承的 environment selections，已有显式 override
       仍优先，且不会因默认 config/fallback 覆盖正确选择；reload 本身不自动发起 model turn 或真实 API。实现采用上游
       `4996cf05...` 的产品结果或当前架构下的等强窄适配，不机械升级基线。前置形成独立提交、聚焦测试和独立审查结论。
 - [ ] **恢复身份**：Root cold resume 与 member reload 恢复原 `SessionId`、canonical Root `ThreadId`、`TeamInstanceId`、child identity/
@@ -228,29 +228,61 @@ ignored 写入例外；不得手工修改、clean 或删除该缓存。078 自�
   fallback、恢复后的默认 turn 仍绑定该环境，且 reload 前后没有新增 thread Op。
 - 最终聚焦门禁 3/3 通过，覆盖 V2 eviction/reload、旧 root/fork environment 合同和 V1 descendant resume；`fmt-check`、`diff --check`
   通过。独立实现审查无 high、medium 或 low finding，不要求新增测试。
+- `#37847` 已形成独立提交、通过外部审查并获准进入本地 `main`；078 已消费包含该精确前置的本地主线提交，未 merge/push。
+- S2 主体已闭合 durable Root/member resume 与 lazy reload、顶层 fork/new/clear 和 child `fork_turns` 身份边界、descendant-first close、
+  可重试 failed close、idle unload 以及 archive/unarchive/delete 的 owner、writer 与部分失败语义，并补齐相应聚焦回归。
+- shutdown 提交、等待取消和 app-server 超时采用既有 Session/ThreadManager 生命周期接缝：已接受 Shutdown 保持 Session Control fenced，
+  late observer 只在真实 termination 后按 exact owner 收尾；独立聚焦复审最终无 high/medium correctness finding。
+- 已补齐轻量验收矩阵复核发现的四处证据缺口：保留 non-durable V2 resume 旧合同并精确比较 durable child metadata；用 paused-time
+  单元测试覆盖完整 idle delay；让 default/Local archive 共同使用 ordered helper 并显式报告 runtime partial；覆盖 Team artifact 已 unlink、
+  Root marker 尚存的 delete retry。另补公开 corrupt snapshot resume 无模型请求及显式 `/new` 新空 Team 回归。
+- 最终候选已通过 thread-store 全量 `199/199`、app-server 全量 `1134/1134` 及 Plan 078 app-server 正式场景
+  `23/23`；受最后重构影响的 idle-unload 场景又以禁用重试的 fresh 运行 `1/1` 通过。core 最终聚焦
+  `19/19` 通过，包含 18 个 S2 合同和当前源码的 schema 一致性；三个受影响 crate 的 clippy 最终无警告。
+- 一次三 crate 组合批次在测试前被内存 PSI watchdog 停止，随后改为 `CARGO_BUILD_JOBS=1` 串行。core 全量批次
+  首次被外部 Cargo 进程中断，第二次完成为 `3417 pass / 16 fail / 8 skipped`；失败由 Publication Critic
+  外部环境要求、旧基线 fixture/realtime timeout 与共享 target 的 077 过期 schema artifact 构成，不与 078 产品链
+  重叠。在不 clean 共享 target、不建第二 target 的前提下强制当前源输入重建，后续 app-server 全量与
+  core schema 聚焦门均证明最终候选使用当前 078 源码。
+- 最终候选已通过 `fmt-check` 和 `git diff --check`。未运行 Docker、真实 API/模型、训练、测评、CI/PR、
+  push 或 main 合并。
+- 最终独立终审发现一项 medium：app-server 成功移除 V2 member runtime owner 后没有清除该 Team 的独立
+  residency 槽，容量为 1 时同 ID lazy reload 会被残留的 protected slot 拒绝。修复已把清理收口到
+  ThreadManager 所有成功 map removal，并在 exact-owner 的 map/gate lease 内使用实际 removed thread 所属
+  `AgentControl` 清理，避免误清 replacement。现有 eviction/reload 回归新增 capacity=1 的 app-style
+  unload → lazy reload 链；轻量复审确认 finding 已关闭，无新 high/medium/low。
+- 整改后最终源码上，capacity=1 unload/reload、exact late removal 和 shutdown-all 三条 core 聚焦回归
+  `3/3` PASS；`codex-core` clippy 无警告 PASS。clippy 首轮发现的 `expect_used` 仅把不必要 panic 窄修为
+  fail-closed `false`，同一审查者确认不改 exact-owner/gate/residency 顺序，最终 high/medium/low 均无。
 
 ### 当前工作
 
-- `#37847` 独立前置的源码、聚焦回归与独立审查已完成，正在形成独立本地提交并交由外部审查者验收；尚未开始 S2 正式实现。
+- S2 产品、最终整改、相邻回归、fresh 正式场景、clippy、独立终审、精炼日志和 078 本地提交已完成。
+  当前只待向指定外部审查者发送 Codex 跨会话队列消息；发送后停止，不 merge/push。
 
 ### 本任务剩余步骤
 
-- 阶段 B：完成 `#37847` 前置提交的外部验收，等待用户批准进入本地 `main`。
-- 阶段 C-D：在获批消费精确最新主线后实现 S2 生命周期矩阵并完成聚焦/相称扩大门禁。
-- 阶段 E：完成 fresh 正式轮、必要的 077 兼容验收、独立终审、精炼日志与 078 本地提交。
+- 发送外部审查队列交接；不 merge/push。
 
 ### 阻塞项
 
-- `#37847` 前置在 078 分支完成后存在预期的外部验收与本地 main 合并授权门；这是明确的阶段边界，不是实现失败。
+- 无阻塞项。最终重型资源已释放，未使用用户的额外授权清理 077 产物或共享 target。
 
 ### 当前验收状态
 
-- `PREREQUISITE_IMPLEMENTED / LOCAL_REVIEW_PASS / MAIN_APPROVAL_PENDING`。只运行获批的聚焦 Cargo 测试；未运行 Docker、真实
-  API/模型、训练、测评、CI/PR、push 或 main 合并。
+- `PREREQUISITE_ACCEPTED / S2_IMPLEMENTED / HEAVY_GATES_PASS / FRESH_FORMAL_PASS / FINAL_REMEDIATION_PASS /
+  INDEPENDENT_REVIEW_PASS / LOCAL_DELIVERY_COMPLETE / EXTERNAL_REVIEW_PENDING`。
+  core 全量基线批次的 16 项非 078 失败如实保留，不冒充为全 core PASS；Plan 078 聚焦产品门、完整 app-server/
+  thread-store 相邻回归和 fresh 正式组均已通过。
 
 ### 交接边界
 
 - 执行者从阶段 A/B 开始；不得把计划编制时的源码调查或 WBS 更新冒充产品实现。
+- 与 Plan 077 并行共享文件的 078 语义所有权限定为：`core/src/team/durable.rs` 的 durable Team snapshot 路径统一调用；
+  `thread-store/src/lib.rs` 的该路径 helper 导出；`thread-store/src/store.rs` 的 `ThreadStore::archive_threads` /
+  `archive_thread_ids_in_order` ordered lifecycle write 语义，保证部分 archive 不得伪报成功。Plan 077 继续拥有正式 durable query
+  read/locator seam；当前未发现双方需要改变同一 API 语义的实质冲突，普通文本冲突留给后整合者基于最新 `main` 收敛。
+  077 的 durable query read/locator seam 不属于 078；后整合者基于最新 `main` 收敛普通文本冲突，不改变上述 lifecycle/write 合同。
 - Plan 078 完成后冻结本计划；后续正式 Session Control/TUI 与 M4-Z(core) 只链接当前 WBS，不在本计划继续规划。
 
 ## 6. 关键决策记录
@@ -269,3 +301,6 @@ ignored 写入例外；不得手工修改、clean 或删除该缓存。078 自�
 | 008 | detach 与 deferred idle unload 分离，idle/close/cold removal 都不能在失败时先丢唯一 owner | 即时客户端附着不是领域生命周期；S1 barrier 只有被真实 consumer 正确调用才成立 | lifecycle/authority | 已采纳 |
 | 009 | archive/unarchive 复用原生冷态能力；delete 仅在线程与 Team durable 结果均确认时 terminal，但不预定介质/事务形状 | 闭合产品结果且避免建设 takeover、补偿事务或第二套 registry | cold lifecycle | 已采纳 |
 | 010 | `#37847` 采用上游 5 行产品结果，并在现有 AgentControl fixture 中验证真实 residency 驱逐与恢复，不机械移植上游完整 mock 集成用例 | 当前 disabled/default environment 测试接缝会在协作调用前阻塞；复用既有 residency 能力更窄且直接验证目标语义 | 前置测试 | 已采纳 |
+| 011 | S2 重型批次在宽限期间使用临时 `270/285/290GB` 项目门限、共享 069 target 和 `CARGO_BUILD_JOBS=1` 串行 | 保留共享缓存且避免内存 PSI 再次停止；临时变量不写入仓库配置 | 构建/资源 | 已采纳 |
+| 012 | 共享 target 出现 077 schema artifact 污染时，仅通过当前源输入时间戳触发有界重建并以 app 全量/core schema 复验，不 clean 共享 target、不建第二 target | 纠正跨 worktree 增量 artifact 不属于当前源码的证据偏差，同时遵守缓存与空间边界 | 构建/验收 | 已采纳 |
+| 013 | 成功移除 ThreadManager owner 时，在 map/availability gate 内用实际 removed thread 的 `AgentControl` 同步清理 V2 residency | residency 是 Team 作用域的独立容量状态；在移除原子区内收口才同时防残留 slot 与 replacement 误清 | lifecycle/residency | 已采纳 |
