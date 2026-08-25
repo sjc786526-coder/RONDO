@@ -7,11 +7,11 @@ only be written once, so a resumed campaign cannot quietly overwrite evidence.
 
 from __future__ import annotations
 
-import json
-import os
 from pathlib import Path
 from typing import Any
 
+from ..full_model_training.contract import pretty_json_bytes
+from ..write_once import WriteOnceError, WriteOnceNamespace
 from .contract import RUN_ID, SelectionError
 
 
@@ -20,63 +20,29 @@ class SelectionArchive:
         match = RUN_ID.fullmatch(run_id)
         if match is None or match.group(1) != mode:
             raise SelectionError("Plan 073 run identity is invalid")
-        self.runs_root = runs_root
         self.run_id = run_id
         self.mode = mode
-        self.path = runs_root / run_id
+        self._archive = WriteOnceNamespace(
+            runs_root,
+            run_id,
+            validate_run_id=lambda value: value == run_id,
+        )
+        self.path = self._archive.path
 
     def create(self, *, exist_ok: bool = False) -> "SelectionArchive":
-        self.runs_root.mkdir(mode=0o700, parents=True, exist_ok=True)
-        if self.runs_root.is_symlink() or not self.runs_root.is_dir():
-            raise SelectionError("Plan 073 runs root is unsafe")
         try:
-            self.path.mkdir(mode=0o700)
-        except FileExistsError:
-            # A campaign may be resumed inside the same frozen namespace, but
-            # individual artifacts still cannot be overwritten.
-            if not exist_ok:
-                raise SelectionError("Plan 073 run archive already exists") from None
-            if self.path.is_symlink() or not self.path.is_dir():
-                raise SelectionError("Plan 073 run archive is unsafe") from None
+            self._archive.create(exist_ok=exist_ok)
+        except WriteOnceError as exc:
+            raise SelectionError(
+                "Plan 073 run archive is unsafe or already exists"
+            ) from exc
         return self
 
     def write_json(self, name: str, value: Any) -> Path:
-        body = json.dumps(
-            value,
-            ensure_ascii=False,
-            allow_nan=False,
-            sort_keys=True,
-            indent=2,
-        ).encode("utf-8") + b"\n"
-        return self.write_bytes(name, body)
+        return self.write_bytes(name, pretty_json_bytes(value))
 
     def write_bytes(self, name: str, value: bytes) -> Path:
-        if self.path.is_symlink() or not self.path.is_dir():
-            raise SelectionError("Plan 073 archive was not safely created")
-        relative = Path(name)
-        if relative.is_absolute() or len(relative.parts) != 1 or relative.name in {
-            "",
-            ".",
-            "..",
-        }:
-            raise SelectionError("Plan 073 archive file name is invalid")
-        destination = self.path / relative
-        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
-        if hasattr(os, "O_NOFOLLOW"):
-            flags |= os.O_NOFOLLOW
         try:
-            descriptor = os.open(destination, flags, 0o600)
-        except OSError as exc:
-            raise SelectionError(
-                "Plan 073 archive file cannot be created without overwrite"
-            ) from exc
-        try:
-            with os.fdopen(descriptor, "wb") as handle:
-                handle.write(value)
-                handle.flush()
-                os.fsync(handle.fileno())
-        except BaseException:
-            if destination.is_file() and not destination.is_symlink():
-                destination.unlink()
-            raise
-        return destination
+            return self._archive.write_bytes(name, value)
+        except WriteOnceError as exc:
+            raise SelectionError("Plan 073 archive file cannot be written") from exc
