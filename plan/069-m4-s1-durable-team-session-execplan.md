@@ -225,6 +225,9 @@ Team State、writer authority、Session identity 或只读状态源。
   blocking SessionMeta head 上限；均已在原 authority/durability/read 接缝内修复，并经第五轮复验确认关闭。
 - 第五轮独立复验仅发现 final close 没有交叉验证 outer `SessionMeta` Session/Root identity；现已让最终 validator 同时检查 outer
   Session ID、outer Root ID 与 exact inner durable marker，并覆盖两个外层字段分别损坏、owner 保留和恢复后重试成功。
+- 最终独立预验收已接受 `6faf45cc3ab2a7caa1b88618c8bdd44a63ced7e9`，确认无剩余高/中等级 correctness finding；当前主体实现状态为
+  `IMPLEMENTATION_COMPLETE / PREACCEPTANCE_COMPLETE`。本轮主线整合已先吸收 `main@d72d109`，保留 Plan 068--072 的共享事实；该
+  主线尚不包含 `#37198`，因此没有进入阶段 E，也没有运行或冒充最终正式轮。
 - 最新 `just fmt` 与 `git diff --check` 已通过；outer lineage/thread-store close 回归 2/2、core 产品 close 回归 1/1 通过，watchdog
   均为 `complete`、退出码 0、`stop_reason=none`。前一轮 core close/blocked-wait 产品回归 2/2、受影响 team-state/thread-store/rollout 邻近回归
   29/29 通过，watchdog 均为 `complete`、退出码 0、`stop_reason=none`。前一轮 core marker-loss/projection/wait 聚焦回归 3/3、
@@ -236,28 +239,29 @@ Team State、writer authority、Session identity 或只读状态源。
 
 ### 当前工作
 
-- 第五轮 correctness 窄修和直接受影响的聚焦门禁均已完成；正在形成单一本地提交并交回同一独立审查者复验。
+- 主体实现与预验收已经完成，正在按用户授权把实现和当前状态文档串行整合进 `main`；069 分支、worktree 与可复用构建资产继续保留，
+  不在本轮归档或清理。
 
 ### 本任务剩余步骤
 
-- 完成本轮独立复验并关闭其确认存在的高/中 correctness finding。
-- 等待 `#37198` 由独立任务进入 `main`，以及用户另行批准把最新 `main` 合入 069 分支。
+- 等待 `#37198` 由独立任务进入 `main`，再把包含该回移的最新 `main` 合入保留的 069 分支。
 - 执行阶段 E 的聚焦回归、全新领域状态正式轮和独立终审，形成最终本地提交。
 
 ### 阻塞项
 
-- 当前无已知 069 主体实现阻塞，独立复验尚待完成。最终 `M4-S1 PASS` 仍受 `#37198` 独立进入 `main` 与后续分支同步批准约束；不得越权
-  回移或宣布最终 PASS。
+- 当前无已知 069 主体 correctness 阻塞。最终 `M4-S1 PASS` 仅受 `#37198` 独立进入 `main`、随后同步与阶段 E 正式轮约束；不得在
+  069 中夹带回移或提前宣布最终 PASS。
 
 ### 当前验收状态
 
-- `IMPLEMENTATION_COMPLETE / PREACCEPTANCE_REVIEW_PENDING / FINAL_PASS_BLOCKED_BY_#37198`。
+- `IMPLEMENTATION_COMPLETE / PREACCEPTANCE_COMPLETE / FINAL_PASS_BLOCKED_BY_#37198`。
 
 ### 交接边界
 
 - 本任务完成后冻结此计划；S2、C0/C*、W0/W1、M4-Z 和跨线组合回归只链接
   `doc/WBS/durable-team-runtime.md`，不在本计划继续规划。
-- 069 工作树只形成本地提交。把 069 合入 `main`、推送、关闭 worktree、归档分支及共享 WBS/COMPLETED 同步均等待用户后续批准。
+- 用户已授权把当前主体实现和三份状态文档提交、合入并推送 `main`；069 worktree/分支继续保留给 `#37198` 后的阶段 E，不在本轮归档。
+  `doc/WBS-COMPLETED.md` 等待最终 M4-S1 PASS 后再记录完成事实。
 
 ## 6. 关键决策记录
 
