@@ -167,6 +167,12 @@ pub(super) async fn shutdown_thread(
     // abort and reopen the owner if recorder shutdown fails. Ordinary callers get an internal
     // permit with the same barrier semantics.
     let owner_close = root_writer_authority.begin_owner_close().await?;
+    if matches!(&owner_close, OwnerCloseState::ExternallyClosing) {
+        // Reject already-visible marker/lineage corruption before recorder shutdown so the same
+        // owner remains fully usable after its external close permit is aborted. The validation
+        // after recorder shutdown remains the authoritative final check for changes during flush.
+        root_writer_authority.validate_close_session_meta()?;
+    }
     let rollout_path = recorder.rollout_path().to_path_buf();
     let shutdown_prepared = {
         let live_recorders = store.live_recorders.lock().await;

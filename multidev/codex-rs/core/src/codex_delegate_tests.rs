@@ -59,6 +59,7 @@ async fn forward_events_filters_private_events_before_blocked_send_is_cancelled(
     let io = Arc::new(SessionIo {
         tx_sub,
         rx_event: rx_events,
+        shutdown_submissions: Default::default(),
         agent_status,
         session_loop_termination: completed_session_loop_termination(),
     });
@@ -158,6 +159,7 @@ async fn forward_ops_preserves_submission_trace_context() {
     let io = Arc::new(SessionIo {
         tx_sub,
         rx_event: rx_events,
+        shutdown_submissions: Default::default(),
         agent_status,
         session_loop_termination: completed_session_loop_termination(),
     });
@@ -245,6 +247,7 @@ async fn handle_request_permissions_uses_tool_call_id_for_round_trip() {
     let io = Arc::new(SessionIo {
         tx_sub,
         rx_event: rx_events_child,
+        shutdown_submissions: Default::default(),
         agent_status,
         session_loop_termination: completed_session_loop_termination(),
     });
@@ -341,6 +344,7 @@ async fn handle_request_user_input_preserves_non_blocking_flag_for_round_trip() 
     let io = Arc::new(SessionIo {
         tx_sub,
         rx_event: rx_events_child,
+        shutdown_submissions: Default::default(),
         agent_status,
         session_loop_termination: completed_session_loop_termination(),
     });
@@ -444,6 +448,7 @@ async fn handle_exec_approval_uses_call_id_for_guardian_review_and_approval_id_f
     let io = Arc::new(SessionIo {
         tx_sub,
         rx_event: rx_events_child,
+        shutdown_submissions: Default::default(),
         agent_status,
         session_loop_termination: completed_session_loop_termination(),
     });

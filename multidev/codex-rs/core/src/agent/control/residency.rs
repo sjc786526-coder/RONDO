@@ -2,6 +2,7 @@ use super::AgentControl;
 use crate::agent::AgentStatus;
 use crate::codex_thread::CodexThread;
 use crate::config::Config;
+use crate::thread_manager::ExactThreadRemoval;
 use crate::thread_manager::ThreadManagerState;
 use codex_protocol::ThreadId;
 use codex_protocol::error::CodexErr;
@@ -72,7 +73,7 @@ impl AgentControl {
         }
     }
 
-    pub(super) fn forget_v2_residency(&self, thread_id: ThreadId) {
+    pub(crate) fn forget_v2_residency(&self, thread_id: ThreadId) {
         self.v2_residency.remove(thread_id);
     }
 }
@@ -144,8 +145,18 @@ impl V2Residency {
                 self.touch(candidate_thread_id);
                 continue;
             }
-            let _ = manager.remove_thread(&candidate_thread_id).await;
-            return true;
+            match manager
+                .remove_thread_if_same(&candidate_thread_id, &candidate_thread)
+                .await
+            {
+                ExactThreadRemoval::Removed => return true,
+                ExactThreadRemoval::Missing | ExactThreadRemoval::Replaced => {
+                    // Missing can be the gap between cold resume removing the dead owner and
+                    // inserting its same-ID replacement. Keep the slot occupied and retry from a
+                    // fresh owner snapshot instead of admitting above the residency limit.
+                    self.touch(candidate_thread_id);
+                }
+            }
         }
         false
     }

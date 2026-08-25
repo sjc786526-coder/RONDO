@@ -17,6 +17,7 @@ use crate::session_prefix::format_subagent_context_line;
 use crate::session_prefix::format_subagent_notification_message;
 use crate::thread_manager::ResumeThreadWithHistoryOptions;
 use crate::thread_manager::ThreadManagerState;
+use crate::thread_manager::ThreadOpSubmission;
 use crate::thread_rollout_truncation::truncate_rollout_to_last_n_fork_turns;
 use codex_protocol::AgentPath;
 use codex_protocol::SessionId;
@@ -67,6 +68,7 @@ mod residency;
 mod spawn;
 
 pub(crate) use self::lifecycle::DurableTeamRootCloseGuard;
+use self::lifecycle::DurableTeamSubtreeCloseGuard;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum SpawnAgentForkMode {
@@ -120,8 +122,7 @@ pub(crate) struct AgentControl {
     /// shared by every sub-agent cloned from it, so there is exactly one team instance per live
     /// root tree and it does not depend on which members are currently loaded.
     team: Arc<TeamStateHandle>,
-    /// Root-scoped child admission and close ordering. The close side is only activated by a
-    /// durable Team owner, so legacy and non-durable sessions retain their existing lifecycle.
+    /// Root-scoped child admission and close ordering.
     team_lifecycle: Arc<DurableTeamLifecycleGate>,
 }
 
@@ -177,6 +178,15 @@ impl AgentControl {
             self.manager.clone(),
             Arc::clone(&self.state),
         )
+    }
+
+    /// Atomically stop child admission while one agent subtree is being closed.
+    ///
+    /// Non-durable controls use the same admission gate for resume and spawn, so they must also
+    /// participate. Otherwise a same-ID replacement can enter between the descendant snapshot and
+    /// exact-owner retirement.
+    fn begin_agent_subtree_close(&self) -> CodexResult<DurableTeamSubtreeCloseGuard> {
+        self.team_lifecycle.begin_subtree_close()
     }
 
     fn reserve_team_child_admission(
@@ -365,17 +375,21 @@ impl AgentControl {
         &self,
         agent_id: ThreadId,
         state: &Arc<ThreadManagerState>,
-        result: CodexResult<String>,
+        submission: ThreadOpSubmission,
     ) -> CodexResult<String> {
+        let ThreadOpSubmission { owner, result } = submission;
         if result
             .as_ref()
             .is_err_and(|err| matches!(err.details(), CodexErrorDetails::InternalAgentDied))
+            && let Some(owner) = owner
+            && let Ok(retirement) = state
+                .lock_threads_if_not_replaced(vec![(agent_id, Some(owner))])
+                .await
         {
-            let _ = state.remove_thread(&agent_id).await;
-            self.forget_v2_residency(agent_id);
-            let _gate = state.lock_availability_transition();
-            self.state.release_spawned_thread(agent_id);
-            state.bump_availability_generation();
+            retirement.retire_with(|thread_id, _| {
+                self.forget_v2_residency(thread_id);
+                self.state.release_spawned_thread(thread_id);
+            });
         }
         result
     }

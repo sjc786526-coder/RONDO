@@ -1,3 +1,4 @@
+use super::thread_lifecycle::PendingThreadUnloads;
 use super::*;
 use codex_agent_extension::AgentInvocation;
 use codex_agent_extension::AgentRun;
@@ -93,7 +94,7 @@ pub(crate) struct TurnRequestProcessor {
     arg0_paths: Arg0DispatchPaths,
     config: Arc<Config>,
     config_manager: ConfigManager,
-    pending_thread_unloads: Arc<Mutex<HashSet<ThreadId>>>,
+    pending_thread_unloads: Arc<PendingThreadUnloads>,
     thread_state_manager: ThreadStateManager,
     thread_watch_manager: ThreadWatchManager,
     thread_list_state_permit: Arc<Semaphore>,
@@ -148,7 +149,7 @@ impl TurnRequestProcessor {
         arg0_paths: Arg0DispatchPaths,
         config: Arc<Config>,
         config_manager: ConfigManager,
-        pending_thread_unloads: Arc<Mutex<HashSet<ThreadId>>>,
+        pending_thread_unloads: Arc<PendingThreadUnloads>,
         thread_state_manager: ThreadStateManager,
         thread_watch_manager: ThreadWatchManager,
         thread_list_state_permit: Arc<Semaphore>,
@@ -471,6 +472,10 @@ impl TurnRequestProcessor {
         Ok(())
     }
 
+    #[expect(
+        clippy::await_holding_invalid_type,
+        reason = "turn submission must be serialized against pending thread unloads"
+    )]
     async fn turn_start_inner(
         &self,
         request_id: ConnectionRequestId,
@@ -562,10 +567,17 @@ impl TurnRequestProcessor {
             additional_context,
             thread_settings,
         };
+        let request_trace_context = self.request_trace_context(&request_id).await;
+        let pending_thread_unloads = self.pending_thread_unloads.lock().await;
+        if pending_thread_unloads.contains(&thread_id) {
+            return Err(invalid_request(format!(
+                "thread {thread_id} is closing; retry turn/start after the thread is closed"
+            )));
+        }
         let turn_id = thread
             .submit_user_input_with_client_user_message_id(
                 turn_op,
-                self.request_trace_context(&request_id).await,
+                request_trace_context,
                 client_user_message_id,
             )
             .await
@@ -574,6 +586,7 @@ impl TurnRequestProcessor {
                 self.track_error_response(&request_id, &error, /*error_type*/ None);
                 error
             })?;
+        drop(pending_thread_unloads);
 
         if turn_has_input {
             let config_snapshot = thread.config_snapshot().await;

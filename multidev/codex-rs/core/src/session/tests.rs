@@ -189,6 +189,8 @@ use serde_json::json;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::OnceLock;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
 use std::time::Duration as StdDuration;
 
 pub(crate) fn mcp_config_for_test(config: &crate::config::Config) -> Arc<codex_mcp::McpConfig> {
@@ -5916,6 +5918,7 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
         mcp_prewarm_task: std::sync::Mutex::new(None),
         conversation: Arc::new(RealtimeConversationManager::new()),
         active_turn: Mutex::new(None),
+        experimental_session_control_shutdown_submissions: Arc::new(AtomicUsize::new(0)),
         pending_user_message_admissions: Default::default(),
         input_queue: super::input_queue::InputQueue::new(),
         guardian_review_session: crate::guardian::GuardianReviewSessionManager::default(),
@@ -6871,6 +6874,7 @@ async fn submit_with_id_captures_current_span_trace_context() {
     let io = SessionIo {
         tx_sub,
         rx_event,
+        shutdown_submissions: Default::default(),
         agent_status: watch::channel(AgentStatus::PendingInit).1,
         session_loop_termination: completed_session_loop_termination(),
     };
@@ -7659,6 +7663,7 @@ async fn shutdown_and_wait_allows_multiple_waiters() {
     let io = Arc::new(SessionIo {
         tx_sub,
         rx_event,
+        shutdown_submissions: Default::default(),
         agent_status: watch::channel(AgentStatus::PendingInit).1,
         session_loop_termination: session_loop_termination_from_handle(session_loop_handle),
     });
@@ -7683,6 +7688,53 @@ async fn shutdown_and_wait_allows_multiple_waiters() {
 }
 
 #[tokio::test]
+async fn canceled_shutdown_waiter_preserves_an_enqueued_shutdown_fence() {
+    let (tx_sub, rx_sub) = async_channel::bounded(1);
+    let (_tx_event, rx_event) = async_channel::unbounded();
+    let (termination_tx, termination_rx) = tokio::sync::oneshot::channel();
+    let session_loop_handle = tokio::spawn(async move {
+        let _ = termination_rx.await;
+    });
+    let shutdown_submissions = Arc::new(AtomicUsize::new(0));
+    let io = Arc::new(SessionIo {
+        tx_sub,
+        rx_event,
+        shutdown_submissions: Arc::clone(&shutdown_submissions),
+        agent_status: watch::channel(AgentStatus::PendingInit).1,
+        session_loop_termination: session_loop_termination_from_handle(session_loop_handle),
+    });
+
+    let waiter = tokio::spawn({
+        let io = Arc::clone(&io);
+        async move { io.shutdown_and_wait().await }
+    });
+    tokio::time::timeout(StdDuration::from_secs(5), async {
+        while rx_sub.is_empty() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("Shutdown should be accepted into the submission queue");
+    waiter.abort();
+    assert!(
+        waiter
+            .await
+            .expect_err("shutdown waiter should be canceled")
+            .is_cancelled()
+    );
+    assert_eq!(
+        shutdown_submissions.load(Ordering::Acquire),
+        1,
+        "canceling the waiter must not clear an accepted Shutdown Op"
+    );
+    let queued = rx_sub.recv().await.expect("queued Shutdown submission");
+    assert_eq!(queued.op, Op::Shutdown);
+    termination_tx
+        .send(())
+        .expect("session-loop completion should still be observed");
+}
+
+#[tokio::test]
 async fn shutdown_and_wait_waits_when_shutdown_is_already_in_progress() {
     let (_session, _turn_context) = make_session_and_context().await;
     let (tx_sub, rx_sub) = async_channel::bounded(4);
@@ -7695,6 +7747,7 @@ async fn shutdown_and_wait_waits_when_shutdown_is_already_in_progress() {
     let io = Arc::new(SessionIo {
         tx_sub,
         rx_event,
+        shutdown_submissions: Default::default(),
         agent_status: watch::channel(AgentStatus::PendingInit).1,
         session_loop_termination: session_loop_termination_from_handle(session_loop_handle),
     });
@@ -7731,6 +7784,7 @@ async fn shutdown_and_wait_shuts_down_cached_guardian_subagent() {
     let parent_io = SessionIo {
         tx_sub: parent_tx_sub,
         rx_event: parent_rx_event,
+        shutdown_submissions: Default::default(),
         agent_status: watch::channel(AgentStatus::PendingInit).1,
         session_loop_termination: session_loop_termination_from_handle(parent_session_loop_handle),
     };
@@ -7753,6 +7807,7 @@ async fn shutdown_and_wait_shuts_down_cached_guardian_subagent() {
     let child_io = SessionIo {
         tx_sub: child_tx_sub,
         rx_event: child_rx_event,
+        shutdown_submissions: Default::default(),
         agent_status: watch::channel(AgentStatus::PendingInit).1,
         session_loop_termination: session_loop_termination_from_handle(child_session_loop_handle),
     };
@@ -7785,6 +7840,7 @@ async fn cached_guardian_subagent_exposes_its_rollout_path() {
     let child_io = SessionIo {
         tx_sub: child_tx_sub,
         rx_event: child_rx_event,
+        shutdown_submissions: Default::default(),
         agent_status: watch::channel(AgentStatus::PendingInit).1,
         session_loop_termination: session_loop_termination_from_handle(child_session_loop_handle),
     };
@@ -7816,6 +7872,7 @@ async fn shutdown_and_wait_shuts_down_tracked_ephemeral_guardian_review() {
     let parent_io = SessionIo {
         tx_sub: parent_tx_sub,
         rx_event: parent_rx_event,
+        shutdown_submissions: Default::default(),
         agent_status: watch::channel(AgentStatus::PendingInit).1,
         session_loop_termination: session_loop_termination_from_handle(parent_session_loop_handle),
     };
@@ -7838,6 +7895,7 @@ async fn shutdown_and_wait_shuts_down_tracked_ephemeral_guardian_review() {
     let child_io = SessionIo {
         tx_sub: child_tx_sub,
         rx_event: child_rx_event,
+        shutdown_submissions: Default::default(),
         agent_status: watch::channel(AgentStatus::PendingInit).1,
         session_loop_termination: session_loop_termination_from_handle(child_session_loop_handle),
     };
@@ -8139,6 +8197,7 @@ where
         mcp_prewarm_task: std::sync::Mutex::new(None),
         conversation: Arc::new(RealtimeConversationManager::new()),
         active_turn: Mutex::new(None),
+        experimental_session_control_shutdown_submissions: Arc::new(AtomicUsize::new(0)),
         pending_user_message_admissions: Default::default(),
         input_queue: super::input_queue::InputQueue::new(),
         guardian_review_session: crate::guardian::GuardianReviewSessionManager::default(),

@@ -4,7 +4,6 @@
 //! local committed medium and adapts the thread store's existing live-writer capability; it does
 //! not introduce another lock or writer identity.
 
-use codex_protocol::ThreadId;
 use codex_protocol::protocol::DurableTeamSessionMeta;
 use codex_protocol::protocol::SessionMeta;
 use codex_team_state::DurableTeamIdentity;
@@ -20,6 +19,7 @@ use codex_thread_store::RootWritePermit;
 use codex_thread_store::RootWriterAuthority;
 use codex_thread_store::ThreadStore;
 use codex_thread_store::ThreadStoreError;
+use codex_thread_store::durable_team_snapshot_path;
 use std::fs::File;
 use std::io::ErrorKind;
 use std::io::Read;
@@ -27,9 +27,6 @@ use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
-
-const TEAM_STATE_DIRECTORY: &str = "team-sessions/v1";
-const TEAM_STATE_EXTENSION: &str = "team-state";
 
 pub(crate) async fn root_team_write_authority(
     thread_store: &Arc<dyn ThreadStore>,
@@ -50,7 +47,7 @@ pub(crate) async fn root_team_write_authority(
     Ok(Arc::new(LocalTeamWriteAuthority {
         identity,
         root_authority,
-        snapshot_path: snapshot_path(codex_home, identity.root_thread_id()),
+        snapshot_path: durable_team_snapshot_path(codex_home, identity.root_thread_id()),
     }))
 }
 
@@ -61,7 +58,10 @@ pub(crate) fn durable_team_snapshot_exists(
     codex_home: &Path,
     identity: DurableTeamIdentity,
 ) -> Result<bool, TeamDurabilityError> {
-    let snapshot = read_snapshot_file(&snapshot_path(codex_home, identity.root_thread_id()))?;
+    let snapshot = read_snapshot_file(&durable_team_snapshot_path(
+        codex_home,
+        identity.root_thread_id(),
+    ))?;
     if let Some(snapshot) = snapshot.as_ref() {
         committed_snapshot_generation(identity, snapshot)?;
     }
@@ -75,12 +75,15 @@ pub(crate) fn validate_durable_team_resume(
     identity: DurableTeamIdentity,
 ) -> Result<(), TeamDurabilityError> {
     validate_session_intent(session_meta, identity)?;
-    let snapshot = read_snapshot_file(&snapshot_path(codex_home, identity.root_thread_id()))?
-        .ok_or_else(|| {
-            TeamDurabilityError::unavailable(
-                "durable Team Session intent exists but its first committed snapshot is missing",
-            )
-        })?;
+    let snapshot = read_snapshot_file(&durable_team_snapshot_path(
+        codex_home,
+        identity.root_thread_id(),
+    ))?
+    .ok_or_else(|| {
+        TeamDurabilityError::unavailable(
+            "durable Team Session intent exists but its first committed snapshot is missing",
+        )
+    })?;
     committed_snapshot_generation(identity, &snapshot)?;
     Ok(())
 }
@@ -129,13 +132,10 @@ pub(crate) fn read_committed_snapshot_after_validated_intent(
     codex_home: &Path,
     identity: DurableTeamIdentity,
 ) -> Result<Option<Vec<u8>>, TeamDurabilityError> {
-    read_snapshot_file(&snapshot_path(codex_home, identity.root_thread_id()))
-}
-
-fn snapshot_path(codex_home: &Path, root_thread_id: ThreadId) -> PathBuf {
-    codex_home
-        .join(TEAM_STATE_DIRECTORY)
-        .join(format!("{root_thread_id}.{TEAM_STATE_EXTENSION}"))
+    read_snapshot_file(&durable_team_snapshot_path(
+        codex_home,
+        identity.root_thread_id(),
+    ))
 }
 
 struct LocalTeamWriteAuthority {
@@ -428,6 +428,7 @@ mod tests {
     use std::process::Command;
 
     use codex_protocol::SessionId;
+    use codex_protocol::ThreadId;
     use codex_protocol::models::BaseInstructions;
     use codex_protocol::protocol::EventMsg;
     use codex_protocol::protocol::MultiAgentVersion;
@@ -639,7 +640,7 @@ mod tests {
             "/root".to_string(),
         )
         .expect("commit initial Team snapshot");
-        let snapshot_path = snapshot_path(home.path(), root_thread_id);
+        let snapshot_path = durable_team_snapshot_path(home.path(), root_thread_id);
         let before = std::fs::read(&snapshot_path).expect("read generation 1");
 
         std::fs::remove_file(&rollout_path).expect("remove canonical Root SessionMeta");
@@ -701,7 +702,7 @@ mod tests {
 
         std::fs::OpenOptions::new()
             .write(true)
-            .open(snapshot_path(home.path(), root_thread_id))
+            .open(durable_team_snapshot_path(home.path(), root_thread_id))
             .expect("open committed Team snapshot")
             .set_len((MAX_ENCODED_SNAPSHOT_BYTES as u64) + 1)
             .expect("make sparse oversized snapshot");

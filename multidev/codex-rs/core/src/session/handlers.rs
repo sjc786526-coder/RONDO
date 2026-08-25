@@ -629,6 +629,7 @@ pub async fn shutdown(sess: &Arc<Session>, sub_id: String) -> bool {
     if durable_root {
         if let Err(error) = sess.ensure_durable_root_activation().await {
             send_durable_close_error(sess, &sub_id, error.to_string()).await;
+            sess.finish_failed_experimental_session_control_shutdown();
             return false;
         }
         let lifecycle_close = match sess
@@ -639,22 +640,51 @@ pub async fn shutdown(sess: &Arc<Session>, sub_id: String) -> bool {
             Ok(close) => close,
             Err(error) => {
                 send_durable_close_error(sess, &sub_id, error.to_string()).await;
+                sess.finish_failed_experimental_session_control_shutdown();
                 return false;
             }
         };
         if let Err(error) = lifecycle_close.ensure_no_live_descendants().await {
             send_durable_close_error(sess, &sub_id, error.to_string()).await;
+            sess.finish_failed_experimental_session_control_shutdown();
             return false;
         }
         let team_close = match team.begin_close().await {
             Ok(close) => close,
             Err(error) => {
                 send_durable_close_error(sess, &sub_id, error.to_string()).await;
+                sess.finish_failed_experimental_session_control_shutdown();
                 return false;
             }
         };
         durable_lifecycle_close = Some(lifecycle_close);
         durable_team_close = Some(team_close);
+    }
+
+    // A durable Root must retain its fully usable runtime when persistence cannot cross the close
+    // boundary. Close its canonical writer first while the Team/lifecycle permits block new
+    // mutation; only a successful persistence shutdown commits us to runtime teardown.
+    if durable_root
+        && let Some(live_thread) = sess.live_thread()
+        && let Err(e) = live_thread.shutdown().await
+    {
+        warn!("failed to shutdown thread persistence: {e}");
+        if let Some(team_close) = durable_team_close.take()
+            && let Err(abort_error) = team_close.abort().await
+        {
+            warn!("failed to abort durable Team close after persistence failure: {abort_error}");
+        }
+        if let Some(lifecycle_close) = durable_lifecycle_close.take() {
+            lifecycle_close.abort();
+        }
+        send_durable_close_error(
+            sess,
+            &sub_id,
+            "Failed to shutdown thread persistence".to_string(),
+        )
+        .await;
+        sess.finish_failed_experimental_session_control_shutdown();
+        return false;
     }
 
     shutdown_session_runtime(sess).await;
@@ -675,27 +705,11 @@ pub async fn shutdown(sess: &Arc<Session>, sub_id: String) -> bool {
 
     // Gracefully flush and shutdown thread persistence on session end so tests
     // that inspect durable state do not race with the background writer.
-    if let Some(live_thread) = sess.live_thread()
+    if !durable_root
+        && let Some(live_thread) = sess.live_thread()
         && let Err(e) = live_thread.shutdown().await
     {
         warn!("failed to shutdown thread persistence: {e}");
-        if let Some(team_close) = durable_team_close.take()
-            && let Err(abort_error) = team_close.abort().await
-        {
-            warn!("failed to abort durable Team close after persistence failure: {abort_error}");
-        }
-        if let Some(lifecycle_close) = durable_lifecycle_close.take() {
-            lifecycle_close.abort();
-        }
-        send_durable_close_error(
-            sess,
-            &sub_id,
-            "Failed to shutdown thread persistence".to_string(),
-        )
-        .await;
-        if durable_root {
-            return false;
-        }
     }
 
     if let Some(team_close) = durable_team_close.take()

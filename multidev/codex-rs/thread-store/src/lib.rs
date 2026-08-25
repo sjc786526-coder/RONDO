@@ -5,6 +5,7 @@
 //! any other backing store.
 
 mod authority;
+mod durable_team_artifact;
 mod error;
 mod in_memory;
 mod live_thread;
@@ -20,6 +21,7 @@ pub use authority::RootWritePermit;
 pub use authority::RootWriterAuthority;
 pub use codex_state::MAX_QUEUE_ITEMS;
 pub use codex_state::QueuedUserSubmissionRecord;
+pub use durable_team_artifact::durable_team_snapshot_path;
 pub use error::ListSessionLocatorsError;
 pub use error::ReadSessionMetaError;
 pub use error::ThreadStoreError;

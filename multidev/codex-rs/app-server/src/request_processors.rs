@@ -512,7 +512,6 @@ use tokio_util::sync::DropGuard;
 use tokio_util::task::TaskTracker;
 use toml::Value as TomlValue;
 use tracing::Instrument;
-use tracing::error;
 use tracing::info;
 use tracing::warn;
 use uuid::Uuid;
@@ -662,6 +661,7 @@ use self::thread_lifecycle::*;
 use self::thread_resume_redaction::*;
 use self::thread_summary::*;
 
+pub(crate) use self::thread_lifecycle::PendingThreadUnloads;
 pub(crate) use self::thread_lifecycle::populate_thread_turns_from_history;
 pub(crate) use self::thread_processor::thread_from_stored_thread;
 #[cfg(test)]

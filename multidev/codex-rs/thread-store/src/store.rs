@@ -58,6 +58,36 @@ pub type ReadSessionMetaFuture<'a> =
 pub type ListSessionLocatorsFuture<'a> =
     Pin<Box<dyn Future<Output = Result<SessionLocatorPage, ListSessionLocatorsError>> + Send + 'a>>;
 
+pub(crate) async fn archive_thread_ids_in_order<F, Fut>(
+    thread_ids: Vec<ThreadId>,
+    mut archive_thread: F,
+) -> ThreadStoreResult<Vec<ThreadId>>
+where
+    F: FnMut(ThreadId) -> Fut,
+    Fut: Future<Output = ThreadStoreResult<()>>,
+{
+    let mut archived_thread_ids = Vec::new();
+    for thread_id in thread_ids {
+        match archive_thread(thread_id).await {
+            Ok(()) => archived_thread_ids.push(thread_id),
+            Err(err) if archived_thread_ids.is_empty() => return Err(err),
+            Err(err) => {
+                return Err(ThreadStoreError::Internal {
+                    message: format!(
+                        "archive partially completed; archived thread ids: {}; failed thread {thread_id}: {err}",
+                        archived_thread_ids
+                            .iter()
+                            .map(ToString::to_string)
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ),
+                });
+            }
+        }
+    }
+    Ok(archived_thread_ids)
+}
+
 /// Storage-neutral thread persistence boundary.
 pub trait ThreadStore: Any + Send + Sync {
     /// Return this store as [`Any`] for implementation-owned escape hatches.
@@ -310,21 +340,18 @@ pub trait ThreadStore: Any + Send + Sync {
 
     /// Archives threads in order, returning the successfully archived thread ids.
     ///
-    /// The first thread must archive successfully; later failures are best effort.
+    /// Any failure is returned to the caller. If an implementation cannot make the operation
+    /// atomic, its error must identify already-completed members rather than reporting success for
+    /// a partially archived subtree.
     fn archive_threads(
         &self,
         params: ArchiveThreadsParams,
     ) -> ThreadStoreFuture<'_, Vec<ThreadId>> {
         Box::pin(async move {
-            let mut archived_thread_ids = Vec::new();
-            for thread_id in params.thread_ids {
-                match self.archive_thread(ArchiveThreadParams { thread_id }).await {
-                    Ok(()) => archived_thread_ids.push(thread_id),
-                    Err(err) if archived_thread_ids.is_empty() => return Err(err),
-                    Err(err) => tracing::warn!("failed to archive thread {thread_id}: {err}"),
-                }
-            }
-            Ok(archived_thread_ids)
+            archive_thread_ids_in_order(params.thread_ids, |thread_id| {
+                self.archive_thread(ArchiveThreadParams { thread_id })
+            })
+            .await
         })
     }
 
@@ -348,5 +375,38 @@ pub trait ThreadStore: Any + Send + Sync {
             }
             Ok(())
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::Ordering;
+
+    #[tokio::test]
+    async fn archive_batch_reports_runtime_partial_failure() {
+        let thread_ids = vec![ThreadId::new(), ThreadId::new(), ThreadId::new()];
+        let attempts = AtomicUsize::new(0);
+
+        let error = archive_thread_ids_in_order(thread_ids.clone(), |thread_id| {
+            let attempt = attempts.fetch_add(1, Ordering::AcqRel);
+            async move {
+                if attempt == 1 {
+                    Err(ThreadStoreError::Conflict {
+                        message: format!("simulated runtime failure for {thread_id}"),
+                    })
+                } else {
+                    Ok(())
+                }
+            }
+        })
+        .await
+        .expect_err("the batch must not report success after a runtime partial failure");
+
+        let message = error.to_string();
+        assert!(message.contains(&thread_ids[0].to_string()));
+        assert!(message.contains(&thread_ids[1].to_string()));
+        assert_eq!(attempts.load(Ordering::Acquire), 2);
     }
 }

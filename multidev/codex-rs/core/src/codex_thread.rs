@@ -62,7 +62,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::RwLock;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use tokio::sync::Mutex;
 use tokio::sync::watch;
@@ -199,7 +199,7 @@ pub struct CodexThread {
     /// takes the write lease before closing the submission channel, so a stopped-but-still-mapped
     /// root can never be used as an online owner by the prototype.
     experimental_session_control_residency: RwLock<()>,
-    experimental_session_control_shutdown_started: AtomicBool,
+    experimental_session_control_shutdown_attempts: AtomicUsize,
     session_configured: SessionConfiguredEvent,
     rollout_path: Option<PathBuf>,
     out_of_band_elicitations: Mutex<OutOfBandElicitations>,
@@ -234,7 +234,7 @@ impl CodexThread {
             io,
             session_source,
             experimental_session_control_residency: RwLock::new(()),
-            experimental_session_control_shutdown_started: AtomicBool::new(false),
+            experimental_session_control_shutdown_attempts: AtomicUsize::new(0),
             session_configured,
             rollout_path,
             out_of_band_elicitations: Mutex::new(OutOfBandElicitations::default()),
@@ -242,7 +242,17 @@ impl CodexThread {
     }
 
     pub async fn submit(&self, op: Op) -> CodexResult<String> {
-        self.io.submit(op).await
+        self.submit_with_trace(op, /*trace*/ None).await
+    }
+
+    pub(crate) async fn submit_with_trace_and_parent_turn_id(
+        &self,
+        op: Op,
+        trace: Option<W3cTraceContext>,
+        parent_turn_id: Option<String>,
+    ) -> CodexResult<String> {
+        let _shutdown_attempt = matches!(&op, Op::Shutdown).then(|| self.shutdown_attempt());
+        self.io.submit_with_trace(op, trace, parent_turn_id).await
     }
 
     /// Returns the session telemetry handle for thread-scoped production instrumentation.
@@ -251,15 +261,20 @@ impl CodexThread {
     }
 
     pub async fn shutdown_and_wait(&self) -> CodexResult<()> {
-        {
-            let _residency = self
-                .experimental_session_control_residency
-                .write()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            self.experimental_session_control_shutdown_started
-                .store(true, Ordering::Release);
-        }
+        let _shutdown_attempt = self.shutdown_attempt();
         self.io.shutdown_and_wait().await
+    }
+
+    fn shutdown_attempt(&self) -> ExperimentalSessionControlShutdownAttempt<'_> {
+        let _residency = self
+            .experimental_session_control_residency
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.experimental_session_control_shutdown_attempts
+            .fetch_add(1, Ordering::AcqRel);
+        ExperimentalSessionControlShutdownAttempt {
+            attempts: &self.experimental_session_control_shutdown_attempts,
+        }
     }
 
     /// Wait until the underlying session loop has terminated.
@@ -302,8 +317,7 @@ impl CodexThread {
         op: Op,
         trace: Option<W3cTraceContext>,
     ) -> CodexResult<String> {
-        self.io
-            .submit_with_trace(op, trace, /*parent_turn_id*/ None)
+        self.submit_with_trace_and_parent_turn_id(op, trace, /*parent_turn_id*/ None)
             .await
     }
 
@@ -489,6 +503,7 @@ impl CodexThread {
 
     /// Use sparingly: this is intended to be removed soon.
     pub async fn submit_with_id(&self, mut sub: Submission) -> CodexResult<()> {
+        let _shutdown_attempt = matches!(&sub.op, Op::Shutdown).then(|| self.shutdown_attempt());
         sub.parent_turn_id = None;
         self.io.submit_with_id(sub).await
     }
@@ -598,8 +613,12 @@ impl CodexThread {
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         if self
-            .experimental_session_control_shutdown_started
+            .experimental_session_control_shutdown_attempts
             .load(Ordering::Acquire)
+            > 0
+            || self
+                .session
+                .experimental_session_control_shutdown_in_progress()
             || !self.is_running()
         {
             return None;
@@ -804,5 +823,16 @@ impl CodexThread {
             elicitations.registration = None;
         }
         Ok(elicitations.count)
+    }
+}
+
+struct ExperimentalSessionControlShutdownAttempt<'a> {
+    attempts: &'a AtomicUsize,
+}
+
+impl Drop for ExperimentalSessionControlShutdownAttempt<'_> {
+    fn drop(&mut self) {
+        let previous = self.attempts.fetch_sub(1, Ordering::AcqRel);
+        debug_assert!(previous > 0);
     }
 }

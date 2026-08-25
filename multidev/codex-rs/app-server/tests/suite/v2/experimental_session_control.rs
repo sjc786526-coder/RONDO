@@ -34,6 +34,8 @@ use codex_app_server_protocol::JSONRPCMessage;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::ThreadArchiveParams;
 use codex_app_server_protocol::ThreadArchiveResponse;
+use codex_app_server_protocol::ThreadDeleteParams;
+use codex_app_server_protocol::ThreadDeleteResponse;
 use codex_app_server_protocol::ThreadLoadedListParams;
 use codex_app_server_protocol::ThreadLoadedListResponse;
 use codex_app_server_protocol::ThreadResumeParams;
@@ -50,6 +52,7 @@ use codex_arg0::Arg0DispatchPaths;
 use codex_config::CloudConfigBundleLoader;
 use codex_config::LoaderOverrides;
 use codex_core::config::ConfigBuilder;
+use codex_core::find_archived_thread_path_by_id_str;
 use codex_core::init_state_db;
 use codex_exec_server::EnvironmentManager;
 use codex_features::Feature;
@@ -58,6 +61,7 @@ use codex_protocol::SessionId;
 use codex_protocol::ThreadId;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::SubAgentSource;
+use codex_thread_store::durable_team_snapshot_path;
 use core_test_support::responses;
 use pretty_assertions::assert_eq;
 use serde_json::json;
@@ -598,6 +602,157 @@ async fn archive_and_unarchive_use_thread_authority_without_loading_the_session(
 }
 
 #[tokio::test]
+async fn durable_archive_unarchive_resume_and_delete_preserve_then_remove_one_lineage() -> Result<()>
+{
+    let publish_args = serde_json::to_string(&json!({
+        "title": "durable lifecycle event",
+        "summary": "persist before the cold lifecycle",
+        "handoff": null
+    }))?;
+    let model_server = create_mock_responses_server_sequence_unchecked(vec![
+        responses::sse(vec![
+            responses::ev_response_created("durable-publish"),
+            responses::ev_function_call_with_namespace(
+                "durable-publish-call",
+                "collaboration",
+                "team_publish",
+                &publish_args,
+            ),
+            responses::ev_completed("durable-publish"),
+        ]),
+        create_final_assistant_message_sse_response("durable state committed")?,
+    ])
+    .await;
+    let codex_home = TempDir::new()?;
+    write_durable_session_config(codex_home.path(), &model_server.uri())?;
+    let mut mcp = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized_with_timeout(DEFAULT_TIMEOUT)
+        .await?;
+    let ThreadStartResponse { thread, .. } = mcp
+        .start_thread(ThreadStartParams {
+            model: Some("mock-model".to_string()),
+            ..Default::default()
+        })
+        .await?;
+    let thread_id = ThreadId::from_string(&thread.id)?;
+
+    let _: TurnStartResponse = mcp
+        .request(|request_id| ClientRequest::TurnStart {
+            request_id,
+            params: TurnStartParams {
+                thread_id: thread.id.clone(),
+                input: vec![UserInput::Text {
+                    text: "publish one durable Team event".to_string(),
+                    text_elements: Vec::new(),
+                }],
+                ..Default::default()
+            },
+        })
+        .await?;
+    timeout(
+        DEFAULT_TIMEOUT,
+        mcp.read_stream_until_notification_message("turn/completed"),
+    )
+    .await??;
+
+    let before = session_read(&mut mcp, &thread.id, None).await?;
+    let before_team = before.team.expect("durable owner should expose Team state");
+    let team_instance_id = before_team.team_instance_id;
+    assert_eq!(before_team.events.len(), 1);
+    let snapshot_path = durable_team_snapshot_path(codex_home.path(), thread_id);
+    let snapshot_before = std::fs::read(&snapshot_path)?;
+    let response_requests_before = model_server
+        .received_requests()
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|request| request.url.path().ends_with("/responses"))
+        .count();
+    assert_eq!(response_requests_before, 2);
+
+    let _: ThreadArchiveResponse = mcp
+        .request(|request_id| ClientRequest::ThreadArchive {
+            request_id,
+            params: ThreadArchiveParams {
+                thread_id: thread.id.clone(),
+            },
+        })
+        .await?;
+    assert!(loaded_thread_ids(&mut mcp).await?.is_empty());
+    assert_eq!(std::fs::read(&snapshot_path)?, snapshot_before);
+
+    let ThreadUnarchiveResponse { thread: unarchived } = mcp
+        .request(|request_id| ClientRequest::ThreadUnarchive {
+            request_id,
+            params: ThreadUnarchiveParams {
+                thread_id: thread.id.clone(),
+            },
+        })
+        .await?;
+    assert_eq!(unarchived.id, thread.id);
+    assert_eq!(unarchived.status, ThreadStatus::NotLoaded);
+    assert!(loaded_thread_ids(&mut mcp).await?.is_empty());
+    assert_eq!(std::fs::read(&snapshot_path)?, snapshot_before);
+
+    let ThreadResumeResponse {
+        thread: resumed, ..
+    } = mcp
+        .request(|request_id| ClientRequest::ThreadResume {
+            request_id,
+            params: ThreadResumeParams {
+                thread_id: thread.id.clone(),
+                ..Default::default()
+            },
+        })
+        .await?;
+    assert_eq!(resumed.id, thread.id);
+    let after_resume = session_read(&mut mcp, &thread.id, None).await?;
+    let after_team = after_resume
+        .team
+        .expect("resumed durable owner should expose Team state");
+    assert_eq!(after_team.team_instance_id, team_instance_id);
+    assert_eq!(after_team.events.len(), 1);
+    let response_requests_after = model_server
+        .received_requests()
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|request| request.url.path().ends_with("/responses"))
+        .count();
+    assert_eq!(
+        response_requests_after, response_requests_before,
+        "archive, unarchive, and resume must not start a model turn"
+    );
+
+    let _: ThreadArchiveResponse = mcp
+        .request(|request_id| ClientRequest::ThreadArchive {
+            request_id,
+            params: ThreadArchiveParams {
+                thread_id: thread.id.clone(),
+            },
+        })
+        .await?;
+    let _: ThreadDeleteResponse = mcp
+        .request(|request_id| ClientRequest::ThreadDelete {
+            request_id,
+            params: ThreadDeleteParams {
+                thread_id: thread.id.clone(),
+            },
+        })
+        .await?;
+    assert!(!snapshot_path.exists());
+    assert!(
+        find_archived_thread_path_by_id_str(codex_home.path(), &thread.id, None)
+            .await?
+            .is_none(),
+        "delete must remove the archived Root rollout with its Team artifact"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn archived_child_is_not_a_cold_session_unarchive_target() -> Result<()> {
     let codex_home = TempDir::new()?;
     let root_id = create_fake_rollout(
@@ -1010,6 +1165,18 @@ fn write_session_config(
         );
     }
     config.write(codex_home)
+}
+
+fn write_durable_session_config(
+    codex_home: &std::path::Path,
+    model_server_uri: &str,
+) -> std::io::Result<()> {
+    MockResponsesConfig::new(model_server_uri)
+        .enable_feature(Feature::ExperimentalSessionControl)
+        .with_extra_config(
+            "[features.multi_agent_v2]\nenabled = true\nteam_state_enabled = true\ndurable_team_enabled = true",
+        )
+        .write(codex_home)
 }
 
 async fn session_list(mcp: &mut TestAppServer) -> Result<ExperimentalSessionListResponse> {

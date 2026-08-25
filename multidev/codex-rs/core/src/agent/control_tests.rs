@@ -196,6 +196,72 @@ fn durable_team_root_close_waits_for_admission_and_complete_stays_closed() {
     );
 }
 
+#[test]
+fn agent_subtree_close_and_child_admission_are_mutually_exclusive_and_retryable() {
+    let control = AgentControl::default();
+    let admission = control
+        .reserve_team_child_admission()
+        .expect("child admission should begin");
+    let err = match control.team_lifecycle.begin_subtree_close() {
+        Ok(_) => panic!("subtree close must not overlap child admission"),
+        Err(err) => err,
+    };
+    assert_eq!(
+        err.to_string(),
+        "unsupported operation: agent subtree cannot close while a child admission is in progress"
+    );
+    drop(admission);
+
+    let subtree_close = control
+        .team_lifecycle
+        .begin_subtree_close()
+        .expect("subtree close should begin after admission ends");
+    let err = match control.reserve_team_child_admission() {
+        Ok(_) => panic!("closing subtree must reject child admission"),
+        Err(err) => err,
+    };
+    assert_eq!(
+        err.to_string(),
+        "unsupported operation: agent subtree is closing; new child admission is unavailable"
+    );
+    drop(subtree_close);
+
+    let admission = control
+        .reserve_team_child_admission()
+        .expect("completed subtree close must reopen admission");
+    drop(admission);
+    let root_close = control
+        .begin_durable_team_root_close(ThreadId::new())
+        .expect("root close should begin after subtree close");
+    let err = match control.team_lifecycle.begin_subtree_close() {
+        Ok(_) => panic!("subtree close must not overlap root close"),
+        Err(err) => err,
+    };
+    assert_eq!(
+        err.to_string(),
+        "unsupported operation: durable team root is already closing"
+    );
+    root_close.abort();
+
+    let subtree_close = control
+        .team_lifecycle
+        .begin_subtree_close()
+        .expect("subtree close should remain retryable");
+    let err = match control.begin_durable_team_root_close(ThreadId::new()) {
+        Ok(_) => panic!("root close must not overlap subtree close"),
+        Err(err) => err,
+    };
+    assert_eq!(
+        err.to_string(),
+        "unsupported operation: agent subtree is already closing"
+    );
+    drop(subtree_close);
+    control
+        .begin_durable_team_root_close(ThreadId::new())
+        .expect("subtree close must not terminally close the root gate")
+        .complete();
+}
+
 fn spawn_agent_call(call_id: &str) -> ResponseItem {
     ResponseItem::FunctionCall {
         id: None,
@@ -228,7 +294,7 @@ impl AgentControlHarness {
             CodexAuth::from_api_key("dummy"),
             config.model_provider.clone(),
             config.codex_home.to_path_buf(),
-            std::sync::Arc::new(codex_exec_server::EnvironmentManager::default_for_tests()),
+            Arc::new(codex_exec_server::EnvironmentManager::default_for_tests()),
             state_db.clone(),
         );
         let control = manager.agent_control();
@@ -241,7 +307,47 @@ impl AgentControlHarness {
         }
     }
 
+    async fn new_with_config_and_extensions(
+        home: TempDir,
+        config: Config,
+        extensions: Arc<codex_extension_api::ExtensionRegistry<Config>>,
+    ) -> Self {
+        let state_db = init_state_db(&config).await;
+        crate::test_support::set_thread_manager_test_mode(true);
+        let auth_manager = AuthManager::from_auth_for_testing(CodexAuth::from_api_key("dummy"));
+        let manager = ThreadManager::new(
+            &config,
+            Arc::clone(&auth_manager),
+            crate::thread_manager::build_models_manager(&config, auth_manager),
+            crate::CodexAppsToolsCache::default(),
+            SessionSource::Exec,
+            Arc::new(codex_exec_server::EnvironmentManager::default_for_tests()),
+            extensions,
+            Arc::new(crate::test_support::EmptyUserInstructionsProvider),
+            /*analytics_events_client*/ None,
+            crate::thread_manager::thread_store_from_config(&config, state_db.clone()),
+            crate::thread_manager::local_agent_graph_store_from_state_db(state_db.as_ref()),
+            uuid::Uuid::new_v4().to_string(),
+            /*attestation_provider*/ None,
+            /*external_time_provider*/ None,
+        );
+        let control = manager.agent_control();
+        Self {
+            _home: home,
+            config,
+            state_db,
+            manager,
+            control,
+        }
+    }
+
     async fn new_durable() -> Self {
+        Self::new_durable_with_extensions(empty_extension_registry()).await
+    }
+
+    async fn new_durable_with_extensions(
+        extensions: Arc<codex_extension_api::ExtensionRegistry<Config>>,
+    ) -> Self {
         let (home, mut config) = test_config().await;
         config
             .features
@@ -254,7 +360,7 @@ impl AgentControlHarness {
         config.multi_agent_v2.team_state_enabled = true;
         config.multi_agent_v2.durable_team_enabled = true;
         config.multi_agent_v2.max_concurrent_threads_per_session = 3;
-        Self::new_with_config(home, config).await
+        Self::new_with_config_and_extensions(home, config, extensions).await
     }
 
     async fn start_thread(&self) -> (ThreadId, Arc<CodexThread>) {
@@ -1113,10 +1219,35 @@ async fn ensure_v2_agent_loaded_reloads_registered_unloaded_agent() {
         .into_iter()
         .find(|entry| *entry == expected);
     assert_eq!(captured, Some(expected));
+
+    reloaded_child
+        .shutdown_and_wait()
+        .await
+        .expect("app-style idle unload should terminate the reloaded member");
+    assert!(
+        harness
+            .manager
+            .remove_thread_if_same(&spawned_agent.thread_id, &reloaded_child)
+            .await,
+        "app-style teardown should remove the exact terminated owner"
+    );
+    harness
+        .control
+        .ensure_v2_agent_loaded(harness.config.clone(), spawned_agent.thread_id)
+        .await
+        .expect("idle-unloaded member should release its residency slot and reload at capacity");
+    assert!(
+        harness
+            .manager
+            .get_thread(spawned_agent.thread_id)
+            .await
+            .is_ok(),
+        "idle-unloaded member should be resident again after lazy reload"
+    );
 }
 
 #[tokio::test]
-async fn resume_agent_from_rollout_does_not_reopen_v2_descendants() {
+async fn resume_agent_from_rollout_does_not_reopen_non_durable_v2_descendants() {
     let (home, mut config) = test_config().await;
     let _ = config.features.enable(Feature::MultiAgentV2);
     let _ = config.features.enable(Feature::Sqlite);
@@ -1147,7 +1278,7 @@ async fn resume_agent_from_rollout_does_not_reopen_v2_descendants() {
             Some(SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
                 parent_thread_id: worker_thread_id,
                 depth: 2,
-                agent_path: Some(reviewer_path.clone()),
+                agent_path: Some(reviewer_path),
                 agent_nickname: None,
                 agent_role: Some("reviewer".to_string()),
             })),
@@ -1234,6 +1365,312 @@ async fn resume_agent_from_rollout_does_not_reopen_v2_descendants() {
     assert!(closed_worker.is_err());
     assert!(surviving_sibling.is_ok());
     assert_thread_not_loaded(&resumed_manager, sibling_thread_id).await;
+}
+
+#[tokio::test]
+async fn durable_spawn_fork_turn_modes_keep_the_parent_session_and_team() {
+    let harness = AgentControlHarness::new_durable().await;
+    let (root_thread_id, root_thread) = harness.start_thread().await;
+    let root_control = root_thread.session.services.agent_control.clone();
+    let session_id = root_thread.session.session_id();
+    let team_instance = root_control.team().instance();
+
+    let modes = [
+        ("none", None, None),
+        (
+            "all",
+            Some("durable-spawn-all"),
+            Some(SpawnAgentForkMode::FullHistory),
+        ),
+        (
+            "last-n",
+            Some("durable-spawn-last-n"),
+            Some(SpawnAgentForkMode::LastNTurns(1)),
+        ),
+    ];
+    for (label, call_id, fork_mode) in modes {
+        if let Some(call_id) = call_id {
+            root_thread
+                .session
+                .persist_rollout_items(&[RolloutItem::ResponseItem(spawn_agent_call(call_id))])
+                .await;
+        }
+        let child_thread_id = root_control
+            .spawn_agent_with_metadata(
+                harness.config.clone(),
+                text_input(&format!("durable child {label}")),
+                Some(SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
+                    parent_thread_id: root_thread_id,
+                    depth: 1,
+                    agent_path: None,
+                    agent_nickname: None,
+                    agent_role: Some(label.to_string()),
+                })),
+                SpawnAgentOptions {
+                    fork_parent_spawn_call_id: call_id.map(ToString::to_string),
+                    fork_mode,
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("durable child spawn should succeed")
+            .thread_id;
+        assert_ne!(child_thread_id, root_thread_id);
+        let child = harness
+            .manager
+            .get_thread(child_thread_id)
+            .await
+            .expect("spawned child should be loaded");
+        assert_eq!(child.session.session_id(), session_id);
+        assert_eq!(
+            child.session.services.agent_control.team().instance(),
+            team_instance
+        );
+        root_control
+            .shutdown_live_agent(child_thread_id)
+            .await
+            .expect("child shutdown should succeed");
+    }
+
+    root_thread
+        .shutdown_and_wait()
+        .await
+        .expect("durable Root shutdown should succeed");
+}
+
+#[tokio::test]
+async fn durable_v2_root_resume_restores_metadata_and_lazily_reloads_members() {
+    let (home, mut config) = test_config().await;
+    let _ = config.features.enable(Feature::MultiAgentV2);
+    let _ = config.features.enable(Feature::Sqlite);
+    config.multi_agent_v2.team_state_enabled = true;
+    config.multi_agent_v2.durable_team_enabled = true;
+    let harness = AgentControlHarness::new_with_config(home, config).await;
+    let (parent_thread_id, parent_thread) = harness.start_thread().await;
+    let root_control = parent_thread.session.services.agent_control.clone();
+    let session_id = parent_thread.session.session_id();
+    let team_instance = root_control.team().instance();
+    let worker_path = AgentPath::root().join("worker").expect("worker path");
+    let worker_thread_id = root_control
+        .spawn_agent(
+            harness.config.clone(),
+            text_input("hello worker"),
+            Some(SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
+                parent_thread_id,
+                depth: 1,
+                agent_path: Some(worker_path.clone()),
+                agent_nickname: None,
+                agent_role: Some("worker".to_string()),
+            })),
+        )
+        .await
+        .expect("worker spawn should succeed");
+    let reviewer_path = worker_path.join("reviewer").expect("reviewer path");
+    let reviewer_thread_id = root_control
+        .spawn_agent(
+            harness.config.clone(),
+            text_input("hello reviewer"),
+            Some(SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
+                parent_thread_id: worker_thread_id,
+                depth: 2,
+                agent_path: Some(reviewer_path.clone()),
+                agent_nickname: None,
+                agent_role: Some("reviewer".to_string()),
+            })),
+        )
+        .await
+        .expect("reviewer spawn should succeed");
+    let sibling_thread_id = root_control
+        .spawn_agent_with_metadata(
+            harness.config.clone(),
+            text_input("hello sibling"),
+            Some(SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
+                parent_thread_id,
+                depth: 1,
+                agent_path: None,
+                agent_nickname: None,
+                agent_role: None,
+            })),
+            SpawnAgentOptions::default(),
+        )
+        .await
+        .expect("sibling spawn should succeed")
+        .thread_id;
+
+    let worker_thread = harness
+        .manager
+        .get_thread(worker_thread_id)
+        .await
+        .expect("worker thread should exist");
+    let reviewer_thread = harness
+        .manager
+        .get_thread(reviewer_thread_id)
+        .await
+        .expect("reviewer thread should exist");
+    let sibling_thread = harness
+        .manager
+        .get_thread(sibling_thread_id)
+        .await
+        .expect("sibling thread should exist");
+    persist_thread_for_tree_resume(&parent_thread, "parent persisted").await;
+    persist_thread_for_tree_resume(&worker_thread, "worker persisted").await;
+    persist_thread_for_tree_resume(&reviewer_thread, "reviewer persisted").await;
+    persist_thread_for_tree_resume(&sibling_thread, "sibling persisted").await;
+    wait_for_live_thread_spawn_children(
+        &root_control,
+        parent_thread_id,
+        &[worker_thread_id, sibling_thread_id],
+    )
+    .await;
+    wait_for_live_thread_spawn_children(&root_control, worker_thread_id, &[reviewer_thread_id])
+        .await;
+    let expected_metadata = [worker_thread_id, reviewer_thread_id, sibling_thread_id]
+        .into_iter()
+        .map(|thread_id| {
+            (
+                thread_id,
+                root_control
+                    .state
+                    .agent_metadata_for_thread(thread_id)
+                    .expect("live child metadata should be registered"),
+            )
+        })
+        .collect::<std::collections::HashMap<_, _>>();
+
+    let report = harness
+        .manager
+        .shutdown_all_threads_bounded(Duration::from_secs(5))
+        .await;
+    assert_eq!(report.submit_failed, Vec::<ThreadId>::new());
+    assert_eq!(report.timed_out, Vec::<ThreadId>::new());
+
+    let resumed_manager = ThreadManager::with_models_provider_home_and_state_for_tests(
+        CodexAuth::from_api_key("dummy"),
+        harness.config.model_provider.clone(),
+        harness.config.codex_home.to_path_buf(),
+        std::sync::Arc::new(codex_exec_server::EnvironmentManager::default_for_tests()),
+        harness.state_db.clone(),
+    );
+    let resumed_control = resumed_manager.agent_control();
+    let resumed_parent_thread_id = resumed_control
+        .resume_agent_from_rollout(
+            harness.config.clone(),
+            parent_thread_id,
+            SessionSource::Exec,
+        )
+        .await
+        .expect("v2 root resume should succeed");
+    assert_eq!(resumed_parent_thread_id, parent_thread_id);
+    let resumed_parent = resumed_manager
+        .get_thread(parent_thread_id)
+        .await
+        .expect("resumed Root should be loaded");
+    let resumed_root_control = resumed_parent.session.services.agent_control.clone();
+    assert_eq!(resumed_root_control.session_id(), session_id);
+    assert_eq!(resumed_root_control.team().instance(), team_instance);
+    assert_ne!(
+        resumed_root_control.get_status(parent_thread_id).await,
+        AgentStatus::NotFound
+    );
+    assert_thread_not_loaded(&resumed_manager, worker_thread_id).await;
+    assert_thread_not_loaded(&resumed_manager, reviewer_thread_id).await;
+    assert_thread_not_loaded(&resumed_manager, sibling_thread_id).await;
+    resumed_root_control
+        .restore_v2_agent_metadata(&harness.config, parent_thread_id)
+        .await;
+    for thread_id in [worker_thread_id, reviewer_thread_id, sibling_thread_id] {
+        assert!(resumed_root_control.ensure_agent_known(thread_id).is_ok());
+        let expected = expected_metadata
+            .get(&thread_id)
+            .expect("captured child metadata");
+        let restored = resumed_root_control
+            .state
+            .agent_metadata_for_thread(thread_id)
+            .expect("restored child metadata");
+        assert_eq!(restored.agent_id, expected.agent_id);
+        assert_eq!(restored.agent_path, expected.agent_path);
+        assert_eq!(restored.agent_nickname, expected.agent_nickname);
+        assert_eq!(restored.agent_role, expected.agent_role);
+    }
+
+    let ops_before_reload = resumed_manager.captured_ops();
+    resumed_root_control
+        .ensure_v2_agent_loaded(harness.config.clone(), worker_thread_id)
+        .await
+        .expect("a real consumer may lazily reload the durable member");
+    assert_eq!(
+        resumed_manager.captured_ops(),
+        ops_before_reload,
+        "metadata restore and residency reload must not start a turn"
+    );
+    let reloaded_worker = resumed_manager
+        .get_thread(worker_thread_id)
+        .await
+        .expect("worker should be loaded on demand");
+    assert_eq!(reloaded_worker.session.session_id(), session_id);
+    assert_eq!(
+        reloaded_worker
+            .session
+            .services
+            .agent_control
+            .team()
+            .instance(),
+        team_instance
+    );
+
+    resumed_root_control
+        .close_agent(worker_thread_id)
+        .await
+        .expect("closing a restored sibling should succeed");
+
+    let closed_worker = resumed_root_control.ensure_agent_known(worker_thread_id);
+    let surviving_sibling = resumed_root_control.ensure_agent_known(sibling_thread_id);
+    assert!(closed_worker.is_err());
+    assert!(surviving_sibling.is_ok());
+    assert_thread_not_loaded(&resumed_manager, sibling_thread_id).await;
+
+    // An unloaded but still-open member remains recoverable and therefore mutation-capable. Close
+    // that durable edge explicitly before asking the Root to cross its terminal close barrier.
+    resumed_root_control
+        .close_agent(sibling_thread_id)
+        .await
+        .expect("closing an unloaded restored sibling should succeed");
+    assert!(
+        resumed_root_control
+            .ensure_agent_known(sibling_thread_id)
+            .is_err()
+    );
+
+    assert_eq!(
+        resumed_manager.list_thread_ids().await,
+        vec![parent_thread_id],
+        "only the durable Root runtime should remain loaded before final shutdown"
+    );
+    let close_id = resumed_parent
+        .submit(Op::Shutdown {})
+        .await
+        .expect("submit final durable Root shutdown");
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let event = resumed_parent
+                .next_event()
+                .await
+                .expect("final durable Root shutdown event");
+            if event.id != close_id {
+                continue;
+            }
+            match event.msg {
+                EventMsg::ShutdownComplete => break,
+                EventMsg::Error(error) => {
+                    panic!("final durable Root shutdown failed: {}", error.message)
+                }
+                _ => {}
+            }
+        }
+    })
+    .await
+    .expect("final durable Root shutdown should complete");
+    resumed_parent.wait_until_terminated().await;
 }
 
 #[tokio::test]
@@ -3991,11 +4428,11 @@ async fn shutdown_agent_tree_closes_live_descendants() {
         .into_iter()
         .filter_map(|(thread_id, op)| matches!(op, Op::Shutdown).then_some(thread_id))
         .collect::<Vec<_>>();
-    let mut expected_shutdown_ids = vec![parent_thread_id, child_thread_id, grandchild_thread_id];
-    expected_shutdown_ids.sort_by_key(std::string::ToString::to_string);
-    let mut shutdown_ids = shutdown_ids;
-    shutdown_ids.sort_by_key(std::string::ToString::to_string);
-    assert_eq!(shutdown_ids, expected_shutdown_ids);
+    assert_eq!(
+        shutdown_ids,
+        vec![grandchild_thread_id, child_thread_id, parent_thread_id],
+        "subtree shutdown must disable descendants before their parent"
+    );
 }
 
 #[tokio::test]
@@ -4087,6 +4524,256 @@ async fn shutdown_agent_tree_closes_descendants_when_started_at_child() {
     let mut shutdown_ids = shutdown_ids;
     shutdown_ids.sort_by_key(std::string::ToString::to_string);
     assert_eq!(shutdown_ids, expected_shutdown_ids);
+}
+
+#[tokio::test]
+async fn durable_close_agent_rejects_root_lifecycle() {
+    let harness = AgentControlHarness::new_durable().await;
+    let (root_thread_id, root_thread) = harness.start_thread().await;
+    let root_control = root_thread.session.services.agent_control.clone();
+
+    assert_eq!(
+        root_control
+            .close_agent(root_thread_id)
+            .await
+            .expect_err("subtree close must not acquire the durable root lifecycle")
+            .to_string(),
+        "unsupported operation: durable team root must be closed through its root shutdown lifecycle"
+    );
+    assert_ne!(
+        root_control.get_status(root_thread_id).await,
+        AgentStatus::NotFound
+    );
+
+    root_control
+        .shutdown_live_agent(root_thread_id)
+        .await
+        .expect("durable root cleanup should succeed through native shutdown");
+}
+
+#[tokio::test]
+async fn close_agent_blocks_descendant_admission_after_snapshot_and_then_reopens() {
+    struct BlockingFirstThreadStop {
+        block_next: std::sync::atomic::AtomicBool,
+        entered: tokio::sync::Notify,
+        release: tokio::sync::Notify,
+    }
+
+    impl codex_extension_api::ThreadLifecycleContributor<Config> for BlockingFirstThreadStop {
+        fn on_thread_stop<'a>(
+            &'a self,
+            _input: codex_extension_api::ThreadStopInput<'a>,
+        ) -> codex_extension_api::ExtensionFuture<'a, ()> {
+            Box::pin(async move {
+                if self
+                    .block_next
+                    .swap(false, std::sync::atomic::Ordering::AcqRel)
+                {
+                    self.entered.notify_one();
+                    self.release.notified().await;
+                }
+            })
+        }
+    }
+
+    let stop_gate = Arc::new(BlockingFirstThreadStop {
+        block_next: std::sync::atomic::AtomicBool::new(true),
+        entered: tokio::sync::Notify::new(),
+        release: tokio::sync::Notify::new(),
+    });
+    let mut extensions = codex_extension_api::ExtensionRegistryBuilder::new();
+    extensions.thread_lifecycle_contributor(stop_gate.clone());
+    let (home, config) = test_config().await;
+    let harness = AgentControlHarness::new_with_config_and_extensions(
+        home,
+        config,
+        Arc::new(extensions.build()),
+    )
+    .await;
+    let (root_thread_id, root_thread) = harness.start_thread().await;
+    let root_control = root_thread.session.services.agent_control.clone();
+    let child_thread_id = root_control
+        .spawn_agent(
+            harness.config.clone(),
+            text_input("hello child"),
+            Some(SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
+                parent_thread_id: root_thread_id,
+                depth: 1,
+                agent_path: None,
+                agent_nickname: None,
+                agent_role: Some("worker".to_string()),
+            })),
+        )
+        .await
+        .expect("non-durable child spawn should succeed");
+    let close_task = tokio::spawn({
+        let root_control = root_control.clone();
+        async move { root_control.close_agent(child_thread_id).await }
+    });
+    timeout(Duration::from_secs(5), stop_gate.entered.notified())
+        .await
+        .expect("close should reach the delayed child stop hook after snapshotting descendants");
+
+    let spawn_result = root_control
+        .spawn_agent(
+            harness.config.clone(),
+            text_input("must not escape close"),
+            Some(SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
+                parent_thread_id: child_thread_id,
+                depth: 2,
+                agent_path: None,
+                agent_nickname: None,
+                agent_role: Some("worker".to_string()),
+            })),
+        )
+        .await;
+    let resume_result = root_control
+        .resume_agent_from_rollout(
+            harness.config.clone(),
+            child_thread_id,
+            SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
+                parent_thread_id: root_thread_id,
+                depth: 1,
+                agent_path: None,
+                agent_nickname: None,
+                agent_role: Some("worker".to_string()),
+            }),
+        )
+        .await;
+    stop_gate.release.notify_one();
+    timeout(Duration::from_secs(5), close_task)
+        .await
+        .expect("close should finish after the stop hook is released")
+        .expect("close task should not panic")
+        .expect("non-durable child close should succeed");
+
+    let expected =
+        "unsupported operation: agent subtree is closing; new child admission is unavailable";
+    assert_eq!(
+        spawn_result
+            .expect_err("closing subtree must reject descendant spawn")
+            .to_string(),
+        expected
+    );
+    assert_eq!(
+        resume_result
+            .expect_err("closing subtree must reject explicit recovery")
+            .to_string(),
+        expected
+    );
+    assert_eq!(
+        root_control.get_status(child_thread_id).await,
+        AgentStatus::NotFound
+    );
+
+    let sibling_thread_id = root_control
+        .spawn_agent(
+            harness.config.clone(),
+            text_input("sibling after close"),
+            Some(SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
+                parent_thread_id: root_thread_id,
+                depth: 1,
+                agent_path: None,
+                agent_nickname: None,
+                agent_role: Some("worker".to_string()),
+            })),
+        )
+        .await
+        .expect("successful subtree close must reopen sibling admission");
+    root_control
+        .close_agent(sibling_thread_id)
+        .await
+        .expect("sibling cleanup should succeed");
+    root_control
+        .shutdown_live_agent(root_thread_id)
+        .await
+        .expect("root cleanup should succeed");
+}
+
+#[tokio::test]
+async fn stale_internal_agent_died_result_preserves_resumed_same_id_owner() {
+    let harness = AgentControlHarness::new().await;
+    let (parent_thread_id, parent_thread) = harness.start_thread().await;
+    let control = parent_thread.session.services.agent_control.clone();
+    let child_source = SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
+        parent_thread_id,
+        depth: 1,
+        agent_path: None,
+        agent_nickname: None,
+        agent_role: Some("worker".to_string()),
+    });
+    let child_thread_id = control
+        .spawn_agent(
+            harness.config.clone(),
+            text_input("owner before recovery"),
+            Some(child_source.clone()),
+        )
+        .await
+        .expect("child spawn should succeed");
+    let old_owner = harness
+        .manager
+        .get_thread(child_thread_id)
+        .await
+        .expect("old child owner should be loaded");
+    persist_thread_for_tree_resume(&old_owner, "recover replacement").await;
+    old_owner
+        .shutdown_and_wait()
+        .await
+        .expect("old owner should terminate while remaining tracked");
+
+    let resumed_thread_id = control
+        .resume_agent_from_rollout(harness.config.clone(), child_thread_id, child_source)
+        .await
+        .expect("same-ID replacement should resume");
+    assert_eq!(resumed_thread_id, child_thread_id);
+    let replacement = harness
+        .manager
+        .get_thread(child_thread_id)
+        .await
+        .expect("replacement should be loaded");
+    assert!(!Arc::ptr_eq(&old_owner, &replacement));
+
+    let state = control
+        .upgrade()
+        .expect("thread manager should remain available");
+    let error = control
+        .handle_thread_request_result(
+            child_thread_id,
+            &state,
+            crate::thread_manager::ThreadOpSubmission {
+                owner: Some(old_owner),
+                result: Err(CodexErr::InternalAgentDied),
+            },
+        )
+        .await
+        .expect_err("the captured operation result remains an error");
+    assert!(matches!(
+        error.details(),
+        CodexErrorDetails::InternalAgentDied
+    ));
+    assert!(Arc::ptr_eq(
+        &harness
+            .manager
+            .get_thread(child_thread_id)
+            .await
+            .expect("stale error cleanup must preserve the replacement"),
+        &replacement
+    ));
+    assert!(
+        control
+            .state
+            .agent_metadata_for_thread(child_thread_id)
+            .is_some()
+    );
+
+    control
+        .close_agent(child_thread_id)
+        .await
+        .expect("replacement cleanup should succeed");
+    control
+        .shutdown_live_agent(parent_thread_id)
+        .await
+        .expect("parent cleanup should succeed");
 }
 
 #[tokio::test]
