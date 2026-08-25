@@ -1914,3 +1914,25 @@ correctness/functionality `remaining_findings=[]`，路线结论为 `GO`。
 - 未运行 unseen-test、真实 API、Docker、云端训练或 Hugging Face 上传，未启动 M3-C2/M3-D，也未默认启用 Critic。
   任务执行日志见 `agent_log/2026-08-24-210426-plan068-local-qualification.md`，最终独立验收见
   `agent_log/2026-08-24-185009-plan068-final-review.md`。
+
+## RONDO Multi 实验性 Session 协议与 TUI 原型（Plan 070 / M4-C0，2026-08-24）
+
+**状态**：默认关闭的 experimental app-server v2→app-server client→TUI 纵向原型、两轮独立审查整改与最终复验均已完成；
+验收通过、任务目标完成，结论为 `M4_C0_PROTOTYPE_PASS`。最终实现提交为
+`bb60a04938b2f55c5ceede4fd5820f1e7637b30f`，最终独立验收提交为 `dab5db3d5a938b8f9ee74a238f6294aa1582ac55`，
+主线合并提交为 `5fdd4db5cd65243c93362ae62bf375d934728463`。
+
+- 新能力只位于 v2 experimental surface，并由独立、默认关闭的 `experimental_session_control` product gate 保护；关闭态不显示
+  `/sessions` 原型、不增加后台查询或 startup tooltip，TUI 继续只经 app-server 工作。
+- discovery/read 不取得 writer、不 repair metadata、不加载 Session 或启动 Agent/model/API；identity、domain lifecycle、runtime
+  residency、operation availability、freshness/certainty 与 provenance 分轴，state DB 和 prototype input 不冒充 S1 durable read model。
+- online Team mutation 只路由 current/running canonical Root owner；non-owner、ChildOnly、owner unavailable 与 stale preflight
+  fail closed。cold unarchive 只在 fresh prototype projection 证明 stored Root 后调用既有权威入口，不直接写持久介质。
+- lag、disconnect、EOF 与真实 response loss 会进入 stale/result unknown；非幂等 mutation 不自动重放，显式权威 read 恢复 Fresh，
+  迟到 request-id response 不覆盖新投影。Root filtering 使用 `RecencyAt + thread-id` 稳定双键 cursor，DB error 与扫描预算耗尽明确
+  返回 unavailable/incomplete。
+- 最终聚焦证据覆盖 protocol/features、app-server/client、core、TUI、schema generator、snapshot、真实 loopback response-loss 和
+  26 条同毫秒跨页回归；app-server 最终 `experimental_session` 全集 13/13 通过。历史全 workspace 14,380 项中 16 项失败均被验收
+  判定在 070 写集外，本任务未弱化或掩盖。
+- 正式 Session query 仍等待 M4-S1，以真实 durable read model 替换 prototype input；正式 control/TUI 再等待 M4-S2 的恢复和 close
+  barrier。C0 不冻结正式 RPC、字段、UI、timeout 或通用 `thread/unarchive` authority，也不授权产品启用、S1/S2、外部资源或远端操作。

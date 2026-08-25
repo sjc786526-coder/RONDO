@@ -1,6 +1,6 @@
 # RONDO 长程规划（WBS）
 
-最后更新：2026-08-24（Plan 067 / M4-A 与 Plan 068 / M3-C1 均已完成并通过独立验收）
+最后更新：2026-08-24（Plan 067 / M4-A、Plan 068 / M3-C1 与 Plan 070 / M4-C0 均已完成并通过独立验收）
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段指针、跨方向关系、
 稳定工程边界和授权门；已完成成果与验收见 `doc/WBS-COMPLETED.md`，单次任务合同见 `plan/`，执行细节见
@@ -20,7 +20,7 @@
 | 0：量化测评基准 | 既有设施与首次 schema v7 正式 canary 已完成，当前无 active campaign | 保留设施；历史结果见 COMPLETED，新 campaign 须重新立项与授权 |
 | 1：Harness 优化 | **正式收口；当前无 active 工作包** | 当前不继续新增观测或内核/热路径优化；既有实现、设施与历史结果保留。未来可由用户另行决定是否重新立项，本次收口不作永久禁止 |
 | 2：本地审批模型 | **已收口，今后不再开启** | 最终结论为“保留为实验”；不改生产默认，不再规划后续工作包 |
-| 3：RONDO Multi | 第一、二期及其收口案例、**三期 M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、Plan 064 与四期 M4-A 已完成** | M3-C1 结论为 base/C2 `NOT_QUALIFIED`、C1/C3 `QUALIFIED`；因 base 对照未通过同口径资格，M3-C2 前置为 false，三期下一包须先修正并重验 base 本地部署可比性，不得直接启动 M3-C2。RunPod 已为 0 Pod/0 volume、持续费用为 0；M4-A 结论为 `M4_A_GO`，其下游分别建立 ExecPlan |
+| 3：RONDO Multi | 第一、二期及其收口案例、**三期 M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、Plan 064 与四期 M4-A、M4-C0 已完成** | M3-C1 结论为 base/C2 `NOT_QUALIFIED`、C1/C3 `QUALIFIED`；因 base 对照未通过同口径资格，M3-C2 前置为 false，三期下一包须先修正并重验 base 本地部署可比性，不得直接启动 M3-C2。RunPod 已为 0 Pod/0 volume、持续费用为 0；M4-C0 结论为 `M4_C0_PROTOTYPE_PASS`，正式 Session query 等待 M4-S1，正式 control/TUI 再等待 M4-S2 |
 
 ### 方向命名口径
 
@@ -29,9 +29,9 @@
 - `RONDO Local` / `rondo-local` 仅在必须区分现有产品或运行身份时使用，不代表方向 2。方向 2 专指已经收口的
   本地审批模型研究。
 
-最近一次有记录的 `v0.147.0` RONDO 全 workspace 实际执行为 14,092 项：14,060 通过、31 失败、
-1 超时，Nextest 另列 23 项 ignored。此后未重跑全 workspace，因此这只是历史测试快照，不代表当前全绿，
-也不代表旧失败已在当前提交复现。
+最近一次有记录的 `v0.147.0` RONDO 全 workspace 实际执行来自 Plan 070：14,380 项中 14,364 通过、
+16 失败，Nextest 另列 24 项 skipped；其中 1 项通过发生在自动重试。16 项均被该任务验收判定为其写集外失败。
+此后未在当前合并提交重跑全 workspace，因此这只是历史测试快照，不代表当前全绿，也不代表旧失败已在当前提交复现。
 
 ## 2. 下一工作包与顺序
 
@@ -72,9 +72,10 @@
 - 四期必成主线是 Team Session 跨进程持久化/恢复及其 app-server v2 / TUI 控制面；Writer Workspace Binding 降为可选增强，
   只绑定调用者已准备且授权的 worktree，价值门证明需要时才附加 minimal handoff，不建设 workspace registry、ChangeSet
   生命周期或 Git 资产平台。
-- 四期详细 WBS 见 [`doc/WBS/durable-team-runtime.md`](WBS/durable-team-runtime.md)。M4-A 是共同前置，之后 Session、控制面原型
-  和 M4-W0 价值原型可有界并行；S/C 可以独立完成 M4-Z(core)，正式 W 实现须先获得 binding GO。Plan 067 已完成共同合同并经
-  独立验收接受 `M4_A_GO`；M4-S1、M4-C0、M4-W0 可分别建立 ExecPlan，但本结论不自动授予其实施或外部资源授权。
+- 四期详细 WBS 见 [`doc/WBS/durable-team-runtime.md`](WBS/durable-team-runtime.md)。Plan 067 已完成共同合同并经独立验收接受
+  `M4_A_GO`；Plan 070 / M4-C0 已完成默认关闭的 experimental app-server v2→client→TUI 纵向原型并取得
+  `M4_C0_PROTOTYPE_PASS`。原型只提供正式拆包输入，不冒充 S1 durable read model 或正式公共控制面；正式 Session query 等待
+  M4-S1，正式 control/TUI 再等待 M4-S2。M4-W0 仍是独立价值原型，正式 W 实现须先获得 binding GO。
 - 四期不依赖 Publication Critic 训练、真实模型、真实 API 或性能测评，可以与三期模型链并行；它保持 shared workspace
   为默认，不建设通用 scheduler、自动路由、自动 merge/push、第二套 Team State/trace 或审计/可信平台。
 - 三期未来另行授权的云计算不占本地 Cargo build lock，可与四期有界并行开发；bundle/checkpoint/结果传输仍竞争本地网络与磁盘，
