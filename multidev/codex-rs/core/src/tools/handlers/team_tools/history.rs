@@ -35,7 +35,7 @@ async fn handle_call(invocation: ToolInvocation) -> Result<Box<dyn ToolOutput>, 
     } = invocation;
     let arguments = function_arguments(payload)?;
     let args: HistoryArgs = parse_arguments(&arguments)?;
-    let access = resolve_access(&session)?;
+    let access = resolve_access(&session).await?;
 
     let event_id = args.event_id.as_deref().map(parse_event_id).transpose()?;
     let page = access

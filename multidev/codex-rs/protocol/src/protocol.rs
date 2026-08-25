@@ -3072,6 +3072,27 @@ pub struct HistoryPosition {
     pub end_byte_offset: u64,
 }
 
+/// Typed durable Team intent embedded in the canonical Root SessionMeta.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Eq, PartialEq, JsonSchema, TS)]
+#[serde(deny_unknown_fields)]
+pub struct DurableTeamSessionMeta {
+    pub version: u32,
+    pub session_id: SessionId,
+    pub root_thread_id: ThreadId,
+}
+
+impl DurableTeamSessionMeta {
+    pub const CURRENT_VERSION: u32 = 1;
+
+    pub const fn current(session_id: SessionId, root_thread_id: ThreadId) -> Self {
+        Self {
+            version: Self::CURRENT_VERSION,
+            session_id,
+            root_thread_id,
+        }
+    }
+}
+
 /// SessionMeta contains session-level data that doesn't correspond to a specific turn.
 ///
 /// NOTE: There used to be an `instructions` field here, which stored user_instructions, but we
@@ -3135,6 +3156,13 @@ pub struct SessionMeta {
     /// Initial context-window identity for consumers that tail rollout JSONL before compaction.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_window: Option<SessionContextWindow>,
+    /// Canonical Root intent for a Team whose state must be resumed from durable storage.
+    ///
+    /// The enclosing SessionMeta owns Session/root lineage; the committed Team snapshot owns the
+    /// generated Team instance. Resume cross-validates both rather than inferring intent from the
+    /// availability of one storage backend.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub durable_team: Option<DurableTeamSessionMeta>,
 }
 
 impl Default for SessionMeta {
@@ -3164,6 +3192,7 @@ impl Default for SessionMeta {
             subagent_history_start_ordinal: None,
             multi_agent_version: None,
             context_window: None,
+            durable_team: None,
         }
     }
 }
@@ -5988,11 +6017,37 @@ mod tests {
 
         assert_eq!(session_meta.history_mode, ThreadHistoryMode::Legacy);
         assert_eq!(session_meta.history_base, None);
+        assert_eq!(session_meta.durable_team, None);
         let serialized = serde_json::to_value(&session_meta)?;
         assert_eq!(serialized["history_mode"], json!("legacy"));
         let mut unknown = serialized;
         unknown["history_mode"] = json!("future");
         assert!(serde_json::from_value::<SessionMeta>(unknown).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn session_meta_round_trips_typed_durable_team_intent() -> Result<()> {
+        let root_thread_id = ThreadId::from_string("00000000-0000-0000-0000-000000000001")?;
+        let session_id = SessionId::from(root_thread_id);
+        let session_meta = SessionMeta {
+            session_id,
+            id: root_thread_id,
+            durable_team: Some(DurableTeamSessionMeta::current(session_id, root_thread_id)),
+            ..SessionMeta::default()
+        };
+
+        let encoded = serde_json::to_value(&session_meta)?;
+        assert_eq!(encoded["durable_team"]["version"], json!(1));
+        assert_eq!(encoded["durable_team"]["session_id"], json!(session_id));
+        assert_eq!(
+            encoded["durable_team"]["root_thread_id"],
+            json!(root_thread_id)
+        );
+        assert_eq!(
+            serde_json::from_value::<SessionMeta>(encoded)?.durable_team,
+            session_meta.durable_team
+        );
         Ok(())
     }
 

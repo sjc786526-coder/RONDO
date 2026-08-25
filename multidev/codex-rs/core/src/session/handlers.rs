@@ -627,6 +627,10 @@ pub async fn shutdown(sess: &Arc<Session>, sub_id: String) -> bool {
     let mut durable_lifecycle_close = None;
     let mut durable_team_close = None;
     if durable_root {
+        if let Err(error) = sess.ensure_durable_root_activation().await {
+            send_durable_close_error(sess, &sub_id, error.to_string()).await;
+            return false;
+        }
         let lifecycle_close = match sess
             .services
             .agent_control

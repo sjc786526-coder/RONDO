@@ -57,6 +57,7 @@ use crate::state_db;
 use crate::state_db::StateDbHandle;
 use codex_git_utils::collect_git_info;
 use codex_git_utils::get_git_repo_root;
+use codex_protocol::protocol::DurableTeamSessionMeta;
 use codex_protocol::protocol::GitInfo as ProtocolGitInfo;
 use codex_protocol::protocol::HistoryPosition;
 use codex_protocol::protocol::InitialHistory;
@@ -97,6 +98,7 @@ pub enum RolloutRecorderParams {
         forked_from_id: Option<ThreadId>,
         parent_thread_id: Option<ThreadId>,
         source: Box<SessionSource>,
+        durable_team: Option<DurableTeamSessionMeta>,
         thread_source: Option<ThreadSource>,
         originator: String,
         base_instructions: BaseInstructions,
@@ -192,6 +194,7 @@ impl RolloutRecorderParams {
             forked_from_id,
             parent_thread_id,
             source: Box::new(source),
+            durable_team: None,
             thread_source,
             originator,
             base_instructions,
@@ -208,6 +211,17 @@ impl RolloutRecorderParams {
     pub fn with_session_id(mut self, session_id: SessionId) -> Self {
         if let Self::Create { session_id: id, .. } = &mut self {
             *id = session_id;
+        }
+        self
+    }
+
+    pub fn with_durable_team(mut self, durable_team: Option<DurableTeamSessionMeta>) -> Self {
+        if let Self::Create {
+            durable_team: marker,
+            ..
+        } = &mut self
+        {
+            *marker = durable_team;
         }
         self
     }
@@ -813,6 +827,7 @@ impl RolloutRecorder {
                 history_base,
                 subagent_history_start_ordinal,
                 initial_window_id,
+                durable_team,
             } => {
                 let ordinal_state =
                     RolloutOrdinalState::for_new_rollout(history_mode, history_base);
@@ -857,6 +872,7 @@ impl RolloutRecorder {
                     subagent_history_start_ordinal,
                     multi_agent_version,
                     context_window: initial_window_id.map(SessionContextWindow::new),
+                    durable_team,
                 };
 
                 RolloutWriterState {

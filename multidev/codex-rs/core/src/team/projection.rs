@@ -81,6 +81,10 @@ pub(crate) async fn capture_team_projection(
     if !super::team_state_enabled(turn_context) {
         return TeamProjectionOutcome::Nothing;
     }
+    if let Err(error) = session.ensure_durable_root_activation().await {
+        tracing::debug!(%error, "fresh durable Root activation is not yet readable");
+        return TeamProjectionOutcome::Nothing;
+    }
     let Ok(access) = super::TeamAccess::resolve(session) else {
         return TeamProjectionOutcome::Nothing;
     };

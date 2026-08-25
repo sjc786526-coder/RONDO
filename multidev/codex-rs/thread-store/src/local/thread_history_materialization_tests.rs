@@ -2275,6 +2275,7 @@ async fn create_paginated_subagent_thread(
             forked_from_id: None,
             parent_thread_id: None,
             source: SessionSource::Exec,
+            durable_team: None,
             thread_source: None,
             originator: "test_originator".to_string(),
             base_instructions: BaseInstructions::default(),

@@ -75,10 +75,15 @@ impl Handler {
             .await;
         // Team changes have their own consumable wake, so a change published before this wait
         // started is still delivered, and one already consumed does not wake the waiter twice.
-        let team_waiter = crate::team::team_state_enabled(&turn)
-            .then(|| crate::team::TeamAccess::resolve(&session).ok())
-            .flatten()
-            .map(|access| access.handle().wake_waiter(access.actor()));
+        let team_waiter = if crate::team::team_state_enabled(&turn)
+            && session.ensure_durable_root_activation().await.is_ok()
+        {
+            crate::team::TeamAccess::resolve(&session)
+                .ok()
+                .map(|access| access.handle().wake_waiter(access.actor()))
+        } else {
+            None
+        };
 
         session
             .emit_turn_item_started(

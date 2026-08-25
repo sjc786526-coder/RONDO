@@ -74,8 +74,13 @@ pub(crate) fn team_error(err: TeamError) -> FunctionCallError {
     FunctionCallError::RespondToModel(err.to_string())
 }
 
-fn resolve_access(
+async fn resolve_access(
     invocation_session: &crate::session::session::Session,
 ) -> Result<TeamAccess, FunctionCallError> {
+    invocation_session
+        .ensure_durable_root_activation()
+        .await
+        .map_err(TeamError::from)
+        .map_err(team_error)?;
     TeamAccess::resolve(invocation_session).map_err(team_error)
 }

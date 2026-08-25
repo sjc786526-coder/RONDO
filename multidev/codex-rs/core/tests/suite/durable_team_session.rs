@@ -2,11 +2,34 @@
 
 use anyhow::Result;
 use codex_features::Feature;
+use codex_protocol::SessionId;
+use codex_protocol::ThreadId;
+use codex_protocol::protocol::DurableTeamSessionMeta;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::Op;
+use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::ThreadSettingsOverrides;
 use codex_protocol::user_input::UserInput;
+use codex_team_state::DurableTeamIdentity;
 use codex_team_state::TEAM_WORLD_STATE_OPEN_TAG;
+use codex_team_state::committed_snapshot_generation;
+use codex_thread_store::AppendThreadItemsParams;
+use codex_thread_store::ArchiveThreadParams;
+use codex_thread_store::CreateThreadParams;
+use codex_thread_store::DeleteThreadParams;
+use codex_thread_store::ListThreadsParams;
+use codex_thread_store::LoadThreadHistoryParams;
+use codex_thread_store::ReadThreadByRolloutPathParams;
+use codex_thread_store::ReadThreadParams;
+use codex_thread_store::ResumeThreadParams;
+use codex_thread_store::RootWriterAuthority;
+use codex_thread_store::StoredThread;
+use codex_thread_store::StoredThreadHistory;
+use codex_thread_store::ThreadPage;
+use codex_thread_store::ThreadStore;
+use codex_thread_store::ThreadStoreError;
+use codex_thread_store::ThreadStoreFuture;
+use codex_thread_store::UpdateThreadMetadataParams;
 use core_test_support::responses::ev_assistant_message;
 use core_test_support::responses::ev_completed;
 use core_test_support::responses::ev_function_call_with_namespace;
@@ -24,6 +47,9 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
+use walkdir::WalkDir;
 
 const NAMESPACE: &str = "collaboration";
 const IMMEDIATE_CRASH_PROCESS_TEST: &str =
@@ -31,6 +57,131 @@ const IMMEDIATE_CRASH_PROCESS_TEST: &str =
 const IMMEDIATE_CRASH_MODE: &str = "CODEX_DURABLE_TEAM_IMMEDIATE_CRASH_MODE";
 const IMMEDIATE_CRASH_HOME: &str = "CODEX_DURABLE_TEAM_IMMEDIATE_CRASH_HOME";
 const IMMEDIATE_CRASH_THREAD_PREFIX: &str = "DURABLE_TEAM_THREAD=";
+
+struct PersistAfterSuccessThreadStore {
+    inner: Arc<dyn ThreadStore>,
+    fail_next_persist: AtomicBool,
+    fail_next_history_read: AtomicBool,
+}
+
+impl PersistAfterSuccessThreadStore {
+    fn new(inner: Arc<dyn ThreadStore>) -> Self {
+        Self::with_history_read_failure(inner, false)
+    }
+
+    fn with_history_read_failure(
+        inner: Arc<dyn ThreadStore>,
+        fail_next_history_read: bool,
+    ) -> Self {
+        Self {
+            inner,
+            fail_next_persist: AtomicBool::new(true),
+            fail_next_history_read: AtomicBool::new(fail_next_history_read),
+        }
+    }
+}
+
+impl ThreadStore for PersistAfterSuccessThreadStore {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn default_history_mode(&self) -> codex_protocol::protocol::ThreadHistoryMode {
+        self.inner.default_history_mode()
+    }
+
+    fn create_thread(&self, params: CreateThreadParams) -> ThreadStoreFuture<'_, ()> {
+        self.inner.create_thread(params)
+    }
+
+    fn resume_thread(&self, params: ResumeThreadParams) -> ThreadStoreFuture<'_, ()> {
+        self.inner.resume_thread(params)
+    }
+
+    fn append_items(&self, params: AppendThreadItemsParams) -> ThreadStoreFuture<'_, ()> {
+        self.inner.append_items(params)
+    }
+
+    fn persist_thread(&self, thread_id: ThreadId) -> ThreadStoreFuture<'_, ()> {
+        let inner = Arc::clone(&self.inner);
+        let fail = self.fail_next_persist.swap(false, Ordering::SeqCst);
+        Box::pin(async move {
+            inner.persist_thread(thread_id).await?;
+            if fail {
+                Err(ThreadStoreError::Internal {
+                    message: "injected error after canonical intent became readable".to_string(),
+                })
+            } else {
+                Ok(())
+            }
+        })
+    }
+
+    fn flush_thread(&self, thread_id: ThreadId) -> ThreadStoreFuture<'_, ()> {
+        self.inner.flush_thread(thread_id)
+    }
+
+    fn writer_authority(&self, thread_id: ThreadId) -> ThreadStoreFuture<'_, RootWriterAuthority> {
+        self.inner.writer_authority(thread_id)
+    }
+
+    fn shutdown_thread(&self, thread_id: ThreadId) -> ThreadStoreFuture<'_, ()> {
+        self.inner.shutdown_thread(thread_id)
+    }
+
+    fn discard_thread(&self, thread_id: ThreadId) -> ThreadStoreFuture<'_, ()> {
+        self.inner.discard_thread(thread_id)
+    }
+
+    fn load_history(
+        &self,
+        params: LoadThreadHistoryParams,
+    ) -> ThreadStoreFuture<'_, StoredThreadHistory> {
+        if self.fail_next_history_read.swap(false, Ordering::SeqCst) {
+            Box::pin(async {
+                Err(ThreadStoreError::Internal {
+                    message: "injected canonical intent read-back failure".to_string(),
+                })
+            })
+        } else {
+            self.inner.load_history(params)
+        }
+    }
+
+    fn read_thread(&self, params: ReadThreadParams) -> ThreadStoreFuture<'_, StoredThread> {
+        self.inner.read_thread(params)
+    }
+
+    fn read_thread_by_rollout_path(
+        &self,
+        params: ReadThreadByRolloutPathParams,
+    ) -> ThreadStoreFuture<'_, StoredThread> {
+        self.inner.read_thread_by_rollout_path(params)
+    }
+
+    fn list_threads(&self, params: ListThreadsParams) -> ThreadStoreFuture<'_, ThreadPage> {
+        self.inner.list_threads(params)
+    }
+
+    fn update_thread_metadata(
+        &self,
+        params: UpdateThreadMetadataParams,
+    ) -> ThreadStoreFuture<'_, StoredThread> {
+        self.inner.update_thread_metadata(params)
+    }
+
+    fn archive_thread(&self, params: ArchiveThreadParams) -> ThreadStoreFuture<'_, ()> {
+        self.inner.archive_thread(params)
+    }
+
+    fn unarchive_thread(&self, params: ArchiveThreadParams) -> ThreadStoreFuture<'_, StoredThread> {
+        self.inner.unarchive_thread(params)
+    }
+
+    fn delete_thread(&self, params: DeleteThreadParams) -> ThreadStoreFuture<'_, ()> {
+        self.inner.delete_thread(params)
+    }
+}
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn durable_team_immediate_crash_is_cold_resumable() -> Result<()> {
@@ -128,10 +279,10 @@ async fn durable_team_cold_resume_preserves_identity_and_continues_mutation() ->
         .expect("durable Session materializes its canonical rollout before startup succeeds");
     assert!(rollout_path.is_file());
     let team_directory = home.path().join("team-sessions/v1");
-    assert!(
-        team_directory
-            .join(format!("{thread_id}.team-lineage"))
-            .is_file()
+    let session_meta = codex_rollout::read_session_meta_line(&rollout_path).await?;
+    assert_eq!(
+        session_meta.meta.durable_team,
+        Some(DurableTeamSessionMeta::current(session_id, thread_id))
     );
     assert!(
         team_directory
@@ -148,6 +299,8 @@ async fn durable_team_cold_resume_preserves_identity_and_continues_mutation() ->
     assert!(first_projection.contains("before resume"));
 
     first.codex.shutdown_and_wait().await?;
+    let moved_team_backend = home.path().join("team-sessions-v1-moved-for-test");
+    std::fs::rename(&team_directory, &moved_team_backend)?;
     let mut disabled_builder = test_codex()
         .with_model("gpt-5.6-sol")
         .with_config(enable_non_durable_team);
@@ -161,6 +314,11 @@ async fn durable_team_cold_resume_preserves_identity_and_continues_mutation() ->
     assert!(
         format!("{disabled_error:#}").contains("writable resume requires durable_team_enabled")
     );
+    assert!(
+        !team_directory.exists(),
+        "durable-off rejection must not recreate an empty Team backend"
+    );
+    std::fs::rename(&moved_team_backend, &team_directory)?;
 
     builder = builder
         .with_model("gpt-5.6-sol")
@@ -189,6 +347,122 @@ async fn durable_team_cold_resume_preserves_identity_and_continues_mutation() ->
     assert!(continued_projection.contains("after resume"));
 
     resumed.codex.shutdown_and_wait().await?;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn durable_team_rejects_unknown_root_before_persistence() -> Result<()> {
+    let server = start_mock_server().await;
+    let home = Arc::new(tempfile::TempDir::new()?);
+    let mut builder = durable_team_codex()
+        .with_home(Arc::clone(&home))
+        .with_session_source(SessionSource::Unknown);
+    let error = match builder.build(&server).await {
+        Ok(_) => anyhow::bail!("Unknown source must not activate a durable Root Session"),
+        Err(error) => error,
+    };
+    assert!(
+        format!("{error:#}").contains("verifiable Root participant identity"),
+        "unexpected activation error: {error:#}"
+    );
+    assert!(
+        !home.path().join("team-sessions").exists(),
+        "rejected Unknown Root must not leave a Team artifact"
+    );
+    assert!(
+        WalkDir::new(home.path())
+            .into_iter()
+            .filter_map(|entry| entry.ok())
+            .all(|entry| entry.path().extension().and_then(|ext| ext.to_str()) != Some("jsonl")),
+        "rejected Unknown Root must not materialize a canonical rollout"
+    );
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn durable_team_reconciles_visible_intent_after_persist_error() -> Result<()> {
+    let server = start_mock_server().await;
+    let home = Arc::new(tempfile::TempDir::new()?);
+    let mut builder = durable_team_codex()
+        .with_home(Arc::clone(&home))
+        .with_thread_store_wrapper(|inner| Arc::new(PersistAfterSuccessThreadStore::new(inner)));
+
+    let created = builder.build(&server).await?;
+    let thread_id = created.session_configured.thread_id;
+    let session_id = SessionId::from(thread_id);
+    let rollout_path =
+        codex_rollout::find_thread_path_by_id_str(home.path(), &thread_id.to_string(), None)
+            .await?
+            .expect("persist error happened after the canonical rollout became readable");
+    let session_meta = codex_rollout::read_session_meta_line(&rollout_path).await?;
+    assert_eq!(
+        session_meta.meta.durable_team,
+        Some(DurableTeamSessionMeta::current(session_id, thread_id))
+    );
+
+    let snapshot = std::fs::read(
+        home.path()
+            .join("team-sessions/v1")
+            .join(format!("{thread_id}.team-state")),
+    )?;
+    assert_eq!(
+        committed_snapshot_generation(DurableTeamIdentity::new(session_id, thread_id), &snapshot,)?,
+        1,
+        "the same Root owner must continue through generation-1 after read-back"
+    );
+    created.codex.shutdown_and_wait().await?;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn durable_team_retains_owner_when_intent_read_back_is_unavailable() -> Result<()> {
+    let server = start_mock_server().await;
+    let home = Arc::new(tempfile::TempDir::new()?);
+    let mut builder = durable_team_codex()
+        .with_home(Arc::clone(&home))
+        .with_thread_store_wrapper(|inner| {
+            Arc::new(PersistAfterSuccessThreadStore::with_history_read_failure(
+                inner, true,
+            ))
+        });
+
+    let created = builder.build(&server).await?;
+    let thread_id = created.session_configured.thread_id;
+    let session_id = SessionId::from(thread_id);
+    let snapshot_path = home
+        .path()
+        .join("team-sessions/v1")
+        .join(format!("{thread_id}.team-state"));
+    assert!(
+        !snapshot_path.exists(),
+        "generation 1 must wait until canonical intent is proven"
+    );
+    let rollout_path =
+        codex_rollout::find_thread_path_by_id_str(home.path(), &thread_id.to_string(), None)
+            .await?
+            .expect("persist-after-success made canonical intent visible");
+    assert_eq!(
+        codex_rollout::read_session_meta_line(&rollout_path)
+            .await?
+            .meta
+            .durable_team,
+        Some(DurableTeamSessionMeta::current(session_id, thread_id))
+    );
+
+    let responses = mount_sse_sequence_without_request_count_expectation(
+        &server,
+        vec![assistant_reply("activation-retried")],
+    )
+    .await;
+    submit_turn(&created, "retry pending durable activation").await?;
+    assert_eq!(responses.requests().len(), 1);
+    let snapshot = std::fs::read(&snapshot_path)?;
+    assert_eq!(
+        committed_snapshot_generation(DurableTeamIdentity::new(session_id, thread_id), &snapshot,)?,
+        1,
+        "a later product access must retry under the retained Root owner"
+    );
+    created.codex.shutdown_and_wait().await?;
     Ok(())
 }
 

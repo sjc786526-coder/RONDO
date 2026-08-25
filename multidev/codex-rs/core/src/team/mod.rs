@@ -45,6 +45,12 @@ impl TeamAccess {
     /// The actor is the session's own thread id. Nothing in the caller's payload can influence who
     /// the harness thinks is acting.
     pub(crate) fn resolve(session: &Session) -> Result<Self, TeamError> {
+        if !session.durable_root_activation_complete() {
+            return Err(codex_team_state::TeamDurabilityError::unavailable(
+                "fresh durable Root activation is still awaiting canonical persistence",
+            )
+            .into());
+        }
         let handle = Arc::clone(session.services.agent_control.team());
         // A failed durable commit keeps the live Root owner but marks its view Unknown or
         // Unavailable. The next product access is the retry boundary: reconcile under the same

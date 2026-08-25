@@ -208,15 +208,24 @@ Team State、writer authority、Session identity 或只读状态源。
   reconcile、最小 lineage intent/首次提交顺序、初始未知结果 owner 保留、同 store live-writer delete 拒绝和全入口有界读取均已落地。
 - 修复回归已覆盖多成员/wake/retry 跨进程恢复、Session 创建后立即非优雅退出再定位恢复、lineage/state 缺半、超限稀疏 snapshot、
   before/after-write failure 和 delete 竞争；team-state 153/153、thread-store 188/188、core 聚焦 3/3 + 7/7 + 产品 2/2 通过。
-- 修复轮全新上下文独立复验先发现连续存储故障会把 Unknown 错降级；窄修为保留未知 generation 窗口并补回归后，同一审查者复验
-  `ACCEPT`，无剩余高/中 correctness finding。
+- 外部修复轮复验确认原高/中 finding 与正常 cold-resume/首次提交顺序均已关闭，但另发现三项中等级缺口：Team intent 与 snapshot
+  共置、`SessionSource::Unknown` 可留下无 generation-1 snapshot 的 durable Session，以及 lineage 发布 Unknown 会释放唯一 owner；三项均已
+  在原边界内窄修，当前等待全新上下文独立复验。
+- durable intent 现为 canonical Root `SessionMeta` 的 typed marker，并与 Team snapshot 交叉验证；旧 `.team-lineage` 旁路已删除。fresh
+  durable Root 在打开 thread persistence 前验证 participant identity，durable-off resume 即使整个 Team backend 丢失也会由 canonical
+  marker 拒绝，lineage publish Unknown 路径则因不再存在第二次发布而结构性消除。
+- 第二轮全新上下文独立复验发现 canonical `SessionMeta` 自身的 persist-after-success 错误仍可能释放 owner；已改为在同一 Root owner 内从
+  canonical ThreadStore read model 读回并严格验证 marker，只有完全匹配才继续 generation 1。复验进一步指出 read-back 自身连续不可用时
+  仍会清理 owner；现保留 fully constructed degraded Session/Root owner，所有 Team access 与 close 均在 marker 验证和 generation-1 注册完成前
+  fail-closed，并由下一次 projection/tool/wait/close 在同一 owner 内重试；两种组合故障均有稳定回归。
+- 同一全新上下文独立审查者在两轮 finding 修复后最终复验 `ACCEPT`，无剩余高/中 correctness finding。
 - 修复轮 `just fmt` 与受影响三 crate 的 `just clippy` 已通过；按复验边界未再次运行完整 workspace。首轮标准 `just test` 曾因上游
   rusty-v8 默认归档 404 在测试前失败；checksum-verified Codex V8 等价完整轮执行 14,373 项：14,363 passed、10 failed、24 skipped，
   其中 8 项为 068 Publication Critic fixture/断言、2 项为未修改 realtime 连接失败超时；069 durable cold-resume 主链在该轮通过。
 
 ### 当前工作
 
-- 阶段 D 的预验收 finding 修复、聚焦门禁、全新上下文独立复验和 069 本地提交均已完成；停在外部前置等待边界。
+- 第二轮 correctness 修复、直接受影响的聚焦门禁和全新上下文独立复验均已完成；069 本地提交准备完成，停在外部前置等待边界。
 
 ### 本任务剩余步骤
 
@@ -225,7 +234,7 @@ Team State、writer authority、Session identity 或只读状态源。
 
 ### 阻塞项
 
-- 当前无 069 主体实现阻塞。最终 `M4-S1 PASS` 仍受 `#37198` 独立进入 `main` 与后续分支同步批准约束；不得越权回移或宣布最终 PASS。
+- 当前无 069 主体实现或预验收阻塞。最终 `M4-S1 PASS` 仍受 `#37198` 独立进入 `main` 与后续分支同步批准约束；不得越权回移或宣布最终 PASS。
 
 ### 当前验收状态
 
@@ -260,3 +269,4 @@ Team State、writer authority、Session identity 或只读状态源。
 | 015 | 同 generation 与 no-op 校验使用完整领域结构等价而非 JSON 字节；跨 generation reconcile 只保留尚未成为 committed Fact 的 live pending observation | HashMap 编码顺序不稳定，pending evidence 又不属于 snapshot，但同进程未提交工作不能因恢复丢失或复活 | domain/recovery | 已采纳 |
 | 016 | LocalThreadStore hard delete 在同 store 仍有 live recorder 时整批 fail-closed，不移除 recorder 或 detach authority | S1 的窄修可消除已有 permit 与删除竞态，完整 delete 生命周期仍留给 S2 | authority/delete | 已采纳 |
 | 017 | lineage 与 snapshot 所有产品读取入口均先检查 regular-file metadata，再以上限加一字节有界读取 | 让显式 64 MiB snapshot 合同发生在分配前，损坏/稀疏超限文件诚实失败 | storage/read | 已采纳 |
+| 018 | durable intent 固化到 canonical Root `SessionMeta`，Team backend 只保留 committed snapshot；删除 `.team-lineage` 旁路，在任何持久副作用前拒绝不可证明 participant identity 的 fresh durable Root；marker persist/read-back 未决时保留 degraded Session owner，所有 Team access/close 先在同一 owner 内重试 marker 与 generation 1 | Session lineage 与 Team backend 独立后，整个 Team backend 丢失仍可 fail-closed；消除第二次 lineage 发布，并闭合 canonical marker 自身的 persist-after-success/read-back-unavailable 窗口，同时保持单一 Root authority 与首次 snapshot CAS | activation/lineage/failure | 已采纳 |

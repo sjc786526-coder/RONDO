@@ -5,6 +5,8 @@
 //! not introduce another lock or writer identity.
 
 use codex_protocol::ThreadId;
+use codex_protocol::protocol::DurableTeamSessionMeta;
+use codex_protocol::protocol::SessionMeta;
 use codex_team_state::DurableTeamIdentity;
 use codex_team_state::MAX_ENCODED_SNAPSHOT_BYTES;
 use codex_team_state::TeamClosePermit;
@@ -18,8 +20,6 @@ use codex_thread_store::RootWritePermit;
 use codex_thread_store::RootWriterAuthority;
 use codex_thread_store::ThreadStore;
 use codex_thread_store::ThreadStoreError;
-use serde::Deserialize;
-use serde::Serialize;
 use std::fs::File;
 use std::io::ErrorKind;
 use std::io::Read;
@@ -30,22 +30,14 @@ use std::sync::Arc;
 
 const TEAM_STATE_DIRECTORY: &str = "team-sessions/v1";
 const TEAM_STATE_EXTENSION: &str = "team-state";
-const TEAM_LINEAGE_EXTENSION: &str = "team-lineage";
-const TEAM_LINEAGE_VERSION: u32 = 1;
-const MAX_LINEAGE_BYTES: usize = 4 * 1024;
-
-#[derive(Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-struct DurableTeamLineage {
-    version: u32,
-    identity: DurableTeamIdentity,
-}
 
 pub(crate) async fn root_team_write_authority(
     thread_store: &Arc<dyn ThreadStore>,
     codex_home: &Path,
     identity: DurableTeamIdentity,
+    intent: DurableTeamSessionMeta,
 ) -> Result<Arc<dyn TeamWriteAuthority>, TeamDurabilityError> {
+    validate_intent(identity, intent)?;
     let root_authority = thread_store
         .writer_authority(identity.root_thread_id())
         .await
@@ -58,84 +50,65 @@ pub(crate) async fn root_team_write_authority(
     Ok(Arc::new(LocalTeamWriteAuthority {
         identity,
         root_authority,
-        lineage_path: lineage_path(codex_home, identity.root_thread_id()),
         snapshot_path: snapshot_path(codex_home, identity.root_thread_id()),
     }))
 }
 
-/// True when either half of the durable Team lineage exists. A malformed or oversized artifact is
-/// an error, never evidence that a legacy resume is safe.
-pub(crate) fn durable_team_artifacts_exist(
+/// True when the Team backend contains a committed snapshot. A malformed or oversized artifact is
+/// an error, never evidence that a legacy resume is safe. Canonical durable intent is read from the
+/// independently persisted Root SessionMeta by the caller.
+pub(crate) fn durable_team_snapshot_exists(
     codex_home: &Path,
     identity: DurableTeamIdentity,
 ) -> Result<bool, TeamDurabilityError> {
-    let lineage = read_lineage(codex_home, identity.root_thread_id())?;
-    if let Some(lineage) = lineage.as_ref() {
-        validate_lineage(identity, lineage)?;
-    }
     let snapshot = read_snapshot_file(&snapshot_path(codex_home, identity.root_thread_id()))?;
     if let Some(snapshot) = snapshot.as_ref() {
         committed_snapshot_generation(identity, snapshot)?;
     }
-    Ok(lineage.is_some() || snapshot.is_some())
+    Ok(snapshot.is_some())
 }
 
 /// Require a complete, cross-validated lineage before writable cold resume.
 pub(crate) fn validate_durable_team_resume(
     codex_home: &Path,
+    session_meta: &SessionMeta,
     identity: DurableTeamIdentity,
 ) -> Result<(), TeamDurabilityError> {
-    let lineage = read_lineage(codex_home, identity.root_thread_id())?.ok_or_else(|| {
-        TeamDurabilityError::conflict(
-            "persisted Session has no durable Team lineage intent; legacy Sessions are not upgraded",
-        )
-    })?;
-    validate_lineage(identity, &lineage)?;
+    validate_session_intent(session_meta, identity)?;
     let snapshot = read_snapshot_file(&snapshot_path(codex_home, identity.root_thread_id()))?
         .ok_or_else(|| {
             TeamDurabilityError::unavailable(
-                "durable Team lineage exists but its first committed snapshot is missing",
+                "durable Team Session intent exists but its first committed snapshot is missing",
             )
         })?;
     committed_snapshot_generation(identity, &snapshot)?;
     Ok(())
 }
 
-/// Persist the minimal Team intent only after the canonical Root rollout has materialized and
-/// while the Root live writer still owns its native authority. The first Team CAS refuses to run
-/// without this record.
-pub(crate) async fn initialize_durable_team_lineage(
-    thread_store: &Arc<dyn ThreadStore>,
-    codex_home: &Path,
+pub(crate) fn validate_session_intent(
+    session_meta: &SessionMeta,
     identity: DurableTeamIdentity,
 ) -> Result<(), TeamDurabilityError> {
-    let root_authority = thread_store
-        .writer_authority(identity.root_thread_id())
-        .await
-        .map_err(map_thread_store_error)?;
-    let _root_permit = root_authority
-        .begin_write()
-        .map_err(map_thread_store_error)?;
-    if read_snapshot_file(&snapshot_path(codex_home, identity.root_thread_id()))?.is_some() {
-        return Err(TeamDurabilityError::conflict(
-            "durable Team snapshot appeared before lineage initialization",
-        ));
+    if session_meta.session_id != identity.session_id()
+        || session_meta.id != identity.root_thread_id()
+    {
+        return Err(TeamDurabilityError::IdentityMismatch);
     }
-    match read_lineage(codex_home, identity.root_thread_id())? {
-        Some(lineage) => validate_lineage(identity, &lineage),
-        None => write_lineage(codex_home, identity),
-    }
+    let intent = session_meta.durable_team.ok_or_else(|| {
+        TeamDurabilityError::conflict(
+            "persisted Session has no durable Team intent; legacy Sessions are not upgraded",
+        )
+    })?;
+    validate_intent(identity, intent)
 }
 
 #[allow(dead_code)] // Narrow S1 read entry; control-plane consumers remain out of Plan 069 scope.
 pub(crate) fn read_committed_snapshot(
     codex_home: &Path,
+    session_meta: &SessionMeta,
     identity: DurableTeamIdentity,
 ) -> Result<Vec<u8>, TeamDurabilityError> {
-    let lineage = read_lineage(codex_home, identity.root_thread_id())?.ok_or_else(|| {
-        TeamDurabilityError::conflict("committed Team snapshot has no Session lineage intent")
-    })?;
-    validate_lineage(identity, &lineage)?;
+    validate_session_intent(session_meta, identity)?;
     read_snapshot_file(&snapshot_path(codex_home, identity.root_thread_id()))?.ok_or_else(|| {
         TeamDurabilityError::unavailable("cannot read durable Team snapshot: file is missing")
     })
@@ -147,16 +120,9 @@ fn snapshot_path(codex_home: &Path, root_thread_id: ThreadId) -> PathBuf {
         .join(format!("{root_thread_id}.{TEAM_STATE_EXTENSION}"))
 }
 
-fn lineage_path(codex_home: &Path, root_thread_id: ThreadId) -> PathBuf {
-    codex_home
-        .join(TEAM_STATE_DIRECTORY)
-        .join(format!("{root_thread_id}.{TEAM_LINEAGE_EXTENSION}"))
-}
-
 struct LocalTeamWriteAuthority {
     identity: DurableTeamIdentity,
     root_authority: RootWriterAuthority,
-    lineage_path: PathBuf,
     snapshot_path: PathBuf,
 }
 
@@ -173,7 +139,6 @@ impl TeamWriteAuthority for LocalTeamWriteAuthority {
         Ok(Box::new(LocalTeamWritePermit {
             identity: self.identity,
             root_permit,
-            lineage_path: self.lineage_path.clone(),
             snapshot_path: self.snapshot_path.clone(),
         }))
     }
@@ -196,22 +161,12 @@ struct LocalTeamWritePermit {
     identity: DurableTeamIdentity,
     #[allow(dead_code)]
     root_permit: RootWritePermit,
-    lineage_path: PathBuf,
     snapshot_path: PathBuf,
 }
 
 impl TeamWritePermit for LocalTeamWritePermit {
     fn read_snapshot(&mut self) -> Result<Option<Vec<u8>>, TeamDurabilityError> {
-        let lineage = read_lineage_file(&self.lineage_path)?;
-        if let Some(lineage) = lineage.as_ref() {
-            validate_lineage(self.identity, lineage)?;
-        }
         let snapshot = read_snapshot_file(&self.snapshot_path)?;
-        if lineage.is_none() && snapshot.is_some() {
-            return Err(TeamDurabilityError::conflict(
-                "durable Team snapshot exists without its Session lineage intent",
-            ));
-        }
         if snapshot.is_some() {
             sync_parent_directory(&self.snapshot_path, "durable Team snapshot")?;
         }
@@ -223,12 +178,6 @@ impl TeamWritePermit for LocalTeamWritePermit {
         expected_generation: u64,
         snapshot: Vec<u8>,
     ) -> Result<(), TeamDurabilityError> {
-        let lineage = read_lineage_file(&self.lineage_path)?.ok_or_else(|| {
-            TeamDurabilityError::conflict(
-                "durable Team commit requires a materialized Session lineage intent",
-            )
-        })?;
-        validate_lineage(self.identity, &lineage)?;
         replace_snapshot(
             self.identity,
             &self.snapshot_path,
@@ -236,6 +185,24 @@ impl TeamWritePermit for LocalTeamWritePermit {
             &snapshot,
         )
     }
+}
+
+fn validate_intent(
+    expected: DurableTeamIdentity,
+    intent: DurableTeamSessionMeta,
+) -> Result<(), TeamDurabilityError> {
+    if intent.version != DurableTeamSessionMeta::CURRENT_VERSION {
+        return Err(TeamDurabilityError::UnsupportedVersion {
+            found: intent.version,
+            supported: DurableTeamSessionMeta::CURRENT_VERSION,
+        });
+    }
+    if intent.session_id != expected.session_id()
+        || intent.root_thread_id != expected.root_thread_id()
+    {
+        return Err(TeamDurabilityError::IdentityMismatch);
+    }
+    Ok(())
 }
 
 struct LocalTeamClosePermit {
@@ -262,84 +229,6 @@ impl TeamClosePermit for LocalTeamClosePermit {
                 .map_err(map_thread_store_error)
         })
     }
-}
-
-fn validate_lineage(
-    expected: DurableTeamIdentity,
-    lineage: &DurableTeamLineage,
-) -> Result<(), TeamDurabilityError> {
-    if lineage.version != TEAM_LINEAGE_VERSION {
-        return Err(TeamDurabilityError::UnsupportedVersion {
-            found: lineage.version,
-            supported: TEAM_LINEAGE_VERSION,
-        });
-    }
-    if lineage.identity != expected {
-        return Err(TeamDurabilityError::IdentityMismatch);
-    }
-    Ok(())
-}
-
-fn read_lineage(
-    codex_home: &Path,
-    root_thread_id: ThreadId,
-) -> Result<Option<DurableTeamLineage>, TeamDurabilityError> {
-    read_lineage_file(&lineage_path(codex_home, root_thread_id))
-}
-
-fn read_lineage_file(path: &Path) -> Result<Option<DurableTeamLineage>, TeamDurabilityError> {
-    let Some(bytes) = read_bounded_file(path, MAX_LINEAGE_BYTES, "durable Team lineage")? else {
-        return Ok(None);
-    };
-    serde_json::from_slice(&bytes)
-        .map(Some)
-        .map_err(|error| TeamDurabilityError::corrupt(format!("invalid Team lineage: {error}")))
-}
-
-fn write_lineage(
-    codex_home: &Path,
-    identity: DurableTeamIdentity,
-) -> Result<(), TeamDurabilityError> {
-    let path = lineage_path(codex_home, identity.root_thread_id());
-    let parent = path.parent().ok_or_else(|| {
-        TeamDurabilityError::unavailable("durable Team lineage path has no parent")
-    })?;
-    std::fs::create_dir_all(parent).map_err(|error| {
-        TeamDurabilityError::unavailable(format!("cannot create durable Team directory: {error}"))
-    })?;
-    let encoded = serde_json::to_vec(&DurableTeamLineage {
-        version: TEAM_LINEAGE_VERSION,
-        identity,
-    })
-    .map_err(|error| {
-        TeamDurabilityError::corrupt(format!("cannot encode Team lineage: {error}"))
-    })?;
-    let mut temporary = tempfile::NamedTempFile::new_in(parent).map_err(|error| {
-        TeamDurabilityError::unavailable(format!(
-            "cannot create durable Team lineage temporary: {error}"
-        ))
-    })?;
-    temporary.write_all(&encoded).map_err(|error| {
-        TeamDurabilityError::unavailable(format!("cannot write durable Team lineage: {error}"))
-    })?;
-    temporary.as_file_mut().sync_all().map_err(|error| {
-        TeamDurabilityError::unavailable(format!("cannot sync durable Team lineage: {error}"))
-    })?;
-    temporary.persist(&path).map_err(|error| {
-        TeamDurabilityError::unknown(format!(
-            "atomic durable Team lineage publish had an indeterminate result: {}",
-            error.error
-        ))
-    })?;
-    #[cfg(unix)]
-    File::open(parent)
-        .and_then(|directory| directory.sync_all())
-        .map_err(|error| {
-            TeamDurabilityError::unknown(format!(
-                "durable Team lineage reached the file but directory sync failed: {error}"
-            ))
-        })?;
-    Ok(())
 }
 
 fn read_snapshot_file(path: &Path) -> Result<Option<Vec<u8>>, TeamDurabilityError> {
@@ -537,7 +426,7 @@ mod tests {
         let identity = DurableTeamIdentity::new(session_id, root_thread_id);
 
         run_child_stage(home.path(), identity, "create");
-        let first = committed_reader(home.path(), identity);
+        let first = committed_reader(home.path(), identity).await;
         let first_view = first
             .snapshot_for(root_thread_id)
             .expect("first committed view");
@@ -551,7 +440,7 @@ mod tests {
         let original_instance = first.instance();
 
         run_child_stage(home.path(), identity, "resume");
-        let second = committed_reader(home.path(), identity);
+        let second = committed_reader(home.path(), identity).await;
         let second_view = second
             .snapshot_for(root_thread_id)
             .expect("continued committed view");
@@ -585,7 +474,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn lineage_intent_requires_a_matching_committed_snapshot_for_resume() {
+    async fn session_intent_requires_a_matching_committed_snapshot_for_resume() {
         let home = TempDir::new().expect("temp durable Team home");
         let root_thread_id = ThreadId::new();
         let identity = DurableTeamIdentity::new(SessionId::new(), root_thread_id);
@@ -600,26 +489,35 @@ mod tests {
             .persist()
             .await
             .expect("materialize Root rollout");
-        initialize_durable_team_lineage(&thread_store, home.path(), identity)
-            .await
-            .expect("persist lineage intent");
+        let session_meta = session_meta(home.path(), identity).await;
 
         assert!(
-            durable_team_artifacts_exist(home.path(), identity)
-                .expect("probe bounded durable artifacts")
+            !durable_team_snapshot_exists(home.path(), identity)
+                .expect("probe bounded durable snapshot")
         );
         assert!(matches!(
-            validate_durable_team_resume(home.path(), identity),
+            validate_durable_team_resume(home.path(), &session_meta, identity),
             Err(TeamDurabilityError::Unavailable { .. })
         ));
 
         let other_identity = DurableTeamIdentity::new(SessionId::new(), root_thread_id);
         assert!(matches!(
-            durable_team_artifacts_exist(home.path(), other_identity),
+            validate_session_intent(&session_meta, other_identity),
+            Err(TeamDurabilityError::IdentityMismatch)
+        ));
+        let mut mismatched_inner = session_meta.clone();
+        mismatched_inner
+            .durable_team
+            .as_mut()
+            .expect("durable Session intent")
+            .session_id = SessionId::new();
+        assert!(matches!(
+            validate_session_intent(&mismatched_inner, identity),
             Err(TeamDurabilityError::IdentityMismatch)
         ));
 
-        let authority = root_team_write_authority(&thread_store, home.path(), identity)
+        let intent = session_meta.durable_team.expect("durable Session intent");
+        let authority = root_team_write_authority(&thread_store, home.path(), identity, intent)
             .await
             .expect("derive Root authority");
         let team = TeamStateHandle::create_durable(authority).expect("create durable Team");
@@ -629,19 +527,31 @@ mod tests {
             "/root".to_string(),
         )
         .expect("commit initial Team snapshot");
-        std::fs::remove_file(lineage_path(home.path(), root_thread_id))
-            .expect("remove lineage half");
         assert!(
-            durable_team_artifacts_exist(home.path(), identity)
-                .expect("snapshot alone remains a detectable durable artifact")
+            durable_team_snapshot_exists(home.path(), identity)
+                .expect("snapshot remains a detectable durable artifact")
         );
+
+        let mut orphaned_meta = session_meta.clone();
+        orphaned_meta.durable_team = None;
         assert!(matches!(
-            validate_durable_team_resume(home.path(), identity),
+            validate_durable_team_resume(home.path(), &orphaned_meta, identity),
             Err(TeamDurabilityError::Conflict { .. })
         ));
         assert!(matches!(
-            read_committed_snapshot(home.path(), identity),
+            read_committed_snapshot(home.path(), &orphaned_meta, identity),
             Err(TeamDurabilityError::Conflict { .. })
+        ));
+
+        let mut unsupported_meta = session_meta;
+        unsupported_meta
+            .durable_team
+            .as_mut()
+            .expect("durable Session intent")
+            .version += 1;
+        assert!(matches!(
+            validate_durable_team_resume(home.path(), &unsupported_meta, identity),
+            Err(TeamDurabilityError::UnsupportedVersion { .. })
         ));
     }
 
@@ -661,12 +571,15 @@ mod tests {
             .persist()
             .await
             .expect("materialize Root rollout");
-        initialize_durable_team_lineage(&thread_store, home.path(), identity)
-            .await
-            .expect("persist lineage intent");
-        let authority = root_team_write_authority(&thread_store, home.path(), identity)
-            .await
-            .expect("derive Root authority");
+        let session_meta = session_meta(home.path(), identity).await;
+        let authority = root_team_write_authority(
+            &thread_store,
+            home.path(),
+            identity,
+            session_meta.durable_team.expect("durable Session intent"),
+        )
+        .await
+        .expect("derive Root authority");
         let team =
             TeamStateHandle::create_durable(Arc::clone(&authority)).expect("create durable Team");
         team.register_durable_participant(
@@ -684,11 +597,11 @@ mod tests {
             .expect("make sparse oversized snapshot");
 
         assert!(matches!(
-            read_committed_snapshot(home.path(), identity),
+            read_committed_snapshot(home.path(), &session_meta, identity),
             Err(TeamDurabilityError::Corrupt { .. })
         ));
         assert!(matches!(
-            durable_team_artifacts_exist(home.path(), identity),
+            durable_team_snapshot_exists(home.path(), identity),
             Err(TeamDurabilityError::Corrupt { .. })
         ));
         let mut permit = authority.begin_write().expect("acquire Root write permit");
@@ -741,25 +654,28 @@ mod tests {
             }
             other => panic!("unexpected durable Team process mode {other}"),
         };
+        if mode == "create" {
+            live_thread
+                .persist()
+                .await
+                .expect("materialize canonical Root rollout before Team success");
+        }
+        let session_meta = session_meta(&home, identity).await;
         match mode {
-            "create" => {
-                live_thread
-                    .persist()
-                    .await
-                    .expect("materialize canonical Root rollout before Team success");
-                initialize_durable_team_lineage(&thread_store, &home, identity)
-                    .await
-                    .expect("persist Team lineage intent");
-            }
-            "resume" => {
-                validate_durable_team_resume(&home, identity)
-                    .expect("cross-validate durable Team lineage");
-            }
+            "create" => validate_session_intent(&session_meta, identity)
+                .expect("validate canonical durable Team Session intent"),
+            "resume" => validate_durable_team_resume(&home, &session_meta, identity)
+                .expect("cross-validate durable Team Session and snapshot"),
             _ => unreachable!("mode checked above"),
         }
-        let authority = root_team_write_authority(&thread_store, &home, identity)
-            .await
-            .expect("derive canonical Root authority");
+        let authority = root_team_write_authority(
+            &thread_store,
+            &home,
+            identity,
+            session_meta.durable_team.expect("durable Session intent"),
+        )
+        .await
+        .expect("derive canonical Root authority");
         let team = match mode {
             "create" => TeamStateHandle::create_durable(authority).expect("create durable Team"),
             "resume" => TeamStateHandle::resume_durable(authority).expect("resume durable Team"),
@@ -842,11 +758,27 @@ mod tests {
         );
     }
 
-    fn committed_reader(home: &Path, identity: DurableTeamIdentity) -> TeamStateHandle {
-        let committed =
-            read_committed_snapshot(home, identity).expect("read committed Team snapshot");
+    async fn committed_reader(home: &Path, identity: DurableTeamIdentity) -> TeamStateHandle {
+        let session_meta = session_meta(home, identity).await;
+        let committed = read_committed_snapshot(home, &session_meta, identity)
+            .expect("read committed Team snapshot");
         TeamStateHandle::from_committed_snapshot(identity, &committed)
             .expect("hydrate non-owner committed reader")
+    }
+
+    async fn session_meta(home: &Path, identity: DurableTeamIdentity) -> SessionMeta {
+        let rollout_path = codex_rollout::find_thread_path_by_id_str(
+            home,
+            &identity.root_thread_id().to_string(),
+            None,
+        )
+        .await
+        .expect("locate persisted Root thread")
+        .expect("persisted Root rollout exists");
+        codex_rollout::read_session_meta_line(&rollout_path)
+            .await
+            .expect("read canonical SessionMeta")
+            .meta
     }
 
     fn local_thread_store(home: &Path) -> Arc<dyn ThreadStore> {
@@ -868,6 +800,10 @@ mod tests {
             forked_from_id: None,
             parent_thread_id: None,
             source: SessionSource::Exec,
+            durable_team: Some(DurableTeamSessionMeta::current(
+                identity.session_id(),
+                identity.root_thread_id(),
+            )),
             thread_source: None,
             originator: "durable-team-process-test".to_string(),
             base_instructions: BaseInstructions::default(),

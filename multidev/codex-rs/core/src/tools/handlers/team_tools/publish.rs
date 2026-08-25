@@ -84,7 +84,7 @@ async fn handle_off_call(
     // Keep this parser distinct from the enabled contract: off must not silently accept a
     // continuation field that the original tool never exposed.
     let args: PublishArgs = parse_arguments(&arguments)?;
-    let access = resolve_access(&session)?;
+    let access = resolve_access(&session).await?;
     let (submission, request) = publish_request(
         args.event_id,
         args.title,
@@ -115,7 +115,7 @@ async fn handle_reviewed_call(
     } = invocation;
     let arguments = function_arguments(payload)?;
     let args = parse_reviewed_arguments(&arguments)?;
-    let access = resolve_access(&session)?;
+    let access = resolve_access(&session).await?;
     let (submission, request) = reviewed_publish_request(
         args.event_id,
         args.title,

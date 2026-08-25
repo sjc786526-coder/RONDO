@@ -54,6 +54,7 @@ use codex_protocol::protocol::ThreadSettingsOverrides;
 use codex_protocol::protocol::TurnEnvironmentSelection;
 use codex_protocol::protocol::TurnEnvironmentSelections;
 use codex_protocol::user_input::UserInput;
+use codex_thread_store::ThreadStore;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_path_uri::PathUri;
 use futures::future::BoxFuture;
@@ -78,6 +79,7 @@ use wiremock::matchers::path_regex;
 
 type ConfigMutator = dyn FnOnce(&mut Config) + Send;
 type PreBuildHook = dyn FnOnce(&Path) + Send + 'static;
+type ThreadStoreWrapper = dyn FnOnce(Arc<dyn ThreadStore>) -> Arc<dyn ThreadStore> + Send + 'static;
 type WorkspaceSetup = dyn FnOnce(AbsolutePathBuf, Arc<dyn ExecutorFileSystem>) -> BoxFuture<'static, Result<()>>
     + Send;
 const TEST_MODEL_WITH_EXPERIMENTAL_TOOLS: &str = "test-gpt-5.1-codex";
@@ -310,6 +312,8 @@ pub struct TestCodexBuilder {
     code_mode_host_program: Option<PathBuf>,
     history_mode: Option<ThreadHistoryMode>,
     models_manager: Option<SharedModelsManager>,
+    session_source: SessionSource,
+    thread_store_wrapper: Option<Box<ThreadStoreWrapper>>,
 }
 
 impl TestCodexBuilder {
@@ -340,6 +344,19 @@ impl TestCodexBuilder {
 
     pub fn with_history_mode(mut self, history_mode: ThreadHistoryMode) -> Self {
         self.history_mode = Some(history_mode);
+        self
+    }
+
+    pub fn with_session_source(mut self, session_source: SessionSource) -> Self {
+        self.session_source = session_source;
+        self
+    }
+
+    pub fn with_thread_store_wrapper<F>(mut self, wrapper: F) -> Self
+    where
+        F: FnOnce(Arc<dyn ThreadStore>) -> Arc<dyn ThreadStore> + Send + 'static,
+    {
+        self.thread_store_wrapper = Some(Box::new(wrapper));
         self
     }
 
@@ -641,7 +658,10 @@ impl TestCodexBuilder {
     ) -> anyhow::Result<TestCodex> {
         let auth = self.auth.clone();
         let state_db = codex_core::init_state_db(&config).await;
-        let thread_store = thread_store_from_config(&config, state_db.clone());
+        let mut thread_store = thread_store_from_config(&config, state_db.clone());
+        if let Some(wrapper) = self.thread_store_wrapper.take() {
+            thread_store = wrapper(thread_store);
+        }
         let installation_id = resolve_installation_id(&config.codex_home).await?;
         let user_instructions_provider =
             self.user_instructions_provider.clone().unwrap_or_else(|| {
@@ -659,7 +679,7 @@ impl TestCodexBuilder {
             auth_manager.clone(),
             models_manager,
             codex_core::CodexAppsToolsCache::default(),
-            SessionSource::Exec,
+            self.session_source.clone(),
             Arc::clone(&environment_manager),
             Arc::clone(&self.extensions),
             user_instructions_provider,
@@ -1293,6 +1313,8 @@ pub fn test_codex() -> TestCodexBuilder {
         code_mode_host_program: None,
         history_mode: None,
         models_manager: None,
+        session_source: SessionSource::Exec,
+        thread_store_wrapper: None,
     }
 }
 

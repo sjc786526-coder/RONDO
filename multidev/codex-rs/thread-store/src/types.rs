@@ -12,6 +12,7 @@ use codex_protocol::models::BaseInstructions;
 use codex_protocol::models::PermissionProfile;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::protocol::AskForApproval;
+use codex_protocol::protocol::DurableTeamSessionMeta;
 use codex_protocol::protocol::GitInfo;
 use codex_protocol::protocol::HistoryPosition;
 use codex_protocol::protocol::MultiAgentVersion;
@@ -81,6 +82,9 @@ pub struct CreateThreadParams {
     pub parent_thread_id: Option<ThreadId>,
     /// Runtime source for the thread.
     pub source: SessionSource,
+    /// Canonical Root intent for durable Team state, if this is a durable Root Session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub durable_team: Option<DurableTeamSessionMeta>,
     /// Optional analytics source classification for this thread.
     pub thread_source: Option<ThreadSource>,
     /// Effective originator used for this thread's Responses requests and analytics events.

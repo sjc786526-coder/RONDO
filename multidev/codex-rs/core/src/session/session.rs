@@ -1,6 +1,7 @@
 use super::input_queue::InputQueue;
 use super::mcp_refresh::McpRefresh;
 use super::*;
+use crate::agent::control::team_participant_identity;
 use crate::agents_md_manager::AgentsMdManager;
 use crate::config::ConstraintError;
 use crate::environment_selection::ThreadEnvironments;
@@ -21,6 +22,7 @@ use codex_protocol::config_types::ServiceTier;
 use codex_protocol::mcp::ClientMcpExtensions;
 use codex_protocol::permissions::FileSystemPath;
 use codex_protocol::permissions::FileSystemSpecialPath;
+use codex_protocol::protocol::DurableTeamSessionMeta;
 use codex_protocol::protocol::MultiAgentVersion;
 use codex_protocol::protocol::ThreadHistoryMode;
 use codex_protocol::protocol::ThreadSource;
@@ -31,7 +33,27 @@ use codex_team_state::TeamDurabilityError;
 use codex_team_state::TeamDurabilityStatus;
 use codex_team_state::TeamStateHandle;
 use std::sync::OnceLock;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use tokio::sync::Semaphore;
+
+struct DurableRootActivation {
+    identity: DurableTeamIdentity,
+    marker_ready: AtomicBool,
+    complete: AtomicBool,
+    retry: Mutex<()>,
+}
+
+impl DurableRootActivation {
+    fn new(identity: DurableTeamIdentity) -> Self {
+        Self {
+            identity,
+            marker_ready: AtomicBool::new(false),
+            complete: AtomicBool::new(false),
+            retry: Mutex::new(()),
+        }
+    }
+}
 
 /// Context for an initialized model agent
 ///
@@ -41,6 +63,9 @@ pub(crate) struct Session {
     /// Identity proven from the Session source and retained for retrying an indeterminate initial
     /// durable registration through the same live owner.
     pub(crate) team_participant_identity: Option<(ParticipantRole, String)>,
+    /// Keeps a fresh durable Root reachable while canonical marker publication or generation-1
+    /// registration remains indeterminate. All Team access fails closed until `complete`.
+    durable_root_activation: Option<DurableRootActivation>,
     pub(crate) installation_id: String,
     pub(super) tx_event: Sender<Event>,
     pub(super) agent_status: watch::Sender<AgentStatus>,
@@ -509,6 +534,57 @@ impl Session {
         self.services.agent_control.session_id()
     }
 
+    pub(crate) fn durable_root_activation_complete(&self) -> bool {
+        self.durable_root_activation
+            .as_ref()
+            .is_none_or(|activation| activation.complete.load(Ordering::Acquire))
+    }
+
+    /// Retry the two ordered fresh-Root activation barriers under the same live Root owner.
+    pub(crate) async fn ensure_durable_root_activation(&self) -> Result<(), TeamDurabilityError> {
+        let Some(activation) = self.durable_root_activation.as_ref() else {
+            return Ok(());
+        };
+        if activation.complete.load(Ordering::Acquire) {
+            return Ok(());
+        }
+        let _retry = activation.retry.lock().await;
+        if activation.complete.load(Ordering::Acquire) {
+            return Ok(());
+        }
+        if !activation.marker_ready.load(Ordering::Acquire) {
+            let live_thread = self.services.live_thread.as_ref().ok_or_else(|| {
+                TeamDurabilityError::unavailable(
+                    "durable Team Root lost its Session persistence during activation",
+                )
+            })?;
+            persist_or_reconcile_durable_root_intent(live_thread, activation.identity).await?;
+            activation.marker_ready.store(true, Ordering::Release);
+        }
+        let (role, label) = self.team_participant_identity.as_ref().ok_or_else(|| {
+            TeamDurabilityError::unavailable(
+                "durable Team Root lost its verified participant identity during activation",
+            )
+        })?;
+        let team = self.services.agent_control.team();
+        let register = || {
+            team.register_durable_participant_checked(self.thread_id, *role, label.clone())
+                .map(|_| ())
+        };
+        if let Err(first_error) = register() {
+            if !matches!(
+                first_error,
+                TeamDurabilityError::Unknown { .. } | TeamDurabilityError::Unavailable { .. }
+            ) {
+                return Err(first_error);
+            }
+            team.ensure_readable_or_reconcile()?;
+            register()?;
+        }
+        activation.complete.store(true, Ordering::Release);
+        Ok(())
+    }
+
     pub(crate) async fn originator(&self) -> String {
         let state = self.state.lock().await;
         state.session_configuration.originator.clone()
@@ -580,15 +656,27 @@ impl Session {
             }
             InitialHistory::Resumed(resumed_history) => resumed_history.conversation_id,
         };
-        let resumed_session_id = match &initial_history {
-            InitialHistory::Resumed(resumed) => {
-                resumed.history.iter().find_map(|item| match item {
-                    RolloutItem::SessionMeta(meta_line) => Some(meta_line.meta.session_id),
+        let resumed_session_meta = match &initial_history {
+            InitialHistory::Resumed(resumed) => match resumed
+                .rollout_path
+                .as_ref()
+                .filter(|rollout_path| rollout_path.is_file())
+            {
+                Some(rollout_path) => Some(
+                    codex_rollout::read_session_meta_line(rollout_path)
+                        .await?
+                        .meta,
+                ),
+                None => resumed.history.iter().find_map(|item| match item {
+                    RolloutItem::SessionMeta(meta_line) => Some(meta_line.meta.clone()),
                     _ => None,
-                })
-            }
+                }),
+            },
             InitialHistory::New | InitialHistory::Cleared | InitialHistory::Forked(_) => None,
         };
+        let resumed_session_id = resumed_session_meta
+            .as_ref()
+            .map(|session_meta| session_meta.session_id);
         // Legacy subagent rollouts synthesize session_id from their own thread id.
         let resumed_session_id = resumed_session_id.filter(|session_id| {
             !session_configuration.session_source.is_non_root_agent()
@@ -601,6 +689,71 @@ impl Session {
                 SessionId::from(thread_id)
             }
         });
+        let durable_team_requested = config.multi_agent_v2.durable_team_enabled;
+        let is_root_session = !session_configuration.session_source.is_non_root_agent();
+        let is_resumed = matches!(&initial_history, InitialHistory::Resumed(_));
+        let durable_identity = DurableTeamIdentity::new(session_id, thread_id);
+        let fresh_durable_team_intent = (durable_team_requested && is_root_session && !is_resumed)
+            .then(|| DurableTeamSessionMeta::current(session_id, thread_id));
+
+        // Durable Root eligibility and canonical lineage must be proven before opening thread
+        // persistence. In particular, Unknown is not a Root participant identity and must never
+        // leave a marker-only Session that could not commit generation 1.
+        if durable_team_requested {
+            if initial_multi_agent_version != Some(MultiAgentVersion::V2) {
+                anyhow::bail!("durable Team State requires the effective Multi-Agent V2 runtime");
+            }
+            if !config.durable_team_enabled() {
+                anyhow::bail!("durable Team State activation prerequisites are not satisfied");
+            }
+            if config.ephemeral {
+                anyhow::bail!("durable Team State requires a persisted Session");
+            }
+            if is_root_session {
+                if team_participant_identity(&session_configuration.session_source).is_none() {
+                    anyhow::bail!(
+                        "durable Team Root requires a verifiable Root participant identity"
+                    );
+                }
+                if matches!(
+                    &initial_history,
+                    InitialHistory::Cleared | InitialHistory::Forked(_)
+                ) {
+                    anyhow::bail!(
+                        "durable Team State does not support clear or fork lifecycle entrypoints in M4-S1"
+                    );
+                }
+                if is_resumed {
+                    let session_meta = resumed_session_meta.as_ref().ok_or_else(|| {
+                        anyhow::anyhow!("resumed durable Root has no canonical SessionMeta")
+                    })?;
+                    crate::team::durable::validate_durable_team_resume(
+                        config.codex_home.as_path(),
+                        session_meta,
+                        durable_identity,
+                    )?;
+                } else if crate::team::durable::durable_team_snapshot_exists(
+                    config.codex_home.as_path(),
+                    durable_identity,
+                )? {
+                    anyhow::bail!("fresh Session collides with an existing durable Team snapshot");
+                }
+            }
+        } else if is_root_session && is_resumed {
+            if resumed_session_meta
+                .as_ref()
+                .and_then(|session_meta| session_meta.durable_team)
+                .is_some()
+                || crate::team::durable::durable_team_snapshot_exists(
+                    config.codex_home.as_path(),
+                    durable_identity,
+                )?
+            {
+                anyhow::bail!(
+                    "this Session has durable Team state; writable resume requires durable_team_enabled"
+                );
+            }
+        }
         let initial_auto_compact_window_ids = AutoCompactWindowIds::new_initial();
         let agent_control = agent_control.with_session_id(
             session_id,
@@ -649,6 +802,7 @@ impl Session {
                             forked_from_id,
                             parent_thread_id,
                             source: session_source,
+                            durable_team: fresh_durable_team_intent,
                             thread_source: session_configuration.thread_source.clone(),
                             originator: session_configuration.originator.clone(),
                             base_instructions: BaseInstructions {
@@ -785,50 +939,26 @@ impl Session {
                 e
             })?);
 
-        let durable_team_requested = config.multi_agent_v2.durable_team_enabled;
-        let is_root_session = !session_configuration.session_source.is_non_root_agent();
-        let is_resumed = matches!(&initial_history, InitialHistory::Resumed(_));
         let durable_activation: anyhow::Result<()> = async {
             if durable_team_requested {
-                if initial_multi_agent_version != Some(MultiAgentVersion::V2) {
-                    anyhow::bail!(
-                        "durable Team State requires the effective Multi-Agent V2 runtime"
-                    );
-                }
-                if !config.durable_team_enabled() {
-                    anyhow::bail!("durable Team State activation prerequisites are not satisfied");
-                }
-                if config.ephemeral || live_thread_init.as_ref().is_none() {
+                if live_thread_init.as_ref().is_none() {
                     anyhow::bail!("durable Team State requires a persisted Session");
                 }
 
                 if is_root_session {
-                    if matches!(
-                        &initial_history,
-                        InitialHistory::Cleared | InitialHistory::Forked(_)
-                    ) {
-                        anyhow::bail!(
-                            "durable Team State does not support clear or fork lifecycle entrypoints in M4-S1"
-                        );
+                    let intent = if is_resumed {
+                        resumed_session_meta
+                            .as_ref()
+                            .and_then(|session_meta| session_meta.durable_team)
+                    } else {
+                        fresh_durable_team_intent
                     }
-                    let identity = DurableTeamIdentity::new(session_id, thread_id);
-                    if is_resumed {
-                        crate::team::durable::validate_durable_team_resume(
-                            config.codex_home.as_path(),
-                            identity,
-                        )?;
-                    } else if crate::team::durable::durable_team_artifacts_exist(
-                        config.codex_home.as_path(),
-                        identity,
-                    )? {
-                        anyhow::bail!(
-                            "fresh Session collides with an existing durable Team lineage"
-                        );
-                    }
+                    .ok_or_else(|| anyhow::anyhow!("durable Root lost its Session intent"))?;
                     let authority = crate::team::durable::root_team_write_authority(
                         &thread_store,
                         config.codex_home.as_path(),
-                        identity,
+                        durable_identity,
+                        intent,
                     )
                     .await?;
                     let team = if is_resumed {
@@ -840,7 +970,9 @@ impl Session {
                 } else {
                     let team = agent_control.team();
                     let identity = team.durable_identity().ok_or_else(|| {
-                        anyhow::anyhow!("durable child Session has no canonical Root Team authority")
+                        anyhow::anyhow!(
+                            "durable child Session has no canonical Root Team authority"
+                        )
                     })?;
                     if identity.session_id() != session_id
                         || !matches!(
@@ -853,16 +985,6 @@ impl Session {
                         );
                     }
                 }
-            } else if is_root_session
-                && is_resumed
-                && crate::team::durable::durable_team_artifacts_exist(
-                    config.codex_home.as_path(),
-                    DurableTeamIdentity::new(session_id, thread_id),
-                )?
-            {
-                anyhow::bail!(
-                    "this Session has durable Team state; writable resume requires durable_team_enabled"
-                );
             }
             Ok(())
         }
@@ -1293,6 +1415,8 @@ impl Session {
             let sess = Arc::new(Session {
                 thread_id,
                 team_participant_identity,
+                durable_root_activation: fresh_durable_team_intent
+                    .map(|_| DurableRootActivation::new(durable_identity)),
                 installation_id,
                 tx_event: tx_event.clone(),
                 agent_status,
@@ -1417,64 +1541,64 @@ impl Session {
                 state.queue_pending_session_start_source(session_start_source);
             }
             // Participant registration is the first durable Team commit for a new Root. First
-            // materialize the canonical rollout and its minimal lineage intent; intent without a
-            // first snapshot stays detectable but cannot masquerade as a resumable empty Team.
+            // materialize the canonical rollout containing its typed durable intent; intent
+            // without a first snapshot stays detectable but cannot masquerade as an empty Team.
             if durable_team_requested {
                 if is_root_session && !is_resumed {
-                    let live_thread = live_thread_init.as_ref().ok_or_else(|| {
-                        anyhow::anyhow!("durable Team Root lost its Session persistence")
-                    })?;
-                    live_thread.persist().await?;
-                    crate::team::durable::initialize_durable_team_lineage(
-                        &thread_store,
-                        config.codex_home.as_path(),
-                        DurableTeamIdentity::new(session_id, thread_id),
-                    )
-                    .await?;
-                }
-                let registration = sess
-                    .services
-                    .agent_control
-                    .try_register_team_participant(
-                        thread_id,
-                        &session_configuration.session_source,
-                    );
-                if let Err(first_error) = registration {
-                    if !matches!(
-                        first_error,
-                        TeamDurabilityError::Unknown { .. }
-                            | TeamDurabilityError::Unavailable { .. }
-                    ) {
-                        return Err(first_error.into());
-                    }
-                    let recovered = sess
-                        .services
-                        .agent_control
-                        .team()
-                        .ensure_readable_or_reconcile()
-                        .and_then(|()| {
-                            sess.services.agent_control.try_register_team_participant(
-                                thread_id,
-                                &session_configuration.session_source,
-                            )
-                        });
-                    if let Err(recovery_error) = recovered {
+                    if let Err(error) = sess.ensure_durable_root_activation().await {
                         if !matches!(
-                            recovery_error,
+                            error,
                             TeamDurabilityError::Unknown { .. }
                                 | TeamDurabilityError::Unavailable { .. }
                         ) {
-                            return Err(recovery_error.into());
+                            return Err(error.into());
                         }
-                        // The fully constructed Session is the retryable owner. Returning it keeps
-                        // the Root writer, Team handle and verified participant identity reachable;
-                        // TeamAccess will reconcile and retry registration before any capability is
-                        // exposed. Until then all durable reads and writes remain fail-closed.
                         tracing::warn!(
-                            first_error = %first_error,
-                            recovery_error = %recovery_error,
-                            "durable Team participant registration remains indeterminate; retaining degraded Session owner"
+                            %error,
+                            "fresh durable Root activation remains indeterminate; retaining degraded Session owner"
                         );
+                    }
+                } else {
+                    let registration = sess
+                        .services
+                        .agent_control
+                        .try_register_team_participant(
+                            thread_id,
+                            &session_configuration.session_source,
+                        );
+                    if let Err(first_error) = registration {
+                        if !matches!(
+                            first_error,
+                            TeamDurabilityError::Unknown { .. }
+                                | TeamDurabilityError::Unavailable { .. }
+                        ) {
+                            return Err(first_error.into());
+                        }
+                        let recovered = sess
+                            .services
+                            .agent_control
+                            .team()
+                            .ensure_readable_or_reconcile()
+                            .and_then(|()| {
+                                sess.services.agent_control.try_register_team_participant(
+                                    thread_id,
+                                    &session_configuration.session_source,
+                                )
+                            });
+                        if let Err(recovery_error) = recovered {
+                            if !matches!(
+                                recovery_error,
+                                TeamDurabilityError::Unknown { .. }
+                                    | TeamDurabilityError::Unavailable { .. }
+                            ) {
+                                return Err(recovery_error.into());
+                            }
+                            tracing::warn!(
+                                first_error = %first_error,
+                                recovery_error = %recovery_error,
+                                "durable Team participant registration remains indeterminate; retaining degraded Session owner"
+                            );
+                        }
                     }
                 }
             } else {
@@ -1497,4 +1621,45 @@ impl Session {
             }
         }
     }
+}
+
+/// Materialize canonical durable intent without turning an indeterminate persistence result into a
+/// permanently half-activated Session. Read-back happens while this Session still owns the Root
+/// writer; only the exact typed Session/root intent permits generation-1 registration to continue.
+async fn persist_or_reconcile_durable_root_intent(
+    live_thread: &LiveThread,
+    identity: DurableTeamIdentity,
+) -> Result<(), TeamDurabilityError> {
+    let Err(persist_error) = live_thread.persist().await else {
+        return Ok(());
+    };
+    let history = live_thread.load_history(/*include_archived*/ true).await.map_err(|read_error| {
+        TeamDurabilityError::unavailable(
+            format!(
+                "durable Root intent persistence failed ({persist_error}); canonical read-back failed ({read_error})"
+            ),
+        )
+    })?;
+    let session_meta = history
+        .items
+        .iter()
+        .find_map(|item| match item {
+            RolloutItem::SessionMeta(meta_line) => Some(&meta_line.meta),
+            _ => None,
+        })
+        .ok_or_else(|| {
+            TeamDurabilityError::unavailable(
+                format!(
+                "durable Root intent persistence failed ({persist_error}); canonical read-back found no SessionMeta"
+                ),
+            )
+        })?;
+    crate::team::durable::validate_session_intent(session_meta, identity)?;
+    tracing::warn!(
+        error = %persist_error,
+        session_id = %identity.session_id(),
+        root_thread_id = %identity.root_thread_id(),
+        "durable Root intent persistence returned an error after the canonical marker became readable; continuing under the same Root owner"
+    );
+    Ok(())
 }

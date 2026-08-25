@@ -43,7 +43,7 @@ async fn handle_call(invocation: ToolInvocation) -> Result<Box<dyn ToolOutput>, 
     } = invocation;
     let arguments = function_arguments(payload)?;
     let args: RouteArgs = parse_arguments(&arguments)?;
-    let access = resolve_access(&session)?;
+    let access = resolve_access(&session).await?;
 
     let event_id = parse_event_id(&args.event_id)?;
     // Naming the target is part of deciding whether this route is legitimate at all, so it happens
