@@ -2011,3 +2011,28 @@ correctness/functionality `remaining_findings=[]`，路线结论为 `GO`。
 - 正式 validation release/result/tracked report 可逐字节重建，SHA-256 分别为 `757dd624…a91`、`2b36eb4b…8915`、
   `f97fcdcc…8e4`。未生成 selection lock，unseen-test 未释放、render、score 或送 Judge；未量化、继续训练、调用付费 API、
   运行 Docker/Cargo 或启用产品。Publication Critic 保持 default-off，M3-D 保持锁定；后续路线须由用户另行立项决定。
+
+## Publication Critic `NO-GO` 原因调研与路线决策（Plan 075，2026-08-25）
+
+**状态**：从数据、监督、训练、候选资格、部署到 Plan 073 联合横评的正式与辅助证据链已完成独立重建；现有证据足以作出
+唯一路线决策，但不足以把任一超参数、objective、optimizer、数据或底模确定为单一根因。任务选择合同阶段 D 第 2 类终态，
+验收通过、任务目标完成。
+
+- 独立复算确认 base/C1/C3 的完整 operating curve 均无可行点，最佳 balanced accuracy 为 `0.666/0.524/0.616`，
+  ROC AUC 为 `0.6169/0.3894/0.5567`；三者 runtime 门均通过且接近，直接失败层是冻结 validation 上的模型质量，
+  不是 threshold、部署资源、不完整打分或 base fallback。
+- Plan 066 技术上成功，但沿用 Plan 060 数值资格 recipe，C1/C2/C3 各只有一次 full-stage update；正式 pre-clip norm、loss、
+  validation ties 与 Plan 073 的 raw-logit/排序退化形成强证据。该证据支持“缺少训练动态开发和训练期质量门”，不支持把 LR、
+  裁剪或其他单一机制宣布为已验证根因；exact base 自身也未达标。
+- 数据 freeze、body-free train+validation bundle、objective/pair 方向、候选工件和资格/产品路径均未发现会推翻结论的
+  correctness 故障。Opus 5 与冻结 validation 标签 53/55 一致，反驳标签整体失真，但合成监督规模、分布和泛化能力仍是未知。
+- 现有证据已足以停止 Plan 075 内追加测量。唯一后续建议及其待授权、有界状态已交接到 `doc/WBS.md` 与三期子 WBS；本任务
+  没有实施正式训练、新候选、产品启用或 M3-D。
+- 本任务只执行静态摘要/指标复算和普通 Python 定向测试；Plan 073、Plan 066 与 full-model-training 聚焦测试 122 项通过、
+  1 项按既有条件 skip。未加载模型，未运行 GPU、Cargo、Docker、真实 API、HF 网络操作或云资源；未读取 unseen-test 正文、
+  逐行 label 或 pair 方向，未 render、score、Judge 或释放其内容，只核对过冻结 split assignment/聚合 metadata；也未修改
+  Plan 069 及其他并行 worktree。
+- 因果审查与范围/WBS 复验均为 `ACCEPT`，前者 `remaining correctness/functionality findings=[]`，后者提出的规划唯一来源、
+  资源有界性和诊断 control 歧义均已关闭。冻结调研报告见
+  `doc/research/2026-08-25-plan075-publication-critic-no-go-route-decision.md`，执行日志见
+  `agent_log/2026-08-25-042835-plan075-no-go-route-decision.md`。

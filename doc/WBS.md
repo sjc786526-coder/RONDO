@@ -1,6 +1,7 @@
 # RONDO 长程规划（WBS）
 
-最后更新：2026-08-25（Plan 073 / M3-C2 以 `NO-GO` 完成并进入主线，M3-D 保持锁定；Plan 069 / M4-S1 仅余阶段 E）
+最后更新：2026-08-25（Plan 075 已完成 `NO-GO` 原因调研并建议待授权 Plan 076 有界诊断；M3-D 保持锁定；
+Plan 069 / M4-S1 仅余阶段 E）
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段指针、跨方向关系、
 稳定工程边界和授权门；已完成成果与验收见 `doc/WBS-COMPLETED.md`，单次任务合同见 `plan/`，执行细节见
@@ -20,7 +21,7 @@
 | 0：量化测评基准 | 既有设施与首次 schema v7 正式 canary 已完成，当前无 active campaign | 保留设施；历史结果见 COMPLETED，新 campaign 须重新立项与授权 |
 | 1：Harness 优化 | **正式收口；当前无 active 工作包** | 当前不继续新增观测或内核/热路径优化；既有实现、设施与历史结果保留。未来可由用户另行决定是否重新立项，本次收口不作永久禁止 |
 | 2：本地审批模型 | **已收口，今后不再开启** | 最终结论为“保留为实验”；不改生产默认，不再规划后续工作包 |
-| 3：RONDO Multi | 第一、二期及其收口案例、**三期 M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、M3-C2、Plan 064、Plan 071、Plan 073 与四期 M4-A、M4-C0、Plan 074 已完成**；Plan 069 / M4-S1 主体实现已通过预验收 | Plan 073 正式联合横评结论为 `NO-GO`：base/C1/C3 均未达到冻结发布质量底线，不产生最终模型/threshold/运行配置，Critic 保持 default-off，M3-D 保持锁定。RunPod 已为 0 Pod/0 volume、持续费用为 0；M4-S1 最终 PASS 只剩 Plan 069 阶段 E，正式 Session query 随后才能收口，正式 control/TUI 再等待 M4-S2 |
+| 3：RONDO Multi | 第一、二期及其收口案例、**三期 M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、M3-C2、Plan 064、Plan 071、Plan 073、Plan 075 与四期 M4-A、M4-C0、Plan 074 已完成**；Plan 069 / M4-S1 主体实现已通过预验收 | Plan 075 确认现有 base/C1/C3 无可发布选择，现有证据不足以指定单一根因；唯一建议的下一工作包是待授权 Plan 076 训练动态与质量门有界诊断，不是正式训练。Critic 保持 default-off，M3-D 保持锁定。M4-S1 最终 PASS 只剩 Plan 069 阶段 E，正式 Session query 随后才能收口，正式 control/TUI 再等待 M4-S2 |
 
 ### 方向命名口径
 
@@ -69,7 +70,10 @@
   `NOT_QUALIFIED`；最终独立验收接受 `BASE_COMPARABILITY_GO`，因此 `m3_c2_prerequisite_satisfied=true`。
   Plan 073 / M3-C2 随后以同一冻结协议正式比较 exact base、C1、C3，三者均未达到发布质量底线，终态为 `NO-GO`；没有
   selection lock 或 unseen-test 释放，也没有最终模型、threshold 或运行配置。Publication Critic 保持 default-off，M3-D 保持锁定；
-  三期当前没有已授权下一工作包，后续是否重新训练或调整路线由用户另行立项决定。
+  Plan 075 已完成证据链重建：直接失败层是模型质量；部署、runtime 和 threshold 不是原因；Plan 066 训练后的 C1/C3 有输出/排序
+  退化，但现有单 recipe/seed/run 不能把 LR、裁剪、objective、optimizer、数据或底模之一确定为单一根因。唯一建议的下一工作包是
+  待授权 Plan 076：以 exact base 仅作历史诊断 control，执行训练动态与质量门有界诊断；它不实施正式训练、不产生正式候选，详细
+  数值边界见三期子 WBS。当前未授权执行或产生云端费用。
 
 ### 方向 3：Durable Team Runtime 四期
 

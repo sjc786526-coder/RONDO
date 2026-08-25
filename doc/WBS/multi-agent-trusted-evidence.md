@@ -1,7 +1,7 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
 最后更新：2026-08-25 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
-状态：**第一期、第二期、M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、M3-C2、Plan 064、Plan 071、Plan 073 与四期 M4-A、M4-C0 已完成；Plan 060 技术 GO、Plan 064 DATA_GO、Plan 066 正式训练 GO；Plan 071 为 `BASE_COMPARABILITY_GO`，Plan 073 / M3-C2 为 `NO-GO`，M3-D 保持锁定；M4-A 为 `M4_A_GO`，M4-C0 为 `M4_C0_PROTOTYPE_PASS`**
+状态：**第一期、第二期、M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、M3-C2、Plan 064、Plan 071、Plan 073、Plan 075 与四期 M4-A、M4-C0 已完成；Plan 060 技术 GO、Plan 064 DATA_GO、Plan 066 正式训练 GO；Plan 071 为 `BASE_COMPARABILITY_GO`，Plan 073 / M3-C2 为 `NO-GO`；Plan 075 唯一建议待授权 Plan 076 有界诊断，M3-D 保持锁定；M4-A 为 `M4_A_GO`，M4-C0 为 `M4_C0_PROTOTYPE_PASS`**
 
 ## 当前定位
 
@@ -268,7 +268,28 @@ threshold 的前提下，以同一冻结规则重验 exact base、C1、C3；唯�
 
 **当前状态**：Plan 073 已完成并进入主线。正式 validation 在同一冻结协议下比较 exact base、C1、C3，三者均未达到
 发布质量底线，终态为 `NO-GO`；没有 selection lock、unseen-test 释放或最终模型/threshold/运行配置。Publication Critic
-保持 default-off，M3-D 保持锁定；三期当前没有已授权下一工作包，详细结果与验收证据见 `doc/WBS-COMPLETED.md`。
+保持 default-off，M3-D 保持锁定；Plan 075 已完成原因调研与路线决策，详细历史见 `doc/WBS-COMPLETED.md`。
+
+#### Plan 075 之后的唯一建议：Plan 076 训练动态与质量门有界诊断
+
+**状态**：待用户另行授权，不是 active 工作包。Plan 075 证明现有 exact base/C1/C3 没有可发布选择，并把 threshold、部署、
+runtime、不完整打分和已知 objective/pair 方向 correctness 故障排除为直接原因；Plan 066 后的输出/排序退化有充分证据，但只有
+一个正式 recipe、seed 和 run，不能可靠指定 LR、裁剪、optimizer、objective、数据或底模中的单一根因。
+
+**唯一目标**：以 exact base 仅作复现 Plan 066 问题的历史诊断 control，判断有界短程训练能否避免输出/排序塌缩，并形成逐 update
+执行的训练期质量停止门。exact base 不是未来正式候选的底模选择，诊断结果也不得冒充候选资格、最终 threshold 或 M3-C2 证据。
+
+**数值边界**：最多 3 条串行诊断路线，每条最多 4 个 optimizer update、全任务最多 12 个 update；只允许 task-owned 单卡，
+GPU 运行总时长最多 4 小时，若使用云端则任务实际账单硬上限 20 USD，任一上限先到即停止。Plan 076 的 execplan 必须在运行前
+进一步冻结路线矩阵、每次只改变的机制组、validation 指标、非退化/改善门和提前停止条件；可以收紧但不得扩大这些上限。
+
+**硬边界**：只使用冻结 v8 train+validation，unseen-test 继续物理封存；不正式再训练、不生产正式候选、不扩数据、不做无边界
+超参数搜索或底模竞赛，不重跑 M3-C2、不启用产品、不启动 M3-D。任何本地模型/GPU或云端运行必须与 Plan 069 及届时其他重型
+任务全局错峰；云端费用、资源创建和删除须由 Plan 076 单独取得明确授权。
+
+**终态**：`TRAINING_ROUTE_GO` 只表示至少一条预冻结短程路线通过相对 control 的非塌缩及质量门，可以另行规划正式候选训练；
+`TRAINING_ROUTE_NO_GO` 表示有界矩阵未形成可继续训练的依据，Publication Critic 训练路线暂停；基础设施或资产不能形成有效证据时为
+`INCONCLUSIVE`。三种终态都不解锁 M3-D。
 
 ### D 阶段：端到端收口
 
