@@ -159,28 +159,33 @@ git-ignored `codex-source-code/` 只作冻结源码的只读对照，不写入�
 
 ### 已完成
 
-- 已确认 `main == origin/main == f2f1aeb4f3cd96befefabfa294f8ece31f2ea23c` 且主工作区 clean；从该提交创建 074 专用 worktree/分支。
-- 已核对根/产品规则、README、当前 WBS、四期 durable WBS、Plan 069、Plan 067 审计快照、模板和现有 worktree 元数据。
-- 已确认 073 有独立未提交 Publication Critic 现场；未读取其 diff/内容，074 写集与资源边界保持隔离。
-- 已只读核对官方 PR：exact commit `547080e4...` 为 3-file、`+118/-5` 的窄增量；当前 RONDO
-  `thread-store/src/local/read_thread.rs` 仍保留 rollout cwd 优先的旧行为和对应旧测试，因此缺口真实存在。
-- 已确认 069 的 ignored Cargo target 现约 38 GB，可在兼容时作为显式 `CARGO_TARGET_DIR` 复用；本计划没有运行构建或修改该缓存。
+- 已完成阶段 A：官方 `547080e4...`、冻结 `v0.147.0` 与当前 RONDO 的差异核对确认缺口真实；073/069 tracked 现场未读取或修改。
+- 已完成阶段 B：匹配同一 resolved rollout 的持久绝对 cwd 可统一覆盖 read-by-ID/read-by-path，并按该 cwd 重新推导 legacy permission；
+  跨 rollout metadata 整体不合并，空/相对 cwd 只回退到可验证的同 lineage rollout，否则明确失败。
+- 已闭合真实消费链：cold `thread/read` 与 state-only `thread/list` 投影相同 persisted cwd；显式 resume cwd/workspace roots 仍只决定 live execution
+  响应，不能被 persisted projection 覆盖或补授权；state-only 相对 cwd 明确失败而不被 app-server 进程 cwd 绝对化。
+- 已完成阶段 C 的产品门禁：`codex-thread-store` 190/190、最终 fresh-fixture 聚焦轮 3/3、单独 resume 复验 1/1、ThreadStore clippy、
+  `just fmt` 与 `git diff --check` 通过；全部重型命令使用 canonical lock/watchdog 和兼容的 069 ignored target。
+- 已完成阶段 D 独立审查：首轮发现同 lineage 的空/相对 cwd 回退后 path-read 未重算 legacy permission；修复并补回归后 test 1/1、clippy
+  通过，同一上下文独立审查者复验 `ACCEPT`，无剩余高/中 correctness finding。
+- 相邻 069 core cold-resume 测试在未修改的 mock sampling 链上两次因 `/v1/responses` 第五次请求返回 502 而超时；无 cwd/ThreadStore
+  断言失败。联合 app-server clippy 同样被未修改 core 的 `MutexGuard` 跨 await 既有禁止项阻断，074 自身告警已关闭并由专属 clippy 通过。
 
 ### 当前工作
 
-- ExecPlan 已完成，等待执行者按本合同开始实现。
+- 阶段 A-D 与独立预验收均已完成；正在进行最终 Git/资源/并行现场检查并形成 clean 本地提交。
 
 ### 本任务剩余步骤
 
-- 完成阶段 A-D：差异核对、窄实现、聚焦验证、独立审查、精炼记录与 clean 本地提交。
+- 形成 clean 本地提交后，通过指定 Codex queue 通知外部验收者并停止；不合并、不推送。
 
 ### 阻塞项
 
-- 当前无产品/代码阻塞。若 073 正在使用真实模型、Docker 或其它重型资源，只延后 074 的重型 Cargo 门禁并继续轻量工作；不得干扰其现场。
+- 当前无产品/代码阻塞。相邻 core 测试和联合 clippy 的上述既有失败会作为未通过项诚实交付，不扩大 074 修改范围。
 
 ### 当前验收状态
 
-- `PLANNED / READY_FOR_EXECUTION`。
+- `IMPLEMENTATION_COMPLETE / INDEPENDENT_PREACCEPTANCE_ACCEPTED / READY_FOR_CLEAN_LOCAL_COMMIT`。
 
 ### 交接边界
 
@@ -200,3 +205,6 @@ git-ignored `codex-source-code/` 只作冻结源码的只读对照，不写入�
 | 004 | 069 tracked 现场保持只读；唯一例外是在构建身份兼容时经 canonical lock/watchdog 复用其 ignored Cargo target | 避免约 38 GB 无意义 clean rebuild，并为 069 阶段 E 保留热缓存 | 构建资产 | 已采纳 |
 | 005 | 074 实现分支不修改共享 WBS；获批整合者在最新 main 上只记录“前置完成、069 阶段 E 待执行” | 避免并行文档覆盖，也防止窄回移提前宣告 M4-S1 PASS | 文档/交接 | 已采纳 |
 | 006 | 普通失败和审查 finding 自主窄修重跑；稳定后才运行全新小型 fixture 的聚焦正式轮 | 保留已验证进度，避免一次窄失败报废整组，同时不弱化最终证据 | 调试/验收 | 已采纳 |
+| 007 | read-by-rollout-path 只有在 SQLite rollout path 可解析且与请求 canonical path 完全相同时才合并整份 metadata | 硬约束禁止跨 rollout 拼接 cwd、permission 或其它 metadata；只保护 cwd 会留下同类 lineage 污染 | ThreadStore read | 已采纳 |
+| 008 | 空/相对 cwd 只可从同 ID 的 SessionMeta 绝对 cwd 回退；state-only 列表无独立 rollout 验证时明确失败 | 保持旧 rollout 的诚实恢复能力，同时阻止 app-server 把空/相对路径按进程 cwd 伪造为持久事实 | 异常读取 | 已采纳 |
+| 009 | persisted cwd 只更新 StoredThread 投影及 legacy permission 自洽计算；resume 的 live cwd/workspace roots 继续由现有 config override 链拥有 | 产品回归证明 read projection 与 execution binding 可同时观察且互不覆盖 | 权限/运行时 | 已采纳 |
