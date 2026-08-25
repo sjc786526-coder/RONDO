@@ -47,6 +47,7 @@ from .release import build_split_release, release_sha256, validate_release
 
 
 SCORES_SCHEMA = "rondo-publication-critic-plan073-candidate-scores-v1"
+REPORT_SCHEMA = "rondo-publication-critic-plan073-selection-report-v1"
 LATENCY_SCOPE = "offline_single_packet_model_forward_ms"
 WARMUP_ITEMS = 3
 DEFAULT_ENVIRONMENT_LOCK = "eval/environments/publication-critic-plan068/uv.lock"
@@ -479,6 +480,127 @@ def _confirm(args: argparse.Namespace) -> int:
     return 0
 
 
+def _slice_summary(metrics: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        name: {
+            "count": row["count"],
+            "pass_count": row["pass_count"],
+            "rewrite_count": row["rewrite_count"],
+            "accuracy": row["accuracy"],
+            "false_pass": row["confusion"]["false_pass"],
+            "false_rewrite": row["confusion"]["false_rewrite"],
+        }
+        for name, row in metrics["by_slice"].items()
+    }
+
+
+def _pair_summary(block: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        name: block[name]
+        for name in ("count", "strict_wins", "ties", "strict_win_rate", "rate_with_ties")
+    }
+
+
+def _candidate_report(report: Mapping[str, Any]) -> dict[str, Any]:
+    """Keep what a reader needs to understand and recompute the decision.
+
+    The full operating curve, per-pair rows and facet breakdowns stay in the
+    ignored run archive: every one of them is recomputable from the per-item
+    scores kept here plus the tracked v8 supervision.
+    """
+
+    search = report["threshold_search"]
+    metrics = report["metrics"]
+    curve = search["curve"]
+    return {
+        "candidate": report["candidate"],
+        "lineage": report["lineage"],
+        "deployment_artifact_sha256": report["deployment_artifact_sha256"],
+        "admission": dict(report["admission"]),
+        "threshold": {
+            "search": search["search"],
+            "rule": search["rule"],
+            "search_point_count": search["search_point_count"],
+            "feasible_point_count": search["feasible_point_count"],
+            "feasible": search["feasible"],
+            "selected": search["threshold"],
+            "best_balanced_accuracy_over_curve": max(
+                point["balanced_accuracy"] for point in curve
+            ),
+            "min_false_pass_over_curve": min(point["false_pass"] for point in curve),
+        },
+        "overall": metrics["overall"],
+        "roc_auc": metrics["roc_auc"],
+        "boundary_pairs": _pair_summary(metrics["boundary_pairs"]),
+        "within_pass_pairs": _pair_summary(metrics["within_pass_pairs"]),
+        "score_distribution": metrics["score_distribution"],
+        "raw_logit_distribution": metrics["raw_logit_distribution"],
+        "by_slice": _slice_summary(metrics),
+        "errors": dict(metrics["errors"]),
+        "runtime": dict(report["runtime"]),
+        "judge_agreement": report["judge_agreement"],
+        "rows": metrics["rows"],
+    }
+
+
+def _report(args: argparse.Namespace) -> int:
+    freeze = validate_freeze(_load_json(args.freeze, "Plan 073 freeze"))
+    result = _load_json(args.validation_result, "Plan 073 validation result")
+    if result.get("selection_freeze_sha256") != freeze_sha256(freeze):
+        raise SelectionError("Plan 073 report is not bound to this freeze")
+    confirmation = (
+        _load_json(args.unseen_confirmation, "Plan 073 unseen confirmation")
+        if args.unseen_confirmation is not None
+        else None
+    )
+    document = {
+        "schema": REPORT_SCHEMA,
+        "run_id": result["run_id"],
+        "mode": result["mode"],
+        "method": result["method"],
+        "selection_freeze_sha256": result["selection_freeze_sha256"],
+        "validation_release_sha256": result["release_sha256"],
+        "cohort": result["cohort"],
+        "quality_floors": freeze["protocol"]["quality_floors"],
+        "runtime_gates": freeze["protocol"]["runtime_gates"],
+        "judge": result["judge"],
+        "candidates": {
+            name: _candidate_report(report)
+            for name, report in result["candidates"].items()
+        },
+        "ranking": result["ranking"],
+        "validation_terminal": result["terminal"],
+        "selected": result["selected"],
+        "runner_up": result["runner_up"],
+        "reasons": result["reasons"],
+        "unseen_test": (
+            {"state": "sealed", "reason": "no_valid_selection_lock_was_produced"}
+            if confirmation is None
+            else {
+                "state": "released_and_confirmed",
+                "selection_lock_sha256": confirmation["selection_lock_sha256"],
+                "terminal": confirmation["terminal"],
+                "failed_gates": confirmation["failed_gates"],
+                "metrics": {
+                    "threshold": confirmation["metrics"]["threshold"],
+                    "overall": confirmation["metrics"]["overall"],
+                    "roc_auc": confirmation["metrics"]["roc_auc"],
+                    "boundary_pairs": _pair_summary(
+                        confirmation["metrics"]["boundary_pairs"]
+                    ),
+                },
+            }
+        ),
+        "task_terminal": (
+            confirmation["terminal"]
+            if confirmation is not None
+            else ("NO_GO" if result["terminal"] == "NO_GO" else "INCONCLUSIVE")
+        ),
+    }
+    _write_json_exclusive(args.output, document)
+    return 0
+
+
 # ------------------------------------------------------------------- cli ----
 
 
@@ -551,6 +673,12 @@ def build_parser() -> argparse.ArgumentParser:
     confirm.add_argument("--score", type=Path, required=True)
     confirm.add_argument("--judge-aggregate", type=Path, default=None)
     confirm.add_argument("--runs-root", type=Path, required=True)
+
+    report = subparsers.add_parser("report")
+    report.add_argument("--freeze", type=Path, required=True)
+    report.add_argument("--validation-result", type=Path, required=True)
+    report.add_argument("--unseen-confirmation", type=Path, default=None)
+    report.add_argument("--output", type=Path, required=True)
     return parser
 
 
@@ -563,6 +691,7 @@ _COMMANDS = {
     "evaluate": _evaluate,
     "lock": _lock,
     "confirm": _confirm,
+    "report": _report,
 }
 
 
@@ -579,6 +708,7 @@ if __name__ == "__main__":
 
 __all__ = [
     "LATENCY_SCOPE",
+    "REPORT_SCHEMA",
     "SCORES_SCHEMA",
     "WARMUP_ITEMS",
     "build_parser",

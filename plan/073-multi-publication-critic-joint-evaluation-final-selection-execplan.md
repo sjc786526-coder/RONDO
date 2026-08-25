@@ -191,32 +191,30 @@ linked worktree 不共享主根 ignored `eval-data/`。因此 Plan 073 的模型
 - Plan 071 唯一有效正式轮已确认 exact base、C1、C3 均为 `QUALIFIED`，C2 保持历史 `NOT_QUALIFIED`；M3-C2 前置满足。
 - 已从 clean `main@d72d109f7a3c4cb5d8a57d585e9efcc834542802` 创建
   `.claude/worktrees/073-m3-c2-publication-critic-selection` / `worktree-073-m3-c2-publication-critic-selection`。
-- 已只读核对根规则、README、当前 WBS/方向 3 WBS、Plan 054/068/071/072、产品合同、v8 数据卡与现有评价/部署实现；未读取 unseen-test
-  正文，未触碰 Plan 069 未提交内容或运行现场，未创建 Plan 073 ignored 运行资产。
-- 本 ExecPlan 已冻结任务目标、必要边界和授权范围；具体指标权重、Judge 批次、threshold 算法、模块布局与运行组织留给执行者在 commissioning
-  中自主选择并于正式运行前冻结。
+- 已只读核对根规则、README、当前 WBS/方向 3 WBS、Plan 054/068/071/072、产品合同、v8 数据卡与现有评价/部署实现。
+- 新增 `eval/rondo_eval/publication_critic/selection/`（protocol/release/metrics/judge/decision/lock/archive/runner）与 44 项 focused
+  测试；复用 Plan 054 packet→scalar 路径、stable sigmoid、Plan 064 consumer，未改动 Plan 054/055/057 产品语义，未改 Rust。
+- 正式轮 `plan073-formal-20260825T084317Z-selection-v1` 已从 clean `65932d69fcdfe9cdb6099f5b0478667f0ca72cfc` 与空 namespace 完整执行：
+  三候选同口径 validation 运行 + `claude-opus-5` 全量 55 条盲化横评。结论 **`NO-GO`**，无候选达到冻结发布质量底线。
+- 因无有效 selection lock，unseen-test 全程未释放、未 render、未打分、未送 Judge。
+- 结果与身份见 `eval/results/publication-critic/m3-c2-joint-selection-v1.{json,md}`；正式 archive 在
+  `eval-data/publication-critic/plan073/formal/runs/plan073-formal-20260825T084317Z-selection-v1/`。
 
 ### 当前工作
 
-- `READY_FOR_EXECUTION`：等待 Claude Code / Opus 5 执行者按本计划实施。
+- `EXECUTED_AWAITING_INDEPENDENT_ACCEPTANCE`：task branch 已完成并提交，等待计划制定者独立验收。
 
 ### 本任务剩余步骤
 
-1. 核对 live main/worktree/重型资源和既有资产，冻结联合评价与选择的宏观协议；不访问 unseen-test。
-2. 打通 validation、三候选运行、指标、Judge、selection lock、归档和恢复路径；自主修复并完成相称 focused tests。
-3. 全链路打通后冻结详细协议和运行身份，从 clean source 与空 namespace 完成正式 validation 和盲化 Opus 横评。
-4. 按冻结协议选择并锁定模型/threshold/config；无候选达标则 `NO-GO` 并保持 unseen 封存。
-5. 有有效 selection lock 时执行一次逻辑 unseen-test 盲验，形成 `GO`、`NO-GO` 或 `INCONCLUSIVE`。
-6. 完成结果/日志/计划状态、定向验证、内部审查和 clean task-branch 提交，交计划制定者独立验收。
+- 无。执行侧步骤 1–6 已全部完成；`NO-GO` 终态使 selection lock 与 unseen 盲验按协议不产生。
 
 ### 阻塞项
 
-- 当前无原则性阻塞。真实本地模型/GPU、Docker 或重型 Cargo 必须等 Plan 069/其它任务释放相应全局重型窗口；等待资源不阻塞轻量实现、
-  协议设计、Judge 准备和非重型测试。
+- 无。重型资源已释放；本任务未使用 Docker、重型 Cargo、付费 API 或远端资源。
 
 ### 当前验收状态
 
-- `PLANNED / NOT_EXECUTED`
+- `EXECUTED / NO-GO / PENDING_INDEPENDENT_ACCEPTANCE`
 
 ### 交接边界
 
@@ -236,3 +234,8 @@ linked worktree 不共享主根 ignored `eval-data/`。因此 Plan 073 的模型
 | 004 | unseen-test 在 selection lock 后只执行一个逻辑盲验；冻结身份不变时可恢复技术中断 | 既保护最终盲验，又不给普通可恢复故障设置一次进程失败即报废的机械限制 | unseen、恢复 | 已采纳 |
 | 005 | tracked 实现在 073 worktree，模型与 raw/Judge/运行资产在主物理根 Plan 073 ignored namespace | linked worktree 不共享 ignored `eval-data/`，且无需复制约 24GB 既有工件 | Git、资产 | 已采纳 |
 | 006 | WBS 最终同步留给独立验收后的主线整合 | Plan 069 并行推进且 WBS 是共享权威文件，执行分支不应以旧基线覆盖并行状态 | 文档、交付 | 已采纳 |
+| 007 | M3-C2 新建 `selection/` 子包，而不是扩写 Plan 054/068/071 schema | 历史 schema 描述 24 样本固定 cohort 的部署身份；M3-C2 比较的是 v8 评价 split 上的模型质量，强行合并会扭曲两者语义 | 模块布局 | 已采纳 |
+| 008 | 质量底线取 False PASS ≤`0.25`、False REWRITE ≤`0.35`、balanced ≥`0.75`、AUC ≥`0.80`、boundary ≥`0.70` | False PASS 让不合格发布进入 Team State，是 Critic 存在的理由；False REWRITE 只多一轮有界重写。数值取自产品语义与 Plan 054 基座事实，正式输出前冻结 | 选择门 | 已采纳 |
+| 009 | 延迟/资源只作可用性门，不参与排名 | 三候选同架构同尺寸，实测 load/warm/RSS/VRAM 几乎一致，用它排名是伪精度 | 排名规则 | 已采纳 |
+| 010 | Judge 覆盖全部 55 条而非分层抽样 | 规模足够小，全覆盖直接消除抽样偏置与"看到标签后挑案例"的质疑 | Judge | 已采纳 |
+| 011 | 正式 `evaluate` 在冻结 commit 运行；tracked 报告投影在其后的 commit 生成 | 报告是对已归档证据的纯投影，不含判定逻辑；正式证据仍绑定冻结 source，并已用归档 raw 逐字节重算复核 | 证据、交付 | 已采纳 |
