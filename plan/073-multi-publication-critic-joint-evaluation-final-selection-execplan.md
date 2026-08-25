@@ -202,15 +202,13 @@ linked worktree 不共享主根 ignored `eval-data/`。因此 Plan 073 的模型
 
 ### 当前工作
 
-- `REMEDIATED_R3_AWAITING_RE_REVIEW`：中断交接复验（`fca9033`）的三项阻塞均已窄修并完成轻量复验；正式
-  `NO-GO`、指标与冻结底线不变。
+- `ACCEPTED / NO-GO / COMPLETE`：第三轮窄整改（`2e95e0d`）已通过独立复验；正式 `NO-GO`、指标与冻结底线不变，
+  不生成 selection lock，不释放 unseen，不启用 Publication Critic，不解锁 M3-D。
 
 ### 本任务剩余步骤
 
-- 无代码剩余。validation bundle 同时通过既有 canonical Plan 066 verifier 与正式导出摘要绑定，containment 测试不再读取
-  mixed v8；unseen confirmation/report 必须重建锁下真实 release，并从 raw score 与成对 Judge package/aggregate 重算后
-  canonical 相等，report 还要求 lock 精确绑定其 validation result。
-- 仅待计划制定者独立复验；无需重跑模型、Opus、Cargo、Docker 或 unseen campaign。
+- 无。validation bundle、containment、selection lock 与 confirmation/report 的阻塞项均已关闭；独立复验已完成。
+- 分支合并、主线 WBS/WBS-COMPLETED 同步、推送与分支归档等待用户批准后基于届时最新 `main` 完成，不属于任务内剩余实现。
 
 ### 阻塞项
 
@@ -218,7 +216,7 @@ linked worktree 不共享主根 ignored `eval-data/`。因此 Plan 073 的模型
 
 ### 当前验收状态
 
-- `EXECUTED / NO-GO RESULT RETAINED / R3 REMEDIATED / PENDING RE_REVIEW`
+- `ACCEPTED / NO-GO / TASK COMPLETE`
 
 ### 交接边界
 
