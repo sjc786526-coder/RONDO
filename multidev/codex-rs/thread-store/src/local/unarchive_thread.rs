@@ -16,6 +16,13 @@ pub(super) async fn unarchive_thread(
 ) -> ThreadStoreResult<StoredThread> {
     let thread_id = params.thread_id;
     let _lifecycle_guard = store.live_writer_locks.lock_lifecycle(thread_id).await;
+    let _live_writer_guard = store.live_writer_locks.lock(thread_id).await;
+    if store.live_recorders.lock().await.contains_key(&thread_id) {
+        return Err(ThreadStoreError::Conflict {
+            message: format!("thread {thread_id} already has an active writer"),
+        });
+    }
+    let _writer_guards = store.acquire_writer_locks(&[thread_id]).await?;
     let state_db_ctx = store.state_db().await;
     let archived_path = find_archived_thread_path_by_id_str(
         store.config.codex_home.as_path(),
@@ -63,6 +70,18 @@ pub(super) async fn unarchive_thread(
         message: format!("failed to unarchive thread: {err}"),
     })?;
     let restored_path = dest_dir.join(&file_name);
+    if restored_path
+        .try_exists()
+        .map_err(|err| ThreadStoreError::Internal {
+            message: format!("failed to inspect unarchive destination: {err}"),
+        })?
+    {
+        return Err(ThreadStoreError::Conflict {
+            message: format!(
+                "cannot unarchive thread {thread_id}: active rollout destination already exists"
+            ),
+        });
+    }
     std::fs::rename(&canonical_archived_path, &restored_path).map_err(|err| {
         ThreadStoreError::Internal {
             message: format!("failed to unarchive thread: {err}"),
@@ -73,9 +92,13 @@ pub(super) async fn unarchive_thread(
     })?;
 
     if let Some(ctx) = state_db_ctx {
-        let _ = ctx
-            .mark_unarchived(thread_id, restored_path.as_path())
-            .await;
+        ctx.mark_unarchived(thread_id, restored_path.as_path())
+            .await
+            .map_err(|err| ThreadStoreError::Internal {
+                message: format!(
+                    "thread {thread_id} was unarchived but its SQLite metadata update failed: {err}"
+                ),
+            })?;
     }
 
     super::read_thread::read_thread(
@@ -133,6 +156,35 @@ mod tests {
             thread.first_user_message.as_deref(),
             Some("Archived user message")
         );
+    }
+
+    #[tokio::test]
+    async fn unarchive_thread_rejects_an_active_cross_store_writer() {
+        let home = TempDir::new().expect("temp dir");
+        let store = LocalThreadStore::new(test_config(home.path()), /*state_db*/ None);
+        let owner = LocalThreadStore::new(test_config(home.path()), /*state_db*/ None);
+        let uuid = Uuid::from_u128(205);
+        let thread_id = ThreadId::from_string(&uuid.to_string()).expect("valid thread id");
+        let archived_path = write_archived_session_file(home.path(), "2025-01-03T13-00-00", uuid)
+            .expect("archived session file");
+        let owner_guard = owner
+            .writer_lock_coordinator
+            .acquire(thread_id)
+            .expect("acquire competing writer lock");
+
+        let error = store
+            .unarchive_thread(ArchiveThreadParams { thread_id })
+            .await
+            .expect_err("active writer must block unarchive");
+        assert!(matches!(error, ThreadStoreError::Conflict { .. }));
+        assert!(archived_path.is_file());
+
+        drop(owner_guard);
+        store
+            .unarchive_thread(ArchiveThreadParams { thread_id })
+            .await
+            .expect("unarchive after writer release");
+        assert!(!archived_path.exists());
     }
 
     #[tokio::test]

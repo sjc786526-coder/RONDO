@@ -194,6 +194,32 @@ enum ShutdownOutcome {
     TimedOut,
 }
 
+async fn collect_thread_shutdowns(
+    threads: Vec<(ThreadId, Arc<CodexThread>)>,
+    timeout: Duration,
+    report: &mut ThreadShutdownReport,
+) {
+    let mut shutdowns = threads
+        .into_iter()
+        .map(|(thread_id, thread)| async move {
+            let outcome = match tokio::time::timeout(timeout, thread.shutdown_and_wait()).await {
+                Ok(Ok(())) => ShutdownOutcome::Complete,
+                Ok(Err(_)) => ShutdownOutcome::SubmitFailed,
+                Err(_) => ShutdownOutcome::TimedOut,
+            };
+            (thread_id, outcome)
+        })
+        .collect::<FuturesUnordered<_>>();
+
+    while let Some((thread_id, outcome)) = shutdowns.next().await {
+        match outcome {
+            ShutdownOutcome::Complete => report.completed.push(thread_id),
+            ShutdownOutcome::SubmitFailed => report.submit_failed.push(thread_id),
+            ShutdownOutcome::TimedOut => report.timed_out.push(thread_id),
+        }
+    }
+}
+
 /// [`ThreadManager`] is responsible for creating threads and maintaining
 /// them in memory.
 pub struct ThreadManager {
@@ -313,6 +339,14 @@ fn originator_from_service_name(service_name: Option<&str>) -> Option<String> {
         }
     }
     None
+}
+
+fn forget_removed_thread_v2_residency(thread_id: ThreadId, thread: &CodexThread) {
+    thread
+        .session
+        .services
+        .agent_control
+        .forget_v2_residency(thread_id);
 }
 
 fn effective_originator_value(
@@ -1075,45 +1109,64 @@ impl ThreadManager {
         self.state.remove_thread(thread_id).await
     }
 
-    /// Tries to shut down all tracked threads concurrently within the provided timeout.
-    /// Threads that complete shutdown are removed from the manager; incomplete shutdowns
-    /// remain tracked so callers can retry or inspect them later.
+    /// Removes `thread_id` only while it still maps to `expected`.
+    ///
+    /// Late shutdown observers use this to avoid deleting a replacement that resumed with the
+    /// same durable identity after the observed runtime terminated.
+    pub async fn remove_thread_if_same(
+        &self,
+        thread_id: &ThreadId,
+        expected: &Arc<CodexThread>,
+    ) -> bool {
+        let mut threads = self.state.threads.write().await;
+        let _gate = self.state.lock_availability_transition();
+        let Some(current) = threads.get(thread_id) else {
+            return false;
+        };
+        if !Arc::ptr_eq(current, expected) {
+            return false;
+        }
+        let Some(removed) = threads.remove(thread_id) else {
+            return false;
+        };
+        forget_removed_thread_v2_residency(*thread_id, removed.as_ref());
+        self.state.bump_availability_generation();
+        true
+    }
+
+    /// Tries to shut down tracked descendants, then tracked roots. Threads within each phase run
+    /// concurrently with the provided per-thread timeout. Completed threads are removed from the
+    /// manager; incomplete shutdowns remain tracked so callers can retry or inspect them later.
     pub async fn shutdown_all_threads_bounded(&self, timeout: Duration) -> ThreadShutdownReport {
-        let threads = {
+        let (descendants, roots) = {
             let threads = self.state.threads.read().await;
-            threads
-                .iter()
-                .map(|(thread_id, thread)| (*thread_id, Arc::clone(thread)))
-                .collect::<Vec<_>>()
+            threads.iter().fold(
+                (Vec::new(), Vec::new()),
+                |(mut descendants, mut roots), (thread_id, thread)| {
+                    let entry = (*thread_id, Arc::clone(thread));
+                    if thread.session_source.is_non_root_agent() {
+                        descendants.push(entry);
+                    } else {
+                        roots.push(entry);
+                    }
+                    (descendants, roots)
+                },
+            )
         };
 
-        let mut shutdowns = threads
-            .into_iter()
-            .map(|(thread_id, thread)| async move {
-                let outcome = match tokio::time::timeout(timeout, thread.shutdown_and_wait()).await
-                {
-                    Ok(Ok(())) => ShutdownOutcome::Complete,
-                    Ok(Err(_)) => ShutdownOutcome::SubmitFailed,
-                    Err(_) => ShutdownOutcome::TimedOut,
-                };
-                (thread_id, outcome)
-            })
-            .collect::<FuturesUnordered<_>>();
         let mut report = ThreadShutdownReport::default();
-
-        while let Some((thread_id, outcome)) = shutdowns.next().await {
-            match outcome {
-                ShutdownOutcome::Complete => report.completed.push(thread_id),
-                ShutdownOutcome::SubmitFailed => report.submit_failed.push(thread_id),
-                ShutdownOutcome::TimedOut => report.timed_out.push(thread_id),
-            }
-        }
+        // A durable Root close proves that every mutation-capable descendant is disabled. Start
+        // all descendant shutdowns first, then let Roots enter their existing close barriers.
+        // Unrelated roots still close concurrently within the second batch.
+        collect_thread_shutdowns(descendants, timeout, &mut report).await;
+        collect_thread_shutdowns(roots, timeout, &mut report).await;
 
         let mut tracked_threads = self.state.threads.write().await;
         let _gate = self.state.lock_availability_transition();
         let mut removed = false;
         for thread_id in &report.completed {
-            if tracked_threads.remove(thread_id).is_some() {
+            if let Some(thread) = tracked_threads.remove(thread_id) {
+                forget_removed_thread_v2_residency(*thread_id, thread.as_ref());
                 removed = true;
             }
         }
@@ -1433,7 +1486,9 @@ impl ThreadManagerState {
             .get(&thread_id)
             .is_some_and(|thread| !thread.is_running())
         {
-            threads.remove(&thread_id);
+            if let Some(thread) = threads.remove(&thread_id) {
+                forget_removed_thread_v2_residency(thread_id, thread.as_ref());
+            }
             drop(threads);
             self.bump_availability_generation();
         }
@@ -1490,15 +1545,23 @@ impl ThreadManagerState {
         parent_turn_id: Option<String>,
     ) -> CodexResult<String> {
         let thread = self.get_thread(thread_id).await?;
+        self.capture_submitted_op(thread_id, &op);
+        thread
+            .submit_with_trace_and_parent_turn_id(op, /*trace*/ None, parent_turn_id)
+            .await
+    }
+
+    fn capture_submitted_op(&self, thread_id: ThreadId, op: &Op) {
         if let Some(ops_log) = &self.ops_log
             && let Ok(mut log) = ops_log.lock()
         {
             log.push((thread_id, op.clone()));
         }
-        thread
-            .io
-            .submit_with_trace(op, /*trace*/ None, parent_turn_id)
-            .await
+    }
+
+    #[cfg(test)]
+    pub(crate) fn capture_direct_thread_op_for_tests(&self, thread_id: ThreadId, op: &Op) {
+        self.capture_submitted_op(thread_id, op);
     }
 
     /// Remove a thread from the manager by ID, returning it when present.
@@ -1506,7 +1569,8 @@ impl ThreadManagerState {
         let mut threads = self.threads.write().await;
         let _gate = self.lock_availability_transition();
         let removed = threads.remove(thread_id);
-        if removed.is_some() {
+        if let Some(thread) = removed.as_ref() {
+            forget_removed_thread_v2_residency(*thread_id, thread.as_ref());
             self.bump_availability_generation();
         }
         removed
@@ -1864,7 +1928,9 @@ impl ThreadManagerState {
                     });
                 }
                 let _gate = self.lock_availability_transition();
-                threads.remove(&resumed.conversation_id);
+                if let Some(thread) = threads.remove(&resumed.conversation_id) {
+                    forget_removed_thread_v2_residency(resumed.conversation_id, thread.as_ref());
+                }
                 drop(threads);
                 self.bump_availability_generation();
             }

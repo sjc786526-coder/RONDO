@@ -5,9 +5,9 @@ use crate::ArchiveThreadParams;
 use crate::ArchiveThreadsParams;
 use crate::ThreadStoreError;
 use crate::ThreadStoreResult;
+use crate::store::archive_thread_ids_in_order;
 use chrono::Utc;
 use codex_rollout::find_thread_path_by_id_str;
-use tracing::warn;
 
 pub(super) async fn archive_threads(
     store: &LocalThreadStore,
@@ -37,18 +37,64 @@ pub(super) async fn archive_threads(
     }
     let _writer_guards = store.acquire_writer_locks(&lock_thread_ids).await?;
 
-    let parent_thread_id = thread_ids[0];
-    let mut archived_thread_ids = Vec::new();
-    for thread_id in thread_ids {
-        match archive_thread(store, ArchiveThreadParams { thread_id }).await {
-            Ok(()) => archived_thread_ids.push(thread_id),
-            Err(err) if archived_thread_ids.is_empty() => return Err(err),
-            Err(err) => warn!(
-                "failed to archive spawned descendant thread {thread_id} while archiving {parent_thread_id}: {err}"
-            ),
-        }
+    // Reject deterministic source/destination conflicts before moving any member. Runtime I/O can
+    // still fail between this check and rename; that rare partial result is returned explicitly
+    // below and keeps the Root last in the caller-provided postorder.
+    for &thread_id in &thread_ids {
+        preflight_archive_thread(store, thread_id).await?;
     }
-    Ok(archived_thread_ids)
+
+    archive_thread_ids_in_order(thread_ids, |thread_id| {
+        archive_thread(store, ArchiveThreadParams { thread_id })
+    })
+    .await
+}
+
+async fn preflight_archive_thread(
+    store: &LocalThreadStore,
+    thread_id: codex_protocol::ThreadId,
+) -> ThreadStoreResult<()> {
+    let state_db_ctx = store.state_db().await;
+    let rollout_path = find_thread_path_by_id_str(
+        store.config.codex_home.as_path(),
+        &thread_id.to_string(),
+        state_db_ctx.as_deref(),
+    )
+    .await
+    .map_err(|err| ThreadStoreError::InvalidRequest {
+        message: format!("failed to locate thread id {thread_id}: {err}"),
+    })?
+    .ok_or_else(|| ThreadStoreError::InvalidRequest {
+        message: format!("no rollout found for thread id {thread_id}"),
+    })?;
+    let canonical_rollout_path = scoped_rollout_path(
+        store.config.codex_home.join(codex_rollout::SESSIONS_SUBDIR),
+        rollout_path.as_path(),
+        "sessions",
+    )?;
+    let file_name = matching_rollout_file_name(
+        canonical_rollout_path.as_path(),
+        thread_id,
+        rollout_path.as_path(),
+    )?;
+    let archived_path = store
+        .config
+        .codex_home
+        .join(codex_rollout::ARCHIVED_SESSIONS_SUBDIR)
+        .join(file_name);
+    if archived_path
+        .try_exists()
+        .map_err(|err| ThreadStoreError::Internal {
+            message: format!("failed to inspect archive destination: {err}"),
+        })?
+    {
+        return Err(ThreadStoreError::Conflict {
+            message: format!(
+                "cannot archive thread {thread_id}: archived rollout destination already exists"
+            ),
+        });
+    }
+    Ok(())
 }
 
 pub(super) async fn archive_thread(
@@ -96,9 +142,13 @@ pub(super) async fn archive_thread(
     })?;
 
     if let Some(ctx) = state_db_ctx {
-        let _ = ctx
-            .mark_archived(thread_id, archived_path.as_path(), Utc::now())
-            .await;
+        ctx.mark_archived(thread_id, archived_path.as_path(), Utc::now())
+            .await
+            .map_err(|err| ThreadStoreError::Internal {
+                message: format!(
+                    "thread {thread_id} was archived but its SQLite metadata update failed: {err}"
+                ),
+            })?;
     }
     Ok(())
 }
@@ -123,6 +173,7 @@ mod tests {
     use crate::ThreadStore;
     use crate::local::LocalThreadStore;
     use crate::local::test_support::test_config;
+    use crate::local::test_support::write_archived_session_file;
     use crate::local::test_support::write_session_file;
     use crate::local::test_support::write_session_file_with_history_mode;
 
@@ -212,6 +263,36 @@ mod tests {
             assert!(parent_path.exists());
             assert!(child_path.exists());
         }
+    }
+
+    #[tokio::test]
+    async fn archive_threads_preflight_descendant_destination_before_moving_root() {
+        let home = TempDir::new().expect("temp dir");
+        let store = LocalThreadStore::new(test_config(home.path()), /*state_db*/ None);
+        let root_uuid = Uuid::from_u128(208);
+        let root_thread_id = ThreadId::from_string(&root_uuid.to_string()).expect("root id");
+        let root_path = write_session_file(home.path(), "2025-01-03T12-00-00", root_uuid)
+            .expect("root rollout");
+        let child_uuid = Uuid::from_u128(209);
+        let child_thread_id = ThreadId::from_string(&child_uuid.to_string()).expect("child id");
+        let child_path = write_session_file(home.path(), "2025-01-03T12-00-01", child_uuid)
+            .expect("child rollout");
+        let archived_child =
+            write_archived_session_file(home.path(), "2025-01-03T12-00-01", child_uuid)
+                .expect("conflicting archived child");
+
+        let error = store
+            .archive_threads(ArchiveThreadsParams {
+                thread_ids: vec![child_thread_id, root_thread_id],
+                writer_lock_thread_ids: vec![root_thread_id, child_thread_id],
+            })
+            .await
+            .expect_err("descendant destination conflict must reject the batch");
+
+        assert!(matches!(error, ThreadStoreError::Conflict { .. }));
+        assert!(root_path.is_file());
+        assert!(child_path.is_file());
+        assert!(archived_child.is_file());
     }
 
     #[tokio::test]

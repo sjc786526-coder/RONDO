@@ -912,27 +912,60 @@ impl ThreadRequestProcessor {
         Ok(ThreadUnsubscribeResponse { status })
     }
 
-    async fn prepare_thread_for_archive(&self, thread_id: ThreadId) {
-        self.prepare_thread_for_removal(thread_id, "archive").await;
+    async fn prepare_thread_for_archive(
+        &self,
+        thread_id: ThreadId,
+    ) -> Result<(), JSONRPCErrorError> {
+        self.prepare_thread_for_removal(thread_id, "archive").await
     }
 
-    pub(super) async fn prepare_thread_for_removal(&self, thread_id: ThreadId, operation: &str) {
-        let removed_conversation = self.thread_manager.remove_thread(&thread_id).await;
-        if let Some(conversation) = removed_conversation {
+    pub(super) async fn prepare_thread_for_removal(
+        &self,
+        thread_id: ThreadId,
+        operation: &str,
+    ) -> Result<(), JSONRPCErrorError> {
+        if let Ok(conversation) = self.thread_manager.get_thread(thread_id).await {
+            {
+                let mut pending_thread_unloads = self.pending_thread_unloads.lock().await;
+                if !pending_thread_unloads.insert(thread_id) {
+                    return Err(invalid_request(format!(
+                        "thread {thread_id} is already closing"
+                    )));
+                }
+            }
             info!("thread {thread_id} was active; shutting down");
             match wait_for_thread_shutdown(&conversation).await {
-                ThreadShutdownResult::Complete => {}
+                ThreadShutdownResult::Complete => {
+                    if self
+                        .thread_manager
+                        .remove_thread(&thread_id)
+                        .await
+                        .is_none()
+                    {
+                        info!("thread {thread_id} was already removed after shutdown completed");
+                    }
+                }
                 ThreadShutdownResult::SubmitFailed => {
-                    error!(
-                        "failed to submit Shutdown to thread {thread_id}; proceeding with {operation}"
-                    );
+                    self.pending_thread_unloads.lock().await.remove(&thread_id);
+                    return Err(invalid_request(format!(
+                        "cannot {operation} thread {thread_id}: failed to submit shutdown; the owner remains loaded"
+                    )));
                 }
                 ThreadShutdownResult::TimedOut => {
-                    warn!("thread {thread_id} shutdown timed out; proceeding with {operation}");
+                    observe_late_thread_shutdown(
+                        self.listener_task_context(),
+                        thread_id,
+                        conversation,
+                    );
+                    self.pending_thread_unloads.lock().await.remove(&thread_id);
+                    return Err(invalid_request(format!(
+                        "cannot {operation} thread {thread_id}: shutdown timed out; the owner remains loaded while late termination is observed"
+                    )));
                 }
             }
         }
         self.finalize_thread_teardown(thread_id).await;
+        Ok(())
     }
 
     fn listener_task_context(&self) -> ListenerTaskContext {
@@ -1511,10 +1544,21 @@ impl ThreadRequestProcessor {
                         archive_thread_ids.push(descendant_thread_id);
                     }
                 }
+                // Keep a missing descendant in the ordered store batch. The Local store acquires
+                // every subtree writer lock before inspecting rollout paths, so an owned but not
+                // yet materialized child reports the stronger writer conflict; a genuinely
+                // missing cold descendant then reports ThreadNotFound without moving the Root.
+                Err(ThreadStoreError::ThreadNotFound { .. }) => {
+                    archive_thread_ids.push(descendant_thread_id);
+                }
+                Err(ThreadStoreError::InvalidRequest { message })
+                    if message
+                        == format!("no rollout found for thread id {descendant_thread_id}") =>
+                {
+                    archive_thread_ids.push(descendant_thread_id);
+                }
                 Err(err) => {
-                    warn!(
-                        "failed to read spawned descendant thread {descendant_thread_id} while archiving {thread_id}: {err}"
-                    );
+                    return Err(thread_store_archive_error("archive", err));
                 }
             }
         }
@@ -1523,9 +1567,14 @@ impl ThreadRequestProcessor {
             return Ok((ThreadArchiveResponse {}, Vec::new()));
         }
 
+        // Disable mutation-capable descendants before the durable Root enters its close barrier.
+        // Store archiving uses this same postorder, so the Root remains recoverable if a
+        // descendant teardown or move fails.
         archive_thread_ids[1..].reverse();
+        archive_thread_ids.rotate_left(1);
         for &thread_id_to_archive in &archive_thread_ids {
-            self.prepare_thread_for_archive(thread_id_to_archive).await;
+            self.prepare_thread_for_archive(thread_id_to_archive)
+                .await?;
         }
 
         let archived_thread_ids = self
@@ -3559,23 +3608,52 @@ impl ThreadRequestProcessor {
                     matches!(existing_thread.agent_status().await, AgentStatus::Running);
 
                 if !has_subscribers && matches!(loaded_status, ThreadStatus::Idle) && !is_running {
-                    // A loaded idle thread is only a cache entry. Shut it down
-                    // before removing it so cold resume cannot duplicate a
-                    // thread that timed out during shutdown.
-                    match wait_for_thread_shutdown(&existing_thread).await {
-                        ThreadShutdownResult::Complete => {
-                            self.thread_manager.remove_thread(&existing_thread_id).await;
-                            self.finalize_thread_teardown(existing_thread_id).await;
-                            // Shutdown can flush newer rollout items, so reload the
-                            // stored thread before starting the replacement session.
-                            return Ok(RunningThreadResumeResult::NotRunning(None));
+                    let owns_shutdown = self
+                        .pending_thread_unloads
+                        .lock()
+                        .await
+                        .insert(existing_thread_id);
+                    if owns_shutdown {
+                        // A loaded idle thread is only a cache entry. Shut it down before removing
+                        // it so cold resume cannot duplicate a thread that timed out during
+                        // shutdown. A late observer owns the ambiguous timeout result.
+                        match wait_for_thread_shutdown(&existing_thread).await {
+                            ThreadShutdownResult::Complete => {
+                                self.thread_manager.remove_thread(&existing_thread_id).await;
+                                self.finalize_thread_teardown(existing_thread_id).await;
+                                // Shutdown can flush newer rollout items, so reload the stored
+                                // thread before starting the replacement session.
+                                return Ok(RunningThreadResumeResult::NotRunning(None));
+                            }
+                            ThreadShutdownResult::SubmitFailed => {
+                                self.pending_thread_unloads
+                                    .lock()
+                                    .await
+                                    .remove(&existing_thread_id);
+                                warn!("failed to submit Shutdown to thread {existing_thread_id}");
+                            }
+                            ThreadShutdownResult::TimedOut => {
+                                observe_late_thread_shutdown(
+                                    self.listener_task_context(),
+                                    existing_thread_id,
+                                    existing_thread.clone(),
+                                );
+                                self.pending_thread_unloads
+                                    .lock()
+                                    .await
+                                    .remove(&existing_thread_id);
+                                warn!(
+                                    "thread {existing_thread_id} shutdown timed out; observing late termination"
+                                );
+                                return Err(invalid_request(format!(
+                                    "cannot resume thread {existing_thread_id} with new overrides: shutdown timed out; the existing owner is still closing"
+                                )));
+                            }
                         }
-                        ThreadShutdownResult::SubmitFailed => {
-                            warn!("failed to submit Shutdown to thread {existing_thread_id}");
-                        }
-                        ThreadShutdownResult::TimedOut => {
-                            warn!("thread {existing_thread_id} shutdown timed out");
-                        }
+                    } else {
+                        return Err(invalid_request(format!(
+                            "cannot resume thread {existing_thread_id} with new overrides while the existing owner is already closing"
+                        )));
                     }
                 }
 

@@ -195,6 +195,9 @@ impl DurableTeamRootCloseGuard {
             let Some(thread_id) = metadata.agent_id else {
                 continue;
             };
+            if thread_id == self.root_thread_id {
+                continue;
+            }
             if let Ok(thread) = manager.get_thread(thread_id).await
                 && thread.is_running()
             {

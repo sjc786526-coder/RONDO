@@ -173,6 +173,7 @@ pub(crate) async fn run_codex_thread_interactive(
     let caller_io = SessionIo {
         tx_sub: tx_ops,
         rx_event: rx_sub,
+        shutdown_submissions: Arc::clone(&io.shutdown_submissions),
         agent_status: io.agent_status.clone(),
         session_loop_termination: io.session_loop_termination.clone(),
     };
@@ -250,7 +251,6 @@ pub(crate) async fn run_codex_thread_one_shot(
 
     // Bridge events so we can observe completion and shut down automatically.
     let (tx_bridge, rx_bridge) = async_channel::bounded(SUBMISSION_CHANNEL_CAPACITY);
-    let ops_tx = io.tx_sub.clone();
     let agent_status = io.agent_status.clone();
     let session_loop_termination = io.session_loop_termination.clone();
     let io_for_bridge = io;
@@ -262,8 +262,8 @@ pub(crate) async fn run_codex_thread_one_shot(
             );
             let _ = tx_bridge.send(event).await;
             if should_shutdown {
-                let _ = ops_tx
-                    .send(Submission {
+                let _ = io_for_bridge
+                    .submit_with_id(Submission {
                         id: "shutdown".to_string(),
                         op: Op::Shutdown {},
                         client_user_message_id: None,
@@ -288,6 +288,7 @@ pub(crate) async fn run_codex_thread_one_shot(
         SessionIo {
             rx_event: rx_bridge,
             tx_sub: tx_closed,
+            shutdown_submissions: Default::default(),
             agent_status,
             session_loop_termination,
         },

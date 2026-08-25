@@ -34,6 +34,7 @@ use codex_team_state::TeamDurabilityStatus;
 use codex_team_state::TeamStateHandle;
 use std::sync::OnceLock;
 use std::sync::atomic::AtomicBool;
+use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use tokio::sync::Semaphore;
 
@@ -88,6 +89,9 @@ pub(crate) struct Session {
     pub(super) mcp_prewarm_task: std::sync::Mutex<Option<JoinHandle<()>>>,
     pub(crate) conversation: Arc<RealtimeConversationManager>,
     pub(crate) active_turn: Mutex<Option<ActiveTurn>>,
+    /// Shutdown submissions that were accepted and have not failed before runtime teardown.
+    /// Canceled external waiters do not clear this authoritative lifecycle fence.
+    pub(super) experimental_session_control_shutdown_submissions: Arc<AtomicUsize>,
     pub(crate) pending_user_message_admissions:
         crate::user_message_admission::PendingUserMessageAdmissions,
     pub(crate) input_queue: InputQueue,
@@ -524,6 +528,21 @@ async fn warm_plugins_and_skills_for_session_init(
 }
 
 impl Session {
+    pub(crate) fn finish_failed_experimental_session_control_shutdown(&self) {
+        let previous = self
+            .experimental_session_control_shutdown_submissions
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |count| {
+                count.checked_sub(1)
+            });
+        debug_assert!(previous.is_ok());
+    }
+
+    pub(crate) fn experimental_session_control_shutdown_in_progress(&self) -> bool {
+        self.experimental_session_control_shutdown_submissions
+            .load(Ordering::Acquire)
+            > 0
+    }
+
     /// Returns the concrete identity for this thread.
     pub(crate) fn thread_id(&self) -> ThreadId {
         self.thread_id
@@ -715,14 +734,6 @@ impl Session {
                 if team_participant_identity(&session_configuration.session_source).is_none() {
                     anyhow::bail!(
                         "durable Team Root requires a verifiable Root participant identity"
-                    );
-                }
-                if matches!(
-                    &initial_history,
-                    InitialHistory::Cleared | InitialHistory::Forked(_)
-                ) {
-                    anyhow::bail!(
-                        "durable Team State does not support clear or fork lifecycle entrypoints in M4-S1"
                     );
                 }
                 if is_resumed {
@@ -1435,6 +1446,7 @@ impl Session {
                 mcp_prewarm_task: std::sync::Mutex::new(None),
                 conversation: Arc::new(RealtimeConversationManager::new()),
                 active_turn: Mutex::new(None),
+                experimental_session_control_shutdown_submissions: Arc::new(AtomicUsize::new(0)),
                 pending_user_message_admissions: Default::default(),
                 input_queue: InputQueue::new(),
                 guardian_review_session: GuardianReviewSessionManager::default(),

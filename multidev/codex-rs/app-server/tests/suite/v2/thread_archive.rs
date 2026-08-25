@@ -91,6 +91,27 @@ async fn thread_archive_rejects_owned_unmaterialized_paginated_descendant() -> R
         error.error.message,
         format!("thread {} already has an active writer", child.id)
     );
+
+    let _: TurnStartResponse = owner
+        .request(|request_id| ClientRequest::TurnStart {
+            request_id,
+            params: TurnStartParams {
+                thread_id: child.id.clone(),
+                client_user_message_id: None,
+                input: vec![UserInput::Text {
+                    text: "materialize descendant".to_string(),
+                    text_elements: Vec::new(),
+                }],
+                ..Default::default()
+            },
+        })
+        .await?;
+    timeout(
+        DEFAULT_READ_TIMEOUT,
+        owner.read_stream_until_notification_message("turn/completed"),
+    )
+    .await??;
+
     timeout(DEFAULT_READ_TIMEOUT, owner.shutdown_gracefully()).await??;
     let _: ThreadArchiveResponse = other
         .request(|request_id| ClientRequest::ThreadArchive {
@@ -304,7 +325,7 @@ async fn thread_archive_archives_spawned_descendants() -> Result<()> {
         .await??;
         archived_ids.push(archived_notification.thread_id);
     }
-    assert_eq!(archived_ids, vec![parent_id, grandchild_id, child_id]);
+    assert_eq!(archived_ids, vec![grandchild_id, child_id, parent_id]);
 
     for thread_id in [parent_thread_id, child_thread_id, grandchild_thread_id] {
         assert!(
@@ -333,7 +354,7 @@ async fn thread_archive_archives_spawned_descendants() -> Result<()> {
 }
 
 #[tokio::test]
-async fn thread_archive_succeeds_when_descendant_archive_fails() -> Result<()> {
+async fn thread_archive_conflict_keeps_the_entire_subtree_recoverable() -> Result<()> {
     let server = create_mock_responses_server_repeating_assistant("Done").await;
     let codex_home = TempDir::new()?;
     MockResponsesConfig::new(&server.uri()).write(codex_home.path())?;
@@ -405,25 +426,25 @@ async fn thread_archive_succeeds_when_descendant_archive_fails() -> Result<()> {
         .build_initialized()
         .await?;
 
-    let _: ThreadArchiveResponse = mcp
-        .request(|request_id| ClientRequest::ThreadArchive {
-            request_id,
-            params: ThreadArchiveParams {
-                thread_id: parent_id.clone(),
-            },
+    let request_id = mcp
+        .send_thread_archive_request(ThreadArchiveParams {
+            thread_id: parent_id.clone(),
         })
         .await?;
-
-    let mut archived_ids = Vec::new();
-    for _ in 0..2 {
-        let archived_notification: ThreadArchivedNotification = timeout(
-            DEFAULT_READ_TIMEOUT,
-            mcp.read_notification("thread/archived"),
-        )
-        .await??;
-        archived_ids.push(archived_notification.thread_id);
-    }
-    assert_eq!(archived_ids, vec![parent_id, grandchild_id]);
+    let archive_err: JSONRPCError = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_error_message(RequestId::Integer(request_id)),
+    )
+    .await??;
+    assert_eq!(archive_err.error.code, -32600);
+    assert!(
+        archive_err
+            .error
+            .message
+            .contains("archived rollout destination already exists"),
+        "unexpected archive error: {}",
+        archive_err.error.message
+    );
 
     assert!(
         timeout(
@@ -436,13 +457,13 @@ async fn thread_archive_succeeds_when_descendant_archive_fails() -> Result<()> {
 
     assert!(
         child_rollout_path.exists(),
-        "child should stay active after descendant archive failure"
+        "conflicting child should stay active"
     );
     assert!(
         archived_child_path.is_dir(),
         "test conflict should remain in archived sessions"
     );
-    for thread_id in [parent_thread_id, grandchild_thread_id] {
+    for thread_id in [parent_thread_id, child_thread_id, grandchild_thread_id] {
         assert!(
             find_thread_path_by_id_str(
                 codex_home.path(),
@@ -450,9 +471,11 @@ async fn thread_archive_succeeds_when_descendant_archive_fails() -> Result<()> {
                 /*state_db_ctx*/ None,
             )
             .await?
-            .is_none(),
-            "expected active rollout for {thread_id} to be archived"
+            .is_some(),
+            "archive preflight failure must keep active rollout for {thread_id}"
         );
+    }
+    for thread_id in [parent_thread_id, grandchild_thread_id] {
         assert!(
             find_archived_thread_path_by_id_str(
                 codex_home.path(),
@@ -460,8 +483,8 @@ async fn thread_archive_succeeds_when_descendant_archive_fails() -> Result<()> {
                 /*state_db_ctx*/ None,
             )
             .await?
-            .is_some(),
-            "expected archived rollout for {thread_id} to exist"
+            .is_none(),
+            "archive preflight failure must not move rollout for {thread_id}"
         );
     }
 
@@ -469,7 +492,8 @@ async fn thread_archive_succeeds_when_descendant_archive_fails() -> Result<()> {
 }
 
 #[tokio::test]
-async fn thread_archive_succeeds_when_spawned_descendant_is_missing() -> Result<()> {
+async fn thread_archive_rejects_a_missing_spawned_descendant_without_moving_the_root() -> Result<()>
+{
     let server = create_mock_responses_server_repeating_assistant("Done").await;
     let codex_home = TempDir::new()?;
     MockResponsesConfig::new(&server.uri()).write(codex_home.path())?;
@@ -507,27 +531,29 @@ async fn thread_archive_succeeds_when_spawned_descendant_is_missing() -> Result<
         .build_initialized()
         .await?;
 
-    let _: ThreadArchiveResponse = mcp
-        .request(|request_id| ClientRequest::ThreadArchive {
-            request_id,
-            params: ThreadArchiveParams {
-                thread_id: parent_id.clone(),
-            },
+    let request_id = mcp
+        .send_thread_archive_request(ThreadArchiveParams {
+            thread_id: parent_id.clone(),
         })
         .await?;
-
-    let archived_notification: ThreadArchivedNotification = timeout(
+    let archive_err: JSONRPCError = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_notification("thread/archived"),
+        mcp.read_stream_until_error_message(RequestId::Integer(request_id)),
     )
     .await??;
-    assert_eq!(archived_notification.thread_id, parent_id);
+    assert!(
+        archive_err.error.message.contains(&format!(
+            "no rollout found for thread id {missing_child_thread_id}"
+        )),
+        "unexpected archive error: {}",
+        archive_err.error.message
+    );
 
     assert!(
         find_thread_path_by_id_str(codex_home.path(), &parent_id, /*state_db_ctx*/ None)
             .await?
-            .is_none(),
-        "parent should be archived even when a descendant is missing"
+            .is_some(),
+        "missing descendant failure must keep the root active"
     );
     assert!(
         find_archived_thread_path_by_id_str(
@@ -536,8 +562,8 @@ async fn thread_archive_succeeds_when_spawned_descendant_is_missing() -> Result<
             /*state_db_ctx*/ None,
         )
         .await?
-        .is_some(),
-        "parent should be moved into archived sessions"
+        .is_none(),
+        "missing descendant failure must not move the root"
     );
 
     Ok(())

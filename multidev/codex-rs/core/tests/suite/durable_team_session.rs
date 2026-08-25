@@ -1,6 +1,11 @@
 //! Product-level cold-resume coverage for durable Team Session activation.
 
 use anyhow::Result;
+use codex_core::ExperimentalSessionControlError;
+use codex_core::ExperimentalSessionControlRootState;
+use codex_core::ExperimentalSessionControlSetRootStateParams;
+use codex_core::ForkSnapshot;
+use codex_core::StartThreadOptions;
 use codex_features::Feature;
 use codex_protocol::SessionId;
 use codex_protocol::ThreadId;
@@ -34,6 +39,7 @@ use codex_thread_store::ThreadStore;
 use codex_thread_store::ThreadStoreError;
 use codex_thread_store::ThreadStoreFuture;
 use codex_thread_store::UpdateThreadMetadataParams;
+use codex_thread_store::durable_team_snapshot_path;
 use core_test_support::responses::ev_assistant_message;
 use core_test_support::responses::ev_completed;
 use core_test_support::responses::ev_function_call_with_namespace;
@@ -452,6 +458,186 @@ async fn durable_team_cold_resume_preserves_identity_and_continues_mutation() ->
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn durable_public_resume_rejects_a_corrupt_snapshot_without_starting_the_model() -> Result<()>
+{
+    let server = start_mock_server().await;
+    let mut builder = durable_team_codex();
+    let created = builder.build(&server).await?;
+    let home = Arc::clone(&created.home);
+    let thread_id = created.session_configured.thread_id;
+    let rollout_path = created
+        .session_configured
+        .rollout_path
+        .clone()
+        .expect("durable Root rollout");
+    created.codex.shutdown_and_wait().await?;
+
+    std::fs::write(
+        durable_team_snapshot_path(home.path(), thread_id),
+        b"not a committed Team snapshot",
+    )?;
+    let response_requests_before = server
+        .received_requests()
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|request| request.url.path().ends_with("/responses"))
+        .count();
+    let mut resumed_builder = durable_team_codex();
+    let error = match resumed_builder.resume(&server, home, rollout_path).await {
+        Ok(_) => anyhow::bail!("corrupt durable state returned a live owner"),
+        Err(error) => error,
+    };
+    let message = format!("{error:#}");
+    assert!(
+        message.contains("Team") && message.contains("snapshot"),
+        "unexpected corrupt-resume error: {message}"
+    );
+    let response_requests_after = server
+        .received_requests()
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|request| request.url.path().ends_with("/responses"))
+        .count();
+    assert_eq!(
+        response_requests_after, response_requests_before,
+        "corrupt resume must fail before starting a model turn"
+    );
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn durable_fork_new_and_clear_create_new_empty_team_lineages() -> Result<()> {
+    let server = start_mock_server().await;
+    let responses = mount_sse_sequence_without_request_count_expectation(
+        &server,
+        vec![
+            publish_call("publish-before-lifecycle-split", "source Team state"),
+            assistant_reply("source-lifecycle-state-complete"),
+        ],
+    )
+    .await;
+    let mut builder = durable_team_codex();
+    let source = builder.build(&server).await?;
+    submit_turn(&source, "populate only the source Team").await?;
+
+    let source_projection = source
+        .codex
+        .experimental_session_control_team_projection()
+        .await?;
+    let source_version = source_projection.events[0].versions[0].clone();
+    let source_rollout = source
+        .codex
+        .rollout_path()
+        .expect("durable source rollout path");
+
+    let forked = source
+        .thread_manager
+        .fork_thread(
+            ForkSnapshot::Interrupted,
+            source.config.clone(),
+            source_rollout,
+            /*thread_source*/ None,
+            /*parent_trace*/ None,
+        )
+        .await?;
+    let forked_projection = forked
+        .thread
+        .experimental_session_control_team_projection()
+        .await?;
+    assert_ne!(forked.thread_id, source.session_configured.thread_id);
+    assert_eq!(
+        forked.session_configured.session_id,
+        SessionId::from(forked.thread_id)
+    );
+    assert_ne!(
+        forked_projection.team_instance,
+        source_projection.team_instance
+    );
+    assert!(forked_projection.events.is_empty());
+    assert_eq!(source_projection.events.len(), 1);
+
+    let stale_reference = forked
+        .thread
+        .experimental_session_control_set_root_state(ExperimentalSessionControlSetRootStateParams {
+            version_id: source_version.id,
+            expected_producer_state: source_version.producer_state,
+            expected_root_state: source_version.root_state,
+            next_root_state: ExperimentalSessionControlRootState::Tracking,
+        })
+        .await
+        .expect_err("a source-Team reference must not mutate the forked Team");
+    assert!(matches!(
+        stale_reference,
+        ExperimentalSessionControlError::TeamInstanceReset { .. }
+    ));
+
+    let fresh = source
+        .thread_manager
+        .start_thread(StartThreadOptions::new(source.config.clone()))
+        .await?;
+    let fresh_projection = fresh
+        .thread
+        .experimental_session_control_team_projection()
+        .await?;
+    assert_ne!(fresh.thread_id, source.session_configured.thread_id);
+    assert_ne!(fresh.thread_id, forked.thread_id);
+    assert_eq!(
+        fresh.session_configured.session_id,
+        SessionId::from(fresh.thread_id)
+    );
+    assert_ne!(
+        fresh_projection.team_instance,
+        source_projection.team_instance
+    );
+    assert_ne!(
+        fresh_projection.team_instance,
+        forked_projection.team_instance
+    );
+    assert!(fresh_projection.events.is_empty());
+
+    let mut clear_options = StartThreadOptions::new(source.config.clone());
+    clear_options.initial_history = codex_protocol::protocol::InitialHistory::Cleared;
+    let cleared = source.thread_manager.start_thread(clear_options).await?;
+    let cleared_projection = cleared
+        .thread
+        .experimental_session_control_team_projection()
+        .await?;
+    assert_ne!(cleared.thread_id, source.session_configured.thread_id);
+    assert_ne!(cleared.thread_id, forked.thread_id);
+    assert_ne!(cleared.thread_id, fresh.thread_id);
+    assert_eq!(
+        cleared.session_configured.session_id,
+        SessionId::from(cleared.thread_id)
+    );
+    assert_ne!(
+        cleared_projection.team_instance,
+        source_projection.team_instance
+    );
+    assert_ne!(
+        cleared_projection.team_instance,
+        forked_projection.team_instance
+    );
+    assert_ne!(
+        cleared_projection.team_instance,
+        fresh_projection.team_instance
+    );
+    assert!(cleared_projection.events.is_empty());
+    assert_eq!(
+        responses.requests().len(),
+        2,
+        "fork, new, and clear startup must not sample the model"
+    );
+
+    cleared.thread.shutdown_and_wait().await?;
+    fresh.thread.shutdown_and_wait().await?;
+    forked.thread.shutdown_and_wait().await?;
+    source.codex.shutdown_and_wait().await?;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn durable_team_rejects_unknown_root_before_persistence() -> Result<()> {
     let server = start_mock_server().await;
     let home = Arc::new(tempfile::TempDir::new()?);
@@ -624,6 +810,23 @@ async fn durable_team_close_revalidates_marker_before_shutdown_complete() -> Res
             ))
         });
     let created = builder.build(&server).await?;
+    let initial_responses = mount_sse_sequence_without_request_count_expectation(
+        &server,
+        vec![
+            publish_call("publish-before-failed-close", "state before close"),
+            assistant_reply("state-before-close-complete"),
+        ],
+    )
+    .await;
+    submit_turn(&created, "create state before the failed close").await?;
+    assert_eq!(initial_responses.requests().len(), 2);
+    let version_before_close = created
+        .codex
+        .experimental_session_control_team_projection()
+        .await?
+        .events[0]
+        .versions[0]
+        .clone();
     let rollout_path = codex_rollout::find_thread_path_by_id_str(
         home.path(),
         &created.session_configured.thread_id.to_string(),
@@ -637,13 +840,18 @@ async fn durable_team_close_revalidates_marker_before_shutdown_complete() -> Res
         .unwrap_or_else(std::sync::PoisonError::into_inner) =
         Some((rollout_path.clone(), hidden_path.clone()));
 
-    let close_id = created.codex.submit(Op::Shutdown {}).await?;
+    let close_attempt = tokio::time::timeout(
+        Duration::from_millis(250),
+        created.codex.shutdown_and_wait(),
+    )
+    .await;
+    assert!(
+        close_attempt.is_err(),
+        "failed close must keep the Session loop alive until a later explicit retry"
+    );
     let close_error = tokio::time::timeout(Duration::from_secs(10), async {
         loop {
             let event = created.codex.next_event().await?;
-            if event.id != close_id {
-                continue;
-            }
             match event.msg {
                 EventMsg::Error(error) => return Ok::<_, anyhow::Error>(error.message),
                 EventMsg::ShutdownComplete => {
@@ -659,23 +867,29 @@ async fn durable_team_close_revalidates_marker_before_shutdown_complete() -> Res
         close_error.contains("Failed to shutdown thread persistence"),
         "unexpected close failure: {close_error}"
     );
-    let no_completion = tokio::time::timeout(Duration::from_millis(100), async {
-        loop {
-            let event = created.codex.next_event().await?;
-            if event.id == close_id && matches!(event.msg, EventMsg::ShutdownComplete) {
-                anyhow::bail!("failed close emitted ShutdownComplete")
-            }
-        }
-        #[allow(unreachable_code)]
-        Ok::<_, anyhow::Error>(())
-    })
-    .await;
-    assert!(
-        no_completion.is_err(),
-        "failed close must remain incomplete"
-    );
 
     std::fs::rename(&hidden_path, &rollout_path)?;
+    created
+        .codex
+        .experimental_session_control_set_root_state(ExperimentalSessionControlSetRootStateParams {
+            version_id: version_before_close.id,
+            expected_producer_state: version_before_close.producer_state,
+            expected_root_state: version_before_close.root_state,
+            next_root_state: ExperimentalSessionControlRootState::Tracking,
+        })
+        .await
+        .expect("a canceled failed-close waiter must restore Team mutation access");
+    let responses = mount_sse_sequence_without_request_count_expectation(
+        &server,
+        vec![assistant_reply("continued-after-failed-close")],
+    )
+    .await;
+    submit_turn(&created, "continue using the retained Root owner").await?;
+    assert_eq!(
+        responses.requests().len(),
+        1,
+        "a deterministic close failure must retain the same usable runtime and writer"
+    );
     created
         .codex
         .shutdown_and_wait()

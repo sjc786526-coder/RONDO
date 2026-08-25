@@ -7,6 +7,8 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
@@ -393,6 +395,7 @@ use codex_utils_stream_parser::ProposedPlanSegment;
 pub(crate) struct SessionIo {
     pub(crate) tx_sub: Sender<Submission>,
     pub(crate) rx_event: Receiver<Event>,
+    pub(crate) shutdown_submissions: Arc<AtomicUsize>,
     // Last known status of the agent.
     pub(crate) agent_status: watch::Receiver<AgentStatus>,
     // Shared future for the background submission loop completion so multiple
@@ -401,6 +404,34 @@ pub(crate) struct SessionIo {
 }
 
 pub(crate) type SessionLoopTermination = Shared<BoxFuture<'static, ()>>;
+
+struct ShutdownSubmissionGuard {
+    submissions: Arc<AtomicUsize>,
+    committed: bool,
+}
+
+impl ShutdownSubmissionGuard {
+    fn new(submissions: Arc<AtomicUsize>) -> Self {
+        submissions.fetch_add(1, Ordering::AcqRel);
+        Self {
+            submissions,
+            committed: false,
+        }
+    }
+
+    fn commit(&mut self) {
+        self.committed = true;
+    }
+}
+
+impl Drop for ShutdownSubmissionGuard {
+    fn drop(&mut self) {
+        if !self.committed {
+            let previous = self.submissions.fetch_sub(1, Ordering::AcqRel);
+            debug_assert!(previous > 0);
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum GitEnrichmentPolicy {
@@ -783,6 +814,9 @@ impl Session {
         let io = SessionIo {
             tx_sub,
             rx_event,
+            shutdown_submissions: Arc::clone(
+                &session.experimental_session_control_shutdown_submissions,
+            ),
             agent_status: agent_status_rx,
             session_loop_termination: session_loop_termination_from_handle(session_loop_handle),
         };
@@ -837,6 +871,8 @@ impl SessionIo {
 
     /// Use sparingly: prefer `submit()` so submission IDs are generated consistently.
     pub(crate) async fn submit_with_id(&self, mut sub: Submission) -> CodexResult<()> {
+        let mut shutdown_submission = matches!(&sub.op, Op::Shutdown)
+            .then(|| ShutdownSubmissionGuard::new(Arc::clone(&self.shutdown_submissions)));
         if sub.trace.is_none() {
             sub.trace = current_span_w3c_trace_context();
         }
@@ -844,6 +880,9 @@ impl SessionIo {
             .send(sub)
             .await
             .map_err(|_| CodexErr::InternalAgentDied)?;
+        if let Some(shutdown_submission) = shutdown_submission.as_mut() {
+            shutdown_submission.commit();
+        }
         Ok(())
     }
 

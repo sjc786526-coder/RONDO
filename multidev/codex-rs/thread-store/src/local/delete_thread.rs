@@ -6,9 +6,13 @@
 
 use std::collections::HashMap;
 use std::collections::HashSet;
+#[cfg(unix)]
+use std::fs::File;
 use std::io::ErrorKind;
 use std::path::Path;
+use std::path::PathBuf;
 
+use codex_protocol::protocol::DurableTeamSessionMeta;
 use codex_rollout::ARCHIVED_SESSIONS_SUBDIR;
 use codex_rollout::RolloutReferenceIndex;
 use codex_rollout::SESSIONS_SUBDIR;
@@ -23,6 +27,7 @@ use crate::DeleteThreadParams;
 use crate::DeleteThreadsParams;
 use crate::ThreadStoreError;
 use crate::ThreadStoreResult;
+use crate::durable_team_snapshot_path;
 
 pub(super) async fn delete_thread(
     store: &LocalThreadStore,
@@ -37,6 +42,7 @@ pub(super) async fn delete_thread(
         return Err(referenced_thread_error(thread_id));
     }
     let mut writer_guards = store.acquire_writer_locks(&[thread_id]).await?;
+    delete_durable_team_artifacts(store, &[thread_id]).await?;
     delete_thread_after_reference_check(store, thread_id, &mut writer_guards).await
 }
 
@@ -44,7 +50,7 @@ pub(super) async fn delete_threads(
     store: &LocalThreadStore,
     params: DeleteThreadsParams,
 ) -> ThreadStoreResult<()> {
-    let thread_ids = params.thread_ids;
+    let mut thread_ids = params.thread_ids;
     if thread_ids.is_empty() {
         return Ok(());
     }
@@ -87,12 +93,252 @@ pub(super) async fn delete_threads(
     }
 
     let mut writer_guards = store.acquire_writer_locks(&lock_thread_ids).await?;
+    let durable_roots = durable_team_artifacts_for_deletion(store, &thread_ids).await?;
+    delete_validated_durable_team_artifacts(&durable_roots)?;
+    // The canonical Root marker is the retry anchor if a later rollout deletion fails after its
+    // Team artifact was removed. Keep every durable Root last regardless of caller order.
+    let durable_root_ids = durable_roots
+        .iter()
+        .map(|artifact| artifact.root_thread_id)
+        .collect::<HashSet<_>>();
+    thread_ids.sort_by_key(|thread_id| durable_root_ids.contains(thread_id));
     for thread_id in thread_ids {
         match delete_thread_after_reference_check(store, thread_id, &mut writer_guards).await {
             Ok(()) | Err(ThreadStoreError::ThreadNotFound { .. }) => {}
             Err(err) => return Err(err),
         }
     }
+    Ok(())
+}
+
+#[derive(Debug)]
+struct DurableTeamArtifactDeletion {
+    root_thread_id: codex_protocol::ThreadId,
+    path: PathBuf,
+}
+
+async fn delete_durable_team_artifacts(
+    store: &LocalThreadStore,
+    thread_ids: &[codex_protocol::ThreadId],
+) -> ThreadStoreResult<()> {
+    let artifacts = durable_team_artifacts_for_deletion(store, thread_ids).await?;
+    delete_validated_durable_team_artifacts(&artifacts)
+}
+
+async fn durable_team_artifacts_for_deletion(
+    store: &LocalThreadStore,
+    thread_ids: &[codex_protocol::ThreadId],
+) -> ThreadStoreResult<Vec<DurableTeamArtifactDeletion>> {
+    let state_db_ctx = store.state_db().await;
+    let mut artifacts = Vec::new();
+    for &thread_id in thread_ids {
+        let thread_id_string = thread_id.to_string();
+        let artifact_path =
+            durable_team_snapshot_path(store.config.codex_home.as_path(), thread_id);
+        let artifact_exists = match std::fs::symlink_metadata(&artifact_path) {
+            Ok(metadata) if metadata.file_type().is_file() => true,
+            Ok(_) => {
+                return Err(ThreadStoreError::InvalidRequest {
+                    message: format!(
+                        "durable Team artifact for Root {thread_id} is not a regular file"
+                    ),
+                });
+            }
+            Err(error) if error.kind() == ErrorKind::NotFound => false,
+            Err(error) => {
+                return Err(ThreadStoreError::Internal {
+                    message: format!(
+                        "failed to inspect durable Team artifact for Root {thread_id}: {error}"
+                    ),
+                });
+            }
+        };
+        let active = find_thread_path_by_id_str(
+            store.config.codex_home.as_path(),
+            thread_id_string.as_str(),
+            state_db_ctx.as_deref(),
+        )
+        .await
+        .map_err(|error| ThreadStoreError::InvalidRequest {
+            message: format!(
+                "failed to inspect durable Team intent for thread {thread_id}: {error}"
+            ),
+        })?;
+        let archived = find_archived_thread_path_by_id_str(
+            store.config.codex_home.as_path(),
+            thread_id_string.as_str(),
+            state_db_ctx.as_deref(),
+        )
+        .await
+        .map_err(|error| ThreadStoreError::InvalidRequest {
+            message: format!(
+                "failed to inspect archived durable Team intent for thread {thread_id}: {error}"
+            ),
+        })?;
+        let mut rollout_candidates = Vec::new();
+        if let Some(path) = active {
+            rollout_candidates.push((
+                path,
+                store.config.codex_home.join(SESSIONS_SUBDIR),
+                "sessions",
+            ));
+        }
+        if let Some(path) = archived {
+            rollout_candidates.push((
+                path,
+                store.config.codex_home.join(ARCHIVED_SESSIONS_SUBDIR),
+                "archived sessions",
+            ));
+        }
+        if rollout_candidates.is_empty() {
+            if artifact_exists {
+                return Err(ThreadStoreError::Conflict {
+                    message: format!(
+                        "cannot delete durable Team artifact for Root {thread_id} without a canonical Root marker"
+                    ),
+                });
+            }
+            continue;
+        }
+
+        let mut durable_intent = None;
+        let mut saw_non_durable_marker = false;
+        let mut saw_unreadable_marker = false;
+        for (rollout_path, rollout_root, scope_label) in rollout_candidates {
+            let canonical_rollout_path =
+                scoped_rollout_path(rollout_root, rollout_path.as_path(), scope_label)?;
+            matching_rollout_file_name(
+                canonical_rollout_path.as_path(),
+                thread_id,
+                rollout_path.as_path(),
+            )?;
+            let session_meta = match codex_rollout::read_session_meta_line(&canonical_rollout_path)
+                .await
+            {
+                Ok(session_meta) => session_meta.meta,
+                Err(_error) if !artifact_exists => {
+                    // Preserve the existing explicit-delete contract for a corrupt ordinary
+                    // rollout. With no Team artifact present there is nothing in the durable Team
+                    // authority domain to orphan. If another marker proves this id is a durable
+                    // Root below, the unreadable marker still makes the lineage ambiguous.
+                    saw_unreadable_marker = true;
+                    continue;
+                }
+                Err(error) => {
+                    return Err(ThreadStoreError::InvalidRequest {
+                        message: format!(
+                            "failed to read canonical SessionMeta before deleting thread {thread_id}: {error}"
+                        ),
+                    });
+                }
+            };
+            let Some(intent) = session_meta.durable_team else {
+                saw_non_durable_marker = true;
+                continue;
+            };
+            if intent.version != DurableTeamSessionMeta::CURRENT_VERSION {
+                return Err(ThreadStoreError::Unsupported {
+                    operation: "delete_durable_team_snapshot_version",
+                });
+            }
+            if session_meta.id != thread_id
+                || session_meta.session_id != intent.session_id
+                || intent.root_thread_id != thread_id
+            {
+                return Err(ThreadStoreError::Conflict {
+                    message: format!(
+                        "durable Team intent for thread {thread_id} does not match its canonical Root lineage"
+                    ),
+                });
+            }
+            if durable_intent.is_some_and(|expected| expected != intent) {
+                return Err(ThreadStoreError::Conflict {
+                    message: format!(
+                        "active and archived Root markers for thread {thread_id} disagree on durable Team lineage"
+                    ),
+                });
+            }
+            durable_intent = Some(intent);
+        }
+        if durable_intent.is_some() && saw_non_durable_marker {
+            return Err(ThreadStoreError::Conflict {
+                message: format!(
+                    "active and archived Root markers for thread {thread_id} disagree on durable Team ownership"
+                ),
+            });
+        }
+        if durable_intent.is_some() && saw_unreadable_marker {
+            return Err(ThreadStoreError::Conflict {
+                message: format!(
+                    "active and archived Root markers for thread {thread_id} do not prove one durable Team lineage"
+                ),
+            });
+        }
+        if durable_intent.is_some() {
+            artifacts.push(DurableTeamArtifactDeletion {
+                root_thread_id: thread_id,
+                path: artifact_path,
+            });
+        } else if artifact_exists {
+            return Err(ThreadStoreError::Conflict {
+                message: format!(
+                    "durable Team artifact for Root {thread_id} has no matching canonical Root intent"
+                ),
+            });
+        }
+    }
+    Ok(artifacts)
+}
+
+fn delete_validated_durable_team_artifacts(
+    artifacts: &[DurableTeamArtifactDeletion],
+) -> ThreadStoreResult<()> {
+    for artifact in artifacts {
+        match std::fs::remove_file(&artifact.path) {
+            Ok(()) => sync_durable_team_artifact_parent(artifact)?,
+            // A retry can observe the file as already absent after an earlier unlink. Syncing the
+            // directory again turns an earlier unknown durability result into proved absence
+            // before the canonical Root marker is removed.
+            Err(error) if error.kind() == ErrorKind::NotFound => {
+                sync_durable_team_artifact_parent(artifact)?;
+            }
+            Err(error) => {
+                return Err(ThreadStoreError::Internal {
+                    message: format!(
+                        "failed to delete durable Team artifact for Root {}: {error}",
+                        artifact.root_thread_id
+                    ),
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn sync_durable_team_artifact_parent(
+    artifact: &DurableTeamArtifactDeletion,
+) -> ThreadStoreResult<()> {
+    let parent = artifact
+        .path
+        .parent()
+        .ok_or_else(|| ThreadStoreError::Internal {
+            message: "durable Team artifact path has no parent".to_string(),
+        })?;
+    File::open(parent)
+        .and_then(|directory| directory.sync_all())
+        .map_err(|error| ThreadStoreError::Internal {
+            message: format!(
+                "durable Team artifact deletion for Root {} has an unknown durability result: {error}",
+                artifact.root_thread_id
+            ),
+        })
+}
+
+#[cfg(not(unix))]
+fn sync_durable_team_artifact_parent(
+    _artifact: &DurableTeamArtifactDeletion,
+) -> ThreadStoreResult<()> {
     Ok(())
 }
 
@@ -237,7 +483,9 @@ fn delete_rollout_path(
 
 #[cfg(test)]
 mod tests {
+    use codex_protocol::SessionId;
     use codex_protocol::ThreadId;
+    use codex_protocol::protocol::DurableTeamSessionMeta;
     use codex_protocol::protocol::HistoryPosition;
     use codex_protocol::protocol::ThreadHistoryMode;
     use codex_protocol::protocol::ThreadMemoryMode;
@@ -250,6 +498,7 @@ mod tests {
     use crate::ResumeThreadParams;
     use crate::ThreadPersistenceMetadata;
     use crate::ThreadStore;
+    use crate::durable_team_snapshot_path;
     use crate::local::LocalThreadStore;
     use crate::local::test_support::test_config;
     use crate::local::test_support::write_archived_session_file;
@@ -289,6 +538,153 @@ mod tests {
             assert!(!path.exists());
         }
         assert!(!compressed_path.exists());
+    }
+
+    #[tokio::test]
+    async fn delete_threads_removes_the_durable_root_artifact_before_the_root_marker() {
+        let home = TempDir::new().expect("temp dir");
+        let store = LocalThreadStore::new(test_config(home.path()), /*state_db*/ None);
+        let root_uuid = Uuid::from_u128(321);
+        let root_thread_id = ThreadId::from_string(&root_uuid.to_string()).expect("root id");
+        let root_path = write_session_file(home.path(), "2025-01-03T12-00-00", root_uuid)
+            .expect("root rollout");
+        mark_rollout_as_durable_root(&root_path, root_thread_id);
+        let child_uuid = Uuid::from_u128(322);
+        let child_thread_id = ThreadId::from_string(&child_uuid.to_string()).expect("child id");
+        let child_path = write_session_file(home.path(), "2025-01-03T12-00-01", child_uuid)
+            .expect("child rollout");
+        let snapshot_path = durable_team_snapshot_path(home.path(), root_thread_id);
+        std::fs::create_dir_all(snapshot_path.parent().expect("snapshot parent"))
+            .expect("snapshot directory");
+        std::fs::write(&snapshot_path, b"committed Team snapshot").expect("snapshot");
+
+        store
+            .delete_threads(DeleteThreadsParams {
+                thread_ids: vec![root_thread_id, child_thread_id],
+            })
+            .await
+            .expect("delete durable subtree");
+
+        assert!(!snapshot_path.exists());
+        assert!(!child_path.exists());
+        assert!(!root_path.exists());
+    }
+
+    #[tokio::test]
+    async fn durable_artifact_post_unlink_retry_removes_the_root_marker() {
+        let home = TempDir::new().expect("temp dir");
+        let store = LocalThreadStore::new(test_config(home.path()), /*state_db*/ None);
+        let root_uuid = Uuid::from_u128(326);
+        let root_thread_id = ThreadId::from_string(&root_uuid.to_string()).expect("root id");
+        let root_path = write_session_file(home.path(), "2025-01-03T12-00-00", root_uuid)
+            .expect("root rollout");
+        mark_rollout_as_durable_root(&root_path, root_thread_id);
+        let snapshot_path = durable_team_snapshot_path(home.path(), root_thread_id);
+        std::fs::create_dir_all(snapshot_path.parent().expect("snapshot parent"))
+            .expect("snapshot directory left by the first unlink attempt");
+        assert!(!snapshot_path.exists());
+
+        store
+            .delete_threads(DeleteThreadsParams {
+                thread_ids: vec![root_thread_id],
+            })
+            .await
+            .expect("retry should prove artifact absence before deleting the Root marker");
+
+        assert!(!root_path.exists());
+        assert!(!snapshot_path.exists());
+    }
+
+    #[tokio::test]
+    async fn durable_artifact_preflight_failure_keeps_rollouts_and_retry_completes() {
+        let home = TempDir::new().expect("temp dir");
+        let store = LocalThreadStore::new(test_config(home.path()), /*state_db*/ None);
+        let root_uuid = Uuid::from_u128(323);
+        let root_thread_id = ThreadId::from_string(&root_uuid.to_string()).expect("root id");
+        let root_path = write_session_file(home.path(), "2025-01-03T12-00-00", root_uuid)
+            .expect("root rollout");
+        mark_rollout_as_durable_root(&root_path, root_thread_id);
+        let snapshot_path = durable_team_snapshot_path(home.path(), root_thread_id);
+        std::fs::create_dir_all(&snapshot_path).expect("non-file artifact fixture");
+
+        let error = store
+            .delete_threads(DeleteThreadsParams {
+                thread_ids: vec![root_thread_id],
+            })
+            .await
+            .expect_err("non-file Team artifact must fail closed");
+        assert!(error.to_string().contains("not a regular file"));
+        assert!(
+            root_path.is_file(),
+            "failed preflight must retain Root marker"
+        );
+        assert!(snapshot_path.is_dir());
+
+        std::fs::remove_dir(&snapshot_path).expect("remove task-owned invalid artifact");
+        std::fs::write(&snapshot_path, b"committed Team snapshot").expect("valid artifact shape");
+        store
+            .delete_threads(DeleteThreadsParams {
+                thread_ids: vec![root_thread_id],
+            })
+            .await
+            .expect("same explicit delete should be retryable");
+        assert!(!root_path.exists());
+        assert!(!snapshot_path.exists());
+    }
+
+    #[tokio::test]
+    async fn delete_threads_rejects_an_orphaned_durable_team_artifact() {
+        let home = TempDir::new().expect("temp dir");
+        let store = LocalThreadStore::new(test_config(home.path()), /*state_db*/ None);
+        let root_uuid = Uuid::from_u128(324);
+        let root_thread_id = ThreadId::from_string(&root_uuid.to_string()).expect("root id");
+        let root_path = write_session_file(home.path(), "2025-01-03T12-00-00", root_uuid)
+            .expect("root rollout");
+        mark_rollout_as_durable_root(&root_path, root_thread_id);
+        let child_uuid = Uuid::from_u128(325);
+        let child_thread_id = ThreadId::from_string(&child_uuid.to_string()).expect("child id");
+        let child_path = write_session_file(home.path(), "2025-01-03T12-00-01", child_uuid)
+            .expect("child rollout");
+        let snapshot_path = durable_team_snapshot_path(home.path(), root_thread_id);
+        std::fs::create_dir_all(snapshot_path.parent().expect("snapshot parent"))
+            .expect("snapshot directory");
+        std::fs::write(&snapshot_path, b"committed Team snapshot").expect("snapshot");
+        std::fs::remove_file(&root_path).expect("simulate a missing canonical Root marker");
+
+        let error = store
+            .delete_threads(DeleteThreadsParams {
+                thread_ids: vec![child_thread_id, root_thread_id],
+            })
+            .await
+            .expect_err("an orphaned Team artifact must not become terminal success");
+
+        assert!(matches!(error, ThreadStoreError::Conflict { .. }));
+        assert!(
+            error
+                .to_string()
+                .contains("without a canonical Root marker")
+        );
+        assert!(snapshot_path.is_file());
+        assert!(child_path.is_file());
+    }
+
+    fn mark_rollout_as_durable_root(path: &Path, root_thread_id: ThreadId) {
+        let contents = std::fs::read_to_string(path).expect("read rollout fixture");
+        let mut lines = contents.lines();
+        let mut session_meta: serde_json::Value =
+            serde_json::from_str(lines.next().expect("session metadata line"))
+                .expect("parse session metadata");
+        session_meta["payload"]["durable_team"] = serde_json::to_value(
+            DurableTeamSessionMeta::current(SessionId::from(root_thread_id), root_thread_id),
+        )
+        .expect("serialize durable intent");
+        let mut rewritten = serde_json::to_string(&session_meta).expect("serialize SessionMeta");
+        rewritten.push('\n');
+        for line in lines {
+            rewritten.push_str(line);
+            rewritten.push('\n');
+        }
+        std::fs::write(path, rewritten).expect("rewrite durable Root fixture");
     }
 
     #[tokio::test]
@@ -505,6 +901,32 @@ mod tests {
             .expect("delete rollout with unreadable metadata");
 
         assert!(!rollout_path.exists());
+    }
+
+    #[tokio::test]
+    async fn delete_threads_keeps_an_artifact_when_the_root_marker_is_unreadable() {
+        let home = TempDir::new().expect("temp dir");
+        let store = LocalThreadStore::new(test_config(home.path()), /*state_db*/ None);
+        let root_uuid = Uuid::from_u128(327);
+        let root_thread_id = ThreadId::from_string(&root_uuid.to_string()).expect("root id");
+        let root_path = write_session_file(home.path(), "2025-01-03T12-00-00", root_uuid)
+            .expect("root rollout");
+        std::fs::write(&root_path, "{not json}\n").expect("damage Root marker");
+        let snapshot_path = durable_team_snapshot_path(home.path(), root_thread_id);
+        std::fs::create_dir_all(snapshot_path.parent().expect("snapshot parent"))
+            .expect("snapshot directory");
+        std::fs::write(&snapshot_path, b"committed Team snapshot").expect("snapshot");
+
+        let error = store
+            .delete_threads(DeleteThreadsParams {
+                thread_ids: vec![root_thread_id],
+            })
+            .await
+            .expect_err("unreadable Root marker must not orphan an existing Team artifact");
+
+        assert!(matches!(error, ThreadStoreError::InvalidRequest { .. }));
+        assert!(root_path.is_file());
+        assert!(snapshot_path.is_file());
     }
 
     #[tokio::test]

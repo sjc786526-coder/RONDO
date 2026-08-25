@@ -121,6 +121,7 @@ impl UnloadingState {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum ThreadShutdownResult {
     Complete,
     SubmitFailed,
@@ -241,6 +242,7 @@ pub(super) async fn ensure_listener_task_running(
         .await;
     let thread_settings_baseline =
         thread_settings_from_config_snapshot(&conversation.config_snapshot().await);
+    let lifecycle_context = listener_task_context.clone();
     let (mut listener_command_rx, listener_generation) = {
         let mut thread_state = thread_state.lock().await;
         if thread_state.listener_matches(&conversation) {
@@ -367,17 +369,19 @@ pub(super) async fn ensure_listener_task_running(
                         }
                         pending_thread_unloads.insert(conversation_id);
                     }
-                    unload_thread_without_subscribers(
-                        thread_manager.clone(),
-                        outgoing_for_task.clone(),
-                        pending_thread_unloads.clone(),
-                        thread_state_manager.clone(),
-                        thread_watch_manager.clone(),
+                    let shutdown_result = unload_thread_without_subscribers(
+                        lifecycle_context.clone(),
                         conversation_id,
                         conversation.clone(),
                     )
                     .await;
-                    break;
+                    if matches!(shutdown_result, ThreadShutdownResult::Complete) {
+                        break;
+                    }
+                    // The same listener remains authoritative after a failed close. Start a new
+                    // idle interval instead of dropping its state and requiring a client attach
+                    // to make the loaded owner observable again.
+                    unloading_state.note_thread_activity_observed();
                 }
             }
         }
@@ -400,55 +404,97 @@ pub(super) async fn wait_for_thread_shutdown(thread: &Arc<CodexThread>) -> Threa
 }
 
 pub(super) async fn unload_thread_without_subscribers(
-    thread_manager: Arc<ThreadManager>,
-    outgoing: Arc<OutgoingMessageSender>,
-    pending_thread_unloads: Arc<Mutex<HashSet<ThreadId>>>,
-    thread_state_manager: ThreadStateManager,
-    thread_watch_manager: ThreadWatchManager,
+    lifecycle_context: ListenerTaskContext,
+    thread_id: ThreadId,
+    thread: Arc<CodexThread>,
+) -> ThreadShutdownResult {
+    info!("thread {thread_id} has no subscribers and is idle; shutting down");
+
+    let result = wait_for_thread_shutdown(&thread).await;
+    match result {
+        ThreadShutdownResult::Complete => {
+            finalize_completed_thread_shutdown(
+                lifecycle_context.clone(),
+                thread_id,
+                thread.clone(),
+            )
+            .await;
+        }
+        ThreadShutdownResult::SubmitFailed => {
+            warn!("failed to submit Shutdown to thread {thread_id}; leaving owner loaded");
+        }
+        ThreadShutdownResult::TimedOut => {
+            warn!(
+                "thread {thread_id} shutdown timed out; retaining the owner and observing late termination"
+            );
+            observe_late_thread_shutdown(lifecycle_context.clone(), thread_id, thread);
+        }
+    }
+    if !matches!(result, ThreadShutdownResult::Complete) {
+        lifecycle_context
+            .pending_thread_unloads
+            .lock()
+            .await
+            .remove(&thread_id);
+    }
+    result
+}
+
+pub(super) fn observe_late_thread_shutdown(
+    lifecycle_context: ListenerTaskContext,
     thread_id: ThreadId,
     thread: Arc<CodexThread>,
 ) {
-    info!("thread {thread_id} has no subscribers and is idle; shutting down");
+    tokio::spawn(async move {
+        thread.wait_until_terminated().await;
+        finalize_completed_thread_shutdown(lifecycle_context, thread_id, thread).await;
+    });
+}
 
-    // Any pending app-server -> client requests for this thread can no longer be
-    // answered; cancel their callbacks before shutdown/unload.
-    outgoing
+async fn finalize_completed_thread_shutdown(
+    lifecycle_context: ListenerTaskContext,
+    thread_id: ThreadId,
+    thread: Arc<CodexThread>,
+) {
+    let Ok(_thread_list_state_permit) = lifecycle_context.thread_list_state_permit.acquire().await
+    else {
+        warn!("thread-list lifecycle gate closed before thread {thread_id} teardown finalized");
+        return;
+    };
+    if !lifecycle_context
+        .thread_manager
+        .remove_thread_if_same(&thread_id, &thread)
+        .await
+    {
+        info!("thread {thread_id} was already removed or replaced before teardown finalized");
+        return;
+    }
+    lifecycle_context
+        .pending_thread_unloads
+        .lock()
+        .await
+        .remove(&thread_id);
+    // Callbacks and listener/watch state are part of the loaded owner. Tear them down only after
+    // core has confirmed shutdown and the exact owner is no longer manager-resident.
+    lifecycle_context
+        .outgoing
         .cancel_requests_for_thread(thread_id, /*error*/ None)
         .await;
-    thread_state_manager.remove_thread_state(thread_id).await;
-
-    tokio::spawn(async move {
-        match wait_for_thread_shutdown(&thread).await {
-            ThreadShutdownResult::Complete => {
-                if thread_manager.remove_thread(&thread_id).await.is_none() {
-                    info!("thread {thread_id} was already removed before teardown finalized");
-                    thread_watch_manager
-                        .remove_thread(&thread_id.to_string())
-                        .await;
-                    pending_thread_unloads.lock().await.remove(&thread_id);
-                    return;
-                }
-                thread_watch_manager
-                    .remove_thread(&thread_id.to_string())
-                    .await;
-                let notification = ThreadClosedNotification {
-                    thread_id: thread_id.to_string(),
-                };
-                outgoing
-                    .send_server_notification(ServerNotification::ThreadClosed(notification))
-                    .await;
-                pending_thread_unloads.lock().await.remove(&thread_id);
-            }
-            ThreadShutdownResult::SubmitFailed => {
-                pending_thread_unloads.lock().await.remove(&thread_id);
-                warn!("failed to submit Shutdown to thread {thread_id}");
-            }
-            ThreadShutdownResult::TimedOut => {
-                pending_thread_unloads.lock().await.remove(&thread_id);
-                warn!("thread {thread_id} shutdown timed out; leaving thread loaded");
-            }
-        }
-    });
+    lifecycle_context
+        .thread_state_manager
+        .remove_thread_state(thread_id)
+        .await;
+    lifecycle_context
+        .thread_watch_manager
+        .remove_thread(&thread_id.to_string())
+        .await;
+    let notification = ThreadClosedNotification {
+        thread_id: thread_id.to_string(),
+    };
+    lifecycle_context
+        .outgoing
+        .send_server_notification(ServerNotification::ThreadClosed(notification))
+        .await;
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -871,4 +917,38 @@ pub(super) fn set_thread_status_and_interrupt_stale_turns(
         }
     }
     thread.status = status;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test(start_paused = true)]
+    async fn unloading_state_waits_for_the_full_idle_delay() {
+        let (_subscribers_tx, has_subscribers_rx) = watch::channel(false);
+        let (_status_tx, thread_status_rx) = watch::channel(ThreadStatus::Idle);
+        let now = Instant::now();
+        let mut unloading_state = UnloadingState {
+            delay: THREAD_UNLOADING_DELAY,
+            has_subscribers_rx,
+            has_subscribers: (false, now),
+            thread_status_rx,
+            is_active: (false, now),
+        };
+
+        let mut waiter = Box::pin(unloading_state.wait_for_unloading_trigger());
+        assert!(matches!(
+            futures::poll!(&mut waiter),
+            std::task::Poll::Pending
+        ));
+
+        tokio::time::advance(THREAD_UNLOADING_DELAY - Duration::from_millis(1)).await;
+        assert!(
+            matches!(futures::poll!(&mut waiter), std::task::Poll::Pending),
+            "detach must not unload before the deferred idle boundary"
+        );
+
+        tokio::time::advance(Duration::from_millis(1)).await;
+        assert!(waiter.await);
+    }
 }

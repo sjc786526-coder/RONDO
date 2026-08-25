@@ -1218,6 +1218,7 @@ mod tests {
                 io: SessionIo {
                     tx_sub,
                     rx_event,
+                    shutdown_submissions: Default::default(),
                     agent_status,
                     session_loop_termination: crate::session::completed_session_loop_termination(),
                 },
