@@ -1,7 +1,7 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
 最后更新：2026-08-25 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
-状态：**第一期、第二期、M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、M3-C2、Plan 064、Plan 071、Plan 073、Plan 075 与四期 M4-A、M4-C0、M4-S1 已完成；Plan 060 技术 GO、Plan 064 DATA_GO、Plan 066 正式训练 GO；Plan 071 为 `BASE_COMPARABILITY_GO`，Plan 073 / M3-C2 为 `NO-GO`；Plan 079 执行者阶段形成 `4B_BASE_QUALITY_NO_GO`，待计划制定者独立验收；三期当前没有已选定 successor，M3-D 保持锁定；M4-A 为 `M4_A_GO`，M4-C0 为 `M4_C0_PROTOTYPE_PASS`，M4-S1 为 `M4_S1_PASS`**
+状态：**第一期、第二期、M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、M3-C2、Plan 064、Plan 071、Plan 073、Plan 075、Plan 079 与四期 M4-A、M4-C0、M4-S1 已完成；Plan 060 技术 GO、Plan 064 DATA_GO、Plan 066 正式训练 GO；Plan 071 为 `BASE_COMPARABILITY_GO`，Plan 073 / M3-C2 为 `NO-GO`，Plan 079 为 `4B_BASE_QUALITY_NO_GO` 并通过独立验收；三期当前没有已选定 successor，M3-D 保持锁定；M4-A 为 `M4_A_GO`，M4-C0 为 `M4_C0_PROTOTYPE_PASS`，M4-S1 为 `M4_S1_PASS`**
 
 ## 当前定位
 
@@ -276,9 +276,9 @@ threshold 的前提下，以同一冻结规则重验 exact base、C1、C3；唯�
 发布质量底线，终态为 `NO-GO`；没有 selection lock、unseen-test 释放或最终模型/threshold/运行配置。Publication Critic
 保持 default-off，M3-D 保持锁定；Plan 075 已完成原因调研与路线决策，详细历史见 `doc/WBS-COMPLETED.md`。
 
-#### Plan 079：Skywork 4B 云端基座质量测评（执行者完成，待独立验收）
+#### Plan 079：Skywork 4B 云端基座质量测评（已完成并通过独立验收）
 
-**结果**：[`Plan 079 ExecPlan`](../../plan/079-multi-publication-critic-skywork-4b-base-quality-execplan.md) 已完成执行者阶段。exact 4B
+**结果**：[`Plan 079 ExecPlan`](../../plan/079-multi-publication-critic-skywork-4b-base-quality-execplan.md) 已完成并通过独立验收。exact 4B
 正式轮 `plan079-formal-20260825T175912Z-610d880-r1` 从 clean source 与空 namespace 完成 55/55、零 typed failure，并经本地独立
 复算得到 `4B_BASE_QUALITY_NO_GO`：无 admissible operating point，False PASS `12/21 = 0.5714`、False REWRITE
 `4/34 = 0.1176`、balanced accuracy `0.6555`、ROC AUC `0.6218`、boundary `13/19 = 0.6842`、within-PASS `6/7`。
@@ -329,7 +329,7 @@ threshold、本地运行配置或产品资格，后续仍须另行立项和授�
   资源终态、final-02 receipt 与独立验收；Plan 068 已完成本地交接、资格运行和远端止费，没有追加训练消费。
 - M3-B1c 与 M3-B2b 前置、Plan 068 / M3-C1、Plan 071 base 同口径重验及 Plan 073 / M3-C2 均已完成；Plan 073
   终态为 `NO-GO`，没有最终锁定组合，M3-D 保持锁定。
-- Plan 079 执行者阶段已只使用 Publication Critic Python 设施与单张云 GPU 完成，没有修改 Plan 077/078 的 `multidev/` 工作面或占用本地重型
+- Plan 079 已通过独立验收，只使用 Publication Critic Python 设施与单张云 GPU 完成，没有修改 Plan 077/078 的 `multidev/` 工作面或占用本地重型
   资源槽；Pod 已止费，保留网络卷继续独立计费。三期当前没有已授权的云计算或本地模型任务。
 - RunPod 云端 smoke/训练不占本地 Cargo build lock，可与产品代码、数据整理和四期非冲突开发并行；真实本地模型、
   Docker 与重型 Cargo 仍按根 `AGENTS.md` 全局串行。

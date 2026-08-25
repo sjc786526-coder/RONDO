@@ -222,26 +222,26 @@ linked worktree 不共享主根 ignored `eval-data/`。因此运行输入投影�
 
 ### 当前工作
 
-- `EXECUTOR_REMEDIATED / PENDING REACCEPTANCE`：实现、真实运行、结果、止费和提交均已完成；首次独立验收唯一 P2 已窄修并通过
-  focused regression，等待 Plan 079 制定者复验。
+- `ACCEPTED / 4B_BASE_QUALITY_NO_GO / COMPLETE`：首次独立验收唯一 P2 已在 `d29e857` 窄修并通过复验；实现、真实运行、
+  正式 NO-GO、独立复算、止费、记录和 task branch 提交均已完成。
 
 ### 本任务剩余步骤
 
-- Plan 079 制定者在本 task branch 上独立复核代码、tracked summary、ignored formal evidence、费用/resource 终态与执行者自审；普通 finding
-  可退回本分支窄修。本计划不在执行者阶段安排后续模型、训练、量化、本地部署或 M3-D 工作。
+- 无。分支合并、主线 WBS/WBS-COMPLETED 整合、推送、分支归档、worktree 清理和网络卷删除等待用户批准后基于届时干净 `main`
+  处理；后续模型、训练、量化、本地部署或 M3-D 不属于本计划。
 
 ### 阻塞项
 
-- 当前无执行阻塞；只等待独立验收。保留卷继续按 Standard 费率计费，删除须用户另行批准。
+- 当前无任务内阻塞。保留卷继续按 Standard 费率计费，删除须用户另行批准。
 
 ### 当前验收状态
 
-- `4B_BASE_QUALITY_NO_GO / CHANGES_REQUIRED REMEDIATED`：正式结果有效且已独立复算，Pod 已删除，卷保留；首次验收 finding 已修复，
-  但复验尚未通过，因此不冒充最终接受或 main 整合。
+- `ACCEPTED / 4B_BASE_QUALITY_NO_GO / TASK COMPLETE`：正式结果有效且已独立复算，首次验收 finding 已通过复验；Pod 已删除，卷按用户
+  指令保留。本状态不冒充 main 整合、后继任务授权或网络卷删除许可。
 
 ### 交接边界
 
-- 执行者按本计划与一次性授权完成实现、云端运行、结果、自检和 task branch 提交；计划制定者随后执行唯一一次独立验收。
+- 执行者按本计划与一次性授权完成实现、云端运行、结果、自检和 task branch 提交；计划制定者已完成独立验收与整改复验。
 - 三种终态都在本任务内收口；量化、本地资格、训练、换模型、产品启用与 M3-D 均由 WBS 后续另行立项，本计划不安排。
 - 任务完成后冻结本计划；主线 WBS/WBS-COMPLETED、合并、推送、分支归档、worktree 清理和网络卷删除均等待用户后续批准。
 
