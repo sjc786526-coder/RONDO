@@ -1283,31 +1283,51 @@ fn event_msg_preview(event: &EventMsg) -> Option<String> {
 pub async fn read_session_meta_line(path: &Path) -> io::Result<SessionMetaLine> {
     let mut lines = compression::open_rollout_line_reader(path).await?;
     while let Some(line) = lines.next_line().await? {
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        let Ok(rollout_line) = serde_json::from_str::<RolloutLine>(trimmed) else {
-            if let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed) {
-                crate::recorder::reject_unknown_thread_history_mode(&value)?;
-            }
-            continue;
-        };
-        match rollout_line.item {
-            RolloutItem::SessionMeta(session_meta_line) => return Ok(session_meta_line),
-            RolloutItem::ResponseItem(_) | RolloutItem::InterAgentCommunication(_) => {
-                return Err(io::Error::other(format!(
-                    "rollout at {} does not start with session metadata",
-                    path.display()
-                )));
-            }
-            RolloutItem::InterAgentCommunicationMetadata { .. }
-            | RolloutItem::Compacted(_)
-            | RolloutItem::TurnContext(_)
-            | RolloutItem::WorldState(_)
-            | RolloutItem::EventMsg(_) => {}
+        if let Some(session_meta_line) = session_meta_from_line(path, line.trim())? {
+            return Ok(session_meta_line);
         }
     }
+    missing_session_meta(path)
+}
+
+/// Synchronous head read used by a live Root write permit to revalidate canonical lineage at the
+/// Team committed-read and mutation-success boundaries.
+pub fn read_session_meta_line_blocking(path: &Path) -> io::Result<SessionMetaLine> {
+    for line in compression::open_rollout_line_reader_blocking(path)? {
+        if let Some(session_meta_line) = session_meta_from_line(path, line?.trim())? {
+            return Ok(session_meta_line);
+        }
+    }
+    missing_session_meta(path)
+}
+
+fn session_meta_from_line(path: &Path, trimmed: &str) -> io::Result<Option<SessionMetaLine>> {
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    let Ok(rollout_line) = serde_json::from_str::<RolloutLine>(trimmed) else {
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed) {
+            crate::recorder::reject_unknown_thread_history_mode(&value)?;
+        }
+        return Ok(None);
+    };
+    match rollout_line.item {
+        RolloutItem::SessionMeta(session_meta_line) => Ok(Some(session_meta_line)),
+        RolloutItem::ResponseItem(_) | RolloutItem::InterAgentCommunication(_) => {
+            Err(io::Error::other(format!(
+                "rollout at {} does not start with session metadata",
+                path.display()
+            )))
+        }
+        RolloutItem::InterAgentCommunicationMetadata { .. }
+        | RolloutItem::Compacted(_)
+        | RolloutItem::TurnContext(_)
+        | RolloutItem::WorldState(_)
+        | RolloutItem::EventMsg(_) => Ok(None),
+    }
+}
+
+fn missing_session_meta(path: &Path) -> io::Result<SessionMetaLine> {
     Err(io::Error::other(format!(
         "rollout at {} is empty",
         path.display()

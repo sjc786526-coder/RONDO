@@ -302,6 +302,7 @@ impl LocalThreadStore {
         history_mode: ThreadHistoryMode,
         writer_lock: WriterLockGuard,
     ) -> ThreadStoreResult<()> {
+        let rollout_path = recorder.rollout_path().to_path_buf();
         match self.live_recorders.lock().await.entry(thread_id) {
             Entry::Occupied(entry) => Err(ThreadStoreError::InvalidRequest {
                 message: format!("thread {} already has a live local writer", entry.key()),
@@ -310,7 +311,11 @@ impl LocalThreadStore {
                 entry.insert(LiveRecorderEntry {
                     recorder,
                     history_mode,
-                    root_writer_authority: RootWriterAuthorityState::new(thread_id, writer_lock),
+                    root_writer_authority: RootWriterAuthorityState::new(
+                        thread_id,
+                        rollout_path,
+                        writer_lock,
+                    ),
                 });
                 Ok(())
             }

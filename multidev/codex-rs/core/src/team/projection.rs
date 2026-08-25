@@ -13,6 +13,7 @@ use codex_protocol::models::ResponseItem;
 use codex_team_state::ProjectionBudget;
 use codex_team_state::ProjectionOutcome;
 use codex_team_state::RenderedProjection;
+use codex_team_state::TeamError;
 use codex_team_state::render_active_world_index;
 use codex_tools::ToolSpec;
 use codex_utils_output_truncation::approx_token_count;
@@ -77,24 +78,23 @@ pub(crate) async fn capture_team_projection(
     session: &Session,
     turn_context: &TurnContext,
     prompt: &PromptCost<'_>,
-) -> TeamProjectionOutcome {
+) -> Result<TeamProjectionOutcome, TeamError> {
     if !super::team_state_enabled(turn_context) {
-        return TeamProjectionOutcome::Nothing;
+        return Ok(TeamProjectionOutcome::Nothing);
     }
-    if let Err(error) = session.ensure_durable_root_activation().await {
-        tracing::debug!(%error, "fresh durable Root activation is not yet readable");
-        return TeamProjectionOutcome::Nothing;
-    }
-    let Ok(access) = super::TeamAccess::resolve(session) else {
-        return TeamProjectionOutcome::Nothing;
+    session
+        .ensure_durable_root_activation()
+        .await
+        .map_err(TeamError::from)?;
+    let access = match super::TeamAccess::resolve(session) {
+        Ok(access) => access,
+        Err(TeamError::UnknownParticipant) => return Ok(TeamProjectionOutcome::Nothing),
+        Err(error) => return Err(error),
     };
-    let Ok(mut snapshot) = access
+    let mut snapshot = access
         .handle()
         .snapshot_for(access.actor())
-        .inspect_err(|err| tracing::debug!(%err, "team projection unavailable"))
-    else {
-        return TeamProjectionOutcome::Nothing;
-    };
+        .inspect_err(|err| tracing::debug!(%err, "team projection unavailable"))?;
     if snapshot.viewer_role.is_root() {
         let availability = session
             .services
@@ -106,7 +106,7 @@ pub(crate) async fn capture_team_projection(
 
     let budget =
         ProjectionBudget::from_remaining_context(remaining_request_context(turn_context, prompt));
-    match render_active_world_index(&snapshot, budget) {
+    Ok(match render_active_world_index(&snapshot, budget) {
         ProjectionOutcome::Idle => TeamProjectionOutcome::Nothing,
         ProjectionOutcome::Rendered(rendered) => {
             tracing::trace!(
@@ -126,7 +126,7 @@ pub(crate) async fn capture_team_projection(
             );
             TeamProjectionOutcome::NeedsRoom
         }
-    }
+    })
 }
 
 /// What the model's window has left once everything else in this request is accounted for.

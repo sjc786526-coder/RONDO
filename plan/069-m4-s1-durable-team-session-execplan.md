@@ -218,27 +218,33 @@ Team State、writer authority、Session identity 或只读状态源。
   canonical ThreadStore read model 读回并严格验证 marker，只有完全匹配才继续 generation 1。复验进一步指出 read-back 自身连续不可用时
   仍会清理 owner；现保留 fully constructed degraded Session/Root owner，所有 Team access 与 close 均在 marker 验证和 generation-1 注册完成前
   fail-closed，并由下一次 projection/tool/wait/close 在同一 owner 内重试；两种组合故障均有稳定回归。
-- 同一全新上下文独立审查者在两轮 finding 修复后最终复验 `ACCEPT`，无剩余高/中 correctness finding。
-- 修复轮 `just fmt` 与受影响三 crate 的 `just clippy` 已通过；按复验边界未再次运行完整 workspace。首轮标准 `just test` 曾因上游
+- 第三轮独立复验确认前述三项阻断均已关闭，但另发现两个中等级缺口：已激活 Session 的后续 committed read/mutation 未持续复核
+  canonical `SessionMeta`，以及 projection/wait 会把持续 durable unavailable 降级为无 Team/正常等待；两项均已在原 069 边界内窄修，
+  当前等待同一独立审查者复验。
+- 本轮 `just fmt` 与 `git diff --check` 已通过；core marker-loss/projection/wait 聚焦回归 3/3、rollout/thread-store/team-state 聚焦回归
+  26/26 通过，watchdog 均为 `complete`、退出码 0、`stop_reason=none`。按复验决定未再次运行完整 workspace 或 clippy。首轮标准
+  `just test` 曾因上游
   rusty-v8 默认归档 404 在测试前失败；checksum-verified Codex V8 等价完整轮执行 14,373 项：14,363 passed、10 failed、24 skipped，
   其中 8 项为 068 Publication Critic fixture/断言、2 项为未修改 realtime 连接失败超时；069 durable cold-resume 主链在该轮通过。
 
 ### 当前工作
 
-- 第二轮 correctness 修复、直接受影响的聚焦门禁和全新上下文独立复验均已完成；069 本地提交准备完成，停在外部前置等待边界。
+- 第三轮 correctness 修复和直接受影响的聚焦门禁均已完成；正在形成单一本地提交并交回同一独立审查者复验。
 
 ### 本任务剩余步骤
 
+- 完成本轮独立复验并关闭其确认存在的高/中 correctness finding。
 - 等待 `#37198` 由独立任务进入 `main`，以及用户另行批准把最新 `main` 合入 069 分支。
 - 执行阶段 E 的聚焦回归、全新领域状态正式轮和独立终审，形成最终本地提交。
 
 ### 阻塞项
 
-- 当前无 069 主体实现或预验收阻塞。最终 `M4-S1 PASS` 仍受 `#37198` 独立进入 `main` 与后续分支同步批准约束；不得越权回移或宣布最终 PASS。
+- 当前无已知 069 主体实现阻塞，独立复验尚待完成。最终 `M4-S1 PASS` 仍受 `#37198` 独立进入 `main` 与后续分支同步批准约束；不得越权
+  回移或宣布最终 PASS。
 
 ### 当前验收状态
 
-- `IMPLEMENTATION_COMPLETE / PREACCEPTANCE_COMPLETE / FINAL_PASS_BLOCKED_BY_#37198`。
+- `IMPLEMENTATION_COMPLETE / PREACCEPTANCE_REVIEW_PENDING / FINAL_PASS_BLOCKED_BY_#37198`。
 
 ### 交接边界
 
@@ -270,3 +276,5 @@ Team State、writer authority、Session identity 或只读状态源。
 | 016 | LocalThreadStore hard delete 在同 store 仍有 live recorder 时整批 fail-closed，不移除 recorder 或 detach authority | S1 的窄修可消除已有 permit 与删除竞态，完整 delete 生命周期仍留给 S2 | authority/delete | 已采纳 |
 | 017 | lineage 与 snapshot 所有产品读取入口均先检查 regular-file metadata，再以上限加一字节有界读取 | 让显式 64 MiB snapshot 合同发生在分配前，损坏/稀疏超限文件诚实失败 | storage/read | 已采纳 |
 | 018 | durable intent 固化到 canonical Root `SessionMeta`，Team backend 只保留 committed snapshot；删除 `.team-lineage` 旁路，在任何持久副作用前拒绝不可证明 participant identity 的 fresh durable Root；marker persist/read-back 未决时保留 degraded Session owner，所有 Team access/close 先在同一 owner 内重试 marker 与 generation 1 | Session lineage 与 Team backend 独立后，整个 Team backend 丢失仍可 fail-closed；消除第二次 lineage 发布，并闭合 canonical marker 自身的 persist-after-success/read-back-unavailable 窗口，同时保持单一 Root authority 与首次 snapshot CAS | activation/lineage/failure | 已采纳 |
+| 019 | Root write permit 持有 canonical rollout 路径，并在 permit/OS writer authority 生命周期内读取 `SessionMeta`；每次 committed read 与 mutation 都复核 marker，CAS 成功后再复核一次，读取和 mutation 均不把 marker 丢失或损坏当作 durable success | activation 完成不是永久证明；只有把 lineage 复核纳入后续 durable 边界，才能避免活跃进程在 marker mutation 后返回不可恢复的成功，同时无需引入第二套 registry 或 lease | authority/read/commit | 已采纳 |
+| 020 | projection 与 wait 对 activation/reconcile/snapshot 的 durable unavailable 直接传播错误；只有 feature-off 或合法的非 participant 仍映射为无 Team/无 waiter | 持续存储故障不是业务上的空 Team 或正常等待，静默降级会让调用者误判生命周期状态 | projection/wait/failure | 已采纳 |

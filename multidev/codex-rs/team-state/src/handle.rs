@@ -410,6 +410,36 @@ impl TeamStateHandle {
         ) {
             self.reconcile_durable()?;
         }
+        if matches!(
+            self.durability_status(),
+            TeamDurabilityStatus::Writable { .. }
+        ) {
+            let runtime = self.durable_runtime().ok_or_else(|| {
+                TeamDurabilityError::conflict("writable Team has no durable runtime")
+            })?;
+            let _gate = runtime
+                .mutation_gate
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let TeamDurabilityStatus::Writable { commit_generation } = self.durability_status()
+            else {
+                return self.ensure_readable();
+            };
+            let authority = runtime
+                .authority
+                .as_ref()
+                .ok_or(TeamDurabilityError::ReadOnly)?;
+            let mut permit = authority.begin_write().inspect_err(|error| {
+                Self::mark_durability_failure(&runtime, commit_generation, error);
+            })?;
+            let current = self.with_store(|store| store.clone());
+            if let Err(error) =
+                Self::verify_committed_state(&runtime, permit.as_mut(), commit_generation, &current)
+            {
+                Self::mark_durability_failure(&runtime, commit_generation, &error);
+                return Err(error);
+            }
+        }
         self.ensure_readable()
     }
 
@@ -417,6 +447,7 @@ impl TeamStateHandle {
     /// abort it if shutdown fails, or complete it after the final durable Team flush and thread
     /// writer close have succeeded.
     pub async fn begin_close(&self) -> Result<Box<dyn TeamClosePermit>, TeamDurabilityError> {
+        self.ensure_readable_or_reconcile()?;
         let runtime = self.durable_runtime().ok_or_else(|| {
             TeamDurabilityError::conflict("an in-memory Team has no durable close barrier")
         })?;
@@ -766,7 +797,8 @@ impl TeamStateHandle {
         submission: &Submission,
         request: &PublishRequest,
     ) -> Result<PublishPreparation, TeamError> {
-        self.ensure_readable().map_err(TeamError::from)?;
+        self.ensure_readable_or_reconcile()
+            .map_err(TeamError::from)?;
         self.with_store(|store| store.prepare_publish(actor, submission, request))
     }
 
@@ -778,7 +810,8 @@ impl TeamStateHandle {
         request: &PublishRequest,
         history_limit: usize,
     ) -> Result<(PublishPreparation, Option<PreparedPublishHistory>), TeamError> {
-        self.ensure_readable().map_err(TeamError::from)?;
+        self.ensure_readable_or_reconcile()
+            .map_err(TeamError::from)?;
         self.with_store(|store| {
             store.prepare_publish_with_history(actor, submission, request, history_limit)
         })
@@ -907,7 +940,8 @@ impl TeamStateHandle {
         query: ObserveQuery,
         cursor: Option<DumpCursor>,
     ) -> Result<TeamDumpPage, TeamError> {
-        self.ensure_readable().map_err(TeamError::from)?;
+        self.ensure_readable_or_reconcile()
+            .map_err(TeamError::from)?;
         self.with_store(|store| {
             let wake_generation = *self.change_tx.borrow();
             store.dump(actor, availability, wake_generation, query, cursor)
@@ -919,7 +953,8 @@ impl TeamStateHandle {
         actor: ThreadId,
         query: ObserveQuery,
     ) -> Result<ChangeLogPage, TeamError> {
-        self.ensure_readable().map_err(TeamError::from)?;
+        self.ensure_readable_or_reconcile()
+            .map_err(TeamError::from)?;
         self.with_store(|store| {
             let wake_generation = *self.change_tx.borrow();
             store.change_log(actor, wake_generation, query)
@@ -931,7 +966,8 @@ impl TeamStateHandle {
         actor: ThreadId,
         query: ObserveQuery,
     ) -> Result<crate::observe::PublicationStatsPage, TeamError> {
-        self.ensure_readable().map_err(TeamError::from)?;
+        self.ensure_readable_or_reconcile()
+            .map_err(TeamError::from)?;
         self.with_store(|store| {
             let wake_generation = *self.change_tx.borrow();
             store.publication_stats(actor, wake_generation, query)
@@ -943,7 +979,8 @@ impl TeamStateHandle {
         actor: ThreadId,
         route_id: RouteId,
     ) -> Result<RouteDispatch, TeamError> {
-        self.ensure_readable().map_err(TeamError::from)?;
+        self.ensure_readable_or_reconcile()
+            .map_err(TeamError::from)?;
         self.with_store(|store| store.route_dispatch(actor, route_id))
     }
 
@@ -1044,12 +1081,14 @@ impl TeamStateHandle {
     }
 
     pub fn read_fact(&self, actor: ThreadId, fact_id: FactId) -> Result<FactView, TeamError> {
-        self.ensure_readable().map_err(TeamError::from)?;
+        self.ensure_readable_or_reconcile()
+            .map_err(TeamError::from)?;
         self.with_store(|store| store.read_fact(actor, fact_id))
     }
 
     pub fn snapshot_for(&self, viewer: ThreadId) -> Result<TeamSnapshot, TeamError> {
-        self.ensure_readable().map_err(TeamError::from)?;
+        self.ensure_readable_or_reconcile()
+            .map_err(TeamError::from)?;
         self.with_store(|store| store.snapshot_for(viewer))
     }
 
@@ -1058,7 +1097,8 @@ impl TeamStateHandle {
         viewer: ThreadId,
         query: &HistoryQuery,
     ) -> Result<HistoryPage, TeamError> {
-        self.ensure_readable().map_err(TeamError::from)?;
+        self.ensure_readable_or_reconcile()
+            .map_err(TeamError::from)?;
         self.with_store(|store| store.history(viewer, query))
     }
 
@@ -1067,7 +1107,8 @@ impl TeamStateHandle {
     }
 
     pub fn has_pending_durable_wake(&self, participant: ThreadId) -> Result<bool, TeamError> {
-        self.ensure_readable().map_err(TeamError::from)?;
+        self.ensure_readable_or_reconcile()
+            .map_err(TeamError::from)?;
         Ok(self.with_store(|store| store.has_pending_wake(participant)))
     }
 

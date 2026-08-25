@@ -55,6 +55,15 @@ pub async fn open_rollout_line_reader(path: &Path) -> io::Result<RolloutLineRead
     reader::open_once(path).await
 }
 
+/// Opens a rollout line reader for a synchronous authority check.
+///
+/// Live Root writer permits are synchronous capabilities. Their canonical metadata check only
+/// reads the rollout head, so keep this narrow blocking counterpart instead of forcing Team state
+/// to grow an async mutation API solely for one small local read.
+pub(crate) fn open_rollout_line_reader_blocking(path: &Path) -> io::Result<BlockingLineReader> {
+    reader::open_once_blocking(path)
+}
+
 /// Returns the compressed `.jsonl.zst` path for a rollout path.
 #[cfg(test)]
 pub(crate) fn compressed_rollout_path(path: &Path) -> PathBuf {
@@ -1006,6 +1015,17 @@ mod path {
         }
         None
     }
+
+    pub(super) fn existing_rollout_path_blocking(path: &Path) -> Option<PathBuf> {
+        let plain_path = plain_rollout_path(path);
+        if std::fs::metadata(plain_path.as_path()).is_ok_and(|metadata| metadata.is_file()) {
+            return Some(plain_path);
+        }
+        let compressed_path = compressed_rollout_path(plain_path.as_path());
+        std::fs::metadata(compressed_path.as_path())
+            .is_ok_and(|metadata| metadata.is_file())
+            .then_some(compressed_path)
+    }
 }
 
 mod file_name {
@@ -1055,6 +1075,17 @@ mod reader {
         Ok(RolloutLineReader {
             inner: RolloutLineReaderInner::Plain(tokio::io::BufReader::new(file).lines()),
         })
+    }
+
+    pub(super) fn open_once_blocking(path: &Path) -> io::Result<super::BlockingLineReader> {
+        let path = path::existing_rollout_path_blocking(path).unwrap_or_else(|| path.to_path_buf());
+        let input = File::open(path.as_path())?;
+        let reader: Box<dyn Read + Send> = if path::is_compressed_rollout_path(path.as_path()) {
+            Box::new(zstd::stream::read::Decoder::new(input)?)
+        } else {
+            Box::new(input)
+        };
+        Ok(io::BufReader::new(reader).lines())
     }
 }
 

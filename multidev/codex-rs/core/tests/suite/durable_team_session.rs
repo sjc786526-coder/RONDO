@@ -34,6 +34,7 @@ use core_test_support::responses::ev_assistant_message;
 use core_test_support::responses::ev_completed;
 use core_test_support::responses::ev_function_call_with_namespace;
 use core_test_support::responses::ev_response_created;
+use core_test_support::responses::mount_sse_once_match_with;
 use core_test_support::responses::mount_sse_sequence_without_request_count_expectation;
 use core_test_support::responses::sse;
 use core_test_support::responses::start_mock_server;
@@ -47,8 +48,9 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
+use std::time::Duration;
 use walkdir::WalkDir;
 
 const NAMESPACE: &str = "collaboration";
@@ -60,24 +62,52 @@ const IMMEDIATE_CRASH_THREAD_PREFIX: &str = "DURABLE_TEAM_THREAD=";
 
 struct PersistAfterSuccessThreadStore {
     inner: Arc<dyn ThreadStore>,
-    fail_next_persist: AtomicBool,
-    fail_next_history_read: AtomicBool,
+    persist_failures_remaining: Arc<AtomicUsize>,
+    history_read_failures_remaining: Arc<AtomicUsize>,
 }
 
 impl PersistAfterSuccessThreadStore {
     fn new(inner: Arc<dyn ThreadStore>) -> Self {
-        Self::with_history_read_failure(inner, false)
+        Self::with_activation_failures(inner, 1, 0)
     }
 
     fn with_history_read_failure(
         inner: Arc<dyn ThreadStore>,
         fail_next_history_read: bool,
     ) -> Self {
+        Self::with_activation_failures(inner, 1, usize::from(fail_next_history_read))
+    }
+
+    fn with_activation_failures(
+        inner: Arc<dyn ThreadStore>,
+        persist_failures: usize,
+        history_read_failures: usize,
+    ) -> Self {
+        Self::with_failure_counters(
+            inner,
+            Arc::new(AtomicUsize::new(persist_failures)),
+            Arc::new(AtomicUsize::new(history_read_failures)),
+        )
+    }
+
+    fn with_failure_counters(
+        inner: Arc<dyn ThreadStore>,
+        persist_failures_remaining: Arc<AtomicUsize>,
+        history_read_failures_remaining: Arc<AtomicUsize>,
+    ) -> Self {
         Self {
             inner,
-            fail_next_persist: AtomicBool::new(true),
-            fail_next_history_read: AtomicBool::new(fail_next_history_read),
+            persist_failures_remaining,
+            history_read_failures_remaining,
         }
+    }
+
+    fn take_failure(counter: &AtomicUsize) -> bool {
+        counter
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |remaining| {
+                remaining.checked_sub(1)
+            })
+            .is_ok()
     }
 }
 
@@ -104,7 +134,7 @@ impl ThreadStore for PersistAfterSuccessThreadStore {
 
     fn persist_thread(&self, thread_id: ThreadId) -> ThreadStoreFuture<'_, ()> {
         let inner = Arc::clone(&self.inner);
-        let fail = self.fail_next_persist.swap(false, Ordering::SeqCst);
+        let fail = Self::take_failure(&self.persist_failures_remaining);
         Box::pin(async move {
             inner.persist_thread(thread_id).await?;
             if fail {
@@ -137,7 +167,7 @@ impl ThreadStore for PersistAfterSuccessThreadStore {
         &self,
         params: LoadThreadHistoryParams,
     ) -> ThreadStoreFuture<'_, StoredThreadHistory> {
-        if self.fail_next_history_read.swap(false, Ordering::SeqCst) {
+        if Self::take_failure(&self.history_read_failures_remaining) {
             Box::pin(async {
                 Err(ThreadStoreError::Internal {
                     message: "injected canonical intent read-back failure".to_string(),
@@ -466,6 +496,117 @@ async fn durable_team_retains_owner_when_intent_read_back_is_unavailable() -> Re
     Ok(())
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn durable_team_projection_fails_before_sampling_when_activation_stays_unavailable()
+-> Result<()> {
+    let server = start_mock_server().await;
+    let home = Arc::new(tempfile::TempDir::new()?);
+    let persist_failures = Arc::new(AtomicUsize::new(usize::MAX));
+    let history_read_failures = Arc::new(AtomicUsize::new(usize::MAX));
+    let persist_failures_for_store = Arc::clone(&persist_failures);
+    let history_read_failures_for_store = Arc::clone(&history_read_failures);
+    let mut builder = durable_team_codex()
+        .with_home(Arc::clone(&home))
+        .with_thread_store_wrapper(move |inner| {
+            Arc::new(PersistAfterSuccessThreadStore::with_failure_counters(
+                inner,
+                Arc::clone(&persist_failures_for_store),
+                Arc::clone(&history_read_failures_for_store),
+            ))
+        });
+    let created = builder.build(&server).await?;
+    let responses = mount_sse_sequence_without_request_count_expectation(
+        &server,
+        vec![assistant_reply("must-not-sample")],
+    )
+    .await;
+
+    let error = submit_turn_expect_error(&created, "durability remains unavailable").await?;
+    assert!(
+        error.contains("Team world state is unavailable"),
+        "unexpected projection failure: {error}"
+    );
+    assert_eq!(
+        responses.requests().len(),
+        0,
+        "persistent durable activation failure must stop sampling"
+    );
+
+    persist_failures.store(0, Ordering::SeqCst);
+    history_read_failures.store(0, Ordering::SeqCst);
+    created.codex.shutdown_and_wait().await?;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn durable_team_wait_fails_when_root_marker_disappears_after_sampling() -> Result<()> {
+    let server = start_mock_server().await;
+    let home = Arc::new(tempfile::TempDir::new()?);
+    let mut builder = durable_team_codex()
+        .with_home(Arc::clone(&home))
+        .with_config(|config| {
+            config.multi_agent_v2.min_wait_timeout_ms = 50;
+            config.multi_agent_v2.default_wait_timeout_ms = 50;
+        });
+    let created = builder.build(&server).await?;
+    let rollout_path = created
+        .session_configured
+        .rollout_path
+        .clone()
+        .expect("live Root rollout path");
+    assert!(
+        rollout_path.is_file(),
+        "canonical Root rollout must exist before sampling: {}",
+        rollout_path.display()
+    );
+    let hidden_path = rollout_path.with_extension("jsonl.hidden-marker");
+    let rollout_path_for_mock = rollout_path.clone();
+    let hidden_path_for_mock = hidden_path.clone();
+    let responses =
+        mount_sse_once_match_with(&server, wiremock::matchers::method("POST"), move |_| {
+            std::fs::rename(&rollout_path_for_mock, &hidden_path_for_mock)
+                .expect("hide canonical Root marker after sampling begins");
+            wait_call("wait-after-marker-loss")
+        })
+        .await;
+
+    let submission_id = created
+        .codex
+        .submit(Op::UserInput {
+            items: vec![UserInput::Text {
+                text: "wait after sampling".to_string(),
+                text_elements: Vec::new(),
+            }],
+            final_output_json_schema: None,
+            responsesapi_client_metadata: None,
+            additional_context: Default::default(),
+            thread_settings: ThreadSettingsOverrides::default(),
+        })
+        .await?;
+    let terminal = wait_for_turn_error(&created, &submission_id).await;
+    let marker_was_hidden = hidden_path.is_file();
+    if marker_was_hidden {
+        std::fs::rename(&hidden_path, &rollout_path)?;
+    }
+    let error = terminal?;
+    assert!(
+        marker_was_hidden,
+        "the initial sampling request must hide the canonical Root marker"
+    );
+    assert!(
+        error.contains("Team world state is unavailable"),
+        "unexpected wait failure: {error}"
+    );
+    assert_eq!(
+        responses.requests().len(),
+        1,
+        "wait must not complete normally or trigger another sampling while Team durability is unavailable"
+    );
+
+    created.codex.shutdown_and_wait().await?;
+    Ok(())
+}
+
 fn durable_team_codex() -> TestCodexBuilder {
     test_codex()
         .with_model("gpt-5.6-sol")
@@ -534,6 +675,47 @@ async fn submit_turn(test: &TestCodex, prompt: &str) -> Result<()> {
     })?
 }
 
+async fn submit_turn_expect_error(test: &TestCodex, prompt: &str) -> Result<String> {
+    let submission_id = test
+        .codex
+        .submit(Op::UserInput {
+            items: vec![UserInput::Text {
+                text: prompt.to_string(),
+                text_elements: Vec::new(),
+            }],
+            final_output_json_schema: None,
+            responsesapi_client_metadata: None,
+            additional_context: Default::default(),
+            thread_settings: ThreadSettingsOverrides::default(),
+        })
+        .await?;
+    wait_for_turn_error(test, &submission_id).await
+}
+
+async fn wait_for_turn_error(test: &TestCodex, submission_id: &str) -> Result<String> {
+    let mut observed = Vec::new();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let event = test.codex.next_event().await?;
+            let is_submission = event.id == submission_id;
+            match event.msg {
+                EventMsg::Error(error) if is_submission => return Ok(error.message),
+                EventMsg::TurnComplete(_) if is_submission => {
+                    anyhow::bail!("durable Team turn unexpectedly completed")
+                }
+                message => observed.push(format!("{}: {message:?}", event.id)),
+            }
+        }
+    })
+    .await
+    .map_err(|_| {
+        anyhow::anyhow!(
+            "durable Team turn {submission_id} did not report an error; prior events: {}",
+            observed.join(" | ")
+        )
+    })?
+}
+
 fn publish_call(response_id: &str, title: &str) -> String {
     sse(vec![
         ev_response_created(response_id),
@@ -555,6 +737,19 @@ fn assistant_reply(response_id: &str) -> String {
     sse(vec![
         ev_response_created(response_id),
         ev_assistant_message(response_id, "done"),
+        ev_completed(response_id),
+    ])
+}
+
+fn wait_call(response_id: &str) -> String {
+    sse(vec![
+        ev_response_created(response_id),
+        ev_function_call_with_namespace(
+            response_id,
+            NAMESPACE,
+            "wait_agent",
+            r#"{"timeout_ms":50}"#,
+        ),
         ev_completed(response_id),
     ])
 }

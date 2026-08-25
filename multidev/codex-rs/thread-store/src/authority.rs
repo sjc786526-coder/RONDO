@@ -1,5 +1,7 @@
 use codex_protocol::ThreadId;
+use codex_protocol::protocol::SessionMeta;
 use std::fmt;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::MutexGuard;
@@ -72,6 +74,21 @@ impl RootWritePermit {
     pub fn thread_id(&self) -> ThreadId {
         self.state.thread_id
     }
+
+    /// Reads the canonical metadata owned by this live Root writer.
+    ///
+    /// Team durability uses this while the write permit is live so a snapshot read or commit
+    /// cannot report success after the Root lineage marker has disappeared or changed.
+    pub fn read_session_meta(&self) -> ThreadStoreResult<SessionMeta> {
+        codex_rollout::read_session_meta_line_blocking(&self.state.rollout_path)
+            .map(|line| line.meta)
+            .map_err(|error| ThreadStoreError::Internal {
+                message: format!(
+                    "cannot read canonical SessionMeta for Root thread {}: {error}",
+                    self.state.thread_id
+                ),
+            })
+    }
 }
 
 impl fmt::Debug for RootWritePermit {
@@ -140,6 +157,7 @@ impl Drop for RootClosePermit {
 
 pub(crate) struct RootWriterAuthorityState {
     thread_id: ThreadId,
+    rollout_path: PathBuf,
     inner: Mutex<AuthorityInner>,
     writes_drained: Notify,
     // A write permit clones this state, so the canonical OS writer lock remains held through the
@@ -170,9 +188,14 @@ pub(crate) enum OwnerCloseState {
 }
 
 impl RootWriterAuthorityState {
-    pub(crate) fn new(thread_id: ThreadId, writer_lock: WriterLockGuard) -> Arc<Self> {
+    pub(crate) fn new(
+        thread_id: ThreadId,
+        rollout_path: PathBuf,
+        writer_lock: WriterLockGuard,
+    ) -> Arc<Self> {
         Arc::new(Self {
             thread_id,
+            rollout_path,
             inner: Mutex::new(AuthorityInner {
                 owner_attached: true,
                 lifecycle: AuthorityLifecycle::Active,
@@ -399,7 +422,11 @@ mod tests {
         let coordinator = Arc::new(WriterLockCoordinator::new(home.path()));
         let thread_id = codex_protocol::ThreadId::default();
         let writer_lock = coordinator.acquire(thread_id).expect("writer lock");
-        let state = RootWriterAuthorityState::new(thread_id, writer_lock);
+        let state = RootWriterAuthorityState::new(
+            thread_id,
+            home.path().join("rollout.jsonl"),
+            writer_lock,
+        );
         (home, state)
     }
 

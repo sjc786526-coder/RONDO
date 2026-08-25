@@ -37,7 +37,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use tokio::sync::Semaphore;
 
-struct DurableRootActivation {
+pub(super) struct DurableRootActivation {
     identity: DurableTeamIdentity,
     marker_ready: AtomicBool,
     complete: AtomicBool,
@@ -65,7 +65,7 @@ pub(crate) struct Session {
     pub(crate) team_participant_identity: Option<(ParticipantRole, String)>,
     /// Keeps a fresh durable Root reachable while canonical marker publication or generation-1
     /// registration remains indeterminate. All Team access fails closed until `complete`.
-    durable_root_activation: Option<DurableRootActivation>,
+    pub(super) durable_root_activation: Option<DurableRootActivation>,
     pub(crate) installation_id: String,
     pub(super) tx_event: Sender<Event>,
     pub(super) agent_status: watch::Sender<AgentStatus>,

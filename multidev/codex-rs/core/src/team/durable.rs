@@ -168,6 +168,9 @@ impl TeamWritePermit for LocalTeamWritePermit {
     fn read_snapshot(&mut self) -> Result<Option<Vec<u8>>, TeamDurabilityError> {
         let snapshot = read_snapshot_file(&self.snapshot_path)?;
         if snapshot.is_some() {
+            // A fresh Team intentionally has neither marker nor generation zero. Once any
+            // committed snapshot exists, every owner read must prove the independent Root marker.
+            self.validate_root_intent()?;
             sync_parent_directory(&self.snapshot_path, "durable Team snapshot")?;
         }
         Ok(snapshot)
@@ -178,12 +181,32 @@ impl TeamWritePermit for LocalTeamWritePermit {
         expected_generation: u64,
         snapshot: Vec<u8>,
     ) -> Result<(), TeamDurabilityError> {
+        self.validate_root_intent()?;
         replace_snapshot(
             self.identity,
             &self.snapshot_path,
             expected_generation,
             &snapshot,
-        )
+        )?;
+        if let Err(error) = self.validate_root_intent() {
+            // The Team snapshot is already complete, but lineage disappeared before the success
+            // boundary. Report an indeterminate commit so reconciliation may later accept either
+            // generation after the canonical marker becomes readable again.
+            return Err(TeamDurabilityError::unknown(format!(
+                "canonical Root SessionMeta became unreadable after Team snapshot replacement: {error}"
+            )));
+        }
+        Ok(())
+    }
+}
+
+impl LocalTeamWritePermit {
+    fn validate_root_intent(&self) -> Result<(), TeamDurabilityError> {
+        let session_meta = self
+            .root_permit
+            .read_session_meta()
+            .map_err(map_thread_store_error)?;
+        validate_session_intent(&session_meta, self.identity)
     }
 }
 
@@ -553,6 +576,69 @@ mod tests {
             validate_durable_team_resume(home.path(), &unsupported_meta, identity),
             Err(TeamDurabilityError::UnsupportedVersion { .. })
         ));
+    }
+
+    #[tokio::test]
+    async fn live_owner_rejects_reads_and_mutations_after_session_meta_disappears() {
+        let home = TempDir::new().expect("temp durable Team home");
+        let root_thread_id = ThreadId::new();
+        let identity = DurableTeamIdentity::new(SessionId::new(), root_thread_id);
+        let thread_store = local_thread_store(home.path());
+        let live_thread = LiveThread::create(
+            Arc::clone(&thread_store),
+            create_thread_params(home.path(), identity),
+        )
+        .await
+        .expect("create Root thread");
+        live_thread
+            .persist()
+            .await
+            .expect("materialize canonical Root rollout");
+        let rollout_path = live_thread
+            .local_rollout_path()
+            .await
+            .expect("read live rollout path")
+            .expect("local Root has a rollout path");
+        let session_meta = session_meta(home.path(), identity).await;
+        let authority = root_team_write_authority(
+            &thread_store,
+            home.path(),
+            identity,
+            session_meta.durable_team.expect("durable Session intent"),
+        )
+        .await
+        .expect("derive Root authority");
+        let team = TeamStateHandle::create_durable(authority).expect("create durable Team");
+        team.register_durable_participant(
+            root_thread_id,
+            ParticipantRole::Root,
+            "/root".to_string(),
+        )
+        .expect("commit initial Team snapshot");
+        let snapshot_path = snapshot_path(home.path(), root_thread_id);
+        let before = std::fs::read(&snapshot_path).expect("read generation 1");
+
+        std::fs::remove_file(&rollout_path).expect("remove canonical Root SessionMeta");
+        assert!(matches!(
+            team.snapshot_for(root_thread_id),
+            Err(codex_team_state::TeamError::Durability { .. })
+        ));
+        assert!(matches!(
+            team.publish(
+                root_thread_id,
+                &Submission {
+                    based_on: team.revision(),
+                    request_id: "missing-root-marker".to_string(),
+                },
+                publish_request("must fail closed"),
+            ),
+            Err(codex_team_state::TeamError::Durability { .. })
+        ));
+        assert_eq!(
+            std::fs::read(&snapshot_path).expect("read unchanged Team snapshot"),
+            before,
+            "a missing Root marker must prevent the next Team generation"
+        );
     }
 
     #[tokio::test]

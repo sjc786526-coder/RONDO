@@ -354,7 +354,7 @@ pub(crate) async fn run_turn(
             // compaction runs first and the view is measured again against the smaller prompt;
             // sampling without it would let the model decide while being shown an idle team.
             let mut team_projection =
-                resolve_team_projection(&sess, &step_context, &sampling_request_input).await;
+                resolve_team_projection(&sess, &step_context, &sampling_request_input).await?;
             if matches!(
                 team_projection,
                 crate::team::TeamProjectionOutcome::NeedsRoom
@@ -387,7 +387,7 @@ pub(crate) async fn run_turn(
                     &mut executed_tool_calls_by_output,
                 );
                 team_projection =
-                    resolve_team_projection(&sess, &step_context, &sampling_request_input).await;
+                    resolve_team_projection(&sess, &step_context, &sampling_request_input).await?;
                 if matches!(
                     team_projection,
                     crate::team::TeamProjectionOutcome::NeedsRoom
@@ -1522,7 +1522,7 @@ async fn resolve_team_projection(
     sess: &Arc<Session>,
     step_context: &Arc<StepContext>,
     prompt_input: &[ResponseItem],
-) -> crate::team::TeamProjectionOutcome {
+) -> CodexResult<crate::team::TeamProjectionOutcome> {
     let turn_context = step_context.turn.as_ref();
     let base_instructions = sess.get_base_instructions().await;
     let tools = step_context.tool_router.model_visible_specs();
@@ -1536,6 +1536,9 @@ async fn resolve_team_projection(
         },
     )
     .await
+    .map_err(|error| {
+        CodexErrorDetails::Fatal(format!("Team world state is unavailable: {error}")).into()
+    })
 }
 
 pub(crate) struct PreparedToolRecommendations {

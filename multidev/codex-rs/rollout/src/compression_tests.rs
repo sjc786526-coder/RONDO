@@ -26,6 +26,7 @@ use crate::RolloutRecorder;
 use crate::RolloutRecorderParams;
 use crate::append_rollout_item_to_path;
 use crate::read_session_meta_line;
+use crate::read_session_meta_line_blocking;
 use crate::search_rollout_matches;
 
 #[tokio::test]
@@ -60,8 +61,10 @@ async fn read_session_meta_line_stops_before_invalid_utf8_tail() -> anyhow::Resu
     fs::write(&rollout_path, contents)?;
 
     let session_meta = read_session_meta_line(&rollout_path).await?;
+    let blocking_session_meta = read_session_meta_line_blocking(&rollout_path)?;
 
     assert_eq!(session_meta.meta.id, thread_id);
+    assert_eq!(blocking_session_meta.meta.id, thread_id);
     Ok(())
 }
 
@@ -78,8 +81,10 @@ async fn read_session_meta_line_stops_before_invalid_utf8_compressed_tail() -> a
     compress_now(&rollout_path)?;
 
     let session_meta = read_session_meta_line(&rollout_path).await?;
+    let blocking_session_meta = read_session_meta_line_blocking(&rollout_path)?;
 
     assert_eq!(session_meta.meta.id, thread_id);
+    assert_eq!(blocking_session_meta.meta.id, thread_id);
     assert!(!rollout_path.exists());
     assert!(compressed_rollout_path(&rollout_path).exists());
     Ok(())
