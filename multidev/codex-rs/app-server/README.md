@@ -498,13 +498,13 @@ query or background synchronization.
 
 `experimentalSession/list` discovers only root candidates already present in the state DB and
 forces the no-repair path; it never scans rollout JSONL to fill missing metadata. Child rows are
-filtered while the server follows state-DB pages under a fixed scan budget, so a child-only source
-page is not reported as `sessions: none`. A query error, an unclassifiable row, or exhausted scan
-budget makes the result incomplete; a query error additionally returns `provenance: "unavailable"`
-instead of claiming an authoritative empty set. `experimentalSession/read` reads stored metadata
-without history and overlays bounded live facts only when a matching runtime is already loaded.
-Neither request obtains a writer, repairs metadata, resumes or restores a Session, or starts an
-Agent, model, or API call.
+filtered while the server follows a stable recency-plus-thread-id state-DB cursor under a fixed scan
+budget, so neither child-only source pages nor equal-millisecond page boundaries can hide a Root. A
+query error, an unclassifiable row, or exhausted scan budget makes the result incomplete; a query
+error additionally returns `provenance: "unavailable"` instead of claiming an authoritative empty
+set. `experimentalSession/read` reads stored metadata without history and overlays bounded live
+facts only when a matching runtime is already loaded. Neither request obtains a writer, repairs
+metadata, resumes or restores a Session, or starts an Agent, model, or API call.
 
 Every returned view keeps these facts independent:
 

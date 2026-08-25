@@ -260,10 +260,13 @@ git-ignored 工作。共享构建锁和监控 target 由仓库既有 `just`/watc
 - 整改后的正式聚焦证据为：protocol/features 327 项通过（1 项跳过）；app-server/client `experimental_session` 23 项通过；TUI
   `experimental_session` 6 项与独立 tooltip 1 项通过；最终代码形态的真实 response-loss transport 注入 1/1 通过。stable 与
   experimental schema generator 各 1/1 通过且没有 tracked schema 差异。
+- 用户指定审查者在提交 `2e8d027` 确认前次 7 项 finding 均已闭合，并指出 CreatedAt timestamp-only cursor 会在同毫秒 source page
+  边界永久漏掉 overflow Root。执行者用 26 个同毫秒 Root 的公共 JSON-RPC 回归精确复现后，把 C0 discovery 改为 state 层现有
+  `RecencyAt + thread-id` 稳定双键；同一回归转绿，app-server `experimental_session` 13/13 全集通过。
 
 ### 当前工作
 
-- 无；7 项验收整改的实现、聚焦验证、机械门禁和提交前检查均已完成。
+- 无；同毫秒 bounded-discovery 修复、聚焦验证、最终 scoped fix/format 和提交前检查均已完成。
 
 ### 本任务剩余步骤
 
@@ -275,9 +278,9 @@ git-ignored 工作。共享构建锁和监控 target 由仓库既有 `just`/watc
 
 ### 当前验收状态
 
-- 7 项外部验收 finding 已在 070 所有权内修复并取得相称聚焦证据，最终 scoped `just fix` 与 `just fmt` 通过；执行者在提交干净后
-  重新给出 `M4_C0_PROTOTYPE_PASS` 候选，并等待用户指定审查者复验。先前完整门禁的 16 项范围外失败继续如实保留，不因本次整改重跑
-  14k 门禁。Docker、真实 API/模型、训练、测评、CI/PR、远端状态均未使用。
+- 前次 7 项 finding 与本轮同毫秒 cursor finding 均已在 070 所有权内修复并取得相称聚焦证据，最终 app-server scoped `just fix` 与
+  `just fmt` 通过；执行者重新给出 `M4_C0_PROTOTYPE_PASS` 候选，并等待用户指定审查者复验。先前完整门禁的 16 项范围外失败继续如实
+  保留，不因本次整改重跑 14k 门禁。Docker、真实 API/模型、训练、测评、CI/PR、远端状态均未使用。
 
 ### 交接边界
 
@@ -314,3 +317,4 @@ git-ignored 工作。共享构建锁和监控 target 由仓库既有 `just`/watc
 | 021 | cold unarchive 只对 stored metadata 可证明的 canonical Root 开放；直接 child query 同样复核 current/running Root，否则统一投影为 ChildOnly | 既有 `thread/unarchive` 按 id 生效，不替 Session 原型证明 Root；query id 不能改变同一拓扑的 owner 可用性结论 | app-server/lifecycle | 已采纳 |
 | 022 | TUI 为每次 C0 mutation request 使用固定有界 confirmation deadline 和 typed per-attempt 结果；超时/未确认即 stale+unknown，不 retry，不清空诚实的历史 certainty | 活连接上的真实 response loss 不会触发 disconnect；专用 attempt 边界可解除永久 pending，同时避免建设通用 transport 平台或把旧 Unknown 错配给未提交的新操作 | client/TUI | 已采纳 |
 | 023 | 默认关闭的 Session feature 不加入全局 startup tooltip；`prototypeFacts` 缺省按 v2 局部规则显式序列化为 `null` | 关闭态不能产生用户可见宣传，v2 payload 的 optional 字段不能依赖 skip serialization | feature/protocol | 已采纳 |
+| 024 | C0 discovery 使用 StateRuntime 现有 `RecencyAt + thread-id` 双键，不继续使用 CreatedAt timestamp-only cursor | 相同 `created_at_ms` 的 overflow row 会被严格 timestamp keyset 永久跳过；现成 RecencyAt keyset 已生成/消费 thread-id tie-breaker，无需修改 state 或新增分页平台 | app-server/query | 已采纳 |

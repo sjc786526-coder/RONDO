@@ -305,6 +305,64 @@ async fn session_list_scans_past_a_full_child_page_to_find_the_root() -> Result<
 }
 
 #[tokio::test]
+async fn session_list_cursor_enumerates_roots_with_the_same_millisecond_timestamp() -> Result<()> {
+    let codex_home = TempDir::new()?;
+    let mut expected = std::collections::BTreeSet::new();
+    for index in 0..26 {
+        expected.insert(create_fake_rollout(
+            codex_home.path(),
+            "2026-08-24T12-30-00",
+            "2026-08-24T12:30:00.123Z",
+            &format!("same-millisecond Root {index}"),
+            Some("mock_provider"),
+            /*git_info*/ None,
+        )?);
+    }
+    write_session_config(codex_home.path(), "http://127.0.0.1:1", false)?;
+    let mut mcp = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .without_auto_env()
+        .build_initialized_with_timeout(DEFAULT_TIMEOUT)
+        .await?;
+
+    let first_request = mcp
+        .send_experimental_session_list_request(ExperimentalSessionListParams {
+            cursor: None,
+            limit: Some(25),
+        })
+        .await?;
+    let first: ExperimentalSessionListResponse =
+        timeout(DEFAULT_TIMEOUT, mcp.read_response(first_request)).await??;
+    assert!(first.complete);
+    assert_eq!(first.data.len(), 25);
+    let cursor = first
+        .next_cursor
+        .expect("the final same-millisecond Root should remain on a second page");
+
+    let second_request = mcp
+        .send_experimental_session_list_request(ExperimentalSessionListParams {
+            cursor: Some(cursor),
+            limit: Some(25),
+        })
+        .await?;
+    let second: ExperimentalSessionListResponse =
+        timeout(DEFAULT_TIMEOUT, mcp.read_response(second_request)).await??;
+    assert!(second.complete);
+    assert_eq!(second.data.len(), 1);
+    assert_eq!(second.next_cursor, None);
+
+    let observed = first
+        .data
+        .into_iter()
+        .chain(second.data)
+        .map(|session| session.identity.session_id)
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(observed, expected);
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn session_list_and_read_do_not_activate_an_unloaded_session() -> Result<()> {
     let model_server = create_mock_responses_server_repeating_assistant("Done").await;
     let codex_home = TempDir::new()?;

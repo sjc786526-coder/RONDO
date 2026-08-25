@@ -96,7 +96,9 @@ impl ThreadRequestProcessor {
                         cwd_filters: None,
                         section: None,
                         anchor: anchor.as_ref(),
-                        sort_key: codex_state::SortKey::CreatedAt,
+                        // RecencyAt is the existing global-list key with a thread-id
+                        // tie-breaker, so equal-millisecond rows remain reachable by cursor.
+                        sort_key: codex_state::SortKey::RecencyAt,
                         sort_direction: codex_state::SortDirection::Desc,
                         search_term: None,
                     },

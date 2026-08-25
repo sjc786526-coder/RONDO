@@ -114,3 +114,19 @@
   `target/debug/incremental` 15,923,028,986 bytes，保留其余构建产物；clippy 后 RONDO 总占用 248,540,674,571 bytes，低于本轮
   265 GB 告警线。提交前再次删除 clippy 重建的 4,385,849,609 bytes incremental，最终总占用 244,310,411,952 bytes；未清理
   `eval-data/uv-cache`。
+
+## 同毫秒 cursor 验收整改
+
+- 用户指定审查者的提交 `2e8d027` 确认前次 7 项 finding 均已闭合，但发现 C0 的 CreatedAt keyset 不带 thread-id tie-breaker；相同
+  `created_at_ms` 的 overflow row 会被下一页的严格 timestamp 条件永久跳过，随后仍可能报告 complete。
+- 新增公共 JSON-RPC 回归创建 26 个相同 `2026-08-24T12:30:00.123Z` 的 Root，以 limit 25 逐页枚举。旧实现稳定复现第一页 25 条、
+  timestamp-only cursor、第二页 0 条的错误（run `03d16a7a-9b6a-487b-8810-2a96cb18c083`，两次尝试均失败）。
+- 最窄修复只把 C0-owned app-server discovery 的 state 查询键切换为现有 `RecencyAt`；该 state keyset 已以 thread id 作为同毫秒
+  tie-breaker，现有 C0 cursor codec 也已支持 `timestamp|threadId`。没有改 protocol、state、thread-store、rollout 或 TUI，也没有新增通用
+  分页设施。修复后同一回归 1/1 通过（run `23ab43b6-5423-41ba-8f44-83af3378b91f`），26 个 Root 无重复无遗漏，第二页返回最后一条并
+  正确耗尽 cursor；app-server `experimental_session` 全集 13/13 通过（run `85e47146-0249-4c7f-a35b-e634691ab5bd`）。
+- 本轮没有协议/schema 变化，按审查边界未重跑 generator、TUI/client/protocol 或 14k workspace 门禁。正式 query 拆包输入应保留稳定
+  双键 cursor；C0 选择产品 recency 只是原型排序策略，不提前冻结正式 durable Session 排序合同。
+- app-server scoped `just fix` 无 warning、无额外代码修正，随后 `just fmt` 通过；按仓库顺序未在 fix/fmt 后重跑测试。提交前精确删除
+  本轮最终 clippy 重建的 7,291,357,600 bytes 070 incremental，保留其余构建产物和 uv cache；RONDO 最终约
+  244,621,749,674 bytes，低于本轮 265 GB 告警线。
