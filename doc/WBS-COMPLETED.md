@@ -1869,3 +1869,48 @@ correctness/functionality `remaining_findings=[]`，路线结论为 `GO`。
   独立终审按用户指定冻结最新 provider 快照总费用 `$10.9647715263`，距 `$23` 连续硬上限 `$12.0352284737`。
 - final-02 的 v1/v2 兼容、费用算术、哈希绑定与预算门正确；终审 focused 11/11、三个 launcher `bash -n` 和 diff 门禁通过。
   本结论只使候选具备进入 M3-C1 独立工作包的资格，不代表模型质量、threshold、部署或产品收益通过，也不自动授权 M3-C1。
+
+## RONDO Multi 四期共同合同（Plan 067 / M4-A，2026-08-24）
+
+**状态**：共同产品合同、两轮独立审查整改与最终复验均已完成；验收通过、任务目标完成，结论为 `M4_A_GO`。
+合同提交为 `c9a6f8795a2e55f7d358a57ab558350158a5f505`，整改提交为
+`304510dcf16055bb69a9086f227e0ded132a9a8e`，最终独立验收提交为
+`309e1d64864ae616124d51b6fdbe2ae74f170574`。
+
+- 冻结 `SessionId`、canonical Root `ThreadId`、`TeamInstanceId` 的 lineage、生命周期/authority anchor 与 Team generation
+  职责，并统一 resume、顶层 fork、child `spawn_agent fork_turns`、`/new`、slash `/clear`、detach、idle unload、退出和冷态
+  archive/unarchive/delete 的产品语义。
+- canonical Team State 保持唯一状态权威；现有 Root active-writer 作为唯一排他基础做架构内扩展，并增加与 Team State 集成的
+  专用 durability/read 能力。durable success、committed read、失败关闭、partial/unknown 与损坏/不兼容降级均已有明确边界，
+  child writer 不能绕过 Root 归属。
+- 独立审查补齐两项真实遗漏：mutation-capable descendant 存活时 Root/Team close 不得完成或释放 authority；第四期 WBS 按已提交
+  main 同步三期完成与资源终态。具体锁、permit、状态机、持久介质、API、字段、调用顺序和测试 fixture 仍由下游自主决定。
+- 四项 `v0.149.1` 候选增量均已明确采用、条件适配或延期决定及消费边，但本任务未回移或升级上游。M4-S1、M4-C0、M4-W0
+  可分别建立 ExecPlan；正式 W1 仍等待 W0 binding GO 与 S1 接缝，W 线不阻塞 S/C 核心收口。
+- 验收只使用现行源码、既有测试定义、冻结上游与官方 PR 的静态证据，并通过精确写集、链接、术语和 `git diff --check`；未运行
+  Cargo/Rust、Docker、真实 API/模型、训练、测评、全 workspace、CI 或 PR，也未修改 Plan 068 内容。
+
+## Publication Critic 本地部署资格与候选交接（Plan 068 / M3-C1，2026-08-24）
+
+**状态**：本地工件交接、真实模型服务接入、四对象正式资格运行、独立审查整改、远端清理与最终验收均已完成；
+实现和任务流程验收通过。base `NOT_QUALIFIED`、C1 `QUALIFIED`、C2 `NOT_QUALIFIED`、C3 `QUALIFIED`，
+但因 base 对照未取得同口径资格，M3-C2 前置未满足。资格与远端清理提交为
+`261164fb82747b2f175b5f29613bec1a56a756fa`，最终独立验收提交为
+`a0f0220452a1f8f084a0645888e7de5918db84eb`。
+
+- 通过无 Pod RunPod S3 入口安全接收并验证 120/120 个必要对象、24,385,153,354 bytes，覆盖 exact base、
+  C1/C2/C3、正式 checkpoint 与必要恢复环境；本地副本的 bytes/hash/身份闭合，unseen-test 始终封存。
+- 在 Plan 055/057 的既有协议、typed failure 与产品语义上接入真实 scorer，正式部署路径使用原始 safetensors 与
+  CUDA BF16，CPU FP32 作为转换前 reference；没有量化、修改权重、继续训练或另建通用模型服务体系。
+- 调试阶段先用 fresh worker 完成窄 commissioning，再冻结统一 BF16 projected cap `0.005` 和干净正式配置。
+  唯一有效正式轮为 `plan068-formal-20260824T222852Z-qualification-v3`：base 因 projected drift
+  `0.03404159` 和 1 次临时 verdict mismatch 失败；C2 因 ranking/direction 失败；C1/C3 的 runner/service
+  projected parity、0 verdict mismatch、15/15 stress、typed failure、取消与关闭语义通过，本地资源和延迟适合既定有界场景。
+- 正式 evidence、freeze、offline/service observations 与 result 以普通 JSON/SHA-256 绑定；此前调试或基础设施失败轮均明确失效，
+  未拼接成正式结果。相关定向 Python 113/113、Rust 34/34、整改复验 41/41，以及 fmt/lock/compileall/diff 门禁通过；
+  最终清理未改变代码、模型或资格证据，因此未机械重跑真实模型、Cargo 或 Docker。
+- 本地交接经独立审查明确接受后，永久删除 exact RunPod winner 卷 `hi3iaz8rsr`；删除后实时复核为 0 Pod、
+  0 volume，当前 compute/volume 持续费用均为 0。本地候选、正式 checkpoint 与资格证据继续保留。
+- 未运行 unseen-test、真实 API、Docker、云端训练或 Hugging Face 上传，未启动 M3-C2/M3-D，也未默认启用 Critic。
+  任务执行日志见 `agent_log/2026-08-24-210426-plan068-local-qualification.md`，最终独立验收见
+  `agent_log/2026-08-24-185009-plan068-final-review.md`。

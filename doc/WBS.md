@@ -1,6 +1,6 @@
 # RONDO 长程规划（WBS）
 
-最后更新：2026-08-24（Plan 068 / M3-C1 阶段 A 的无 Pod S3 可达性已验证，本地候选交接尚未开始）
+最后更新：2026-08-24（Plan 067 / M4-A 与 Plan 068 / M3-C1 均已完成并通过独立验收）
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段指针、跨方向关系、
 稳定工程边界和授权门；已完成成果与验收见 `doc/WBS-COMPLETED.md`，单次任务合同见 `plan/`，执行细节见
@@ -20,7 +20,7 @@
 | 0：量化测评基准 | 既有设施与首次 schema v7 正式 canary 已完成，当前无 active campaign | 保留设施；历史结果见 COMPLETED，新 campaign 须重新立项与授权 |
 | 1：Harness 优化 | **正式收口；当前无 active 工作包** | 当前不继续新增观测或内核/热路径优化；既有实现、设施与历史结果保留。未来可由用户另行决定是否重新立项，本次收口不作永久禁止 |
 | 2：本地审批模型 | **已收口，今后不再开启** | 最终结论为“保留为实验”；不改生产默认，不再规划后续工作包 |
-| 3：RONDO Multi | 第一、二期及其收口案例、**三期 M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b 与 Plan 064 已完成**；Plan 068 / M3-C1 阶段 A 已验证无 Pod S3 可达性，本地交接待执行；四期状态由独立 Plan 067 维护 | Plan 068 已确认 0 Pod、exact winner 卷和 S3 只读入口；下一步是本地接收 base/C1/C2/C3 与必要恢复工件、真实 scorer、四候选部署资格和卷最终交接。完成前不得进入 M3-C2；M4-A 状态以其独立 worktree/后续主线整合为准 |
+| 3：RONDO Multi | 第一、二期及其收口案例、**三期 M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、Plan 064 与四期 M4-A 已完成** | M3-C1 结论为 base/C2 `NOT_QUALIFIED`、C1/C3 `QUALIFIED`；因 base 对照未通过同口径资格，M3-C2 前置为 false，三期下一包须先修正并重验 base 本地部署可比性，不得直接启动 M3-C2。RunPod 已为 0 Pod/0 volume、持续费用为 0；M4-A 结论为 `M4_A_GO`，其下游分别建立 ExecPlan |
 
 ### 方向命名口径
 
@@ -55,15 +55,17 @@
   `remaining_findings=[]`，最终验收通过，结论为 `TECHNICAL_GO`。Plan 060 与 Plan 066 从原 Plan 060 基线连续计入 23 USD 总账；
   Plan 066 已统一收口计算资源终态；final-01 terminal receipt 因延迟追账 superseded，final-02 保留生成时的控制台费用快照，最终费用口径见下项。
 - M3-B1c / Plan 066 已在当前唯一 H100 PCIe 80GB 上从 exact base 干净执行 C1→C2→C3，实际消费 128 Binary、50 Boundary 与 8
-  Within-PASS，保存并复验三个阶段候选、固定 validation 与完整恢复点，新进程 step 3→4 继续更新通过。计算 Pod 已永久删除，winner 卷保留
-  formal checkpoint、三个候选、exact 模型与可复用环境。独立验收按用户指定冻结终审最新 provider 快照总费用 `$10.9647715263`，距 `$23`
+  Within-PASS，保存并复验三个阶段候选、固定 validation 与完整恢复点，新进程 step 3→4 继续更新通过。计算 Pod 已永久删除；Plan 068
+  随后把 formal checkpoint、三个候选、exact 模型与必要环境安全交接到本地并删除 winner 卷。独立验收按用户指定冻结终审最新 provider 快照总费用 `$10.9647715263`，距 `$23`
   硬上限 `$12.0352284737`；correctness/functionality `remaining_findings=[]`，结论为 `GO`。该训练结论解除 M3-C1 前置，
-  但本身不授予模型质量、threshold、部署或产品资格；后续资格由已立项的 Plan 068 独立判断。
-- M3-C1 / Plan 068 已建立独立 ExecPlan 并进入阶段 A：0 Pod、exact winner 卷、既有 S3 凭据安全入口及无 Pod `HeadBucket`/有界目录可见性
-  已验证，当前尚未下载 winner 卷工件或运行真实本地模型。它只负责
-  base/C1/C2/C3 的本地部署资格、真实 scorer/service 一致性、资源与漂移事实，以及本地安全交接后的 task-only winner 卷止费；
-  不排名模型、不冻结最终 threshold、不默认启用 Critic。只有 base 与至少一个训练候选在同一口径下取得资格，才解除 M3-C2 前置；
-  M3-C2 仍须另行规划和授权。
+  但本身不授予模型质量、threshold、部署或产品资格；资格已由 Plan 068 独立判断，见下项。
+- M3-C1 / Plan 068 已完成本地工件交接、真实 scorer/service 接入、四对象正式资格运行、独立验收与远端止费。正式 v3 结论为
+  base `NOT_QUALIFIED`、C1 `QUALIFIED`、C2 `NOT_QUALIFIED`、C3 `QUALIFIED`：base 未过 projected drift 与临时 verdict parity，
+  C2 未过 ranking/direction，C1/C3 的 runner/service 一致性、稳定性和有界资源门通过；unseen-test 未用于适配或选择。
+  本地保留 120/120 个必要对象与正式 checkpoint；RunPod exact winner 卷已删除，当前 0 Pod、0 volume、持续费用为 0。
+- Plan 068 的技术实现与任务流程验收通过，但约定要求 base 对照和至少一个训练候选同口径可比，因此
+  `m3_c2_prerequisite_satisfied=false`。三期下一包应先在不改冻结权重、数据、产品语义或最终 threshold 的前提下，修正并重验
+  base 本地部署可比性；具体路线另建 ExecPlan。M3-C2 与 M3-D 均未启动，也未获实施授权。
 
 ### 方向 3：Durable Team Runtime 四期
 
@@ -71,11 +73,11 @@
   只绑定调用者已准备且授权的 worktree，价值门证明需要时才附加 minimal handoff，不建设 workspace registry、ChangeSet
   生命周期或 Git 资产平台。
 - 四期详细 WBS 见 [`doc/WBS/durable-team-runtime.md`](WBS/durable-team-runtime.md)。M4-A 是共同前置，之后 Session、控制面原型
-  和 M4-W0 价值原型可有界并行；S/C 可以独立完成 M4-Z(core)，正式 W 实现须先获得 binding GO。M4-A 当前规划与授权状态由独立
-  Plan 067 worktree 及其后续主线整合维护；Plan 068 的授权不延伸到 M4-A。
+  和 M4-W0 价值原型可有界并行；S/C 可以独立完成 M4-Z(core)，正式 W 实现须先获得 binding GO。Plan 067 已完成共同合同并经
+  独立验收接受 `M4_A_GO`；M4-S1、M4-C0、M4-W0 可分别建立 ExecPlan，但本结论不自动授予其实施或外部资源授权。
 - 四期不依赖 Publication Critic 训练、真实模型、真实 API 或性能测评，可以与三期模型链并行；它保持 shared workspace
   为默认，不建设通用 scheduler、自动路由、自动 merge/push、第二套 Team State/trace 或审计/可信平台。
-- 三期云计算不占本地 Cargo build lock，可与四期有界并行开发；bundle/checkpoint/结果传输仍竞争本地网络与磁盘，
+- 三期未来另行授权的云计算不占本地 Cargo build lock，可与四期有界并行开发；bundle/checkpoint/结果传输仍竞争本地网络与磁盘，
   四期重型 Cargo 与三期本地模型、Docker 等重型任务按根 `AGENTS.md` 串行错峰。详细资源关系见四期子 WBS。
 
 如果未来重新启动方向 1，它仍与方向 3 保持产品源码和任务合同独立；本地重型 Cargo、Docker、真实本地模型
