@@ -47,8 +47,8 @@ Team State、writer authority、Session identity 或只读状态源。
 - [ ] **故障与领域回归**：用相称的 deterministic/fake、领域、跨进程和故障注入回归覆盖 root/child mutation、双进程竞争、非 owner
   committed read、authority 丢失、提交失败/结果未知、损坏与不兼容、失败 close 及 Root-close-with-live-child。测试必须验证可观察
   结果和恢复后的真实状态，不以只检查文件存在、marker 或 mock 调用次数替代产品行为。
-- [ ] **最终前置与正式轮**：`#37198` 由独立任务合同完成 RONDO 窄回移并进入 `main`；在用户另行批准把该最新 `main` 合入 069 分支后，
-  闭合 persisted cwd 与 live execution override 的聚焦回归，并从全新的任务专用 Session/store 状态完整重跑一次 S1 主链，以该轮作为
+- [ ] **最终前置与正式轮**：Plan 074 已把 `#37198` 的 RONDO 窄回移送入指定 `main`，用户也已批准 069 吸收该主线；仍须闭合
+  persisted cwd 与 live execution override 的聚焦回归，并从全新的任务专用 Session/store 状态完整重跑一次 S1 主链，以该轮作为
   正式结果。“全新状态”指新的领域状态和最终代码/配置，不要求 `cargo clean`。
 - [ ] **独立验收**：实现、相关门禁和最终正式轮均有可复核记录；独立审查无未关闭的高/中等级 correctness finding。普通 finding 允许
   执行者自主窄修、重跑和复验，不因首次失败整组作废。
@@ -68,8 +68,8 @@ Team State、writer authority、Session identity 或只读状态源。
 
 ### 不允许修改
 
-- `doc/WBS.md`、`doc/WBS/multi-agent-trusted-evidence.md`、`doc/WBS/durable-team-runtime.md`、`doc/WBS-COMPLETED.md`。并行开发期不在
-  069 分支同步路线或完成状态；后续获批的主线整合者基于最新 `main` 窄同步。
+- 阶段 E 正式结论形成前，不更新 `doc/WBS.md`、`doc/WBS/durable-team-runtime.md` 或 `doc/WBS-COMPLETED.md` 宣布完成。只有正式轮
+  与独立终审均满足本计划标准后，才按用户本轮授权基于已吸收的最新 `main` 窄同步这些权威文档；无需为同一结论扩写其它 WBS。
 - Plan 068 的 Publication Critic crate、`eval/`、训练/模型部署/资格资产、计划或日志；也不消费其模型、Docker、远端资源或未提交结果。
 - Plan 070 拥有的 experimental app-server v2/client/TUI 协议、正式/实验控制面 API、通知、UI 和其 schema/test 资产。若 Root authority
   或 close barrier 的领域结果确实需要现有 app-server 内部 lifecycle consumer 做窄适配，069 只能在共享面串行规则下接入该结果，
@@ -83,7 +83,7 @@ Team State、writer authority、Session identity 或只读状态源。
 ### 不允许读取/查看
 
 - `.env.local` 内容、任何密钥/凭据、ignored 私有模型或测评正文、训练输出/权重，以及项目外个人文件或私有数据。
-- Plan 068、070 或其他 worktree 的未提交文件、diff、commit 内容或设计；并行核对只使用 `git worktree list`、branch/HEAD/status 路径和
+- Plan 073 或其他 worktree 的未提交文件、diff、commit 内容或设计；并行核对只使用 `git worktree list`、branch/HEAD/status 路径和
   资源/进程元数据。已经进入 `main` 的提交按正常主线事实读取。
 
 ### Git-ignored 与主工作区边界
@@ -98,9 +98,9 @@ Team State、writer authority、Session identity 或只读状态源。
 
 以下约束具有强制性。不得为了简化实现、通过测试或提高局部进度而违反。
 
-1. **精确基线与并行隔离**：开发从 `main@445b6eae7f1df5bfd106fcd963141173a1292af5` 开始；只读核对其他 worktree 的
-   branch/HEAD/status 路径和资源状态。069 不覆盖旧分支文档、不吸收未提交实现，也不与 068/070 并发争写共享 WBS、manifest/lock、
-   schema 或不可避免的 common/core/protocol/config 接缝。
+1. **精确基线与并行隔离**：主体开发从 `main@445b6eae7f1df5bfd106fcd963141173a1292af5` 开始；阶段 E 只吸收用户指定、已经包含
+   Plan 074 的本地 `main@62d3ed732bf9452014a85722e7ed88c50a63dd94`。只读核对其他 worktree 的 branch/HEAD/status 路径和资源状态；
+   不读取或吸收 Plan 073 的未提交实现，也不与其并发争写共享 WBS、manifest/lock、schema 或不可避免的公共接缝。
 2. **复用现有三类身份与 canonical 状态**：`SessionId`、canonical Root `ThreadId`、`TeamInstanceId` 分别继续拥有 lineage、原生
    lifecycle/authority anchor 和 Team generation 职责；当前部分 ID 同值不是新格式承诺。Team State 仍是唯一 canonical coordination
    状态，durability/read 只为它提供持久提交、恢复和读取，不新建身份映射或竞争状态源。
@@ -125,15 +125,16 @@ Team State、writer authority、Session identity 或只读状态源。
    相应动作。
 9. **测试与资源门禁**：不调用真实 API/模型，不训练、不做性能测评，不运行 Docker、CI/PR、发布、上传或付费外部动作。Rust 格式、
    lint、构建与测试使用 `multidev/justfile` 及仓库共享锁/看门狗，保持既有并发上限；拿不到锁、cgroup、Windows `C:` 实际余量或其他
-   必要计数器时 fail-closed。069 接管重型资源前必须确认 068/070 的模型、Docker 或构建进程已经真实退出；其他任务的资源与外部
+   必要计数器时 fail-closed。069 接管重型资源前及正式轮开始前都必须确认 Plan 073 的本地模型、Docker 或构建进程已经真实退出；其他任务的资源与外部
    授权不转授 069，build lock 也不能替代对 Docker/模型进程的核对。资源尚未释放或锁正忙时等待后重试，不终止其他任务、不绕过门禁。
    调试期只跑受影响 crate/目标的聚焦门禁；若 common/core/protocol 的实际改动触发就近规则，可在最终整合边界经用户本次授权运行一次
    必要的完整 `just test`，不在调试期反复跑全量，也不使用 `cargo clean` 伪造“干净状态”。
-10. **外部前置不夹带**：`#37198` 必须由独立任务合同进入 `main`，不由 069 实施。069 可在此前完成开发与预验收，但不得宣布最终
-    M4-S1 PASS；只有用户另行批准把含该回移的最新 `main` 合入 069 分支后，才执行 persisted cwd/live override 回归和最终正式轮。
+10. **独立前置只消费不重做**：Plan 074 已把 `#37198` 的 RONDO 窄回移送入指定 `main`，用户也已授权 069 消费该提交并执行阶段 E；
+    069 不重做、扩张或改写该回移。只有 persisted cwd/live override 回归、全新领域状态正式轮和独立终审都通过后，才能宣布最终
+    M4-S1 PASS。
 11. **本地交付后停止**：按有意义批次精炼记录并提交 `worktree-069-m4-s1-durable-team-session`；提交前检查 diff、生成物、允许写集、
-    主工作区及所有 worktree 元数据。未经用户后续批准，不把 069 合入 `main`，不 merge/rebase 其他分支，不推送、不关闭 worktree、
-    不归档/重命名分支，也不触碰 068/070 工作。
+    主工作区及所有 worktree 元数据。本轮只获准把上述精确 `main` 整合进 069 分支；未经用户后续批准，不把 069 合入 `main`，不吸收
+    其他分支或更新后的 main，不推送、不关闭 worktree、不归档/重命名分支，也不触碰 Plan 073 工作。
 
 ## 4. 软性建议
 
@@ -186,8 +187,8 @@ Team State、writer authority、Session identity 或只读状态源。
 
 **E. 最终合流后的正式验收**
 
-- 用户另行批准后，把已包含独立 `#37198` 回移的最新 `main` 合入 069 工作树分支，解决真实冲突并复跑受影响门禁；从全新的任务专用
-  Session/store 状态完整执行一次主链和 persisted cwd/live override 聚焦回归。
+- 当前已获用户授权把包含 Plan 074 / `#37198` 窄回移的 `main@62d3ed732bf9452014a85722e7ed88c50a63dd94` 整合进 069 工作树分支，
+  解决真实冲突并复跑受影响门禁；从全新的任务专用 Session/store 状态完整执行一次主链和 persisted cwd/live override 聚焦回归。
 - 退出条件：正式轮证据有效，独立终审无未关闭高/中 correctness finding，069 分支形成最终本地提交；仍不自行合入或推送 `main`。
 
 ## 5. 当前状态
@@ -226,7 +227,7 @@ Team State、writer authority、Session identity 或只读状态源。
 - 第五轮独立复验仅发现 final close 没有交叉验证 outer `SessionMeta` Session/Root identity；现已让最终 validator 同时检查 outer
   Session ID、outer Root ID 与 exact inner durable marker，并覆盖两个外层字段分别损坏、owner 保留和恢复后重试成功。
 - 最终独立预验收已接受 `6faf45cc3ab2a7caa1b88618c8bdd44a63ced7e9`，确认无剩余高/中等级 correctness finding；当前主体实现状态为
-  `IMPLEMENTATION_COMPLETE / PREACCEPTANCE_COMPLETE`。本轮主线整合已先吸收 `main@d72d109`，保留 Plan 068--072 的共享事实；该
+  `IMPLEMENTATION_COMPLETE / PREACCEPTANCE_COMPLETE`。本轮主线整合已先吸收 `main@d72d109`，保留 Plan 068--072 的共享事实；当时该
   主线尚不包含 `#37198`，因此没有进入阶段 E，也没有运行或冒充最终正式轮。
 - 最新 `just fmt` 与 `git diff --check` 已通过；outer lineage/thread-store close 回归 2/2、core 产品 close 回归 1/1 通过，watchdog
   均为 `complete`、退出码 0、`stop_reason=none`。前一轮 core close/blocked-wait 产品回归 2/2、受影响 team-state/thread-store/rollout 邻近回归
@@ -239,29 +240,38 @@ Team State、writer authority、Session identity 或只读状态源。
 
 ### 当前工作
 
-- 主体实现与预验收已经完成，正在按用户授权把实现和当前状态文档串行整合进 `main`；069 分支、worktree 与可复用构建资产继续保留，
-  不在本轮归档或清理。
+- 主体实现与预验收已经完成，Plan 074 / `#37198` 窄回移也已进入本地 `main@62d3ed732bf9452014a85722e7ed88c50a63dd94`；
+  阶段 E 已获授权，等待执行者在保留的 069 worktree 中整合该精确 main 并完成最终正式验收。
+- 069 的 `multidev/codex-rs/target` 当前约 59 GiB，是阶段 E 的首选增量构建资产；不得为制造“干净状态”执行 `cargo clean`。正式轮的
+  “干净”只要求最终代码/配置和全新的任务专用 Session/store 领域状态。
 
 ### 本任务剩余步骤
 
-- 等待 `#37198` 由独立任务进入 `main`，再把包含该回移的最新 `main` 合入保留的 069 分支。
-- 执行阶段 E 的聚焦回归、全新领域状态正式轮和独立终审，形成最终本地提交。
+- 在不读取 Plan 073 未提交内容的前提下确认 Git 与资源现场，把指定 `main@62d3ed7` 整合进 069 分支；普通冲突或编译问题可在本任务
+  边界内自主窄修、复验。
+- 复用现有 target，通过 canonical heavy lock/watchdog 运行 ThreadStore persisted cwd、live execution override 和 Durable Team
+  相邻接缝的必要聚焦门禁；若最终实现确实修改 shared core/protocol 并触发就近完整门禁，只在最终边界运行一次，不在调试期重复。
+- 代码与配置稳定后，从全新的任务专用 Session/store 执行一次创建、mutation、durable commit、非 owner committed read、进程退出、
+  同 identity 冷恢复、继续 mutation 与正常 close 的正式链；同轮确认 persisted read 与显式 live cwd/workspace override 各守职责。
+- 对最终代码、范围和正式证据做独立终审；范围内普通 finding 自主窄修并重跑受影响门禁，若变更影响正式链则使用新的领域状态重跑该链。
+- PASS 后窄同步 Plan 069、`doc/WBS.md`、`doc/WBS/durable-team-runtime.md`、`doc/WBS-COMPLETED.md` 和一份精炼日志，形成干净的
+  069 本地提交后停止，等待用户决定是否合入和推送。
 
 ### 阻塞项
 
-- 当前无已知 069 主体 correctness 阻塞。最终 `M4-S1 PASS` 仅受 `#37198` 独立进入 `main`、随后同步与阶段 E 正式轮约束；不得在
-  069 中夹带回移或提前宣布最终 PASS。
+- 当前无已知产品前置或 069 主体 correctness 阻塞。Plan 073 的本地模型、Docker、构建或共享锁占用只构成临时资源等待；等待释放后
+  重试，不干扰其现场。阶段 E 的正式门禁、正式链或终审若未满足，则诚实保持未 PASS。
 
 ### 当前验收状态
 
-- `IMPLEMENTATION_COMPLETE / PREACCEPTANCE_COMPLETE / FINAL_PASS_BLOCKED_BY_#37198`。
+- `IMPLEMENTATION_COMPLETE / PREACCEPTANCE_COMPLETE / STAGE_E_AUTHORIZED`。
 
 ### 交接边界
 
 - 本任务完成后冻结此计划；S2、C0/C*、W0/W1、M4-Z 和跨线组合回归只链接
   `doc/WBS/durable-team-runtime.md`，不在本计划继续规划。
-- 用户已授权把当前主体实现和三份状态文档提交、合入并推送 `main`；069 worktree/分支继续保留给 `#37198` 后的阶段 E，不在本轮归档。
-  `doc/WBS-COMPLETED.md` 等待最终 M4-S1 PASS 后再记录完成事实。
+- 本轮授权覆盖指定 main 向 069 的整合、范围内修复、聚焦门禁、全新状态正式轮、终审、完成文档与 069 本地提交；不覆盖 069 向 main
+  的合并或任何推送。`doc/WBS-COMPLETED.md` 只有最终 M4-S1 PASS 后才记录完成事实。
 
 ## 6. 关键决策记录
 
@@ -293,3 +303,6 @@ Team State、writer authority、Session identity 或只读状态源。
 | 022 | 既有 `Unknown(N)` 在任何 reconcile 失败后保持 N/N+1 窗口，直到成功读回并判定 snapshot；blocking SessionMeta reader 对解压后的 head 累计限制 16 MiB 和 10 条记录 | typed marker mismatch 不能证明 post-CAS 未提交；plain 无换行或 zstd 膨胀输入也不能让 authority read 无界分配或阻塞 | recovery/storage/read | 已采纳 |
 | 023 | wait resolve 成功时保留 Team handle/actor guard，任一正常 wait 分支胜出后、发出 Completed 前再执行一次 durable wake read | marker 丢失不会触发 Team watch；入口健康不代表 timeout/mailbox 返回时仍可恢复 | wait/failure | 已采纳 |
 | 024 | final close 在 recorder materialization 后同时验证 outer `SessionMeta.session_id`、outer Root `id` 与 exact inner durable marker | inner marker 自洽不能证明 canonical outer lineage 未损坏；close 成功必须使用与 cold resume 相同的 Session/Root/Team identity 交叉验证 | close/lineage/failure | 已采纳 |
+| 025 | Plan 074 / `#37198` 已由独立任务进入 `main@62d3ed7`；阶段 E 只消费该精确主线事实，不在 069 重做回移或吸收 Plan 073 现场 | 解除最终代码前置，同时维持任务所有权和并行隔离 | Stage E/Git | 已采纳 |
+| 026 | 复用 069 约 59 GiB target；“干净正式轮”以最终代码/配置和全新 Session/store 领域状态定义，不以 clean rebuild 定义 | 已有构建资产与新主线工具链兼容时可避免无意义重建，产品验收关注状态隔离而非删除缓存 | 资源/验收 | 已采纳 |
+| 027 | 最终正式链只在代码与配置稳定后运行；普通失败先窄修、保留已验证进度并重跑受影响切片，影响正式链的修复再用新状态重跑正式轮 | 允许合理调试冗余，同时保证最终证据对应最终实现且不以旧状态冒充 PASS | 执行/证据 | 已采纳 |
