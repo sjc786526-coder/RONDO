@@ -25,6 +25,16 @@
 - 已改为 matching lineage 下始终使用 persisted sandbox metadata 与最终 cwd 重算 permission，并为两种异常 cwd 增加 ID/path permission 等值及
   helper 结果断言；同一审查者复验 `ACCEPT`，无剩余高/中 correctness finding。
 
+## 外部验收整改
+
+- 外部验收指出 read-by-path 在 matching SQLite metadata overlay 前已拒绝 rollout 的空/相对 cwd，导致可信 persisted absolute cwd 无法修复
+  history projection。finding 成立。
+- rollout 解析现拆为“无 cwd 裁决的 lineage/内容读取”和“公共最终 projection 校验”；只有 exact canonical lineage matching 的 metadata
+  可先 overlay，最终 cwd 再统一校验。无 metadata、unresolved 或 mismatch 仍 fail-closed。
+- 新回归同时覆盖空/相对 rollout cwd 的 path/ID history、legacy permission 与 mismatch 拒绝。新回归 1/1、ThreadStore 191/191、
+  app-server read/list/resume 2/2、ThreadStore clippy 均通过；对应 watchdog 为 `20260825-023249-1000-2035054`、
+  `20260825-023312-1000-2036697`、`20260825-023330-1000-2039385`、`20260825-023438-1000-2049137`。
+
 ## 未通过/未运行
 
 - 069 相邻 core cold-resume 测试两次均在未修改的 mock sampling 链因 `/v1/responses` 第五次请求返回 502 后超时；无 074 cwd 断言失败。

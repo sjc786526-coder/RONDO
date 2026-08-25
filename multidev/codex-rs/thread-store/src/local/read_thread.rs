@@ -57,7 +57,8 @@ pub(super) async fn read_thread(
         if thread.history_mode == ThreadHistoryMode::Legacy
             && !params.include_history
             && let Some(rollout_path) = thread.rollout_path.clone()
-            && let Ok(mut rollout_thread) = read_thread_from_rollout_path(store, rollout_path).await
+            && let Ok(mut rollout_thread) =
+                read_thread_from_rollout_path_without_cwd_validation(store, rollout_path).await
             && rollout_thread.thread_id == thread_id
             && (params.include_archived || rollout_thread.archived_at.is_none())
             && !rollout_thread.preview.is_empty()
@@ -112,7 +113,7 @@ async fn sqlite_rollout_path_can_load_history_for_thread(
     // SQLite metadata can outlive a moved/recreated rollout path. When history is
     // requested, verify the path still resolves to the requested thread before
     // trusting it as the source replay.
-    read_thread_from_rollout_path(store, path.to_path_buf())
+    read_thread_from_rollout_path_without_cwd_validation(store, path.to_path_buf())
         .await
         .is_ok_and(|thread| thread.thread_id == thread_id)
 }
@@ -124,7 +125,8 @@ pub(super) async fn read_thread_by_rollout_path(
     include_history: bool,
 ) -> ThreadStoreResult<StoredThread> {
     let path = resolve_requested_rollout_path(store, rollout_path).await?;
-    let mut thread = read_thread_from_rollout_path(store, path.clone()).await?;
+    let mut thread =
+        read_thread_from_rollout_path_without_cwd_validation(store, path.clone()).await?;
     if !include_archived && thread.archived_at.is_some() {
         return Err(ThreadStoreError::InvalidRequest {
             message: format!("thread {} is archived", thread.thread_id),
@@ -168,6 +170,7 @@ pub(super) async fn read_thread_by_rollout_path(
             );
         }
     }
+    validate_thread_projection_cwd(thread.thread_id, thread.cwd.as_path())?;
     reject_paginated_history(&thread, include_history)?;
     attach_history_if_requested(&mut thread, include_history).await?;
     Ok(thread)
@@ -292,10 +295,17 @@ async fn read_thread_from_rollout_path(
     store: &LocalThreadStore,
     path: std::path::PathBuf,
 ) -> ThreadStoreResult<StoredThread> {
+    let thread = read_thread_from_rollout_path_without_cwd_validation(store, path).await?;
+    validate_thread_projection_cwd(thread.thread_id, thread.cwd.as_path())?;
+    Ok(thread)
+}
+
+async fn read_thread_from_rollout_path_without_cwd_validation(
+    store: &LocalThreadStore,
+    path: std::path::PathBuf,
+) -> ThreadStoreResult<StoredThread> {
     let Some(item) = read_thread_item_from_rollout(path.clone()).await else {
-        let thread = stored_thread_from_session_meta(store, path).await?;
-        validate_thread_projection_cwd(thread.thread_id, thread.cwd.as_path())?;
-        return Ok(thread);
+        return stored_thread_from_session_meta(store, path).await;
     };
     let archived = rollout_path_is_archived(store.config.codex_home.as_path(), path.as_path());
     let mut thread = stored_thread_from_rollout_item(
@@ -325,7 +335,6 @@ async fn read_thread_from_rollout_path(
     {
         set_thread_name(&mut thread, name);
     }
-    validate_thread_projection_cwd(thread.thread_id, thread.cwd.as_path())?;
     Ok(thread)
 }
 
@@ -1232,6 +1241,129 @@ mod tests {
             .expect("read rollout while metadata path is unresolved");
         assert_eq!(thread_with_unresolved_metadata.cwd, rollout_cwd);
         assert!(thread_with_unresolved_metadata.git_info.is_none());
+    }
+
+    #[tokio::test]
+    async fn matching_persisted_cwd_repairs_unusable_rollout_cwd_before_history_projection() {
+        let home = TempDir::new().expect("temp dir");
+        let config = test_config(home.path());
+        let runtime = codex_state::StateRuntime::init(
+            config.sqlite.clone(),
+            config.default_model_provider_id.clone(),
+        )
+        .await
+        .expect("state db should initialize");
+        let store = LocalThreadStore::new(config.clone(), Some(runtime.clone()));
+        let uuid = Uuid::from_u128(225);
+        let thread_id = ThreadId::from_string(&uuid.to_string()).expect("valid thread id");
+        let day_dir = home.path().join("sessions/2025/01/05");
+        std::fs::create_dir_all(&day_dir).expect("sessions dir");
+        let rollout_path = day_dir.join(format!("rollout-2025-01-05T12-00-00-{uuid}.jsonl"));
+        let persisted_cwd = home.path().join("persisted-workspace");
+        let mut builder = ThreadMetadataBuilder::new(
+            thread_id,
+            rollout_path.clone(),
+            Utc::now(),
+            SessionSource::Cli,
+        );
+        builder.cwd = persisted_cwd.clone();
+        let mut metadata = builder.build(config.default_model_provider_id.as_str());
+        metadata.sandbox_policy = "workspace-write".to_string();
+        runtime
+            .upsert_thread(&metadata)
+            .await
+            .expect("state db upsert should succeed");
+        let legacy_policy = SandboxPolicy::WorkspaceWrite {
+            writable_roots: Vec::new(),
+            network_access: false,
+            exclude_tmpdir_env_var: false,
+            exclude_slash_tmp: false,
+        };
+        let expected_permission = PermissionProfile::from_legacy_sandbox_policy_for_cwd(
+            &legacy_policy,
+            persisted_cwd.as_path(),
+        );
+
+        for rollout_cwd in [PathBuf::new(), PathBuf::from("relative-rollout-cwd")] {
+            let mut file = std::fs::File::create(&rollout_path).expect("session file");
+            let meta = serde_json::json!({
+                "timestamp": "2025-01-05T12:00:00Z",
+                "type": "session_meta",
+                "payload": {
+                    "session_id": uuid,
+                    "id": uuid,
+                    "timestamp": "2025-01-05T12:00:00Z",
+                    "cwd": rollout_cwd,
+                    "originator": "test_originator",
+                    "cli_version": "test_version",
+                    "source": "cli",
+                    "model_provider": "rollout-provider"
+                },
+            });
+            writeln!(file, "{meta}").expect("write session meta");
+            let user_event = serde_json::json!({
+                "timestamp": "2025-01-05T12:00:00Z",
+                "type": "event_msg",
+                "payload": {
+                    "type": "user_message",
+                    "message": "History survives cwd repair",
+                    "kind": "plain",
+                },
+            });
+            writeln!(file, "{user_event}").expect("write user event");
+            drop(file);
+
+            let thread_by_path = store
+                .read_thread_by_rollout_path(
+                    rollout_path.clone(),
+                    /*include_archived*/ false,
+                    /*include_history*/ true,
+                )
+                .await
+                .expect("matching persisted cwd should repair path projection");
+            assert_eq!(thread_by_path.cwd, persisted_cwd);
+            assert_eq!(thread_by_path.permission_profile, expected_permission);
+            assert!(
+                thread_by_path
+                    .history
+                    .as_ref()
+                    .is_some_and(|history| !history.items.is_empty()),
+                "history must remain available after cwd repair"
+            );
+
+            let thread_by_id = store
+                .read_thread(ReadThreadParams {
+                    thread_id,
+                    include_archived: false,
+                    include_history: true,
+                })
+                .await
+                .expect("matching persisted cwd should repair ID history projection");
+            assert_eq!(thread_by_id.cwd, thread_by_path.cwd);
+            assert_eq!(
+                thread_by_id.permission_profile,
+                thread_by_path.permission_profile
+            );
+        }
+
+        metadata.rollout_path =
+            write_session_file(home.path(), "2025-01-06T12-00-00", uuid).expect("other rollout");
+        runtime
+            .upsert_thread(&metadata)
+            .await
+            .expect("move state metadata to another rollout");
+        let error = store
+            .read_thread_by_rollout_path(
+                rollout_path,
+                /*include_archived*/ false,
+                /*include_history*/ true,
+            )
+            .await
+            .expect_err("mismatched metadata must not repair an unusable rollout cwd");
+        assert!(
+            format!("{error:#}").contains("has no usable absolute cwd"),
+            "unexpected mismatch error: {error:#}"
+        );
     }
 
     #[tokio::test]

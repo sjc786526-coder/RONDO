@@ -168,24 +168,26 @@ git-ignored `codex-source-code/` 只作冻结源码的只读对照，不写入�
   `just fmt` 与 `git diff --check` 通过；全部重型命令使用 canonical lock/watchdog 和兼容的 069 ignored target。
 - 已完成阶段 D 独立审查：首轮发现同 lineage 的空/相对 cwd 回退后 path-read 未重算 legacy permission；修复并补回归后 test 1/1、clippy
   通过，同一上下文独立审查者复验 `ACCEPT`，无剩余高/中 correctness finding。
+- 外部验收发现 rollout cwd 在 matching persisted overlay 前被过早拒绝；现已把 cwd 有效性裁决延后到最终 projection，并覆盖空/相对 rollout
+  cwd、matching history/permission 与 mismatch fail-closed。新回归 1/1、ThreadStore 191/191、app-server 2/2、ThreadStore clippy 均通过。
 - 相邻 069 core cold-resume 测试在未修改的 mock sampling 链上两次因 `/v1/responses` 第五次请求返回 502 而超时；无 cwd/ThreadStore
   断言失败。联合 app-server clippy 同样被未修改 core 的 `MutexGuard` 跨 await 既有禁止项阻断，074 自身告警已关闭并由专属 clippy 通过。
 
 ### 当前工作
 
-- 阶段 A-D 与独立预验收均已完成；正在进行最终 Git/资源/并行现场检查并形成 clean 本地提交。
+- 外部验收 finding 已完成窄修和聚焦复验；正在进行最终记录、Git/资源/并行现场检查并形成 remediation 提交。
 
 ### 本任务剩余步骤
 
-- 形成 clean 本地提交后，通过指定 Codex queue 通知外部验收者并停止；不合并、不推送。
+- 形成 clean remediation 提交后，通过指定 Codex queue 通知外部验收者复验并停止；不合并、不推送。
 
 ### 阻塞项
 
-- 当前无产品/代码阻塞。相邻 core 测试和联合 clippy 的上述既有失败会作为未通过项诚实交付，不扩大 074 修改范围。
+- 当前无产品/代码阻塞。069 mock 失败和 core 既有 clippy 阻断仍按外部审查决策保持非阻断，不扩大 074 修改范围。
 
 ### 当前验收状态
 
-- `IMPLEMENTATION_COMPLETE / INDEPENDENT_PREACCEPTANCE_ACCEPTED / READY_FOR_CLEAN_LOCAL_COMMIT`。
+- `REMEDIATION_COMPLETE / FOCUSED_GATES_PASS / EXTERNAL_REACCEPTANCE_PENDING`。
 
 ### 交接边界
 
@@ -208,3 +210,4 @@ git-ignored `codex-source-code/` 只作冻结源码的只读对照，不写入�
 | 007 | read-by-rollout-path 只有在 SQLite rollout path 可解析且与请求 canonical path 完全相同时才合并整份 metadata | 硬约束禁止跨 rollout 拼接 cwd、permission 或其它 metadata；只保护 cwd 会留下同类 lineage 污染 | ThreadStore read | 已采纳 |
 | 008 | 空/相对 cwd 只可从同 ID 的 SessionMeta 绝对 cwd 回退；state-only 列表无独立 rollout 验证时明确失败 | 保持旧 rollout 的诚实恢复能力，同时阻止 app-server 把空/相对路径按进程 cwd 伪造为持久事实 | 异常读取 | 已采纳 |
 | 009 | persisted cwd 只更新 StoredThread 投影及 legacy permission 自洽计算；resume 的 live cwd/workspace roots 继续由现有 config override 链拥有 | 产品回归证明 read projection 与 execution binding 可同时观察且互不覆盖 | 权限/运行时 | 已采纳 |
+| 010 | rollout 读取先提取 lineage/内容，cwd 有效性只在 exact matching metadata 合并后的公共投影出口裁决 | 可信 persisted absolute cwd 必须能修复同 lineage 的旧空/相对 cwd，同时 mismatch 仍需在最终出口 fail-closed | read/history 顺序 | 已采纳 |
