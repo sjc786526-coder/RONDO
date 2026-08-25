@@ -1,7 +1,7 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
 最后更新：2026-08-25 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
-状态：**第一期、第二期、M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、M3-C2、Plan 064、Plan 071、Plan 073、Plan 075 与四期 M4-A、M4-C0 已完成；Plan 060 技术 GO、Plan 064 DATA_GO、Plan 066 正式训练 GO；Plan 071 为 `BASE_COMPARABILITY_GO`，Plan 073 / M3-C2 为 `NO-GO`；Plan 075 唯一建议待授权 Plan 076 有界诊断，M3-D 保持锁定；M4-A 为 `M4_A_GO`，M4-C0 为 `M4_C0_PROTOTYPE_PASS`**
+状态：**第一期、第二期、M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、M3-C2、Plan 064、Plan 071、Plan 073、Plan 075 与四期 M4-A、M4-C0、M4-S1 已完成；Plan 060 技术 GO、Plan 064 DATA_GO、Plan 066 正式训练 GO；Plan 071 为 `BASE_COMPARABILITY_GO`，Plan 073 / M3-C2 为 `NO-GO`；Plan 075 唯一建议待授权 Plan 076 有界诊断，M3-D 保持锁定；M4-A 为 `M4_A_GO`，M4-C0 为 `M4_C0_PROTOTYPE_PASS`，M4-S1 为 `M4_S1_PASS`**
 
 ## 当前定位
 
@@ -30,8 +30,9 @@ durable read model 或正式公共控制面。
 
 Plan 067 / M4-A 已收敛 Durable Team Session、Session 控制面与可选 writer binding 共享的产品和生命周期边界，结论为
 `M4_A_GO`。Plan 070 / M4-C0 已以默认关闭的 experimental surface 完成状态投影、owner/cold 操作路由、stale/result-unknown
-与权威重读原型，结论为 `M4_C0_PROTOTYPE_PASS`；正式 Session query 仍等待 M4-S1，正式 control/TUI 再等待 M4-S2。
-M4-S1 与 M4-W0 继续按各自合同推进；M4-Z(core) 不被 W 线阻塞，只有 binding GO 后才立项正式 W1，其 handoff 范围服从价值门证据。
+与权威重读原型，结论为 `M4_C0_PROTOTYPE_PASS`；M4-S1 已完成阶段 E 并取得 `M4_S1_PASS`，正式 Session query M4-C* 可另行立项，
+正式 control/TUI 再等待 M4-S2。M4-W0 继续按自身合同推进；M4-Z(core) 不被 W 线阻塞，只有 binding GO 后才立项正式 W1，其 handoff
+范围服从价值门证据。
 Durable Team Session 的 V1 写 authority 归属于 canonical Root lineage，并持续覆盖成功 Team 提交；现有 Root active-writer
 作为唯一排他基础做架构内扩展，Team State 保持 canonical，并增加与其集成的专用 durability/read 能力，不建设相互竞争的第二套
 写者或状态体系。其他客户端可只读，child Thread writer 不能绕过 Root 归属；只读结果必须是自洽的已提交状态或明确

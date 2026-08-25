@@ -2036,3 +2036,22 @@ correctness/functionality `remaining_findings=[]`，路线结论为 `GO`。
   资源有界性和诊断 control 歧义均已关闭。冻结调研报告见
   `doc/research/2026-08-25-plan075-publication-critic-no-go-route-decision.md`，执行日志见
   `agent_log/2026-08-25-042835-plan075-no-go-route-decision.md`。
+
+## M4-S1 Team Session 持久生命周期（Plan 069，2026-08-25）
+
+**状态**：主体实现、六轮独立预验收整改、Plan 074 / `#37198` 精确合流、阶段 E 正式轮与最终独立终审均已完成；结论为
+`M4_S1_PASS`。阶段 E 从 `f970f133cb4613b0b7f9f27db266aa36164fce12` 精确整合
+`main@62d3ed732bf9452014a85722e7ed88c50a63dd94`，未吸收更晚主线或 Plan 073 现场。
+
+- 默认关闭的 Durable Team Session 以 canonical Root ThreadStore authority 为唯一写权威，版本化 checksummed Team snapshot、typed
+  `SessionMeta` lineage、committed read/reconcile、跨进程 cold resume、非 owner read、失败保留 owner 与最小 live-child close
+  barrier 已闭合；缺失、损坏、unknown/unavailable 和 identity mismatch 均 fail-closed，不另建 Team lock、registry 或控制面状态源。
+- 阶段 E 在同一全新 Session/store 产品链中完成 create、mutation、durable commit、非 owner committed read、非优雅进程退出、同
+  Session/Root/TeamInstance cold resume、继续 mutation 与正常 close；Plan 074 的 persisted cwd read 与显式 live cwd/workspace override
+  保持各自职责。最终独立终审结论 `ACCEPT`，无剩余高/中等级 correctness finding。
+- 正式证据为 Durable Team/跨进程链 **3/3**、ThreadStore persisted cwd **2/2**、app-server persisted/live override **2/2**；邻近
+  ThreadStore **191/191**、activation/retry **3/3**、ThreadStore/core clippy、`just fmt` 与 diff 检查通过。所有成功重型轮均由
+  canonical lock/watchdog 执行，`complete`、退出码 0、`stop_reason=none`。
+- shared core 触发的一次标准全 workspace `just test` 在测试前被 rusty-v8 v150.4.0 默认 archive URL 的 HTTP 404 阻断，未产生
+  JUnit，未表述为通过或重复扩大完整轮；既有 checksum-verified 历史完整轮仍为 14,373 项中 14,363 通过、10 项既知相邻失败。
+  本阶段未使用 Docker、真实模型/API、训练、测评、CI/PR，未把 069 合入或推送主线。
