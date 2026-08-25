@@ -1531,6 +1531,135 @@ mod tests {
         assert!(authority.begin_write().is_err());
     }
 
+    #[tokio::test]
+    async fn external_close_rejects_outer_lineage_mismatch_before_releasing_owner() {
+        let home = TempDir::new().expect("temp dir");
+        let store = LocalThreadStore::new(test_config(home.path()), /*state_db*/ None);
+        let thread_id = ThreadId::new();
+        let session_id = codex_protocol::SessionId::new();
+        let expected =
+            codex_protocol::protocol::DurableTeamSessionMeta::current(session_id, thread_id);
+        let mut params = create_thread_params(thread_id);
+        params.session_id = session_id;
+        params.durable_team = Some(expected);
+        store
+            .create_thread(params)
+            .await
+            .expect("create durable Root writer");
+        store
+            .persist_thread(thread_id)
+            .await
+            .expect("materialize canonical SessionMeta");
+        let rollout_path = store
+            .live_rollout_path(thread_id)
+            .await
+            .expect("live rollout path");
+        let original = std::fs::read_to_string(&rollout_path).expect("read canonical rollout");
+        let authority = store
+            .writer_authority(thread_id)
+            .await
+            .expect("derive Root authority");
+
+        rewrite_session_meta_outer_identity(
+            &rollout_path,
+            &original,
+            Some(codex_protocol::SessionId::new()),
+            None,
+        );
+        let mut close = authority.begin_close().await.expect("start Team close");
+        close
+            .require_session_meta(expected)
+            .expect("register final lineage validation");
+        let error = store
+            .shutdown_thread(thread_id)
+            .await
+            .expect_err("outer Session mismatch must fail writer shutdown");
+        assert!(
+            error
+                .to_string()
+                .contains("no longer matches the expected durable Team lineage"),
+            "unexpected close validation error: {error}"
+        );
+        close.abort().expect("failed close reopens owner");
+        let write = authority
+            .begin_write()
+            .expect("outer Session mismatch must retain the same Root owner");
+        drop(write);
+
+        rewrite_session_meta_outer_identity(&rollout_path, &original, None, Some(ThreadId::new()));
+        let mut retry = authority
+            .begin_close()
+            .await
+            .expect("retry Team close after Session mismatch");
+        retry
+            .require_session_meta(expected)
+            .expect("register retry lineage validation");
+        let error = store
+            .shutdown_thread(thread_id)
+            .await
+            .expect_err("outer Root mismatch must fail writer shutdown");
+        assert!(
+            error
+                .to_string()
+                .contains("no longer matches the expected durable Team lineage"),
+            "unexpected close validation error: {error}"
+        );
+        retry.abort().expect("second failed close reopens owner");
+        let write = authority
+            .begin_write()
+            .expect("outer Root mismatch must retain the same Root owner");
+        drop(write);
+
+        std::fs::write(&rollout_path, &original).expect("restore canonical SessionMeta");
+        let mut final_close = authority
+            .begin_close()
+            .await
+            .expect("retry Team close after lineage restoration");
+        final_close
+            .require_session_meta(expected)
+            .expect("register restored lineage validation");
+        store
+            .shutdown_thread(thread_id)
+            .await
+            .expect("restored lineage permits writer shutdown");
+        final_close.complete().expect("complete restored close");
+        assert!(authority.begin_write().is_err());
+    }
+
+    fn rewrite_session_meta_outer_identity(
+        rollout_path: &std::path::Path,
+        original: &str,
+        session_id: Option<codex_protocol::SessionId>,
+        thread_id: Option<ThreadId>,
+    ) {
+        let (session_meta_line, remaining_rollout) = original
+            .split_once('\n')
+            .expect("canonical rollout contains SessionMeta and a trailing newline");
+        let mut session_meta: serde_json::Value =
+            serde_json::from_str(session_meta_line).expect("parse SessionMeta line");
+        let payload = session_meta
+            .get_mut("payload")
+            .and_then(serde_json::Value::as_object_mut)
+            .expect("SessionMeta line has an object payload");
+        if let Some(session_id) = session_id {
+            payload.insert(
+                "session_id".to_string(),
+                serde_json::Value::String(session_id.to_string()),
+            );
+        }
+        if let Some(thread_id) = thread_id {
+            payload.insert(
+                "id".to_string(),
+                serde_json::Value::String(thread_id.to_string()),
+            );
+        }
+        let rewritten = format!(
+            "{}\n{remaining_rollout}",
+            serde_json::to_string(&session_meta).expect("serialize SessionMeta line")
+        );
+        std::fs::write(rollout_path, rewritten).expect("rewrite SessionMeta outer identity");
+    }
+
     fn run_writer_authority_child(home: &std::path::Path, thread_id: ThreadId, mode: &str) {
         let output = Command::new(std::env::current_exe().expect("current test executable"))
             .arg("--exact")

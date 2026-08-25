@@ -393,10 +393,13 @@ impl RootWriterAuthorityState {
             return Ok(());
         };
         let session_meta = self.read_session_meta()?;
-        if session_meta.durable_team != Some(expected) {
+        if session_meta.session_id != expected.session_id
+            || session_meta.id != expected.root_thread_id
+            || session_meta.durable_team != Some(expected)
+        {
             return Err(ThreadStoreError::Conflict {
                 message: format!(
-                    "canonical SessionMeta for Root thread {} no longer carries the expected durable Team marker",
+                    "canonical SessionMeta for Root thread {} no longer matches the expected durable Team lineage",
                     self.thread_id
                 ),
             });

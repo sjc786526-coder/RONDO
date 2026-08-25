@@ -222,8 +222,11 @@ Team State、writer authority、Session identity 或只读状态源。
   canonical `SessionMeta`，以及 projection/wait 会把持续 durable unavailable 降级为无 Team/正常等待；两项均已在原 069 边界内窄修，
   并经第四轮复验确认关闭。
 - 第四轮独立复验另发现四项中等级缺口：close 最终成功边界、post-CAS typed mismatch 的 `Unknown(N)` 保留、阻塞 wait 的最终复核和
-  blocking SessionMeta head 上限；均已在原 authority/durability/read 接缝内修复，当前等待同一独立审查者复验。
-- 最新 `just fmt` 与 `git diff --check` 已通过；core close/blocked-wait 产品回归 2/2、受影响 team-state/thread-store/rollout 邻近回归
+  blocking SessionMeta head 上限；均已在原 authority/durability/read 接缝内修复，并经第五轮复验确认关闭。
+- 第五轮独立复验仅发现 final close 没有交叉验证 outer `SessionMeta` Session/Root identity；现已让最终 validator 同时检查 outer
+  Session ID、outer Root ID 与 exact inner durable marker，并覆盖两个外层字段分别损坏、owner 保留和恢复后重试成功。
+- 最新 `just fmt` 与 `git diff --check` 已通过；outer lineage/thread-store close 回归 2/2、core 产品 close 回归 1/1 通过，watchdog
+  均为 `complete`、退出码 0、`stop_reason=none`。前一轮 core close/blocked-wait 产品回归 2/2、受影响 team-state/thread-store/rollout 邻近回归
   29/29 通过，watchdog 均为 `complete`、退出码 0、`stop_reason=none`。前一轮 core marker-loss/projection/wait 聚焦回归 3/3、
   rollout/thread-store/team-state 聚焦回归
   26/26 通过，watchdog 均为 `complete`、退出码 0、`stop_reason=none`。按复验决定未再次运行完整 workspace 或 clippy。首轮标准
@@ -233,7 +236,7 @@ Team State、writer authority、Session identity 或只读状态源。
 
 ### 当前工作
 
-- 第四轮 correctness 修复和直接受影响的聚焦门禁均已完成；正在形成单一本地提交并交回同一独立审查者复验。
+- 第五轮 correctness 窄修和直接受影响的聚焦门禁均已完成；正在形成单一本地提交并交回同一独立审查者复验。
 
 ### 本任务剩余步骤
 
@@ -285,3 +288,4 @@ Team State、writer authority、Session identity 或只读状态源。
 | 021 | Team close generation 登记预期 typed marker；local writer 在 recorder shutdown/materialization 后、移除 live entry/owner 前执行最终复核，并记录已 prepared 的 recorder 使 marker 修复后的同 owner close retry 不重复发送 Shutdown | close 初检不能代表最终成功边界；只在现有 complete 中读取又会因 recorder entry 已移除而无法 abort。复用 close generation 与 live entry 可保留唯一 authority，无需通用事务或新 lifecycle 平台 | close/authority/failure | 已采纳 |
 | 022 | 既有 `Unknown(N)` 在任何 reconcile 失败后保持 N/N+1 窗口，直到成功读回并判定 snapshot；blocking SessionMeta reader 对解压后的 head 累计限制 16 MiB 和 10 条记录 | typed marker mismatch 不能证明 post-CAS 未提交；plain 无换行或 zstd 膨胀输入也不能让 authority read 无界分配或阻塞 | recovery/storage/read | 已采纳 |
 | 023 | wait resolve 成功时保留 Team handle/actor guard，任一正常 wait 分支胜出后、发出 Completed 前再执行一次 durable wake read | marker 丢失不会触发 Team watch；入口健康不代表 timeout/mailbox 返回时仍可恢复 | wait/failure | 已采纳 |
+| 024 | final close 在 recorder materialization 后同时验证 outer `SessionMeta.session_id`、outer Root `id` 与 exact inner durable marker | inner marker 自洽不能证明 canonical outer lineage 未损坏；close 成功必须使用与 cold resume 相同的 Session/Root/Team identity 交叉验证 | close/lineage/failure | 已采纳 |
