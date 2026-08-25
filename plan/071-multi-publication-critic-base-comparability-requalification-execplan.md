@@ -27,32 +27,32 @@ CPU FP32 reference 与本地 CUDA deployment 之间为何出现 projected drift 
 
 ### 完成/验收标准
 
-- [ ] 只读复核 Plan 068 唯一有效正式轮 `plan068-formal-20260824T222852Z-qualification-v3` 的输入、freeze、raw reference/
+- [x] 只读复核 Plan 068 唯一有效正式轮 `plan068-formal-20260824T222852Z-qualification-v3` 的输入、freeze、raw reference/
       deployment、service 和 result，明确区分候选身份、cross-dtype 数值差异、同 runtime 重复性、offline/service parity 与临时 verdict。
-- [ ] 对 base 失败给出有证据的分类：真实且不可接受的部署漂移、参考/数值域/运行口径不等价、scorer/runtime 局部兼容问题，或
+- [x] 对 base 失败给出有证据的分类：真实且不可接受的部署漂移、参考/数值域/运行口径不等价、scorer/runtime 局部兼容问题，或
       临时 verdict 对近边界差异的放大；允许多因一果，但不能只凭最终 PASS/FAIL 倒推原因。
-- [ ] 在正式模型重验前固定资格规则的选择依据；完成必要 commissioning 后，再冻结 source、原始工件、实际 deployment artifact、
+- [x] 在正式模型重验前固定资格规则的选择依据；完成必要 commissioning 后，再冻结 source、原始工件、实际 deployment artifact、
       runtime identity、既有非 unseen cohort、训练候选锚点和具体数值/方向/verdict/service 门。规则不得按 base 已知差值贴线。
-- [ ] exact base 与锚点使用同一输入、tokenizer、窗口、projection、runtime 类别和资格判断规则；如果对象身份导致规则输入不同，差异必须是
+- [x] exact base 与锚点使用同一输入、tokenizer、窗口、projection、runtime 类别和资格判断规则；如果对象身份导致规则输入不同，差异必须是
       规则本身预先定义的显式输入，而不是 candidate-specific relaxation。
-- [ ] base 从空正式 namespace 完成完整资格运行；至少一个 Plan 068 `QUALIFIED` 的 C1/C3 候选完成同口径正式锚点运行。若修改影响
+- [x] base 从空正式 namespace 完成完整资格运行；至少一个 Plan 068 `QUALIFIED` 的 C1/C3 候选完成同口径正式锚点运行。若修改影响
       共享 qualification/scorer/projection/service 逻辑，则正式覆盖所有受影响的 C1/C3 门，不能静默沿用旧结论。
-- [ ] base 取得 `QUALIFIED`，或在有效基础设施下形成可复现的 `BASE_NOT_COMPARABLE`；无法满足有效运行条件时形成 `INCONCLUSIVE`，
+- [x] base 取得 `QUALIFIED`，或在有效基础设施下形成可复现的 `BASE_NOT_COMPARABLE`；无法满足有效运行条件时形成 `INCONCLUSIVE`，
       不把基础设施失败写成模型失败。
-- [ ] base 正式轮覆盖 24 条既有 cohort 的 identity/load/offline score、资源与延迟，以及真实 service 的 ready、同输入 parity、有界压力和
+- [x] base 正式轮覆盖 24 条既有 cohort 的 identity/load/offline score、资源与延迟，以及真实 service 的 ready、同输入 parity、有界压力和
       clean shutdown；既有 failure/cancel/restart 合同未受影响时不机械重做完整故障矩阵，相关接缝改变时才补齐受影响项。
-- [ ] offline deployment runner 与正式 Plan 055 service runtime 对同一输入保持合法、有限 scalar 和 verdict 一致；若改动触及 service seam，
+- [x] offline deployment runner 与正式 Plan 055 service runtime 对同一输入保持合法、有限 scalar 和 verdict 一致；若改动触及 service seam，
       定向复核 descriptor、typed failure、取消、重启和关闭，不机械重复无关全生命周期测评。
-- [ ] C1/C3 既有资格未因本轮规则或共享实现变化被静默破坏；C2 保持 Plan 068 的 `NOT_QUALIFIED` 历史结论，不进行模型重验、调参或能力修复。
-- [ ] Plan 054 输入/render/tokenizer/window/scalar 语义、Plan 055 服务协议、Plan 057 默认关闭与发布/fallback/cancel/store 语义均保持不变；
+- [x] C1/C3 既有资格未因本轮规则或共享实现变化被静默破坏；C2 保持 Plan 068 的 `NOT_QUALIFIED` 历史结论，不进行模型重验、调参或能力修复。
+- [x] Plan 054 输入/render/tokenizer/window/scalar 语义、Plan 055 服务协议、Plan 057 默认关闭与发布/fallback/cancel/store 语义均保持不变；
       unseen-test 未导出、未读取、未运行或用于口径选择。
-- [ ] 调试阶段先以小范围从未打通处自主修复、续跑和重跑，直至目标链路完整打通；随后冻结身份和配置，从 clean tracked source 与全新正式
+- [x] 调试阶段先以小范围从未打通处自主修复、续跑和重跑，直至目标链路完整打通；随后冻结身份和配置，从 clean tracked source 与全新正式
       namespace 完整运行一轮。不得拼接 Plan 068 结果、调试轮或不同 freeze 的零散输出冒充 Plan 071 正式结果。
-- [ ] 只运行受影响的 Publication Critic Python/Rust 定向门禁、必要格式/生成物检查、真实模型重验与 `git diff --check`；skip、未运行、
+- [x] 只运行受影响的 Publication Critic Python/Rust 定向门禁、必要格式/生成物检查、真实模型重验与 `git diff --check`；skip、未运行、
       pure/fake、真实模型和 Docker 证据分别表述，不机械运行无关全 workspace。
-- [ ] 使用普通 JSON、SHA-256、现有日志和必要测试证据即可闭合身份与结果；不建设签名链、数据库、registry、通用审计/可信平台或第二套模型服务。
-- [ ] 不干扰 Plan 069/070 的文件与运行现场；真实本地模型、Docker 或重型 Cargo 只在二者释放重型资源后按根资源门串行执行。
-- [ ] 更新本计划当前状态和一份精炼 `agent_log`，形成 clean Plan 071 分支提交并接受独立验收；不合并、推送、归档分支或删除 worktree。
+- [x] 使用普通 JSON、SHA-256、现有日志和必要测试证据即可闭合身份与结果；不建设签名链、数据库、registry、通用审计/可信平台或第二套模型服务。
+- [x] 不干扰 Plan 069/070 的文件与运行现场；真实本地模型、Docker 或重型 Cargo 只在二者释放重型资源后按根资源门串行执行。
+- [x] 更新本计划当前状态和一份精炼 `agent_log`，形成 clean Plan 071 分支提交并接受独立验收；不合并、推送、归档分支或删除 worktree。
 
 ## 2. 范围
 
@@ -202,7 +202,7 @@ Plan 068 的核心模型、checkpoint、证据、serving env 与旧 target 只�
 - 受影响 Python 定向测试 40/40、compileall 与 `git diff --check` 通过。没有 Rust 源码变化，故未运行 Cargo；Docker、HF 下载、
   真实 API、远端操作和 unseen-test 均未运行。
 
-### 当前工作
+### 终态
 
 - 修复后的 clean source checkpoint 为 `90ce6ba5eb3ba3faa3ffa4db41934c1147e18653`。唯一有效正式轮
   `plan071-formal-20260825T064600Z-qualification-v5` 从新的空 namespace 完整运行，freeze canonical SHA-256 为
@@ -220,8 +220,7 @@ Plan 068 的核心模型、checkpoint、证据、serving env 与旧 target 只�
 
 ### 本任务剩余步骤
 
-1. 提交终态逻辑窄整改与回归并保持分支 clean。
-2. 通过既有 queue 机制重新交最终独立验收；范围内 finding 自主修复并重新交接。
+- 无。实现、正式重验、finding 整改与最终独立验收均已完成；后续路线只由 WBS 承接。
 
 ### 阻塞项
 
@@ -230,11 +229,11 @@ Plan 068 的核心模型、checkpoint、证据、serving env 与旧 target 只�
 
 ### 当前验收状态
 
-- `REMEDIATION_COMPLETE_REVIEW_REHANDOFF_PENDING`
+- `COMPLETE / ACCEPTED / BASE_COMPARABILITY_GO`
 
 ### 交接边界
 
-- `BASE_COMPARABILITY_GO` 经独立验收后，只允许后续基于最新 main 更新 WBS 中的 M3-C2 规划前置；不自动启动、授权、合并或启用 M3-C2。
+- `BASE_COMPARABILITY_GO` 已经独立验收接受；M3-C2 规划前置由最新 WBS 承接，但不自动启动、授权或启用 M3-C2。
 - `BASE_NOT_COMPARABLE` 或 `INCONCLUSIVE` 经独立验收后，按证据把三期继续锁定并指出返回的部署/基础设施能力；不在本计划安排新训练、C2 修复或替代模型。
 - 本任务完成后冻结此计划；跨任务后续只链接 WBS，不在本计划继续维护。
 

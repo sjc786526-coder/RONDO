@@ -1936,3 +1936,26 @@ correctness/functionality `remaining_findings=[]`，路线结论为 `GO`。
   判定在 070 写集外，本任务未弱化或掩盖。
 - 正式 Session query 仍等待 M4-S1，以真实 durable read model 替换 prototype input；正式 control/TUI 再等待 M4-S2 的恢复和 close
   barrier。C0 不冻结正式 RPC、字段、UI、timeout 或通用 `thread/unarchive` authority，也不授权产品启用、S1/S2、外部资源或远端操作。
+
+## Publication Critic base 对照可比性修正与重验（Plan 071，2026-08-25）
+
+**状态**：base 归因、资格口径分层、同口径正式重验、独立审查整改与最终复验均已完成；验收通过、任务目标完成，结论为
+`BASE_COMPARABILITY_GO`。实现与资格边界提交为 `c72edde0f6f7cdd3b944b38fc2a47dbb7ceae65e`、
+`90ce6ba5eb3ba3faa3ffa4db41934c1147e18653`，终态逻辑整改提交为
+`c69868f07d46f7991c6b9bac4904fdaf22dc6088`，最终独立验收提交为
+`5e13251a2fd647e746e6daee34ced1b4a25d494f`。
+
+- Plan 068 的 base 失败来自把 CPU FP32→CUDA BF16 cross-runtime 差异、sigmoid 区域放大、near-threshold 临时 verdict 与
+  同 runtime worker parity 混在同一 projected gate。Plan 071 复用既有真实 scorer/service，将 cross-runtime raw cap 及其
+  stable-sigmoid envelope、同 CUDA BF16 fresh-worker parity 和精确 descriptor threshold 的 service verdict 分层判断；没有改变
+  Plan 054 输入/scalar、Plan 055 服务协议或 Plan 057 发布/fallback/cancel/store 语义。
+- 唯一有效正式轮 `plan071-formal-20260825T064600Z-qualification-v5` 绑定 clean source `90ce6ba...` 和既有 24 条非 unseen
+  cohort。base、C1、C3 均为 `QUALIFIED`，C2 未重验并保持 Plan 068 历史 `NOT_QUALIFIED`；三对象均完成 CPU FP32 reference、
+  CUDA BF16 deployment、fresh-worker parity、18/18 真实 service verdict、15/15 stress 与 clean shutdown，C1 另完成
+  cancel/post-cancel ready/review。
+- 独立验收发现并闭合一个三态终止分支：无 C1/C3 合格锚点时统一返回 `INCONCLUSIVE`，只有存在合格锚点且 base 不合格时才返回
+  `BASE_NOT_COMPARABLE`。最终 41/41 定向 unittest、compileall 与 diff 门禁通过；修复后从 v5 raw 机械重建的
+  observations/result 与正式 archive 完全一致，因此保留 v5，不机械重跑真实模型、Cargo 或 Docker。
+- exact base/C1/C2/C3、完整 checkpoint 与 Plan 068/071 证据继续保留在本地；未读取 unseen-test，未修改权重或数据，未训练、量化、
+  下载 HF 资产、调用真实 API 或写入远端。RunPod 保持 0 Pod/0 volume、持续费用为 0；本任务未启动 M3-C2/M3-D，当前路线只见
+  `doc/WBS.md` 与 `doc/WBS/multi-agent-trusted-evidence.md`。
