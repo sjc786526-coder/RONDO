@@ -229,11 +229,15 @@ XXX用以下内容代替：
   精选历史回归合计 36/36 通过。内部组合复核继续发现半删 snapshot 后旧 checkpoint 可恢复、多个 discard checkpoint 升序删除会
   暴露依赖已删旧 best 的 checkpoint 两个 P2；现按数值 chronology 从新到旧隐藏 discard checkpoint，再删除 snapshot，并补
   cp2/cp4/cp6 故障恢复回归。整改后两路定点复核与全 diff 复核均未发现剩余或新增 P1/P2。
+- 2026-08-25：第三轮复验提交 `d7589c5` 报告 2 个 P2 与 1 个 P3、无 P1：checkpoint 资格尚未实际 load/restore adapter，首个
+  checkpoint 前失败缺少同 store fresh attempt 路径，cloud handoff 必要项未精确冻结；均确认存在且不构成 `REPLAN_REQUIRED`。
+- 2026-08-25：checkpoint 资格与 resume 未完成 marker 路径现均在 retention 前执行完整 adapter load/scope/state/cursor restore；首
+  checkpoint 前失败可从原失败 controller 经 fresh exact-base 断言与 base observation 精确匹配进入新 generation；cloud 输入/输出清单
+  按冻结 JSON 精确验证。Plan 081 31 项与 7 项精选历史回归合计 38/38 通过；两路定点与一轮全 diff 只读复核无剩余或新增 P1/P2。
 
 ### 当前工作
 
-- Plan 081 整改复验的 2 个 finding 及内部组合复核发现的相邻窗口均已整改；本地门禁、定点/全 diff 独立复核与最终
-  diff/生成物检查均已完成，整改提交后等待再次复验。
+- 第三轮复验的 2 个 P2 与 1 个 P3 均已整改；本地门禁与 diff/生成物检查完成后提交，等待指定审查者再次复验。
 
 ### 本任务剩余步骤
 
@@ -246,7 +250,7 @@ XXX用以下内容代替：
 
 ### 当前验收状态
 
-- `IMPLEMENTATION_COMPLETE / SECOND_REVIEW_REMEDIATED / FOCUSED_LOCAL_GATES_PASS / REACCEPTANCE_PENDING`。
+- `IMPLEMENTATION_COMPLETE / THIRD_REVIEW_REMEDIATED / FOCUSED_LOCAL_GATES_PASS / REACCEPTANCE_PENDING`。
 
 ### 交接边界
 
@@ -276,3 +280,4 @@ XXX用以下内容代替：
 | 012 | Plan 081 使用专用薄层：typed train/validation identity、观测后显式扩大 scope、永久小观测与分层快照/checkpoint，并以持久 reservation 分配恢复 attempt | 旧 Plan 060/066 固定 recipe 不适合连续路线；新边界需避免夹带 holdout、静态预写扩层和同一 checkpoint 多次重放冲突 | local control/recovery | 已采纳 |
 | 013 | post-update 任一失败都进入 `recovery_required` 并从完整 checkpoint 新 adapter 恢复；adapter 显式声明 state codec，retention 以原子 completion artifact 收口 | 模型更新无法由 controller 安全回滚；半提交不得原地重试，非 JSON optimizer/RNG 状态和 checkpoint prune 都需可验证恢复边界 | failure/recovery | 已采纳 |
 | 014 | 新 checkpoint 只有经绑定 reader 读回并核对 controller/training/data cursor 后才能替代旧恢复点；已验证 discard 先原子改名为严格 prune tombstone，checkpoint 按数值 chronology 从新到旧隐藏后再删 snapshot | byte manifest 不等于可恢复；删除意图必须先与 live artifact 分离，中途失败时仍可见的旧 checkpoint 不得依赖已删除恢复点或 snapshot | checkpoint/retention | 已采纳 |
+| 015 | checkpoint 替换旧锚前执行 adapter 级完整恢复资格；首 checkpoint 前失败只允许从原失败 controller 以 fresh exact-base 新 attempt 重启；cloud handoff 必要清单精确冻结 | reader 可解码不等于 adapter 可恢复；同 store base 是 write-once，重启必须证明 exact base 且不覆盖旧工件；必要交接项不可静默删改 | recovery/handoff | 已采纳 |

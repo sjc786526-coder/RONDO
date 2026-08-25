@@ -32,6 +32,21 @@ from .plan066_data import (
 ROUTE_SCHEMA = "rondo-publication-critic-plan081-route-v1"
 CLOUD_HANDOFF_SCHEMA = "rondo-publication-critic-plan081-cloud-handoff-v1"
 UPDATE_METHOD = "direct_original_parameter_update"
+CLOUD_REQUIRED_INPUTS = (
+    "exact_model_and_v8_route_contract",
+    "runtime_selected_trainable_scope_and_expansion_policy",
+    "runtime_selected_optimizer_scheduler_and_update_recipe",
+    "same_validation_cohort_comparison_policy_and_tolerance",
+    "separate_external_action_authorization",
+)
+CLOUD_REQUIRED_OUTPUTS = (
+    "commissioning_runtime_and_memory_facts",
+    "actual_recipe_and_trainable_inventory",
+    "continuous_validation_observations",
+    "verified_latest_recovery_checkpoint",
+    "base_best_latest_and_turning_point_retention",
+    "better_than_base_candidate_or_no_improvement",
+)
 COMPARISON_METRICS = frozenset(
     {
         "roc_auc",
@@ -380,14 +395,8 @@ def validate_cloud_handoff(value: Any) -> dict[str, Any]:
     required_inputs = value.get("required_inputs")
     required_outputs = value.get("required_outputs")
     if (
-        not isinstance(required_inputs, list)
-        or not required_inputs
-        or not isinstance(required_outputs, list)
-        or not required_outputs
-        or len(set(required_inputs)) != len(required_inputs)
-        or len(set(required_outputs)) != len(required_outputs)
-        or any(not isinstance(item, str) or not item for item in required_inputs)
-        or any(not isinstance(item, str) or not item for item in required_outputs)
+        required_inputs != list(CLOUD_REQUIRED_INPUTS)
+        or required_outputs != list(CLOUD_REQUIRED_OUTPUTS)
     ):
         raise FullModelTrainingError("plan081_cloud_handoff_io_invalid")
     if value.get("claims") != {

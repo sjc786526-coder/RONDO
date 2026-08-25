@@ -153,6 +153,64 @@ class ContinuousTrainingController:
         scope = TrainableScope.from_value(self.state["current_scope"])
         adapter.configure_trainable_scope(scope)
         adapter.assert_trainable_scope(scope)
+        observation = self._base_observation(adapter, scope)
+        reference = self.artifact_store.write_observation(
+            "base-step-000000", observation
+        )
+        self._accept_base(observation, reference)
+        return self.archive_summary()
+
+    def restart_from_exact_base(
+        self,
+        adapter: Any,
+    ) -> "ContinuousTrainingController":
+        """Start a fresh attempt in one store after a pre-checkpoint failure."""
+
+        if (
+            self.state["status"] != "recovery_required"
+            or self.state["latest_checkpoint_id"] is not None
+            or not isinstance(self.state["base"], Mapping)
+        ):
+            raise FullModelTrainingError("plan081_exact_base_restart_not_allowed")
+        self.artifact_store.recover_incomplete_staging()
+        initial_scope = TrainableScope.from_value(
+            self.state["scope_history"][0]["scope"]
+        )
+        controller = type(self)(
+            route_contract=self.route_contract,
+            control_plan=self.control_plan,
+            initial_scope=initial_scope,
+            comparison_policy=self.comparison_policy,
+            training_dataset=self.training_dataset,
+            validation_dataset=self.validation_dataset,
+            artifact_store=self.artifact_store,
+            report_threshold=self.report_threshold,
+        )
+        controller._require_input_identities()
+        controller._bind_training_state_codec(adapter)
+        _assert_fresh_exact_base(adapter)
+        scope = TrainableScope.from_value(controller.state["current_scope"])
+        adapter.configure_trainable_scope(scope)
+        adapter.assert_trainable_scope(scope)
+        observation = controller._base_observation(adapter, scope)
+        try:
+            existing = self.artifact_store.read_observation("base-step-000000")
+            reference = self.artifact_store.verify_observation("base-step-000000")
+        except FullModelTrainingError as exc:
+            raise FullModelTrainingError(
+                "plan081_base_restart_unavailable"
+            ) from exc
+        if existing != observation:
+            raise FullModelTrainingError("plan081_base_restart_mismatch")
+        controller._accept_base(observation, reference)
+        controller.state["artifact_generation"] = (
+            self.artifact_store.reserve_artifact_generation(after_generation=0)
+        )
+        return controller
+
+    def _base_observation(
+        self, adapter: Any, scope: TrainableScope
+    ) -> dict[str, Any]:
         observation = self._evaluate(adapter, global_step=0, scope=scope)
         observation["comparisons"] = {"base": "incumbent", "previous": None, "best": None}
         observation["evidence"] = {
@@ -160,14 +218,16 @@ class ContinuousTrainingController:
             "research_candidate_eligible": False,
             "real_quality_claim": False,
         }
-        reference = self.artifact_store.write_observation(
-            "base-step-000000", observation
-        )
+        return observation
+
+    def _accept_base(
+        self, observation: Mapping[str, Any], reference: Mapping[str, Any]
+    ) -> None:
         base = {
             "role": "base_incumbent",
             "model": {"repository": MODEL_REPOSITORY, "revision": MODEL_REVISION},
             "snapshot_id": "exact-base-incumbent",
-            "observation": reference,
+            "observation": dict(reference),
             "comparison_value": observation["comparison_value"],
         }
         self.state["base"] = base
@@ -178,7 +238,6 @@ class ContinuousTrainingController:
             policy=self.comparison_policy,
         )
         self.state["status"] = "paused"
-        return self.archive_summary()
 
     def run(self, adapter: Any, *, stop_after: int | None = None) -> dict[str, Any]:
         if self.state["base"] is None:
@@ -295,6 +354,8 @@ class ContinuousTrainingController:
                 qualification_attempted = True
                 self._qualify_checkpoint(
                     checkpoint_id,
+                    adapter=adapter,
+                    scope=scope,
                     state_reader=state_reader,
                     expected_controller_state=checkpoint_state,
                     expected_data_cursor=receipt["data_cursor"],
@@ -312,6 +373,8 @@ class ContinuousTrainingController:
                     try:
                         self._qualify_checkpoint(
                             checkpoint_id,
+                            adapter=adapter,
+                            scope=scope,
                             state_reader=state_reader,
                             expected_controller_state=checkpoint_state,
                             expected_data_cursor=receipt["data_cursor"],
@@ -331,6 +394,8 @@ class ContinuousTrainingController:
         self,
         checkpoint_id: str,
         *,
+        adapter: Any,
+        scope: TrainableScope,
         state_reader: StateReader,
         expected_controller_state: Mapping[str, Any],
         expected_data_cursor: Mapping[str, Any],
@@ -338,7 +403,7 @@ class ContinuousTrainingController:
         """Read back a new checkpoint before it may replace a recovery point."""
 
         try:
-            controller_state, training_state, _model_root = (
+            controller_state, training_state, model_root = (
                 self.artifact_store.read_checkpoint(
                     checkpoint_id, state_reader=state_reader
                 )
@@ -358,6 +423,12 @@ class ContinuousTrainingController:
             raise FullModelTrainingError(
                 "plan081_data_cursor_checkpoint_mismatch"
             )
+        _restore_adapter_checkpoint(
+            adapter,
+            model_root=model_root,
+            scope=scope,
+            training_state=training_state,
+        )
 
     @classmethod
     def resume(
@@ -410,25 +481,23 @@ class ContinuousTrainingController:
         _validate_training_state(training_state)
         if training_state["data"] != controller.state["updates"][-1]["data_cursor"]:
             raise FullModelTrainingError("plan081_data_cursor_checkpoint_mismatch")
-        if not artifact_store.has_retention_completion(checkpoint_id):
-            if not artifact_store.is_latest_checkpoint(checkpoint_id):
-                raise FullModelTrainingError(
-                    "plan081_checkpoint_retention_incomplete"
-                )
+        needs_retention = not artifact_store.has_retention_completion(checkpoint_id)
+        if needs_retention and not artifact_store.is_latest_checkpoint(checkpoint_id):
+            raise FullModelTrainingError(
+                "plan081_checkpoint_retention_incomplete"
+            )
+        _restore_adapter_checkpoint(
+            adapter,
+            model_root=model_root,
+            scope=scope,
+            training_state=training_state,
+        )
+        if needs_retention:
             controller._apply_retention(prune_checkpoints=True)
             artifact_store.mark_retention_complete(checkpoint_id)
         fresh_generation = artifact_store.reserve_artifact_generation(
             after_generation=int(controller.state["artifact_generation"])
         )
-
-        # Optimizer param groups are scope-dependent: rebuild and verify the
-        # actual inventory before optimizer/scheduler/RNG state is restored.
-        adapter.load_model(model_root)
-        adapter.configure_trainable_scope(scope)
-        adapter.assert_trainable_scope(scope)
-        adapter.restore_training_state(training_state)
-        adapter.assert_trainable_scope(scope)
-        adapter.assert_data_cursor(training_state["data"])
 
         controller.state["resume_count"] = int(controller.state["resume_count"]) + 1
         controller.state["artifact_generation"] = fresh_generation
@@ -1045,6 +1114,42 @@ def _adapter_training_state_codec(
     if not isinstance(codec_id, str) or _CODEC_ID.fullmatch(codec_id) is None:
         raise FullModelTrainingError("plan081_training_state_codec_invalid")
     return codec_id, state_writer, state_reader
+
+
+def _assert_fresh_exact_base(adapter: Any) -> None:
+    assertion = getattr(adapter, "assert_fresh_exact_base", None)
+    if not callable(assertion):
+        raise FullModelTrainingError("plan081_fresh_exact_base_assertion_missing")
+    try:
+        assertion(MODEL_REPOSITORY, MODEL_REVISION)
+    except FullModelTrainingError:
+        raise
+    except Exception as exc:
+        raise FullModelTrainingError("plan081_fresh_exact_base_invalid") from exc
+
+
+def _restore_adapter_checkpoint(
+    adapter: Any,
+    *,
+    model_root: Path,
+    scope: TrainableScope,
+    training_state: Mapping[str, Any],
+) -> None:
+    """Exercise the adapter's complete restore contract for one checkpoint."""
+
+    try:
+        adapter.load_model(model_root)
+        adapter.configure_trainable_scope(scope)
+        adapter.assert_trainable_scope(scope)
+        adapter.restore_training_state(training_state)
+        adapter.assert_trainable_scope(scope)
+        adapter.assert_data_cursor(training_state["data"])
+    except FullModelTrainingError:
+        raise
+    except Exception as exc:
+        raise FullModelTrainingError(
+            "plan081_checkpoint_restore_failed"
+        ) from exc
 
 
 def _artifact_id(kind: str, generation: int, step: int) -> str:

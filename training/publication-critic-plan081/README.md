@@ -22,18 +22,24 @@ stage and subsequent work are defined only by `doc/WBS.md` and
 An adapter must bind validation results to the typed validation dataset and
 declare one explicit writer/reader codec for complete optimizer, scheduler,
 RNG, and data-cursor state. A failed post-update step is not retried in place:
-the controller enters `recovery_required`, and continuation uses a fresh
-adapter restored from a verified complete checkpoint.
+the controller enters `recovery_required`. When a verified complete checkpoint
+exists, continuation uses a fresh adapter restored from it. A failure before
+the first checkpoint can only return through `restart_from_exact_base()` on the
+failed controller: a fresh adapter must assert the exact base, reproduce the
+write-once base observation exactly, and continue in a newly reserved attempt.
 
 A newly written checkpoint is eligible to replace an older recovery point only
-after its declared reader decodes it and the controller state, four training
-state sections, and data cursor match the checkpoint/update contract. Byte-tree
-integrity alone is not recovery qualification.
+after its declared reader decodes it, the controller state and four training
+state sections match the checkpoint/update contract, and the adapter actually
+loads the model payload and restores optimizer, scheduler, RNG, scope, and data
+cursor state. Byte-tree integrity or decodability alone is not recovery
+qualification.
 
 Checkpoint retention is complete only after its write-once completion artifact
 has been atomically published. Resume may repair an absent marker only for the
-newest physical checkpoint, before loading or mutating adapter state; a marked
-older best or turning-point checkpoint never reapplies its historical prune.
+newest physical checkpoint, and only after that checkpoint passes the same
+adapter-level recovery qualification; a marked older best or turning-point
+checkpoint never reapplies its historical prune.
 Each verified discard is first atomically renamed to a strict task-owned prune
 tombstone, so an interrupted tree deletion can be resumed without treating a
 partial tree as a live artifact. Superseded checkpoints are hidden from newest
