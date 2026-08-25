@@ -265,6 +265,14 @@ class DatasetConsumer:
             for row in stage["binary"]
         )
 
+    def dropped_oldest_publications(self, candidate_id: str) -> int:
+        """Report the frozen census omission count for a visible candidate."""
+
+        try:
+            return self._dropped_oldest_publications[candidate_id]
+        except KeyError:
+            raise TrainingDataError("candidate is not visible to this consumer") from None
+
     def evaluation_split(self, split: str) -> tuple[Mapping[str, Any], ...]:
         if not self.allow_evaluation:
             raise TrainingDataError("validation/unseen-test access requires explicit evaluation mode")
