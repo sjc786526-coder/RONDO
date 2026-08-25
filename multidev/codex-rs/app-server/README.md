@@ -171,6 +171,7 @@ Example with notification opt-out:
 - `threadSection/delete` — delete an existing custom section and atomically return its member threads to the unsectioned list; returns `{}`. The built-in pinned section cannot be deleted.
 - `thread/loaded/list` — list the thread ids currently loaded in memory.
 - `thread/read` — read a stored thread by id without resuming it; optionally include turns via `includeTurns`. The returned `thread` includes `status` (`ThreadStatus`), defaulting to `notLoaded` when the thread is not currently loaded. For loaded threads, experimental clients can use `canAcceptDirectInput` to determine whether `turn/start` and `turn/steer` are accepted; unloaded stored threads report `null` when that capability is unavailable.
+- `session/list` and `session/read` — query canonical Durable Sessions and their bounded committed Team projections without loading or resuming them. These stable v2 methods use the separate, default-disabled `durable_session_query` product feature and do not require the experimental API capability; see [Durable Session query](#durable-session-query).
 - `experimentalSession/list` and `experimentalSession/read` — inspect the experimental Session prototype without loading or resuming a Session. These methods require both `capabilities.experimentalApi = true` and the separate, default-disabled `experimental_session_control` product feature; see [Experimental Session control prototype](#experimental-session-control-prototype).
 - `experimentalSession/updateTeamLifecycle` — submit one optimistic Root-state transition through the currently loaded canonical Session owner. Child, non-owner, unavailable-owner, and conflicting requests fail closed. This method has the same two opt-ins as the prototype reads.
 - `thread/turns/list` — experimental; page through a stored thread’s turn history without resuming it; supports cursor-based pagination with `sortDirection`, `itemsView`, `nextCursor`, and `backwardsCursor`.
@@ -487,6 +488,60 @@ Enable `capabilities.experimentalApi` during initialization, then use `thread/li
     "data": ["thr_123", "thr_456"]
 } }
 ```
+
+### Durable Session query
+
+`session/list` and `session/read` are the formal, query-only v2 surface for Durable Sessions. Start
+the product with the default-disabled `durable_session_query` feature to expose them. The methods
+are stable API and do not require `capabilities.experimentalApi`; enabling the product does not
+enable durable writers or the separate `experimentalSession/*` control prototype.
+
+```json
+{ "method": "session/list", "id": 22, "params": {
+    "limit": 25,
+    "archived": false,
+    "cursor": null
+} }
+{ "method": "session/read", "id": 23, "params": {
+    "sessionId": "019c...",
+    "rootThreadId": "019c..."
+} }
+```
+
+List cursors are opaque and scoped to either the active or archived source. Discovery uses the
+state DB through a dedicated bounded locator that includes empty-preview rows, then authenticates
+every result with canonical Root
+`SessionMeta`; legacy records and child rollouts are not promoted into the Durable Session
+namespace. Filtering continues across source pages until the requested page is filled, the source
+is exhausted, or a fixed scan/page budget is reached. `complete: false` and `incompleteReason`
+distinguish source failure, concurrent source change, unreadable/incompatible records,
+classification failure, and budget exhaustion. An active cursor cannot be reused for an archived
+request. The locator collection has no source-generation token, so a cursor continuation or one
+request that must filter across multiple locator pages conservatively reports
+`complete: false` with `sourceChanged`: the bounded rows remain useful, but the server does not
+claim cross-read membership continuity that it cannot prove.
+
+Each view keeps independent fact axes for canonical identity, active/archived storage placement,
+whole-Session domain lifecycle, this app-server's runtime residency observation, operation
+availability, provenance, and read completeness. In particular:
+
+- archive placement is not a closed lifecycle; lifecycle remains `unknown` until an owning durable
+  lifecycle source exists;
+- `notObservedHere` only means this app-server did not observe the Root owner, while
+  `ownerUnavailableHere` means it observed a child without that owner;
+- operation availability is informational and never executes resume, close, archive, unarchive,
+  delete, or a Team mutation; and
+- caller locators are not reported as authenticated identity when canonical metadata is missing,
+  belongs to a child, or conflicts with the requested Session/Root pair.
+
+The Team projection always comes from one complete checksummed committed snapshot, even if the
+Root is currently loaded. It carries `commitGeneration`, a complete-payload `commitFingerprint`,
+and Team-domain `revision` as separate facts, plus bounded participant/event/version lists and
+omission counts. Missing, corrupt, incompatible, identity-invalid, or concurrently changed state
+returns a typed `readStatus` and no partial Team. The server rereads canonical lineage after the
+snapshot projection and reports `sourceChanged` rather than combining facts across that boundary.
+Neither method obtains writer authority, repairs metadata, opens rollout history, resumes a
+Session, starts an Agent, or calls a model/API.
 
 ### Experimental Session control prototype
 

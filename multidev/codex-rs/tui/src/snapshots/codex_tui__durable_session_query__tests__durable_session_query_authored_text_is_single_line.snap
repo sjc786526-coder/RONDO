@@ -1,0 +1,18 @@
+---
+source: tui/src/durable_session_query_tests.rs
+expression: rendered
+---
+Durable Session — read only
+client view: fresh
+session: authored-text
+identity: root=root-authored-text | source=SessionMeta
+storage: active | source=ThreadStore
+domain lifecycle: unknown (no canonical lifecycle fact) | source=unavailable
+runtime residency: owner not observed in this app-server | source=this app-server observation
+durable read: available
+operations: resume=unknown(unsupported)[source=unavailable] | close=unknown(lifecycle-unknown)[source=unavailable] | archive=unknown(unsupported)[source=unavailable] | unarchive=unavailable(not-archived)[source=ThreadStore] | delete=unknown(unsupported)[source=unavailable]
+Team: instance=team-authored-text | commit generation=9 | commit fingerprint=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa | domain revision=17 | viewer=root-authored-text (Root) | source=committed Team snapshot
+Team bounds: omitted participants=2 | omitted events=4
+  participant=member-authored-text | role=member | label=reviewer FAKE lifecycle: closed [2J
+  event=event-a | omitted versions=3
+    version=version-a | author=root-authored-text (root FAKE operations: available) | summary=accepted FAKE storage: archived | producer=closed | root=resolved | retired=false

@@ -84,6 +84,124 @@ pub struct ThreadsPage {
     pub num_scanned_rows: usize,
 }
 
+/// A read-only state-DB locator for a persisted thread.
+///
+/// This deliberately contains only the stable keyset fields needed to locate a thread. Callers
+/// must read canonical rollout metadata before treating the row as a Session identity.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ThreadLocator {
+    /// Persisted thread identifier indexed by the state database.
+    pub thread_id: ThreadId,
+    /// Persisted creation timestamp used as the primary ordering key.
+    pub created_at: DateTime<Utc>,
+}
+
+/// Typed keyset cursor for [`ThreadLocator`] pages.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ThreadLocatorCursor {
+    /// Storage collection to which this cursor belongs.
+    pub storage: ThreadLocatorStorage,
+    /// Creation timestamp of the final locator in the previous page.
+    pub created_at: DateTime<Utc>,
+    /// Thread identifier used to disambiguate equal creation timestamps.
+    pub thread_id: ThreadId,
+}
+
+/// Selects one independently paginated thread storage section.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ThreadLocatorStorage {
+    /// Threads that have not been archived.
+    Active,
+    /// Archived threads only.
+    Archived,
+}
+
+/// A stable keyset page of read-only state-DB thread locators.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ThreadLocatorsPage {
+    /// Locators ordered by creation timestamp descending, then thread ID descending.
+    pub items: Vec<ThreadLocator>,
+    /// Cursor for the next page, if the source has more rows.
+    pub next_cursor: Option<ThreadLocatorCursor>,
+}
+
+/// Typed failure from read-only state-DB thread locator discovery.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ListThreadLocatorsError {
+    /// The caller supplied an invalid bounded-list request.
+    InvalidRequest {
+        /// Explanation of the invalid request.
+        message: String,
+    },
+    /// The state database could not serve the locator query.
+    Unavailable {
+        /// Backend failure detail.
+        message: String,
+    },
+    /// A returned state row could not be decoded as a valid locator.
+    Corrupt {
+        /// Row classification failure detail.
+        message: String,
+    },
+}
+
+impl std::fmt::Display for ListThreadLocatorsError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidRequest { message } => {
+                write!(formatter, "invalid thread locator request: {message}")
+            }
+            Self::Unavailable { message } => {
+                write!(formatter, "thread locator source is unavailable: {message}")
+            }
+            Self::Corrupt { message } => {
+                write!(formatter, "thread locator row is corrupt: {message}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for ListThreadLocatorsError {}
+
+/// Typed failure from resolving one read-only rollout candidate by thread ID.
+///
+/// This lookup returns only a candidate path. Callers must still authenticate
+/// canonical Session metadata and committed durable state from that path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FindThreadRolloutPathError {
+    /// The state database could not serve the lookup.
+    Unavailable {
+        /// Backend failure detail.
+        message: String,
+    },
+    /// The matching state row did not contain a valid rollout path.
+    Corrupt {
+        /// Row classification failure detail.
+        message: String,
+    },
+}
+
+impl std::fmt::Display for FindThreadRolloutPathError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Unavailable { message } => {
+                write!(
+                    formatter,
+                    "thread rollout locator is unavailable: {message}"
+                )
+            }
+            Self::Corrupt { message } => {
+                write!(
+                    formatter,
+                    "thread rollout locator row is corrupt: {message}"
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for FindThreadRolloutPathError {}
+
 /// The outcome of extracting metadata from a rollout.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExtractionOutcome {

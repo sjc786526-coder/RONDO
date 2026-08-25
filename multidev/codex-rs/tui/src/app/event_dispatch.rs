@@ -23,6 +23,12 @@ impl App {
         event: AppEvent,
     ) -> Result<AppRunControl> {
         match event {
+            AppEvent::DurableSessionQueryCommand(args) => {
+                self.handle_durable_session_query_command(app_server, &args);
+            }
+            AppEvent::DurableSessionQueryCompleted(completion) => {
+                self.handle_durable_session_query_completion(app_server, completion);
+            }
             AppEvent::ExperimentalSessionControlCommand(args) => {
                 self.handle_experimental_session_control_command(app_server, &args)
                     .await;

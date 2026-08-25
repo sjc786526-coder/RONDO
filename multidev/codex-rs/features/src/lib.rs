@@ -161,6 +161,8 @@ pub enum Feature {
     Collab,
     /// Enable task-path-based multi-agent routing.
     MultiAgentV2,
+    /// Enable the formal read-only Durable Session query product surface.
+    DurableSessionQuery,
     /// Enable the experimental Session control product prototype.
     ExperimentalSessionControl,
     /// Removed compatibility flag retained as a no-op.
@@ -1115,6 +1117,18 @@ pub const FEATURES: &[FeatureSpec] = &[
         id: Feature::MultiAgentV2,
         key: "multi_agent_v2",
         stage: Stage::Stable,
+        default_enabled: false,
+    },
+    FeatureSpec {
+        id: Feature::DurableSessionQuery,
+        key: "durable_session_query",
+        stage: Stage::Experimental {
+            name: "Durable Session query",
+            menu_description: "Inspect durable Sessions through the read-only query interface.",
+            // Keep this explicit opt-in out of the process-global startup tooltip pool. The
+            // /experimental menu continues to expose the name and description after opt-in.
+            announcement: "",
+        },
         default_enabled: false,
     },
     FeatureSpec {

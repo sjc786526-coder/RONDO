@@ -87,6 +87,37 @@ fn experimental_session_control_is_an_independent_product_opt_in() {
 }
 
 #[test]
+fn durable_session_query_is_an_independent_read_only_product_opt_in() {
+    let spec = crate::FEATURES
+        .iter()
+        .find(|spec| spec.id == Feature::DurableSessionQuery)
+        .expect("durable Session query feature is registered");
+    assert_eq!(spec.key, "durable_session_query");
+    assert!(matches!(spec.stage, Stage::Experimental { .. }));
+    assert!(!spec.default_enabled);
+
+    let mut features = Features::with_defaults();
+    assert!(!features.enabled(Feature::DurableSessionQuery));
+    assert!(!features.enabled(Feature::ExperimentalSessionControl));
+
+    features.apply_map(&BTreeMap::from([(
+        "durable_session_query".to_string(),
+        true,
+    )]));
+    assert!(features.enabled(Feature::DurableSessionQuery));
+    assert!(!features.enabled(Feature::ExperimentalSessionControl));
+    assert_eq!(
+        spec.stage.experimental_menu_name(),
+        Some("Durable Session query")
+    );
+    assert_eq!(
+        spec.stage.experimental_menu_description(),
+        Some("Inspect durable Sessions through the read-only query interface.")
+    );
+    assert_eq!(spec.stage.experimental_announcement(), None);
+}
+
+#[test]
 fn default_enabled_features_are_stable() {
     for spec in crate::FEATURES {
         if spec.default_enabled {

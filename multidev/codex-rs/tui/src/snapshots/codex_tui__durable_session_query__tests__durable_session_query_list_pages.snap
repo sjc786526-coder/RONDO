@@ -1,0 +1,8 @@
+---
+source: tui/src/durable_session_query_tests.rs
+expression: "render_list(\n    &response,\n    QueryViewFreshness::Fresh,\n    DurableSessionListScope::Active\n)"
+---
+Durable Sessions — read only
+client view: fresh | storage source: active | complete: true | next: available
+- active-a | storage=active | lifecycle=unknown (no canonical lifecycle fact) | residency=owner not observed in this app-server | read=available
+  root=root-active-a | Team instance=team-active-a commit-generation=9 commit-fingerprint=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa domain-revision=17

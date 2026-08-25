@@ -2055,3 +2055,51 @@ correctness/functionality `remaining_findings=[]`，路线结论为 `GO`。
 - shared core 触发的一次标准全 workspace `just test` 在测试前被 rusty-v8 v150.4.0 默认 archive URL 的 HTTP 404 阻断，未产生
   JUnit，未表述为通过或重复扩大完整轮；既有 checksum-verified 历史完整轮仍为 14,373 项中 14,363 通过、10 项既知相邻失败。
   本阶段未使用 Docker、真实模型/API、训练、测评、CI/PR，未把 069 合入或推送主线。
+
+## M4-C1 正式 Durable Session Query（Plan 077，2026-08-25）
+
+**状态**：基于 M4-S1 canonical durable read model 的正式只读 Session Query、四项独立审查整改与最终复验均已完成；验收通过、
+任务目标完成，结论为 `M4_C1_QUERY_PASS`。初始实现提交为 `3642b04405bfad5daff3462f9a9f9ef7edd86a9a`，整改提交为
+`c14d66143433acc887e7bce1ef6747ccd6574ba5`，最终独立验收提交为 `7f179b19615d3e3e4ea8eb54bb0ca2f6b63812c4`。
+
+- 默认关闭的正式 app-server v2 `session/list` / `session/read`、app-server client 与 TUI `/sessions` 纵向链已经闭合。查询从
+  ThreadStore 的 canonical persisted `SessionMeta` 定位 Session/Root identity，再与 durable marker 和同一完整 committed Team
+  snapshot 交叉验证；state DB 只提供有界候选，不成为第二份 durable 状态源，prototype input 不再参与正式事实。
+- 查询可在服务重启后发现 active/archived Durable Session，并分轴投影 Session/Root/Team identity、domain lifecycle、runtime
+  residency、operation availability、provenance 与 freshness。分页 continuation、source change、损坏、不完整、backend unavailable
+  和 stale retained view 均保守表达，不把不同一致性边界拼成当前事实。
+- 整条查询链不加载或恢复 Agent/Session，不取得 writer authority，不启动模型、工具或 API，也不产生 Team mutation。C0 control
+  保持独立默认关闭 gate；两个 gate 同开时 `/sessions` 固定正式 query、`/session-control` 固定 C0，仅开启 C0 时保留旧
+  `/sessions` alias，query-only 不暴露控制操作。
+- 提交级独立审查发现并推动关闭四个中等级问题：InMemory 易失 metadata 不再冒充 persisted seam；client 在提交前对称验证
+  `Available <=> Team` 及 canonical Root viewer；双 gate 不再互相遮蔽；Team authored label/summary 只在正式 renderer 边界
+  单行化。最终复验无剩余高、中或低等级 correctness finding。
+- 正式证据包括 lower locator/meta **18/18**、app-server/client/TUI query **46/46** 与整改直接因果轮 **8/8**，均为 0
+  failure/error；相关 schema export、四 crate scoped fix、fmt/fmt-check 与 diff 门禁通过。workspace `just test` 在测试前被既有
+  rusty-v8 v150.4.0 archive HTTP 404 阻断，core/protocol 宽轮也受范围外 proxy/mock 环境失败影响，均未冒充通过或用于扩大写集。
+- 未运行 Docker、真实 API/模型、训练、测评、CI/PR 或远端操作。Plan 078 的 `#37847` 前置已先期进入本地 `main`；Plan 077 /
+  M4-C1 正式实现随后、先于 M4-S2 正式轮进入主线。M4-S2 正式轮作为后整合者负责 shared 接缝收敛及 query/lifecycle 聚焦兼容
+  验收，正式 Session Control/TUI 继续等待 M4-S2。
+
+## Publication Critic Skywork 4B 云端基座质量测评（Plan 079，2026-08-25）
+
+**状态**：exact `Skywork/Skywork-Reward-V2-Qwen3-4B@fd958fef475f323f4e6b195930e3dd918485c668` 原始 BF16 base 的
+commissioning、唯一正式轮、独立复算、一次验收整改与最终复验均已完成；验收通过、任务目标完成，终态为
+`4B_BASE_QUALITY_NO_GO`。正式评分绑定源码 `610d880`，交付实现为 `b671f51ff63f1f80aaddbd035e57634adb1838f5`，
+formal retry 整改为 `d29e857`，最终独立验收提交为 `43cf0eeb3e1b4826c60924fc1385319d7adead3a`。
+
+- 唯一正式轮 `plan079-formal-20260825T175912Z-610d880-r1` 从 clean source 与空 namespace 完成冻结 v8 validation 55/55，
+  typed failure 为 0；完整 operating curve 无 admissible point。False PASS 为 `12/21 = 0.5714`、False REWRITE 为
+  `4/34 = 0.1176`、balanced accuracy 为 `0.6555`、ROC AUC 为 `0.6218`、boundary strict win 为 `13/19 = 0.6842`，
+  within-PASS 为 `6/7 = 0.8571`。相较历史 1.7B base，4B 降低 False REWRITE 但显著增加 False PASS，仍未达到发布门限。
+- 正式运行复用冻结 typed packet/render、16,384 context、scalar head、score 方向、validation 与 pair/metrics；只消费物理不含
+  unseen-test 的既有 train+validation bundle。未重问 Judge、训练、量化、转换、重跑 1.7B/C1/C2/C3、启用产品或解锁 M3-D。
+  正式结果与独立复算逐字节一致；formal 崩溃恢复整改只允许通过完整既有合同验证的 `INCONCLUSIVE` 进入新空 namespace 重跑，
+  不改变本次完整 NO-GO 结果。
+- 任务 Pod `iocp8k8w6zvh4s` 已删除并确认同名查询为 0，GPU 持续费用为 `$0/h`。20 GB Standard 网络卷 `v1us0nmk0p` 按用户
+  要求保留在 `US-IL-1`，观察使用量约 `7.68 GiB`、费率 `$0.00194444449/h`，删除仍须单独批准；任务交接累计费用保守上界
+  `$0.3207`。没有运行本地重型 Cargo、Docker 或真实本地模型。
+- 聚焦 base-quality 与 Pod monitor 测试 23/23，复用的 Plan 073 threshold/selection/archive/freeze 测试 23/23；format、定向
+  `py_compile`、shell syntax、JSON 与 diff checks 通过。最终独立复验无剩余 correctness/functionality finding。
+- 结果见 `eval/results/publication-critic/skywork-reward-v2-qwen3-4b-base-quality-v1.{json,md}`，执行与验收细节见对应 Plan 079
+  `agent_log`。本任务没有形成后继任务授权；三期当前状态与后续选择只由 `doc/WBS.md` 及三期子 WBS 维护。

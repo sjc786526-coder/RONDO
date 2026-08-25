@@ -1,0 +1,16 @@
+---
+source: tui/src/durable_session_query_tests.rs
+expression: rendered
+---
+Durable Session query failed: session/list timed out; no retry was attempted
+Retained stale context (not current):
+Durable Sessions — read only
+client view: stale | storage source: archived | complete: false | next: none
+incomplete: budget-exhausted
+- partial | storage=archived | lifecycle=unknown (no canonical lifecycle fact) | residency=owner not observed in this app-server | read=unsupported(source-unsupported)
+  root=root-partial | Team unavailable(source=unavailable)
+
+Durable Sessions — read only
+client view: fresh | storage source: active | complete: false | next: none
+incomplete: unknown
+sessions: no authoritative rows in this incomplete page

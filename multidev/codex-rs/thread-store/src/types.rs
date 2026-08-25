@@ -243,6 +243,67 @@ pub struct ReadThreadParams {
     pub include_history: bool,
 }
 
+/// Parameters for reading a thread's canonical persisted session metadata.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReadSessionMetaParams {
+    /// Thread id whose canonical SessionMeta should be read.
+    pub thread_id: ThreadId,
+    /// Whether archived rollouts are eligible.
+    pub include_archived: bool,
+}
+
+/// Selects one independently paginated durable-session locator collection.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SessionLocatorStorage {
+    /// Threads that have not been archived.
+    Active,
+    /// Archived threads only.
+    Archived,
+}
+
+/// Stable typed cursor for durable-session locator discovery.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionLocatorCursor {
+    /// Storage collection to which this cursor belongs.
+    pub storage: SessionLocatorStorage,
+    /// Creation timestamp of the final locator in the previous page.
+    pub created_at: DateTime<Utc>,
+    /// Thread ID used to disambiguate equal creation timestamps.
+    pub thread_id: ThreadId,
+}
+
+/// Parameters for fail-closed durable-session locator discovery.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ListSessionLocatorsParams {
+    /// Maximum number of locators to return. Must be in `1..=100`.
+    pub page_size: usize,
+    /// Typed keyset cursor returned by a previous locator list call.
+    pub cursor: Option<SessionLocatorCursor>,
+    /// Active or archived locator collection to query.
+    pub storage: SessionLocatorStorage,
+}
+
+/// State-DB locator for a thread that may contain a canonical durable Session.
+///
+/// The locator is not a Session identity fact. Callers must separately read and validate the
+/// canonical SessionMeta and durable snapshot before projecting it as a durable Session.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionLocator {
+    /// Thread ID used for the subsequent canonical metadata read.
+    pub thread_id: ThreadId,
+    /// Creation timestamp used as the primary stable ordering key.
+    pub created_at: DateTime<Utc>,
+}
+
+/// A stable page of durable-session locator candidates.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionLocatorPage {
+    /// Candidate locators ordered by creation timestamp descending, then thread ID descending.
+    pub items: Vec<SessionLocator>,
+    /// Typed cursor for the next page, if more locator rows exist.
+    pub next_cursor: Option<SessionLocatorCursor>,
+}
+
 /// Parameters for reading a local rollout-backed thread by path.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReadThreadByRolloutPathParams {

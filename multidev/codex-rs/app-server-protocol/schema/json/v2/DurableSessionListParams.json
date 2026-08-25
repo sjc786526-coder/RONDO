@@ -1,0 +1,28 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "description": "Parameters for discovering canonical durable Sessions.",
+  "properties": {
+    "archived": {
+      "description": "Selects the archived source when true and the active source when false.",
+      "type": "boolean"
+    },
+    "cursor": {
+      "description": "Opaque pagination cursor returned by a previous call for the same source.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "limit": {
+      "description": "Optional page size; the server applies a bounded default and maximum.",
+      "format": "uint32",
+      "minimum": 0.0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    }
+  },
+  "title": "DurableSessionListParams",
+  "type": "object"
+}

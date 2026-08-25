@@ -36,6 +36,11 @@ impl App {
     ) {
         match event {
             AppServerEvent::Lagged { skipped } => {
+                app_server_client.durable_session_on_lagged();
+                self.render_durable_session_sync_loss(
+                    app_server_client,
+                    "app-server event lag; refresh is required",
+                );
                 app_server_client.experimental_session_on_lagged();
                 self.render_experimental_session_sync_loss(
                     app_server_client,
@@ -57,6 +62,11 @@ impl App {
                     .await;
             }
             AppServerEvent::Disconnected { message } => {
+                app_server_client.durable_session_on_disconnected();
+                self.render_durable_session_sync_loss(
+                    app_server_client,
+                    "app-server disconnected; reconnect and refresh are required",
+                );
                 app_server_client.experimental_session_on_disconnected();
                 self.render_experimental_session_sync_loss(
                     app_server_client,
@@ -73,6 +83,11 @@ impl App {
         &mut self,
         app_server_client: &AppServerSession,
     ) {
+        app_server_client.durable_session_on_event_stream_closed();
+        self.render_durable_session_sync_loss(
+            app_server_client,
+            "app-server event stream closed; reconnect and refresh are required",
+        );
         app_server_client.experimental_session_on_event_stream_closed();
         self.render_experimental_session_sync_loss(
             app_server_client,

@@ -1,4 +1,5 @@
 use codex_protocol::ThreadId;
+use codex_protocol::protocol::SessionMeta;
 use codex_protocol::protocol::ThreadHistoryMode;
 use std::any::Any;
 use std::future::Future;
@@ -14,6 +15,8 @@ use crate::DeleteThreadSectionParams;
 use crate::DeleteThreadsParams;
 use crate::ItemPage;
 use crate::ListItemsParams;
+use crate::ListSessionLocatorsError;
+use crate::ListSessionLocatorsParams;
 use crate::ListThreadSectionsParams;
 use crate::ListThreadsParams;
 use crate::ListTurnsParams;
@@ -21,6 +24,8 @@ use crate::LoadThreadHistoryParams;
 use crate::MoveThreadToSectionParams;
 use crate::PrepareForkParams;
 use crate::PreparedFork;
+use crate::ReadSessionMetaError;
+use crate::ReadSessionMetaParams;
 use crate::ReadThreadByRolloutPathParams;
 use crate::ReadThreadParams;
 use crate::RenameThreadSectionParams;
@@ -28,6 +33,7 @@ use crate::ResumeThreadParams;
 use crate::RootWriterAuthority;
 use crate::SearchThreadOccurrencesParams;
 use crate::SearchThreadsParams;
+use crate::SessionLocatorPage;
 use crate::StoredModelContext;
 use crate::StoredThread;
 use crate::StoredThreadHistory;
@@ -43,6 +49,14 @@ use crate::UpdateThreadMetadataParams;
 
 /// Future returned by [`ThreadStore`] operations.
 pub type ThreadStoreFuture<'a, T> = Pin<Box<dyn Future<Output = ThreadStoreResult<T>> + Send + 'a>>;
+
+/// Future returned by the canonical SessionMeta read seam.
+pub type ReadSessionMetaFuture<'a> =
+    Pin<Box<dyn Future<Output = Result<SessionMeta, ReadSessionMetaError>> + Send + 'a>>;
+
+/// Future returned by fail-closed durable-session locator discovery.
+pub type ListSessionLocatorsFuture<'a> =
+    Pin<Box<dyn Future<Output = Result<SessionLocatorPage, ListSessionLocatorsError>> + Send + 'a>>;
 
 pub(crate) async fn archive_thread_ids_in_order<F, Fut>(
     thread_ids: Vec<ThreadId>,
@@ -153,6 +167,35 @@ pub trait ThreadStore: Any + Send + Sync {
         Box::pin(async {
             Err(ThreadStoreError::Unsupported {
                 operation: "prepare_fork",
+            })
+        })
+    }
+
+    /// Reads the canonical persisted SessionMeta without activating or mutating the thread.
+    ///
+    /// Implementations must not open a writer, repair metadata, update an index, or resume the
+    /// thread while serving this query. Stores that cannot prove those semantics should retain the
+    /// fail-closed default.
+    fn read_session_meta(&self, _params: ReadSessionMetaParams) -> ReadSessionMetaFuture<'_> {
+        Box::pin(async {
+            Err(ReadSessionMetaError::Unsupported {
+                operation: "read_session_meta",
+            })
+        })
+    }
+
+    /// Lists state-backed thread locators for canonical durable-session classification.
+    ///
+    /// Implementations must use a bounded, stable keyset and must not scan rollouts, repair an
+    /// index, activate a thread, or treat locator rows as canonical Session identity. Stores that
+    /// cannot prove those semantics should retain the fail-closed default.
+    fn list_session_locators(
+        &self,
+        _params: ListSessionLocatorsParams,
+    ) -> ListSessionLocatorsFuture<'_> {
+        Box::pin(async {
+            Err(ListSessionLocatorsError::Unsupported {
+                operation: "list_session_locators",
             })
         })
     }

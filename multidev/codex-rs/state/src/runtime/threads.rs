@@ -368,6 +368,50 @@ ON CONFLICT(child_thread_id) DO NOTHING
             .map(PathBuf::from))
     }
 
+    /// Resolve one read-only rollout candidate without collapsing source and row failures.
+    ///
+    /// The state row remains locator-only: consumers must validate canonical Session metadata
+    /// and any durable snapshot at the returned path before treating it as product state.
+    pub async fn find_rollout_path_by_id_for_query(
+        &self,
+        id: ThreadId,
+        archived_only: Option<bool>,
+    ) -> Result<Option<PathBuf>, crate::FindThreadRolloutPathError> {
+        let mut builder =
+            QueryBuilder::<Sqlite>::new("SELECT rollout_path FROM threads WHERE id = ");
+        builder.push_bind(id.to_string());
+        match archived_only {
+            Some(true) => {
+                builder.push(" AND archived = 1");
+            }
+            Some(false) => {
+                builder.push(" AND archived = 0");
+            }
+            None => {}
+        }
+        let row = builder
+            .build()
+            .fetch_optional(self.pool.as_ref())
+            .await
+            .map_err(|error| crate::FindThreadRolloutPathError::Unavailable {
+                message: format!("failed to query thread {id}: {error}"),
+            })?;
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        let rollout_path = row.try_get::<String, _>("rollout_path").map_err(|error| {
+            crate::FindThreadRolloutPathError::Corrupt {
+                message: format!("failed to decode rollout_path for thread {id}: {error}"),
+            }
+        })?;
+        if rollout_path.is_empty() {
+            return Err(crate::FindThreadRolloutPathError::Corrupt {
+                message: format!("thread {id} has an empty rollout_path"),
+            });
+        }
+        Ok(Some(PathBuf::from(rollout_path)))
+    }
+
     /// Find the newest thread whose user-facing title exactly matches `title`.
     #[allow(clippy::too_many_arguments)]
     pub async fn find_thread_by_exact_title(
@@ -493,6 +537,127 @@ ON CONFLICT(child_thread_id) DO NOTHING
             next_anchor,
             num_scanned_rows,
         })
+    }
+
+    /// List stable read-only thread locators directly from the state database.
+    ///
+    /// Unlike the ordinary product thread list, this locator seam includes rows whose preview is
+    /// empty and always uses `(created_at, thread_id)` keyset ordering. It neither scans rollouts
+    /// nor repairs indexed metadata. The returned IDs are locators only; they are not canonical
+    /// Session identity facts.
+    pub async fn list_thread_locators(
+        &self,
+        page_size: usize,
+        cursor: Option<&crate::ThreadLocatorCursor>,
+        storage: crate::ThreadLocatorStorage,
+    ) -> Result<crate::ThreadLocatorsPage, crate::ListThreadLocatorsError> {
+        if !(1..=100).contains(&page_size) {
+            return Err(crate::ListThreadLocatorsError::InvalidRequest {
+                message: "page_size must be between 1 and 100".to_string(),
+            });
+        }
+        if cursor.is_some_and(|cursor| cursor.storage != storage) {
+            return Err(crate::ListThreadLocatorsError::InvalidRequest {
+                message: "cursor belongs to another storage collection".to_string(),
+            });
+        }
+        let limit = page_size + 1;
+        let anchor = cursor.map(|cursor| crate::Anchor {
+            ts: cursor.created_at,
+            id: Some(cursor.thread_id),
+        });
+        let mut builder = QueryBuilder::<Sqlite>::new(
+            "SELECT threads.id, threads.created_at_ms AS created_at FROM threads",
+        );
+        push_thread_filters_with_preview(
+            &mut builder,
+            ThreadFilterOptions {
+                archived_only: matches!(storage, crate::ThreadLocatorStorage::Archived),
+                allowed_sources: &[],
+                model_providers: None,
+                cwd_filters: None,
+                section: None,
+                anchor: anchor.as_ref(),
+                sort_key: SortKey::CreatedAt,
+                sort_direction: SortDirection::Desc,
+                search_term: None,
+            },
+            /*include_thread_id_tiebreaker*/ true,
+            /*include_empty_preview*/ true,
+        );
+        push_thread_order_and_limit(
+            &mut builder,
+            SortKey::CreatedAt,
+            SortDirection::Desc,
+            OrderByIndex::Enabled,
+            /*include_thread_id_tiebreaker*/ true,
+            limit,
+        );
+
+        let rows = builder
+            .build()
+            .fetch_all(self.pool.as_ref())
+            .await
+            .map_err(|error| crate::ListThreadLocatorsError::Unavailable {
+                message: error.to_string(),
+            })?;
+        let mut items = rows
+            .into_iter()
+            .map(|row| {
+                let raw_thread_id = row.try_get::<String, _>("id").map_err(|error| {
+                    crate::ListThreadLocatorsError::Corrupt {
+                        message: format!("failed to decode thread id column: {error}"),
+                    }
+                })?;
+                let thread_id = ThreadId::try_from(raw_thread_id.clone()).map_err(|error| {
+                    crate::ListThreadLocatorsError::Corrupt {
+                        message: format!("invalid thread id `{raw_thread_id}`: {error}"),
+                    }
+                })?;
+                let canonical_thread_id = thread_id.to_string();
+                if raw_thread_id != canonical_thread_id {
+                    return Err(crate::ListThreadLocatorsError::Corrupt {
+                        message: format!(
+                            "non-canonical thread id `{raw_thread_id}`; expected `{canonical_thread_id}`"
+                        ),
+                    });
+                }
+                let raw_created_at = row.try_get::<i64, _>("created_at").map_err(|error| {
+                    crate::ListThreadLocatorsError::Corrupt {
+                        message: format!("failed to decode created_at column: {error}"),
+                    }
+                })?;
+                let created_at = epoch_millis_to_datetime(raw_created_at).map_err(|error| {
+                    crate::ListThreadLocatorsError::Corrupt {
+                        message: format!(
+                            "invalid created_at millis `{raw_created_at}` for thread {thread_id}: {error}"
+                        ),
+                    }
+                })?;
+                if datetime_to_epoch_millis(created_at) != raw_created_at {
+                    return Err(crate::ListThreadLocatorsError::Corrupt {
+                        message: format!(
+                            "non-canonical created_at millis `{raw_created_at}` for thread {thread_id}"
+                        ),
+                    });
+                }
+                Ok(crate::ThreadLocator {
+                    thread_id,
+                    created_at,
+                })
+            })
+            .collect::<Result<Vec<_>, crate::ListThreadLocatorsError>>()?;
+        let next_cursor = if items.len() > page_size {
+            items.pop();
+            items.last().map(|item| crate::ThreadLocatorCursor {
+                storage,
+                created_at: item.created_at,
+                thread_id: item.thread_id,
+            })
+        } else {
+            None
+        };
+        Ok(crate::ThreadLocatorsPage { items, next_cursor })
     }
 
     /// List thread ids using the underlying database (no rollout scanning).
@@ -1482,6 +1647,253 @@ mod tests {
     use std::path::PathBuf;
 
     const CUSTOM_THREAD_SECTION_ID: &str = "01984de2-8f74-7c91-a3b2-5c5e937cf317";
+
+    #[tokio::test]
+    async fn thread_locator_pages_include_empty_preview_and_break_timestamp_ties_by_id() {
+        let codex_home = unique_temp_dir();
+        let runtime = StateRuntime::init(
+            crate::SqliteConfig::new_for_testing(codex_home.as_path().abs()),
+            "test-provider".to_string(),
+        )
+        .await
+        .expect("state db should initialize");
+        let created_at = DateTime::<Utc>::from_timestamp(1_700_000_123, 456_000_000)
+            .expect("valid creation timestamp");
+        let oldest_id =
+            ThreadId::from_string("00000000-0000-0000-0000-000000000071").expect("thread id");
+        let empty_preview_id =
+            ThreadId::from_string("00000000-0000-0000-0000-000000000072").expect("thread id");
+        let newest_id =
+            ThreadId::from_string("00000000-0000-0000-0000-000000000073").expect("thread id");
+        for thread_id in [oldest_id, empty_preview_id, newest_id] {
+            let mut metadata = test_thread_metadata(&codex_home, thread_id, codex_home.clone());
+            metadata.created_at = created_at;
+            if thread_id == empty_preview_id {
+                metadata.preview = None;
+                metadata.first_user_message = None;
+            }
+            runtime
+                .upsert_thread(&metadata)
+                .await
+                .expect("index thread");
+        }
+
+        let first = runtime
+            .list_thread_locators(
+                /*page_size*/ 1,
+                /*cursor*/ None,
+                crate::ThreadLocatorStorage::Active,
+            )
+            .await
+            .expect("first locator page");
+        let second = runtime
+            .list_thread_locators(
+                /*page_size*/ 1,
+                first.next_cursor.as_ref(),
+                crate::ThreadLocatorStorage::Active,
+            )
+            .await
+            .expect("second locator page");
+        let third = runtime
+            .list_thread_locators(
+                /*page_size*/ 1,
+                second.next_cursor.as_ref(),
+                crate::ThreadLocatorStorage::Active,
+            )
+            .await
+            .expect("third locator page");
+
+        assert_eq!(
+            [first.items, second.items, third.items],
+            [
+                vec![crate::ThreadLocator {
+                    thread_id: newest_id,
+                    created_at,
+                }],
+                vec![crate::ThreadLocator {
+                    thread_id: empty_preview_id,
+                    created_at,
+                }],
+                vec![crate::ThreadLocator {
+                    thread_id: oldest_id,
+                    created_at,
+                }],
+            ]
+        );
+        assert_eq!(third.next_cursor, None);
+    }
+
+    #[tokio::test]
+    async fn thread_locator_list_rejects_page_sizes_that_cannot_form_a_bounded_limit() {
+        let codex_home = unique_temp_dir();
+        let runtime = StateRuntime::init(
+            crate::SqliteConfig::new_for_testing(codex_home.as_path().abs()),
+            "test-provider".to_string(),
+        )
+        .await
+        .expect("state db should initialize");
+
+        for page_size in [0, 101, usize::MAX] {
+            assert_eq!(
+                runtime
+                    .list_thread_locators(
+                        page_size,
+                        /*cursor*/ None,
+                        crate::ThreadLocatorStorage::Active,
+                    )
+                    .await,
+                Err(crate::ListThreadLocatorsError::InvalidRequest {
+                    message: "page_size must be between 1 and 100".to_string(),
+                })
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn thread_locator_list_types_malformed_rows_as_corrupt() {
+        let codex_home = unique_temp_dir();
+        let runtime = StateRuntime::init(
+            crate::SqliteConfig::new_for_testing(codex_home.as_path().abs()),
+            "test-provider".to_string(),
+        )
+        .await
+        .expect("state db should initialize");
+        let thread_id =
+            ThreadId::from_string("00000000-0000-0000-0000-000000000074").expect("thread id");
+        let metadata = test_thread_metadata(&codex_home, thread_id, codex_home.clone());
+        runtime
+            .upsert_thread(&metadata)
+            .await
+            .expect("index thread");
+        sqlx::query("UPDATE threads SET id = 'not-a-thread-id' WHERE id = ?")
+            .bind(thread_id.to_string())
+            .execute(runtime.pool.as_ref())
+            .await
+            .expect("inject malformed locator id");
+
+        let error = runtime
+            .list_thread_locators(
+                /*page_size*/ 10,
+                /*cursor*/ None,
+                crate::ThreadLocatorStorage::Active,
+            )
+            .await
+            .expect_err("malformed locator row must fail closed");
+        let crate::ListThreadLocatorsError::Corrupt { message } = error else {
+            panic!("malformed row must be classified as corrupt");
+        };
+        assert!(message.contains("not-a-thread-id"), "{message}");
+    }
+
+    #[tokio::test]
+    async fn query_rollout_path_types_malformed_rows_as_corrupt() {
+        let codex_home = unique_temp_dir();
+        let runtime = StateRuntime::init(
+            crate::SqliteConfig::new_for_testing(codex_home.as_path().abs()),
+            "test-provider".to_string(),
+        )
+        .await
+        .expect("state db should initialize");
+        let thread_id =
+            ThreadId::from_string("00000000-0000-0000-0000-000000000076").expect("thread id");
+        let metadata = test_thread_metadata(&codex_home, thread_id, codex_home.clone());
+        runtime
+            .upsert_thread(&metadata)
+            .await
+            .expect("index thread");
+        sqlx::query("UPDATE threads SET rollout_path = x'80' WHERE id = ?")
+            .bind(thread_id.to_string())
+            .execute(runtime.pool.as_ref())
+            .await
+            .expect("inject malformed rollout path");
+
+        let error = runtime
+            .find_rollout_path_by_id_for_query(thread_id, Some(false))
+            .await
+            .expect_err("malformed rollout path must fail closed");
+        let crate::FindThreadRolloutPathError::Corrupt { message } = error else {
+            panic!("malformed rollout path must be classified as corrupt");
+        };
+        assert!(message.contains(&thread_id.to_string()), "{message}");
+        assert!(message.contains("rollout_path"), "{message}");
+    }
+
+    #[tokio::test]
+    async fn thread_locator_list_rejects_legacy_second_precision_before_issuing_a_cursor() {
+        let codex_home = unique_temp_dir();
+        let runtime = StateRuntime::init(
+            crate::SqliteConfig::new_for_testing(codex_home.as_path().abs()),
+            "test-provider".to_string(),
+        )
+        .await
+        .expect("state db should initialize");
+        let thread_id =
+            ThreadId::from_string("00000000-0000-0000-0000-000000000075").expect("thread id");
+        let metadata = test_thread_metadata(&codex_home, thread_id, codex_home.clone());
+        runtime
+            .upsert_thread(&metadata)
+            .await
+            .expect("index thread");
+        let legacy_seconds = 1_700_000_000_i64;
+        sqlx::query("UPDATE threads SET created_at_ms = ? WHERE id = ?")
+            .bind(legacy_seconds)
+            .bind(thread_id.to_string())
+            .execute(runtime.pool.as_ref())
+            .await
+            .expect("inject legacy second-precision locator timestamp");
+
+        let result = runtime
+            .list_thread_locators(
+                /*page_size*/ 1,
+                /*cursor*/ None,
+                crate::ThreadLocatorStorage::Active,
+            )
+            .await;
+        let Err(crate::ListThreadLocatorsError::Corrupt { message }) = result else {
+            panic!("non-canonical locator time must fail before returning an item or cursor");
+        };
+        assert!(message.contains(&legacy_seconds.to_string()), "{message}");
+        assert!(message.contains(&thread_id.to_string()), "{message}");
+    }
+
+    #[tokio::test]
+    async fn thread_locator_list_rejects_parseable_noncanonical_ids_before_issuing_a_cursor() {
+        let codex_home = unique_temp_dir();
+        let runtime = StateRuntime::init(
+            crate::SqliteConfig::new_for_testing(codex_home.as_path().abs()),
+            "test-provider".to_string(),
+        )
+        .await
+        .expect("state db should initialize");
+        let thread_id =
+            ThreadId::from_string("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa").expect("thread id");
+        let metadata = test_thread_metadata(&codex_home, thread_id, codex_home.clone());
+        runtime
+            .upsert_thread(&metadata)
+            .await
+            .expect("index thread");
+        let uppercase_thread_id = thread_id.to_string().to_ascii_uppercase();
+        sqlx::query("UPDATE threads SET id = ? WHERE id = ?")
+            .bind(&uppercase_thread_id)
+            .bind(thread_id.to_string())
+            .execute(runtime.pool.as_ref())
+            .await
+            .expect("inject parseable non-canonical locator id");
+
+        let result = runtime
+            .list_thread_locators(
+                /*page_size*/ 1,
+                /*cursor*/ None,
+                crate::ThreadLocatorStorage::Active,
+            )
+            .await;
+        let Err(crate::ListThreadLocatorsError::Corrupt { message }) = result else {
+            panic!("non-canonical row must fail before returning an item or pagination cursor");
+        };
+        assert!(message.contains(&uppercase_thread_id), "{message}");
+        assert!(message.contains(&thread_id.to_string()), "{message}");
+    }
+
     #[tokio::test]
     async fn upsert_thread_keeps_creation_memory_mode_for_existing_rows() {
         let codex_home = unique_temp_dir();

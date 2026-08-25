@@ -105,20 +105,37 @@ pub(crate) fn validate_session_intent(
     validate_intent(identity, intent)
 }
 
-#[allow(dead_code)] // Narrow S1 read entry; control-plane consumers remain out of Plan 069 scope.
+#[allow(dead_code)] // Strict wrapper retained for S1 invariant tests and future required reads.
 pub(crate) fn read_committed_snapshot(
     codex_home: &Path,
     session_meta: &SessionMeta,
     identity: DurableTeamIdentity,
 ) -> Result<Vec<u8>, TeamDurabilityError> {
+    read_committed_snapshot_if_present(codex_home, session_meta, identity)?.ok_or_else(|| {
+        TeamDurabilityError::unavailable("cannot read durable Team snapshot: file is missing")
+    })
+}
+
+pub(crate) fn read_committed_snapshot_if_present(
+    codex_home: &Path,
+    session_meta: &SessionMeta,
+    identity: DurableTeamIdentity,
+) -> Result<Option<Vec<u8>>, TeamDurabilityError> {
     validate_session_intent(session_meta, identity)?;
+    read_committed_snapshot_after_validated_intent(codex_home, identity)
+}
+
+/// Read the committed medium after the caller has validated the canonical SessionMeta marker.
+/// Keeping marker validation out of this step lets read-side callers preserve marker and snapshot
+/// failures as separate typed axes without parsing diagnostics.
+pub(crate) fn read_committed_snapshot_after_validated_intent(
+    codex_home: &Path,
+    identity: DurableTeamIdentity,
+) -> Result<Option<Vec<u8>>, TeamDurabilityError> {
     read_snapshot_file(&durable_team_snapshot_path(
         codex_home,
         identity.root_thread_id(),
-    ))?
-    .ok_or_else(|| {
-        TeamDurabilityError::unavailable("cannot read durable Team snapshot: file is missing")
-    })
+    ))
 }
 
 struct LocalTeamWriteAuthority {

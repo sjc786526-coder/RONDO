@@ -48,6 +48,27 @@ impl DurableTeamIdentity {
     }
 }
 
+/// Stable identity of one fully validated committed snapshot payload.
+///
+/// The checksum is copied from the existing snapshot frame after checksum, version, lineage, and
+/// domain validation succeeds. This value grants no writer authority and is not an authentication
+/// token; read-side consumers can use it to reject different payloads reported at one generation.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct CommittedSnapshotToken {
+    commit_generation: u64,
+    payload_checksum: [u8; 32],
+}
+
+impl CommittedSnapshotToken {
+    pub fn commit_generation(self) -> u64 {
+        self.commit_generation
+    }
+
+    pub fn payload_checksum(self) -> [u8; 32] {
+        self.payload_checksum
+    }
+}
+
 /// Health and access mode of a durable handle's last reconciled committed snapshot.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TeamDurabilityStatus {
@@ -199,6 +220,7 @@ struct SnapshotPayload {
 
 pub(crate) struct HydratedTeamSnapshot {
     pub(crate) commit_generation: u64,
+    payload_checksum: [u8; 32],
     pub(crate) store: TeamStore,
 }
 
@@ -292,6 +314,8 @@ pub(crate) fn decode_snapshot(
             "snapshot checksum does not match",
         ));
     }
+    let mut payload_checksum = [0; 32];
+    payload_checksum.copy_from_slice(expected_checksum);
 
     let payload: SnapshotPayload = serde_json::from_slice(payload).map_err(|error| {
         TeamDurabilityError::corrupt(format!("invalid snapshot payload: {error}"))
@@ -307,7 +331,20 @@ pub(crate) fn decode_snapshot(
     payload.store.validate_durable(expected_identity)?;
     Ok(HydratedTeamSnapshot {
         commit_generation: payload.commit_generation,
+        payload_checksum,
         store: payload.store,
+    })
+}
+
+/// Validate one complete committed snapshot and return its stable read-side identity.
+pub fn committed_snapshot_token(
+    expected_identity: DurableTeamIdentity,
+    encoded: &[u8],
+) -> Result<CommittedSnapshotToken, TeamDurabilityError> {
+    let hydrated = decode_snapshot(expected_identity, encoded)?;
+    Ok(CommittedSnapshotToken {
+        commit_generation: hydrated.commit_generation,
+        payload_checksum: hydrated.payload_checksum,
     })
 }
 
@@ -319,7 +356,7 @@ pub fn committed_snapshot_generation(
     expected_identity: DurableTeamIdentity,
     encoded: &[u8],
 ) -> Result<u64, TeamDurabilityError> {
-    Ok(decode_snapshot(expected_identity, encoded)?.commit_generation)
+    Ok(committed_snapshot_token(expected_identity, encoded)?.commit_generation())
 }
 
 #[cfg(test)]
@@ -521,6 +558,54 @@ mod tests {
         assert_eq!(hydrated.commit_generation, 7);
         assert_eq!(hydrated.store.instance(), store.instance());
         assert_eq!(hydrated.store.participants(), store.participants());
+    }
+
+    #[test]
+    fn committed_snapshot_token_is_stable_and_distinguishes_same_generation_payloads() {
+        let (identity, mut store) = snapshot_fixture();
+        let encoded = encode_snapshot(identity, 7, &store).expect("encode snapshot");
+        let token = committed_snapshot_token(identity, &encoded).expect("validate snapshot");
+
+        assert_eq!(token.commit_generation(), 7);
+        assert_eq!(
+            committed_snapshot_token(identity, &encoded).expect("validate the same snapshot"),
+            token
+        );
+
+        assert!(store.register_participant(
+            ThreadId::new(),
+            ParticipantRole::Member,
+            "member".to_string(),
+        ));
+        let different = encode_snapshot(identity, 7, &store).expect("encode different snapshot");
+        let different_token =
+            committed_snapshot_token(identity, &different).expect("validate different snapshot");
+
+        assert_eq!(
+            different_token.commit_generation(),
+            token.commit_generation()
+        );
+        assert_ne!(different_token.payload_checksum(), token.payload_checksum());
+    }
+
+    #[test]
+    fn committed_snapshot_token_fails_closed_before_returning_a_value() {
+        let (identity, store) = snapshot_fixture();
+        let mut corrupt = encode_snapshot(identity, 1, &store).expect("encode snapshot");
+        let last = corrupt.last_mut().expect("payload byte");
+        *last ^= 1;
+        assert!(matches!(
+            committed_snapshot_token(identity, &corrupt),
+            Err(TeamDurabilityError::Corrupt { .. })
+        ));
+
+        let encoded = encode_snapshot(identity, 1, &store).expect("encode snapshot");
+        let other_root = ThreadId::new();
+        let other = DurableTeamIdentity::new(SessionId::from(other_root), other_root);
+        assert_eq!(
+            committed_snapshot_token(other, &encoded).err(),
+            Some(TeamDurabilityError::IdentityMismatch)
+        );
     }
 
     #[test]
