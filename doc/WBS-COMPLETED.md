@@ -2079,7 +2079,29 @@ correctness/functionality `remaining_findings=[]`，路线结论为 `GO`。
   rusty-v8 v150.4.0 archive HTTP 404 阻断，core/protocol 宽轮也受范围外 proxy/mock 环境失败影响，均未冒充通过或用于扩大写集。
 - 未运行 Docker、真实 API/模型、训练、测评、CI/PR 或远端操作。Plan 078 的 `#37847` 前置已先期进入本地 `main`；Plan 077 /
   M4-C1 正式实现随后、先于 M4-S2 正式轮进入主线。M4-S2 正式轮作为后整合者负责 shared 接缝收敛及 query/lifecycle 聚焦兼容
-  验收，正式 Session Control/TUI 继续等待 M4-S2。
+  验收；这是 Plan 077 完成时的交接状态，M4-S2 的随后完成事实见下节。
+
+## M4-S2 恢复与生命周期收口（Plan 078，2026-08-25）
+
+**状态**：`#37847` 独立前置、M4-S2 产品实现、两轮 correctness 整改与外部复验均已完成；验收通过、任务目标完成，结论为
+`M4_S2_PASS`。主体提交为 `8300826`，最终 owner-race 整改提交为 `7014250`，外部复验提交为 `4fd5805`。
+
+- Durable Root cold resume 保持 Session/Root/Team identity，V2 member 仅在真实消费入口 lazy reload；顶层 fork/new/clear 创建新
+  Session/Root/空 Team，`spawn_agent fork_turns=none/all/N` 只改变 child context 并留在原 Team。`#37847` 同时保证 inherited
+  environment 在 member reload 后保留且显式 override 优先，不自动启动 turn、模型或 API。
+- detach 不等于关闭；idle unload、正常/失败 shutdown、InternalAgentDied、archive/delete 与 running-resume timeout 均复用
+  descendant-first close/admission barrier。late observer 持有 exact owner/generation 到最终收尾，失败保持可定位、可重试 owner，
+  不误清 replacement、residency 或提前释放 Root authority。
+- archive/unarchive/delete 通过 ThreadStore 冷态域处理 writer、subtree、partial 与 unknown。delete 先移除 Team artifact、后移除
+  Root marker，支持中断后重试；旧版、损坏、身份不一致和不兼容状态 fail-closed，未建设 takeover、relay、queue 或第二套 registry。
+- 正式证据包括 thread-store `199/199`、app-server `1134/1134`（1 skipped）、fresh 生命周期 `23/23`、core 聚焦 `19/19`；最终
+  owner-race 整改又通过 core `8/8` 与 app-server `1/1`。三个受影响 crate 的 scoped clippy/fix、fmt 与 diff 门禁通过，外部复验
+  无剩余 high/medium correctness finding。
+- core 全量历史批次为 `3417 pass / 16 fail / 8 skipped`；16 项来自范围外 Publication Critic 环境、旧 fixture、realtime timeout
+  与共享 target 的旧 schema artifact，不冒充全量 PASS。未运行 Docker、真实 API/模型、训练、测评、CI/PR 或远端操作。
+- 主线整合时，Plan 077 的 canonical query read/locator seam 与 Plan 078 的 snapshot path/lifecycle-write seam 在三个 shared 文件中
+  做加法收敛，`just fmt-check` 与 diff 检查通过。因用户未追加重型 Cargo 授权，合并树 query×lifecycle 聚焦回归未在本批重跑；
+  该轮作为后续正式 Session Control/TUI 的首批获批门禁，不表述为已通过。
 
 ## Publication Critic Skywork 4B 云端基座质量测评（Plan 079，2026-08-25）
 
