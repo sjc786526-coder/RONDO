@@ -1,7 +1,7 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
 最后更新：2026-08-25 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
-状态：**第一期、第二期、M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、M3-C2、Plan 064、Plan 071、Plan 073、Plan 075、Plan 079 与四期 M4-A、M4-C0、M4-S1、M4-C1 已完成；Plan 060 技术 GO、Plan 064 DATA_GO、Plan 066 正式训练 GO；Plan 071 为 `BASE_COMPARABILITY_GO`，Plan 073 / M3-C2 为 `NO-GO`，Plan 079 为 `4B_BASE_QUALITY_NO_GO` 并通过独立验收；三期当前没有已选定 successor，M3-D 保持锁定；M4-A 为 `M4_A_GO`，M4-C0 为 `M4_C0_PROTOTYPE_PASS`，M4-S1 为 `M4_S1_PASS`，M4-C1 为 `M4_C1_QUERY_PASS`**
+状态：**第一期、第二期、M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、M3-C2、Plan 064、Plan 071、Plan 073、Plan 075、Plan 079 与四期 M4-A、M4-C0、M4-S1、M4-C1 已完成；Plan 060 技术 GO、Plan 064 DATA_GO、Plan 066 正式训练 GO；Plan 071 为 `BASE_COMPARABILITY_GO`，Plan 073 / M3-C2 为 `NO-GO`，Plan 079 为 `4B_BASE_QUALITY_NO_GO` 并通过独立验收；Plan 081 是三期当前工作包，只做 exact 1.7B 非 LoRA 训练路线的本地收敛与云端就绪，M3-D 保持锁定；M4-A 为 `M4_A_GO`，M4-C0 为 `M4_C0_PROTOTYPE_PASS`，M4-S1 为 `M4_S1_PASS`，M4-C1 为 `M4_C1_QUERY_PASS`**
 
 ## 当前定位
 
@@ -63,11 +63,13 @@ archive/unarchive/delete 跟随 Root 的原生权威生命周期。Team clone/br
 - Plan 079 已以 exact `Skywork/Skywork-Reward-V2-Qwen3-4B@fd958fef475f323f4e6b195930e3dd918485c668`
   原始 BF16 base 独立验证更大同家族基座的云端质量，终态为 `4B_BASE_QUALITY_NO_GO`；它没有改写 1.7B 训练历史，也没有训练、
   量化或授予本地产品资格。
-- 云端训练冻结为单张 RunPod H100 PCIe 80GB 上的 BF16 全参数微调；付费 smoke 与正式训练共用 **23 USD** 总硬上限。
-- FlashOptim/FlashAdamW 是主优化器路径；训练优先利用 80GB 显存保持配置宽松，减少不必要的量化、offload 和重算。
-  具体依赖版本、优化器参数、batch、上下文长度、步数与工件格式由相应任务根据实测决定，不在长程 WBS 固定。
-- 同一训练 lineage 依次加入 Binary qualification、Boundary/Q± 和少量 Within-PASS 监督，并保留前序样本避免遗忘。
-  阶段 checkpoint 用于选择最好用的产品候选，不把每一阶段包装成独立产品、退役流程或完整学术消融矩阵。
+- Plan 060/066 已历史性证明单张 RunPod H100 PCIe 80GB 上的 BF16 全参数 FlashAdamW 训练、checkpoint 与恢复技术可行；
+  该固定 recipe 后续出现模型质量与排序退化，因此不再作为当前冻结路线，也不改写其当时的技术/执行成功事实。
+- 当前路线继续使用 exact 1.7B、既有 pair 设计、输入语义与冻结 v8 数据，明确禁止 LoRA/QLoRA；首选从部分原模型参数直接更新开始，
+  并允许依据训练动态扩大更新范围。具体层数/模块、学习率、batch、更新数、优化器、scheduler 与扩大策略不在 WBS 预先冻结。
+- 训练控制须支持多个连续更新/观测点、同口径 validation 质量趋势、模型评价快照与完整恢复 checkpoint 分层，以及
+  base/best/latest/少量关键转折点保留。base 继续作为研究 incumbent，只有同口径优于 base 的训练结果才成为目标候选；
+  未优于 base 时诚实记录 no-improvement。当前研究不要求候选直接达到产品 GO，开发期 validation 不冒充 M3-C2 或 unseen 证据。
 - 数据以少量真实协作样本为锚点、教师合成为主体，保留必要的独立复核和冻结测试集；异构模型只承担最终辅助横评，
   不建立教师委员会、人工标注平台或严格盲测体系。
 
@@ -94,6 +96,10 @@ M3-B1c 正式分阶段训练与工件回收          │
         M3-C2 联合横评与最终选择（Plan 073 `NO-GO`）
                        ↓
         Plan 079 Skywork 4B 云端基座质量测评（`4B_BASE_QUALITY_NO_GO`）
+                       ↓
+        Plan 081 exact 1.7B 非 LoRA 本地训练就绪（当前）
+                       ↓ 仅在 `LOCAL_TRAINING_READINESS_PASS` 后
+        Plan 082 云端 commissioning / 训练参数开发（未授权）
                        ╳
                  M3-D 端到端收口（未解锁）
 ```
@@ -302,7 +308,24 @@ threshold 的前提下，以同一冻结规则重验 exact base、C1、C3；唯�
 维护持续变化的计费数字。
 
 **交接**：Plan 079 没有形成训练、量化、本地部署、产品启用或 M3-D 资格；Plan 075 的 1.7B 路线判断仍只作为历史研究。
-三期下一工作包尚未选择，必须根据届时 WBS/独立验收另行立项和授权，不从本 NO-GO 自动推导。
+当前后继为 Plan 081，不从本 NO-GO 自动取得真实模型、GPU、云端或训练授权。
+
+#### Plan 081：exact 1.7B 非 LoRA 训练路线本地收敛与云端就绪（当前）
+
+**任务合同**：[`Plan 081 ExecPlan`](../../plan/081-publication-critic-non-lora-local-training-readiness-execplan.md)。
+
+**目标**：保持 exact 1.7B、冻结 pair/input/v8 与 unseen 隔离，禁止 LoRA/QLoRA；在不运行真实模型/GPU/云端的前提下，
+以 fixture/fake 打通可从部分参数直接更新起步并按训练动态扩大的连续训练控制、同口径质量观察、checkpoint/恢复、候选保留和结果归档；
+选择语义区分 base incumbent、训练序列内部 best、better-than-base candidate 与 no-improvement。
+
+**边界**：职责契合时复用 Plan 060/066 数据、checkpoint/恢复与 Plan 073 指标；旧固定 recipe 扭曲新语义时增加专用薄能力，
+不得复制第二套数据/评价/训练平台，不冻结具体层数、LR、batch、更新数或 optimizer。开发期 validation 可驱动观察/选择，
+但不进入梯度、不读取 unseen，也不冒充正式 M3-C2 或产品资格。
+
+**出口**：独立验收只给出 `LOCAL_TRAINING_READINESS_PASS` 或 `REPLAN_REQUIRED`。普通实现、fixture、依赖或接口问题须在本任务内
+修复重跑；只有原则性冲突才可重规划。PASS 后的 Plan 082 只需完成真实环境 commissioning 和训练参数开发，其云端边界为单张
+A40 48GB 首选、L40S 48GB 备选、单卡窗口不超过 12 小时、外部总费用不超过 15 USD；真实训练的研究成功是形成同口径优于
+exact 1.7B base 的候选，不要求直接达到产品 GO。Plan 079 保留卷不是前置，Plan 082 仍须另行授权。
 
 ### D 阶段：端到端收口
 
@@ -320,8 +343,8 @@ threshold 的前提下，以同一冻结规则重验 exact base、C1、C3；唯�
 - 相关正确性测试纳入既有测试体系，必要测评可复跑并自动归档；
 - 完成证据归档到 `doc/WBS-COMPLETED.md`，本页只保留最终产品事实和后续仍有效的边界。
 
-**当前状态**：Plan 073 / M3-C2 为 `NO-GO`，Plan 079 为 `4B_BASE_QUALITY_NO_GO`；本阶段仍未解锁或启动。三期没有最终模型、
-threshold、本地运行配置或产品资格，后续仍须另行立项和授权。
+**当前状态**：Plan 073 / M3-C2 为 `NO-GO`，Plan 079 为 `4B_BASE_QUALITY_NO_GO`，Plan 081 只准备新的本地训练控制路线；
+本阶段仍未解锁或启动。三期没有最终模型、threshold、本地运行配置或产品资格，后续仍须另行立项和授权。
 
 ## 串并行与资源关系
 
@@ -332,13 +355,16 @@ threshold、本地运行配置或产品资格，后续仍须另行立项和授�
 - M3-B1c 与 M3-B2b 前置、Plan 068 / M3-C1、Plan 071 base 同口径重验及 Plan 073 / M3-C2 均已完成；Plan 073
   终态为 `NO-GO`，没有最终锁定组合，M3-D 保持锁定。
 - Plan 079 已通过独立验收，只使用 Publication Critic Python 设施与单张云 GPU 完成，没有修改 Plan 077/078 的 `multidev/` 工作面或占用本地重型
-  资源槽；Pod 已止费，保留网络卷继续独立计费。三期当前没有已授权的云计算或本地模型任务。
+  资源槽；Pod 已止费，保留网络卷继续独立计费。
+- Plan 081 在独立 worktree 内只修改 Publication Critic Python/训练合同与三期 WBS，不运行 Cargo、Docker、真实模型/GPU或云计算，
+  不写/清理 Plan 069 target，也不以 Plan 079 卷为前置；三期当前没有已授权的云计算或本地模型任务。
 - RunPod 云端 smoke/训练不占本地 Cargo build lock，可与产品代码、数据整理和四期非冲突开发并行；真实本地模型、
   Docker 与重型 Cargo 仍按根 `AGENTS.md` 全局串行。
 - 三期与已经正式收口的方向 1 没有产品依赖。如果未来重新启动方向 1，普通工作仍可并行安排，但共享 API 预算、
   本地 GPU、Docker、构建锁和磁盘时必须显式错峰。
-- 四期与三期没有固定产品依赖，可按四期子 WBS 有界并行；若同时修改 `multidev/` 公共面，分别在独立 worktree 开发并
-  串行进入主线。跨期资源竞争和 M3-D/M4-Z(core) 兼容回归以四期子 WBS 为准，不在本页复制完整关系图或资源表。
+- 四期与三期没有固定产品依赖，Plan 081 可与 Plan 080 有界并行。两者都可能窄改顶层 `doc/WBS.md`，各自在独立 worktree 提交，
+  后进入主线者必须基于届时最新 main 手工合并三期/四期事实，不以旧文档 whole-file 覆盖。跨期资源竞争和 M3-D/M4-Z(core)
+  兼容回归以四期子 WBS 为准，不在本页复制完整关系图或资源表。
 - M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、M3-C2、M3-D 各自对应一个任务级 plan；
   阶段叙事不单独创建总 plan，长程 WBS 也不替执行者冻结模块布局、API schema、训练超参数或部署技术路线。
 
