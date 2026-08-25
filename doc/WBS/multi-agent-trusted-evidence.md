@@ -1,7 +1,7 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
 最后更新：2026-08-25 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
-状态：**第一期、第二期、M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、M3-C2、Plan 064、Plan 071、Plan 073、Plan 075 与四期 M4-A、M4-C0、M4-S1 已完成；Plan 060 技术 GO、Plan 064 DATA_GO、Plan 066 正式训练 GO；Plan 071 为 `BASE_COMPARABILITY_GO`，Plan 073 / M3-C2 为 `NO-GO`；Plan 075 唯一建议待授权 Plan 076 有界诊断，M3-D 保持锁定；M4-A 为 `M4_A_GO`，M4-C0 为 `M4_C0_PROTOTYPE_PASS`，M4-S1 为 `M4_S1_PASS`**
+状态：**第一期、第二期、M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、M3-C2、Plan 064、Plan 071、Plan 073、Plan 075 与四期 M4-A、M4-C0、M4-S1 已完成；Plan 060 技术 GO、Plan 064 DATA_GO、Plan 066 正式训练 GO；Plan 071 为 `BASE_COMPARABILITY_GO`，Plan 073 / M3-C2 为 `NO-GO`；Plan 079 Skywork 4B 云端基座质量测评已立项并成为三期当前入口，M3-D 保持锁定；M4-A 为 `M4_A_GO`，M4-C0 为 `M4_C0_PROTOTYPE_PASS`，M4-S1 为 `M4_S1_PASS`**
 
 ## 当前定位
 
@@ -58,6 +58,8 @@ archive/unarchive/delete 跟随 Root 的原生权威生命周期。Team clone/br
 ### 模型与训练边界
 
 - 学生模型冻结为 `Skywork/Skywork-Reward-V2-Qwen3-1.7B`，目标是形成一个可在本地运行的专用发布质量模型。
+- Plan 079 以 exact `Skywork/Skywork-Reward-V2-Qwen3-4B@fd958fef475f323f4e6b195930e3dd918485c668`
+  原始 BF16 base 独立验证更大同家族基座的云端质量；它不改写 1.7B 训练历史，也不在本包训练、量化或授予本地产品资格。
 - 云端训练冻结为单张 RunPod H100 PCIe 80GB 上的 BF16 全参数微调；付费 smoke 与正式训练共用 **23 USD** 总硬上限。
 - FlashOptim/FlashAdamW 是主优化器路径；训练优先利用 80GB 显存保持配置宽松，减少不必要的量化、offload 和重算。
   具体依赖版本、优化器参数、batch、上下文长度、步数与工件格式由相应任务根据实测决定，不在长程 WBS 固定。
@@ -87,6 +89,8 @@ M3-B1c 正式分阶段训练与工件回收          │
                  M3-C1 本地部署资格（已完成）
                        ↓ Plan 071 base 同口径重验已通过
         M3-C2 联合横评与最终选择（Plan 073 `NO-GO`）
+                       ↓
+        Plan 079 Skywork 4B 云端基座质量测评（已立项）
                        ╳
                  M3-D 端到端收口（未解锁）
 ```
@@ -271,26 +275,27 @@ threshold 的前提下，以同一冻结规则重验 exact base、C1、C3；唯�
 发布质量底线，终态为 `NO-GO`；没有 selection lock、unseen-test 释放或最终模型/threshold/运行配置。Publication Critic
 保持 default-off，M3-D 保持锁定；Plan 075 已完成原因调研与路线决策，详细历史见 `doc/WBS-COMPLETED.md`。
 
-#### Plan 075 之后的唯一建议：Plan 076 训练动态与质量门有界诊断
+#### 当前入口：Plan 079 Skywork 4B 云端基座质量测评
 
-**状态**：待用户另行授权，不是 active 工作包。Plan 075 证明现有 exact base/C1/C3 没有可发布选择，并把 threshold、部署、
-runtime、不完整打分和已知 objective/pair 方向 correctness 故障排除为直接原因；Plan 066 后的输出/排序退化有充分证据，但只有
-一个正式 recipe、seed 和 run，不能可靠指定 LR、裁剪、optimizer、objective、数据或底模中的单一根因。
+**状态**：已建立 [`Plan 079 ExecPlan`](../../plan/079-multi-publication-critic-skywork-4b-base-quality-execplan.md)，成为三期当前工作包。
+Plan 075 的 1.7B 训练动态诊断建议保留为历史路线判断，但当前不排期、不授权 Plan 076；Plan 079 先直接检验同家族更大基座能否通过
+已经冻结的发布质量门。
 
-**唯一目标**：以 exact base 仅作复现 Plan 066 问题的历史诊断 control，判断有界短程训练能否避免输出/排序塌缩，并形成逐 update
-执行的训练期质量停止门。exact base 不是未来正式候选的底模选择，诊断结果也不得冒充候选资格、最终 threshold 或 M3-C2 证据。
+**目标与终态**：在单张 24GB RunPod RTX 4090、RTX 3090 或末位备选 RTX A5000 上，对 exact Skywork 4B 原始 BF16 base
+使用物理不含 unseen-test 的冻结 v8
+train+validation bundle、相同 typed packet/render/16,384 overflow/scalar/pair/指标，完成 commissioning 后从 clean source 与空正式
+namespace 完整运行唯一正式轮。终态为 `4B_BASE_QUALITY_GO`、`4B_BASE_QUALITY_NO_GO` 或 `INCONCLUSIVE`；可靠终态本身即为成功。
 
-**数值边界**：最多 3 条串行诊断路线，每条最多 4 个 optimizer update、全任务最多 12 个 update；只允许 task-owned 单卡，
-GPU 运行总时长最多 4 小时，若使用云端则任务实际账单硬上限 20 USD，任一上限先到即停止。Plan 076 的 execplan 必须在运行前
-进一步冻结路线矩阵、每次只改变的机制组、validation 指标、非退化/改善门和提前停止条件；可以收紧但不得扩大这些上限。
+**边界**：不训练、量化、转换、重跑 1.7B/C1/C2/C3、重问 Judge、修改数据/门限、读取 unseen、启用产品或启动 M3-D。
+职责契合时复用 Plan 054/066/073 的输入、bundle、scoring、metrics 与 archive；三候选、单文件或 Judge/selection 语义不契合时可增加
+小型 4B base 专用能力，但不复制第二套评价体系。
 
-**硬边界**：只使用冻结 v8 train+validation，unseen-test 继续物理封存；不正式再训练、不生产正式候选、不扩数据、不做无边界
-超参数搜索或底模竞赛，不重跑 M3-C2、不启用产品、不启动 M3-D。任何本地模型/GPU或云端运行必须与 Plan 069 及届时其他重型
-任务全局错峰；云端费用、资源创建和删除须由 Plan 076 单独取得明确授权。
-
-**终态**：`TRAINING_ROUTE_GO` 只表示至少一条预冻结短程路线通过相对 control 的非塌缩及质量门，可以另行规划正式候选训练；
-`TRAINING_ROUTE_NO_GO` 表示有界矩阵未形成可继续训练的依据，Publication Critic 训练路线暂停；基础设施或资产不能形成有效证据时为
-`INCONCLUSIVE`。三种终态都不解锁 M3-D。
+**资源**：从任务云资源创建到执行者交付期间，RunPod 的 Pod、GPU、网络卷与存储费用共用 15 USD 硬上限，同时最多一张 GPU。
+任务使用与 Pod 同数据中心的专属网络卷承载模型、环境与进度，允许在同数据中心用同 GPU 型号重建/更换 Pod；交付时释放 Pod 并停止
+GPU 计费，网络卷按用户要求保留且删除须另获批准。交付必须报告累计费用、卷费率、剩余 headroom、预计触线时间和持续计费状态；
+执行者不得自行删卷，也不得把无限期卷费冒充仍受其控制的硬保证。本任务不运行本地重型 Cargo、Docker 或真实本地模型，可与
+Plan 077/078 的非冲突工作并行。GPU 顺序为 4090 → 3090 → A5000；数据中心不受地域限制，但创建卷前须按实时库存选择，软性优先同一
+Secure Cloud 中心同时具备 4090 与 RTX 6000 Ada，便于未来另行授权的任务复用同一卷。该偏好不授权本任务使用 6000 Ada 或实施微调。
 
 ### D 阶段：端到端收口
 
@@ -308,8 +313,8 @@ GPU 运行总时长最多 4 小时，若使用云端则任务实际账单硬上�
 - 相关正确性测试纳入既有测试体系，必要测评可复跑并自动归档；
 - 完成证据归档到 `doc/WBS-COMPLETED.md`，本页只保留最终产品事实和后续仍有效的边界。
 
-**当前状态**：Plan 073 / M3-C2 为 `NO-GO`，本阶段未解锁、未启动或授权。只有未来另行立项取得新的有效选择结论后，
-才能重新评估是否进入 M3-D。
+**当前状态**：Plan 073 / M3-C2 为 `NO-GO`，本阶段未解锁或启动。Plan 079 即使取得 `4B_BASE_QUALITY_GO` 也只形成云端 BF16
+基座质量候选，不直接授予量化、本地部署或产品资格，因而不直接解锁 M3-D；后续仍须另行立项和授权。
 
 ## 串并行与资源关系
 
@@ -319,6 +324,8 @@ GPU 运行总时长最多 4 小时，若使用云端则任务实际账单硬上�
   资源终态、final-02 receipt 与独立验收；Plan 068 已完成本地交接、资格运行和远端止费，没有追加训练消费。
 - M3-B1c 与 M3-B2b 前置、Plan 068 / M3-C1、Plan 071 base 同口径重验及 Plan 073 / M3-C2 均已完成；Plan 073
   终态为 `NO-GO`，没有最终锁定组合，M3-D 保持锁定。
+- Plan 079 已作为三期当前入口独立立项，只使用 Publication Critic Python 设施与单张云 GPU；不修改 Plan 077/078 的 `multidev/`
+  工作面、不占本地重型资源槽，可立即并行。模型/bundle 上传与结果回传仍会占用本地网络和磁盘，执行时按实际压力错峰。
 - RunPod 云端 smoke/训练不占本地 Cargo build lock，可与产品代码、数据整理和四期非冲突开发并行；真实本地模型、
   Docker 与重型 Cargo 仍按根 `AGENTS.md` 全局串行。
 - 三期与已经正式收口的方向 1 没有产品依赖。如果未来重新启动方向 1，普通工作仍可并行安排，但共享 API 预算、
