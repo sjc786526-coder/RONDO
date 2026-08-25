@@ -202,24 +202,25 @@ linked worktree 不共享主根 ignored `eval-data/`。因此 Plan 073 的模型
 
 ### 当前工作
 
-- `REMEDIATED_AWAITING_RE_REVIEW`：独立验收（`0841748`）的两个 correctness 阻塞项均属实，已窄修并复验；正式 `NO-GO` 结论、
-  指标与冻结底线不变。
+- `SECOND_RE_REVIEW_FAILED / REMEDIATION_REQUIRED`：`02759ae` 拒绝了浅层伪造，但流式 reader 仍打开并解析 mixed-split v8，
+  result validator 仍由同一份 result 自证，且 report 未校验 unseen confirmation；详见
+  `agent_log/2026-08-25-022511-plan073-remediation-reacceptance-review.md`。正式 `NO-GO` 质量事实保留。
 
 ### 本任务剩余步骤
 
-- 无。两个阻塞项已关闭：validation release 改由 `selection/dataset_source.py` 的 split-scoped 流式 reader 构建，非成员行读到即丢弃，
-  unseen 门禁下沉到该 reader；`validate_validation_result()` 从 result 自带逐行分数重算 threshold/confusion/AUC/admission/ranking/terminal，
-  `build_selection_lock()` 与 `report` 均先过该校验，伪造 `SELECTED` 被拒绝。
-- 一并收紧：Judge package id 不得含 split 名、`evaluate` 可绑定实际 package、Judge 身份硬校验 `claude-opus-5`、
-  scoring 不完整在两处均明确拒绝。未重跑模型或 Opus。
+- validation 改用物理上不含 unseen body 的冻结输入，并复用相称的跨行/omission 校验；测试证明成功路径不打开或 decode unseen-bearing 源。
+- 构锁时从真实 validation release、三份 raw scores、Judge package/aggregate 复用 evaluator 重算，并与 result canonical equality；
+  aggregate/package 成对必需。report 的 unseen confirmation 必须验证并绑定 freeze、selection lock 与 locked combination。
+- 统一 Judge split 泄漏表述，运行 pure/focused 复验和现有 archive 轻量重建；不重跑模型或 Opus。
 
 ### 阻塞项
 
-- 无。重型资源已释放；整改未使用 Docker、重型 Cargo、付费 API、远端资源或新的真实模型/Judge 运行。
+- lock 前仍读取 unseen-bearing 混合源；selection lock/report 仍未绑定真实 run 输入。这两项关闭前 task branch 不得合并。
+- 重型资源已释放；整改不需要 Docker、重型 Cargo、付费 API、远端资源或新的真实模型/Judge 运行。
 
 ### 当前验收状态
 
-- `EXECUTED / NO-GO / BLOCKING_FINDINGS_REMEDIATED / PENDING_RE_REVIEW`
+- `EXECUTED / NO-GO RESULT RETAINED / SECOND_RE_REVIEW_FAILED`
 
 ### 交接边界
 
@@ -244,5 +245,5 @@ linked worktree 不共享主根 ignored `eval-data/`。因此 Plan 073 的模型
 | 009 | 延迟/资源只作可用性门，不参与排名 | 三候选同架构同尺寸，实测 load/warm/RSS/VRAM 几乎一致，用它排名是伪精度 | 排名规则 | 已采纳 |
 | 010 | Judge 覆盖全部 55 条而非分层抽样 | 规模足够小，全覆盖直接消除抽样偏置与"看到标签后挑案例"的质疑 | Judge | 已采纳 |
 | 011 | 正式 `evaluate` 在冻结 commit 运行；tracked 报告投影在其后的 commit 生成 | 报告是对已归档证据的纯投影，不含判定逻辑；正式证据仍绑定冻结 source，并已用归档 raw 逐字节重算复核 | 证据、交付 | 已采纳 |
-| 012 | validation release 改用 split-scoped 流式 reader，而不是全量 consumer 后过滤 | 全量 consumer 会在 lock 前把 unseen 正文载入正式进程，违反盲验边界；流式读取保留 manifest 与 per-row 校验，不降低完整性 | unseen 边界 | 已采纳（验收整改） |
-| 013 | selection lock 前先从 result 自带逐行分数重算 threshold/confusion/AUC/admission/ranking/terminal | 浅校验下一份手改的 `SELECTED` 文档即可开出 unseen；重算用的是既有函数，不引入签名链或审计设施 | lock 门禁 | 已采纳（验收整改） |
+| 012 | validation release 改用 split-scoped 流式 reader，而不是全量 consumer 后过滤 | 全量 consumer 会在 lock 前把 unseen 正文载入正式进程，违反盲验边界；流式读取保留 manifest 与 per-row 校验，不降低完整性 | unseen 边界 | 未关闭：仍打开并解析 mixed-split 源 |
+| 013 | selection lock 前先从 result 自带逐行分数重算 threshold/confusion/AUC/admission/ranking/terminal | 浅校验下一份手改的 `SELECTED` 文档即可开出 unseen；重算用的是既有函数，不引入签名链或审计设施 | lock 门禁 | 部分关闭：浅伪造已拒绝，真实输入/confirmation 未绑定 |
