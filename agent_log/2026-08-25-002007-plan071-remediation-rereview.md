@@ -52,4 +52,3 @@
 
 接受 Plan 071 的 `BASE_COMPARABILITY_GO`。M3-C2 的 base + 已合格训练候选前置可以在后续获授权的 WBS 同步中解除；这不等于启动
 M3-C2，也不授权模型排名、最终 threshold、产品配置选择或默认启用 Publication Critic。
-
