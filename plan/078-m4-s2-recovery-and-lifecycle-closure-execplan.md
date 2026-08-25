@@ -254,10 +254,18 @@ ignored 写入例外；不得手工修改、clean 或删除该缓存。078 自�
 - 整改后最终源码上，capacity=1 unload/reload、exact late removal 和 shutdown-all 三条 core 聚焦回归
   `3/3` PASS；`codex-core` clippy 无警告 PASS。clippy 首轮发现的 `expect_used` 仅把不必要 panic 窄修为
   fail-closed `false`，同一审查者确认不改 exact-owner/gate/residency 顺序，最终 high/medium/low 均无。
+- 后续外部终审继续发现一项 high 与两项 medium：shutdown 后仍有按 ThreadId 清理 replacement 的同步路径，subtree close
+  只覆盖 durable Team，timeout 路径又在 late observer 完成前释放 pending closing。三项均经 live 调用链确认并聚焦修复：
+  ThreadManager 以捕获的 `Arc<CodexThread>` 提交 exact-owner retirement lease，并在同一 map/availability 临界区释放
+  residency 与 Agent registry；所有 AgentControl close 共用现有 subtree/admission gate；idle、archive/delete 与 running-resume
+  timeout 把 generation token 所有权转交 late observer，只有 exact finalizer 完成或确认 owner mismatch 后释放。
+- 第二轮整改的 core replacement/close/resume 聚焦回归 `8/8` PASS，app-server pending token 回归 `1/1` PASS；
+  `codex-core` 与 `codex-app-server` scoped fix 均无 lint 输出，最终 `fmt` 与 `git diff --check` 通过。独立只读复审确认
+  原三项 finding 全部关闭，无新的 high/medium correctness finding；唯一 non-durable 错误文案 low 已同步改为中性表述。
 
 ### 当前工作
 
-- S2 产品、最终整改、相邻回归、fresh 正式场景、clippy、独立终审、精炼日志和 078 本地提交已完成。
+- S2 产品、两轮终审整改、相邻回归、fresh 正式场景、scoped fix、独立复审、精炼日志和 078 本地提交已完成。
   当前只待向指定外部审查者发送 Codex 跨会话队列消息；发送后停止，不 merge/push。
 
 ### 本任务剩余步骤
@@ -266,12 +274,14 @@ ignored 写入例外；不得手工修改、clean 或删除该缓存。078 自�
 
 ### 阻塞项
 
-- 无阻塞项。最终重型资源已释放，未使用用户的额外授权清理 077 产物或共享 target。
+- 无阻塞项。最终重型资源已释放。为使整改聚焦门和 scoped fix 在临时 285GB stop 内安全启动，按用户明确授权只删除了
+  15 个可重建、与 077 watchdog 时段一致且 078 从未使用的 `codex_tui-*` incremental 目录；未删除 `deps`、core/app-server
+  当前缓存、源码、测试、fixture、JUnit 或 watchdog 证据。
 
 ### 当前验收状态
 
-- `PREREQUISITE_ACCEPTED / S2_IMPLEMENTED / HEAVY_GATES_PASS / FRESH_FORMAL_PASS / FINAL_REMEDIATION_PASS /
-  INDEPENDENT_REVIEW_PASS / LOCAL_DELIVERY_COMPLETE / EXTERNAL_REVIEW_PENDING`。
+- `PREREQUISITE_ACCEPTED / S2_IMPLEMENTED / HEAVY_GATES_PASS / FRESH_FORMAL_PASS / SECOND_REMEDIATION_PASS /
+  INDEPENDENT_REVIEW_PASS / LOCAL_DELIVERY_COMPLETE / EXTERNAL_REREVIEW_PENDING`。
   core 全量基线批次的 16 项非 078 失败如实保留，不冒充为全 core PASS；Plan 078 聚焦产品门、完整 app-server/
   thread-store 相邻回归和 fresh 正式组均已通过。
 

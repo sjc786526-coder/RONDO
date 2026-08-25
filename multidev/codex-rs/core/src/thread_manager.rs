@@ -93,6 +93,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
+use tokio::sync::OwnedRwLockWriteGuard;
 use tokio::sync::RwLock;
 use tokio::sync::broadcast;
 use tracing::instrument;
@@ -186,6 +187,58 @@ pub struct ThreadShutdownReport {
     pub completed: Vec<ThreadId>,
     pub submit_failed: Vec<ThreadId>,
     pub timed_out: Vec<ThreadId>,
+    /// Shutdown completed for a captured owner that is no longer the current map entry.
+    pub superseded: Vec<ThreadId>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ExactThreadRemoval {
+    Removed,
+    Missing,
+    Replaced,
+}
+
+pub(crate) struct ThreadOpSubmission {
+    pub(crate) owner: Option<Arc<CodexThread>>,
+    pub(crate) result: CodexResult<String>,
+}
+
+/// Exclusive lease over the thread map after every captured owner has been validated.
+///
+/// Close holds this lease while persisting its durable edge, so a failed write leaves the
+/// terminated owners tracked and a successful write cannot race a same-ID replacement.
+pub(crate) struct ExactThreadRetirement {
+    state: Arc<ThreadManagerState>,
+    threads: OwnedRwLockWriteGuard<HashMap<ThreadId, Arc<CodexThread>>>,
+    expected_owners: Vec<(ThreadId, Option<Arc<CodexThread>>)>,
+}
+
+impl ExactThreadRetirement {
+    pub(crate) fn retire_with(
+        mut self,
+        mut on_retired: impl FnMut(ThreadId, Option<&Arc<CodexThread>>),
+    ) {
+        let _gate = self.state.lock_availability_transition();
+        let mut retired_any = false;
+        for (thread_id, expected) in &self.expected_owners {
+            match expected {
+                Some(_) => {
+                    if let Some(removed) = self.threads.remove(thread_id) {
+                        forget_removed_thread_v2_residency(*thread_id, removed.as_ref());
+                        on_retired(*thread_id, Some(&removed));
+                        retired_any = true;
+                    }
+                }
+                None => {
+                    on_retired(*thread_id, None);
+                    retired_any = true;
+                }
+            }
+        }
+        if retired_any {
+            self.state.bump_availability_generation();
+        }
+    }
 }
 
 enum ShutdownOutcome {
@@ -198,7 +251,7 @@ async fn collect_thread_shutdowns(
     threads: Vec<(ThreadId, Arc<CodexThread>)>,
     timeout: Duration,
     report: &mut ThreadShutdownReport,
-) {
+) -> Vec<(ThreadId, Arc<CodexThread>)> {
     let mut shutdowns = threads
         .into_iter()
         .map(|(thread_id, thread)| async move {
@@ -207,17 +260,19 @@ async fn collect_thread_shutdowns(
                 Ok(Err(_)) => ShutdownOutcome::SubmitFailed,
                 Err(_) => ShutdownOutcome::TimedOut,
             };
-            (thread_id, outcome)
+            (thread_id, thread, outcome)
         })
         .collect::<FuturesUnordered<_>>();
 
-    while let Some((thread_id, outcome)) = shutdowns.next().await {
+    let mut completed = Vec::new();
+    while let Some((thread_id, thread, outcome)) = shutdowns.next().await {
         match outcome {
-            ShutdownOutcome::Complete => report.completed.push(thread_id),
+            ShutdownOutcome::Complete => completed.push((thread_id, thread)),
             ShutdownOutcome::SubmitFailed => report.submit_failed.push(thread_id),
             ShutdownOutcome::TimedOut => report.timed_out.push(thread_id),
         }
     }
+    completed
 }
 
 /// [`ThreadManager`] is responsible for creating threads and maintaining
@@ -1118,20 +1173,10 @@ impl ThreadManager {
         thread_id: &ThreadId,
         expected: &Arc<CodexThread>,
     ) -> bool {
-        let mut threads = self.state.threads.write().await;
-        let _gate = self.state.lock_availability_transition();
-        let Some(current) = threads.get(thread_id) else {
-            return false;
-        };
-        if !Arc::ptr_eq(current, expected) {
-            return false;
-        }
-        let Some(removed) = threads.remove(thread_id) else {
-            return false;
-        };
-        forget_removed_thread_v2_residency(*thread_id, removed.as_ref());
-        self.state.bump_availability_generation();
-        true
+        matches!(
+            self.state.remove_thread_if_same(thread_id, expected).await,
+            ExactThreadRemoval::Removed
+        )
     }
 
     /// Tries to shut down tracked descendants, then tracked roots. Threads within each phase run
@@ -1158,16 +1203,24 @@ impl ThreadManager {
         // A durable Root close proves that every mutation-capable descendant is disabled. Start
         // all descendant shutdowns first, then let Roots enter their existing close barriers.
         // Unrelated roots still close concurrently within the second batch.
-        collect_thread_shutdowns(descendants, timeout, &mut report).await;
-        collect_thread_shutdowns(roots, timeout, &mut report).await;
+        let mut completed_shutdowns =
+            collect_thread_shutdowns(descendants, timeout, &mut report).await;
+        completed_shutdowns.extend(collect_thread_shutdowns(roots, timeout, &mut report).await);
 
         let mut tracked_threads = self.state.threads.write().await;
         let _gate = self.state.lock_availability_transition();
         let mut removed = false;
-        for thread_id in &report.completed {
-            if let Some(thread) = tracked_threads.remove(thread_id) {
-                forget_removed_thread_v2_residency(*thread_id, thread.as_ref());
-                removed = true;
+        for (thread_id, expected) in completed_shutdowns {
+            match tracked_threads.get(&thread_id) {
+                Some(current) if Arc::ptr_eq(current, &expected) => {
+                    if let Some(thread) = tracked_threads.remove(&thread_id) {
+                        forget_removed_thread_v2_residency(thread_id, thread.as_ref());
+                        removed = true;
+                    }
+                    report.completed.push(thread_id);
+                }
+                None => report.superseded.push(thread_id),
+                Some(_) => report.superseded.push(thread_id),
             }
         }
         drop(tracked_threads);
@@ -1183,6 +1236,9 @@ impl ThreadManager {
             .sort_by_key(std::string::ToString::to_string);
         report
             .timed_out
+            .sort_by_key(std::string::ToString::to_string);
+        report
+            .superseded
             .sort_by_key(std::string::ToString::to_string);
         report
     }
@@ -1543,12 +1599,24 @@ impl ThreadManagerState {
         thread_id: ThreadId,
         op: Op,
         parent_turn_id: Option<String>,
-    ) -> CodexResult<String> {
-        let thread = self.get_thread(thread_id).await?;
+    ) -> ThreadOpSubmission {
+        let thread = match self.get_thread(thread_id).await {
+            Ok(thread) => thread,
+            Err(error) => {
+                return ThreadOpSubmission {
+                    owner: None,
+                    result: Err(error),
+                };
+            }
+        };
         self.capture_submitted_op(thread_id, &op);
-        thread
+        let result = thread
             .submit_with_trace_and_parent_turn_id(op, /*trace*/ None, parent_turn_id)
-            .await
+            .await;
+        ThreadOpSubmission {
+            owner: Some(thread),
+            result,
+        }
     }
 
     fn capture_submitted_op(&self, thread_id: ThreadId, op: &Op) {
@@ -1574,6 +1642,54 @@ impl ThreadManagerState {
             self.bump_availability_generation();
         }
         removed
+    }
+
+    /// Remove one runtime only while it remains the owner captured by the caller.
+    pub(crate) async fn remove_thread_if_same(
+        &self,
+        thread_id: &ThreadId,
+        expected: &Arc<CodexThread>,
+    ) -> ExactThreadRemoval {
+        let mut threads = self.threads.write().await;
+        let _gate = self.lock_availability_transition();
+        let Some(current) = threads.get(thread_id) else {
+            return ExactThreadRemoval::Missing;
+        };
+        if !Arc::ptr_eq(current, expected) {
+            return ExactThreadRemoval::Replaced;
+        }
+        let Some(removed) = threads.remove(thread_id) else {
+            return ExactThreadRemoval::Missing;
+        };
+        forget_removed_thread_v2_residency(*thread_id, removed.as_ref());
+        self.bump_availability_generation();
+        ExactThreadRemoval::Removed
+    }
+
+    /// Lock the thread map after atomically validating a captured shutdown tree.
+    ///
+    /// A captured owner becoming missing is not success: cold resume removes a dead owner before
+    /// it inserts the replacement, so absence can be an in-progress same-ID replacement.
+    pub(crate) async fn lock_threads_if_not_replaced(
+        self: &Arc<Self>,
+        expected_owners: Vec<(ThreadId, Option<Arc<CodexThread>>)>,
+    ) -> Result<ExactThreadRetirement, ThreadId> {
+        let threads = Arc::clone(&self.threads).write_owned().await;
+        for (thread_id, expected) in &expected_owners {
+            match (expected, threads.get(thread_id)) {
+                (Some(expected), Some(current)) if Arc::ptr_eq(current, expected) => {}
+                (None, None) => {}
+                (Some(_), None) | (Some(_), Some(_)) | (None, Some(_)) => {
+                    return Err(*thread_id);
+                }
+            }
+        }
+
+        Ok(ExactThreadRetirement {
+            state: Arc::clone(self),
+            threads,
+            expected_owners,
+        })
     }
 
     pub(crate) async fn effective_multi_agent_version_for_spawn(

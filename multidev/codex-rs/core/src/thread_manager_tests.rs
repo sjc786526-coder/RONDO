@@ -572,6 +572,115 @@ async fn canceled_shutdown_waiter_keeps_teardown_fenced_and_late_termination_rem
 }
 
 #[tokio::test]
+async fn exact_owner_retirement_preserves_replacement_and_keeps_batch_atomic() {
+    let temp_dir = tempdir().expect("tempdir");
+    let mut config = test_config().await;
+    config.codex_home = temp_dir.path().join("codex-home").abs();
+    config.cwd = config.codex_home.abs();
+    std::fs::create_dir_all(&config.codex_home).expect("create codex home");
+    let manager = ThreadManager::with_models_provider_and_home_for_tests(
+        CodexAuth::from_api_key("dummy"),
+        config.model_provider.clone(),
+        config.codex_home.to_path_buf(),
+        Arc::new(codex_exec_server::EnvironmentManager::default_for_tests()),
+    );
+    let captured = manager
+        .start_thread(StartThreadOptions::new(config.clone()))
+        .await
+        .expect("start captured owner");
+    let replacement = manager
+        .start_thread(StartThreadOptions::new(config.clone()))
+        .await
+        .expect("start replacement owner");
+    let sibling = manager
+        .start_thread(StartThreadOptions::new(config))
+        .await
+        .expect("start sibling owner");
+
+    {
+        let mut threads = manager.state.threads.write().await;
+        let replacement_owner = threads
+            .remove(&replacement.thread_id)
+            .expect("replacement should be tracked");
+        let previous = threads.insert(captured.thread_id, replacement_owner);
+        assert!(
+            previous
+                .as_ref()
+                .is_some_and(|owner| Arc::ptr_eq(owner, &captured.thread))
+        );
+    }
+
+    assert_eq!(
+        manager
+            .state
+            .remove_thread_if_same(&captured.thread_id, &captured.thread)
+            .await,
+        ExactThreadRemoval::Replaced
+    );
+    let expected_owners = vec![
+        (captured.thread_id, Some(Arc::clone(&captured.thread))),
+        (sibling.thread_id, Some(Arc::clone(&sibling.thread))),
+    ];
+    let replaced_thread_id = match manager
+        .state
+        .lock_threads_if_not_replaced(expected_owners)
+        .await
+    {
+        Ok(_) => panic!("replacement must reject the whole retirement batch"),
+        Err(thread_id) => thread_id,
+    };
+    assert_eq!(replaced_thread_id, captured.thread_id);
+    assert!(Arc::ptr_eq(
+        &manager
+            .get_thread(captured.thread_id)
+            .await
+            .expect("replacement must remain tracked"),
+        &replacement.thread
+    ));
+    assert!(Arc::ptr_eq(
+        &manager
+            .get_thread(sibling.thread_id)
+            .await
+            .expect("batch failure must preserve sibling"),
+        &sibling.thread
+    ));
+
+    assert_eq!(
+        manager
+            .state
+            .remove_thread_if_same(&sibling.thread_id, &sibling.thread)
+            .await,
+        ExactThreadRemoval::Removed
+    );
+    let missing_thread_id = match manager
+        .state
+        .lock_threads_if_not_replaced(vec![(sibling.thread_id, Some(Arc::clone(&sibling.thread)))])
+        .await
+    {
+        Ok(_) => panic!("missing captured owner must reject retirement during a replacement gap"),
+        Err(thread_id) => thread_id,
+    };
+    assert_eq!(missing_thread_id, sibling.thread_id);
+
+    captured
+        .thread
+        .shutdown_and_wait()
+        .await
+        .expect("untracked captured owner should shut down");
+    sibling
+        .thread
+        .shutdown_and_wait()
+        .await
+        .expect("untracked sibling owner should shut down");
+    let report = manager
+        .shutdown_all_threads_bounded(Duration::from_secs(10))
+        .await;
+    assert!(report.submit_failed.is_empty());
+    assert!(report.timed_out.is_empty());
+    assert!(report.superseded.is_empty());
+}
+
+#[tokio::test]
 async fn code_mode_session_provider_is_shared_across_threads() {
     let temp_dir = tempdir().expect("tempdir");
     let mut config = test_config().await;
@@ -626,6 +735,7 @@ async fn code_mode_session_provider_is_shared_across_threads() {
             completed,
             submit_failed: Vec::new(),
             timed_out: Vec::new(),
+            superseded: Vec::new(),
         }
     );
 }

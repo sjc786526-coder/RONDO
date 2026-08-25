@@ -10,6 +10,8 @@ use std::sync::Weak;
 
 const TEAM_CLOSING_MESSAGE: &str =
     "durable team root is closing; new child admission is unavailable";
+const TEAM_SUBTREE_CLOSING_MESSAGE: &str =
+    "agent subtree is closing; new child admission is unavailable";
 const TEAM_CLOSED_MESSAGE: &str = "durable team root is closed; new child admission is unavailable";
 
 #[derive(Default)]
@@ -24,7 +26,8 @@ enum LifecycleState {
     Admitting {
         count: usize,
     },
-    Closing,
+    RootClosing,
+    SubtreeClosing,
     Closed,
 }
 
@@ -46,9 +49,14 @@ impl DurableTeamLifecycleGate {
                 };
                 *count = next_count;
             }
-            LifecycleState::Closing => {
+            LifecycleState::RootClosing => {
                 return Err(CodexErr::UnsupportedOperation(
                     TEAM_CLOSING_MESSAGE.to_string(),
+                ));
+            }
+            LifecycleState::SubtreeClosing => {
+                return Err(CodexErr::UnsupportedOperation(
+                    TEAM_SUBTREE_CLOSING_MESSAGE.to_string(),
                 ));
             }
             LifecycleState::Closed => {
@@ -75,7 +83,7 @@ impl DurableTeamLifecycleGate {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         match &*state {
             LifecycleState::Open => {
-                *state = LifecycleState::Closing;
+                *state = LifecycleState::RootClosing;
             }
             LifecycleState::Admitting { .. } => {
                 return Err(CodexErr::UnsupportedOperation(
@@ -83,9 +91,14 @@ impl DurableTeamLifecycleGate {
                         .to_string(),
                 ));
             }
-            LifecycleState::Closing => {
+            LifecycleState::RootClosing => {
                 return Err(CodexErr::UnsupportedOperation(
                     "durable team root is already closing".to_string(),
+                ));
+            }
+            LifecycleState::SubtreeClosing => {
+                return Err(CodexErr::UnsupportedOperation(
+                    "agent subtree is already closing".to_string(),
                 ));
             }
             LifecycleState::Closed => {
@@ -104,6 +117,44 @@ impl DurableTeamLifecycleGate {
         })
     }
 
+    pub(super) fn begin_subtree_close(
+        self: &Arc<Self>,
+    ) -> CodexResult<DurableTeamSubtreeCloseGuard> {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        match &*state {
+            LifecycleState::Open => {
+                *state = LifecycleState::SubtreeClosing;
+            }
+            LifecycleState::Admitting { .. } => {
+                return Err(CodexErr::UnsupportedOperation(
+                    "agent subtree cannot close while a child admission is in progress".to_string(),
+                ));
+            }
+            LifecycleState::RootClosing => {
+                return Err(CodexErr::UnsupportedOperation(
+                    "durable team root is already closing".to_string(),
+                ));
+            }
+            LifecycleState::SubtreeClosing => {
+                return Err(CodexErr::UnsupportedOperation(
+                    "agent subtree is already closing".to_string(),
+                ));
+            }
+            LifecycleState::Closed => {
+                return Err(CodexErr::UnsupportedOperation(
+                    "durable team root is already closed".to_string(),
+                ));
+            }
+        }
+        drop(state);
+        Ok(DurableTeamSubtreeCloseGuard {
+            gate: Arc::clone(self),
+        })
+    }
+
     fn finish_admission(&self) {
         let mut state = self
             .state
@@ -117,7 +168,10 @@ impl DurableTeamLifecycleGate {
                 debug_assert!(*count > 1, "team child admission state became unbalanced");
                 *count = count.saturating_sub(1);
             }
-            LifecycleState::Open | LifecycleState::Closing | LifecycleState::Closed => {
+            LifecycleState::Open
+            | LifecycleState::RootClosing
+            | LifecycleState::SubtreeClosing
+            | LifecycleState::Closed => {
                 debug_assert!(false, "team child admission state became unbalanced");
             }
         }
@@ -128,7 +182,7 @@ impl DurableTeamLifecycleGate {
             .state
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if matches!(&*state, LifecycleState::Closing) {
+        if matches!(&*state, LifecycleState::RootClosing) {
             *state = LifecycleState::Open;
         } else {
             debug_assert!(false, "team root close state became unbalanced");
@@ -140,10 +194,22 @@ impl DurableTeamLifecycleGate {
             .state
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if matches!(&*state, LifecycleState::Closing) {
+        if matches!(&*state, LifecycleState::RootClosing) {
             *state = LifecycleState::Closed;
         } else {
             debug_assert!(false, "team root close state became unbalanced");
+        }
+    }
+
+    fn finish_subtree_close(&self) {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if matches!(&*state, LifecycleState::SubtreeClosing) {
+            *state = LifecycleState::Open;
+        } else {
+            debug_assert!(false, "team subtree close state became unbalanced");
         }
     }
 }
@@ -155,6 +221,21 @@ pub(super) struct DurableTeamChildAdmissionGuard {
 impl Drop for DurableTeamChildAdmissionGuard {
     fn drop(&mut self) {
         self.gate.finish_admission();
+    }
+}
+
+/// A non-terminal close barrier for one agent subtree.
+///
+/// The root-scoped gate deliberately serializes subtree close with child spawn and recovery. The
+/// barrier always reopens when dropped because closing one subtree must not terminally close the
+/// surrounding Team.
+pub(crate) struct DurableTeamSubtreeCloseGuard {
+    gate: Arc<DurableTeamLifecycleGate>,
+}
+
+impl Drop for DurableTeamSubtreeCloseGuard {
+    fn drop(&mut self) {
+        self.gate.finish_subtree_close();
     }
 }
 

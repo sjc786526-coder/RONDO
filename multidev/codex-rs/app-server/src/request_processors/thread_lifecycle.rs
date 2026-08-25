@@ -4,12 +4,62 @@ use codex_protocol::config_types::MultiAgentMode;
 
 pub(super) const THREAD_UNLOADING_DELAY: Duration = Duration::from_secs(30 * 60);
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct PendingThreadUnloadToken {
+    thread_id: ThreadId,
+    generation: u64,
+}
+
+#[derive(Default)]
+pub(crate) struct PendingThreadUnloads {
+    state: Mutex<PendingThreadUnloadState>,
+}
+
+#[derive(Default)]
+pub(super) struct PendingThreadUnloadState {
+    next_generation: u64,
+    entries: HashMap<ThreadId, u64>,
+}
+
+impl PendingThreadUnloads {
+    pub(super) async fn lock(&self) -> tokio::sync::MutexGuard<'_, PendingThreadUnloadState> {
+        self.state.lock().await
+    }
+}
+
+impl PendingThreadUnloadState {
+    pub(super) fn contains(&self, thread_id: &ThreadId) -> bool {
+        self.entries.contains_key(thread_id)
+    }
+
+    pub(super) fn try_begin(&mut self, thread_id: ThreadId) -> Option<PendingThreadUnloadToken> {
+        if self.entries.contains_key(&thread_id) {
+            return None;
+        }
+        self.next_generation = self.next_generation.checked_add(1)?;
+        let token = PendingThreadUnloadToken {
+            thread_id,
+            generation: self.next_generation,
+        };
+        self.entries.insert(thread_id, token.generation);
+        Some(token)
+    }
+
+    pub(super) fn finish(&mut self, token: PendingThreadUnloadToken) -> bool {
+        if self.entries.get(&token.thread_id) != Some(&token.generation) {
+            return false;
+        }
+        self.entries.remove(&token.thread_id);
+        true
+    }
+}
+
 #[derive(Clone)]
 pub(super) struct ListenerTaskContext {
     pub(super) thread_manager: Arc<ThreadManager>,
     pub(super) thread_state_manager: ThreadStateManager,
     pub(super) outgoing: Arc<OutgoingMessageSender>,
-    pub(super) pending_thread_unloads: Arc<Mutex<HashSet<ThreadId>>>,
+    pub(super) pending_thread_unloads: Arc<PendingThreadUnloads>,
     pub(super) thread_watch_manager: ThreadWatchManager,
     pub(super) thread_list_state_permit: Arc<Semaphore>,
     pub(super) fallback_model_provider: String,
@@ -359,7 +409,7 @@ pub(super) async fn ensure_listener_task_running(
                         unloading_state.note_thread_activity_observed();
                         continue;
                     }
-                    {
+                    let Some(unload_token) = ({
                         let mut pending_thread_unloads = pending_thread_unloads.lock().await;
                         if pending_thread_unloads.contains(&conversation_id) {
                             continue;
@@ -367,12 +417,15 @@ pub(super) async fn ensure_listener_task_running(
                         if !unloading_state.should_unload_now() {
                             continue;
                         }
-                        pending_thread_unloads.insert(conversation_id);
-                    }
+                        pending_thread_unloads.try_begin(conversation_id)
+                    }) else {
+                        continue;
+                    };
                     let shutdown_result = unload_thread_without_subscribers(
                         lifecycle_context.clone(),
                         conversation_id,
                         conversation.clone(),
+                        unload_token,
                     )
                     .await;
                     if matches!(shutdown_result, ThreadShutdownResult::Complete) {
@@ -407,6 +460,7 @@ pub(super) async fn unload_thread_without_subscribers(
     lifecycle_context: ListenerTaskContext,
     thread_id: ThreadId,
     thread: Arc<CodexThread>,
+    unload_token: PendingThreadUnloadToken,
 ) -> ThreadShutdownResult {
     info!("thread {thread_id} has no subscribers and is idle; shutting down");
 
@@ -417,25 +471,29 @@ pub(super) async fn unload_thread_without_subscribers(
                 lifecycle_context.clone(),
                 thread_id,
                 thread.clone(),
+                Some(unload_token),
             )
             .await;
         }
         ThreadShutdownResult::SubmitFailed => {
             warn!("failed to submit Shutdown to thread {thread_id}; leaving owner loaded");
+            lifecycle_context
+                .pending_thread_unloads
+                .lock()
+                .await
+                .finish(unload_token);
         }
         ThreadShutdownResult::TimedOut => {
             warn!(
                 "thread {thread_id} shutdown timed out; retaining the owner and observing late termination"
             );
-            observe_late_thread_shutdown(lifecycle_context.clone(), thread_id, thread);
+            observe_late_thread_shutdown(
+                lifecycle_context.clone(),
+                thread_id,
+                thread,
+                unload_token,
+            );
         }
-    }
-    if !matches!(result, ThreadShutdownResult::Complete) {
-        lifecycle_context
-            .pending_thread_unloads
-            .lock()
-            .await
-            .remove(&thread_id);
     }
     result
 }
@@ -444,10 +502,17 @@ pub(super) fn observe_late_thread_shutdown(
     lifecycle_context: ListenerTaskContext,
     thread_id: ThreadId,
     thread: Arc<CodexThread>,
+    unload_token: PendingThreadUnloadToken,
 ) {
     tokio::spawn(async move {
         thread.wait_until_terminated().await;
-        finalize_completed_thread_shutdown(lifecycle_context, thread_id, thread).await;
+        finalize_completed_thread_shutdown(
+            lifecycle_context,
+            thread_id,
+            thread,
+            Some(unload_token),
+        )
+        .await;
     });
 }
 
@@ -455,25 +520,35 @@ async fn finalize_completed_thread_shutdown(
     lifecycle_context: ListenerTaskContext,
     thread_id: ThreadId,
     thread: Arc<CodexThread>,
+    unload_token: Option<PendingThreadUnloadToken>,
 ) {
     let Ok(_thread_list_state_permit) = lifecycle_context.thread_list_state_permit.acquire().await
     else {
+        if let Some(unload_token) = unload_token {
+            lifecycle_context
+                .pending_thread_unloads
+                .lock()
+                .await
+                .finish(unload_token);
+        }
         warn!("thread-list lifecycle gate closed before thread {thread_id} teardown finalized");
         return;
     };
-    if !lifecycle_context
+    let removed = lifecycle_context
         .thread_manager
         .remove_thread_if_same(&thread_id, &thread)
-        .await
-    {
+        .await;
+    if !removed {
+        if let Some(unload_token) = unload_token {
+            lifecycle_context
+                .pending_thread_unloads
+                .lock()
+                .await
+                .finish(unload_token);
+        }
         info!("thread {thread_id} was already removed or replaced before teardown finalized");
         return;
     }
-    lifecycle_context
-        .pending_thread_unloads
-        .lock()
-        .await
-        .remove(&thread_id);
     // Callbacks and listener/watch state are part of the loaded owner. Tear them down only after
     // core has confirmed shutdown and the exact owner is no longer manager-resident.
     lifecycle_context
@@ -495,6 +570,13 @@ async fn finalize_completed_thread_shutdown(
         .outgoing
         .send_server_notification(ServerNotification::ThreadClosed(notification))
         .await;
+    if let Some(unload_token) = unload_token {
+        lifecycle_context
+            .pending_thread_unloads
+            .lock()
+            .await
+            .finish(unload_token);
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -506,7 +588,7 @@ pub(super) async fn handle_thread_listener_command(
     thread_state: &Arc<Mutex<ThreadState>>,
     thread_watch_manager: &ThreadWatchManager,
     outgoing: &Arc<OutgoingMessageSender>,
-    pending_thread_unloads: &Arc<Mutex<HashSet<ThreadId>>>,
+    pending_thread_unloads: &Arc<PendingThreadUnloads>,
     listener_command: ThreadListenerCommand,
 ) {
     match listener_command {
@@ -579,7 +661,7 @@ pub(super) async fn handle_pending_thread_resume_request(
     thread_state: &Arc<Mutex<ThreadState>>,
     thread_watch_manager: &ThreadWatchManager,
     outgoing: &Arc<OutgoingMessageSender>,
-    pending_thread_unloads: &Arc<Mutex<HashSet<ThreadId>>>,
+    pending_thread_unloads: &Arc<PendingThreadUnloads>,
     mut pending: crate::thread_state::PendingThreadResumeRequest,
 ) {
     let active_turn = {
@@ -922,6 +1004,30 @@ pub(super) fn set_thread_status_and_interrupt_stale_turns(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn pending_unload_token_stays_exclusive_and_cannot_clear_replacement_operation() {
+        let pending = PendingThreadUnloads::default();
+        let thread_id = ThreadId::new();
+        let old_token = pending
+            .lock()
+            .await
+            .try_begin(thread_id)
+            .expect("old unload should begin");
+        assert!(pending.lock().await.try_begin(thread_id).is_none());
+        assert!(pending.lock().await.contains(&thread_id));
+        assert!(pending.lock().await.finish(old_token));
+        let replacement_token = pending
+            .lock()
+            .await
+            .try_begin(thread_id)
+            .expect("replacement unload should begin");
+
+        assert!(!pending.lock().await.finish(old_token));
+        assert!(pending.lock().await.contains(&thread_id));
+        assert!(pending.lock().await.finish(replacement_token));
+        assert!(!pending.lock().await.contains(&thread_id));
+    }
 
     #[tokio::test(start_paused = true)]
     async fn unloading_state_waits_for_the_full_idle_delay() {
