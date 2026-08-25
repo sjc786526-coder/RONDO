@@ -1,6 +1,6 @@
 # RONDO 开发环境基线
 
-最后状态同步：2026-08-25（Plan 072 同步共享 wrapper 合同；环境版本未全量重探测）
+最后状态同步：2026-08-13（环境版本未在本次文档整理中全量重探测）
 
 适用工作区：`/home/sjc/desktop/RONDO`。产品源码有两棵并列的树：RONDO Local 在 `mydev/`、
 RONDO Multi 在 `multidev/`；构建锁与资源看门狗在仓库根 `scripts/` 内由两者共用。
@@ -257,10 +257,6 @@ cgroup 报告 OOM kill。短时 1–3GiB swap 只削峰，不会被当作故障�
   仓库根的 `just product-build` / `just product-default-off-test` 也一样；其他重型 Cargo 命令必须
   显式用 `scripts/with-build-lock.sh <command>` 包裹。主工作区与任一 worktree、两个 worktree、
   两条产品线之间均不得同时构建。
-- wrapper 成功取得 canonical flock 后、watchdog-disabled 直通和正常 `systemd-run` 两条 payload 路径之前，会枚举
-  `rondo-build-<uid>-<digits>-<digits>.scope` 并核对 ControlGroup 的 `cgroup.events populated`。仍 populated 的旧 scope
-  或不可可靠观察的事实统一以 `84` 拒绝启动；门禁不等待、不终止、不清理或接管旧 scope。无 ControlGroup 的历史终态、
-  明确 `populated 0`，或 cgroup 已消失且复读仍为 inactive/failed 时才放行。
 - 脚本启动前拒绝已有 `cargo` / `rustc` / `rust-lld` / `nextest`；运行中若发现 scope 外第二个构建，
   会停止受控构建。rustc wrapper 只保证跨入口最多 6 个 rustc，不等于 Cargo 互斥锁。
 - 直接 Cargo、Windows just 分支和 Bazel 不自动进入该 scope；这是明确未覆盖面。本机尚未安装 Bazel。
@@ -278,7 +274,7 @@ RONDO_BUILD_PROJECT_STOP_BYTES=250000000000 just test
 `RONDO_BUILD_WATCHDOG=0`、`RONDO_BUILD_LOCK=0` 与 `RONDO_RUSTC_THROTTLE=0` 是实现层的紧急
 诊断开关，不是普通开发入口；只有用户单独授权且已安排等价外部监督时才能使用。看门狗用
 `cgroup.events` 的 `populated` 位判断整个scope及其子cgroup是否仍有进程，`cgroup.procs`只记录根层
-直接成员数作诊断；user D-Bus只用于unit发现和消失竞态复核，不替代cgroup存活事实。事实不可读时按unknown主动终止并继续监督，不能
+直接成员数作诊断；user D-Bus查询不参与存活判定。事实不可读时按unknown主动终止并继续监督，不能
 当作inactive。终止采用约1秒的kill round与无界外层监督，按Bash `SECONDS` 约每30秒报告真实经过
 秒数；这减少了 `date` 子进程，但不声明抗宿主时钟跳变。user D-Bus终止请求失败时，脚本先尝试
 `cgroup.kill`，不可写时再递归核对并SIGKILL目标cgroup子树成员；`MemoryMax`在此期间继续兜底。
