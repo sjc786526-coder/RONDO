@@ -1,6 +1,6 @@
 # RONDO 长程规划（WBS）
 
-最后更新：2026-08-25（Plan 069 / M4-S1 已完成阶段 E 并取得 `M4_S1_PASS`）
+最后更新：2026-08-25（Plan 073 / M3-C2 以 `NO-GO` 完成，M3-D 保持锁定；Plan 069 / M4-S1 已取得 `M4_S1_PASS`）
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段指针、跨方向关系、
 稳定工程边界和授权门；已完成成果与验收见 `doc/WBS-COMPLETED.md`，单次任务合同见 `plan/`，执行细节见
@@ -20,7 +20,7 @@
 | 0：量化测评基准 | 既有设施与首次 schema v7 正式 canary 已完成，当前无 active campaign | 保留设施；历史结果见 COMPLETED，新 campaign 须重新立项与授权 |
 | 1：Harness 优化 | **正式收口；当前无 active 工作包** | 当前不继续新增观测或内核/热路径优化；既有实现、设施与历史结果保留。未来可由用户另行决定是否重新立项，本次收口不作永久禁止 |
 | 2：本地审批模型 | **已收口，今后不再开启** | 最终结论为“保留为实验”；不改生产默认，不再规划后续工作包 |
-| 3：RONDO Multi | 第一、二期及其收口案例、**三期 M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、Plan 064、Plan 071 与四期 M4-A、M4-C0、M4-S1、Plan 074 已完成**；Plan 073 / M3-C2 在独立工作树实施 | Plan 071 同口径重验结论为 base/C1/C3 `QUALIFIED`，C2 保持历史 `NOT_QUALIFIED`；Plan 073 已承接 M3-C2，但尚未完成或进入主线，M3-D 继续等待其结论。RunPod 已为 0 Pod/0 volume、持续费用为 0；M4-S1 已取得 `M4_S1_PASS`，正式 Session query M4-C* 可另行立项，正式 control/TUI 再等待 M4-S2 |
+| 3：RONDO Multi | 第一、二期及其收口案例、**三期 M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、M3-C2、Plan 064、Plan 071、Plan 073 与四期 M4-A、M4-C0、M4-S1、Plan 074 已完成** | Plan 073 正式联合横评结论为 `NO-GO`：base/C1/C3 均未达到冻结发布质量底线，不产生最终模型/threshold/运行配置，Critic 保持 default-off，M3-D 保持锁定。RunPod 已为 0 Pod/0 volume、持续费用为 0；M4-S1 已取得 `M4_S1_PASS`，正式 Session query M4-C* 可另行立项，正式 control/TUI 再等待 M4-S2 |
 
 ### 方向命名口径
 
@@ -43,8 +43,7 @@
 
 - M3-A1 产品合同、M3-B2a / Plan 055 本地 Critic 服务与 M3-B2b / Plan 057 发布流程接入均已完成并进入主线。Plan 060 训练资格
   `TECHNICAL_GO`、冻结 v8 `DATA_GO` 与 Plan 066 正式训练授权已经同时成立；M3-B1c 已完成正式训练、候选保存、恢复验证、计算终态与
-  独立验收。产品链与模型链在
-  `M3-C1 → M3-C2` 汇合，最后由 M3-D 收口。
+  独立验收。产品链与模型链已在 `M3-C1 → M3-C2` 汇合；Plan 073 的 `NO-GO` 未解锁原路线最后的 M3-D。
 - M3-A2 / Plan 054 与 M3-B1a / Plan 059 均已完成并进入主线。Plan 059 revision v7 冻结 72 candidate、30 Boundary 与
   6 Within-PASS，三 split 为 42/16/14；独立最终验收确认输入隔离、group/split、review、50,073-token census、manifest、
   factory-only consumer 与 train-only smoke bundle 闭环，`remaining_findings=[]`，数据结论 GO。详细历史见
@@ -69,7 +68,9 @@
   同 deployment worker parity 与精确 service verdict 分层判断，并以同一规则从干净状态重验 exact base、C1、C3。唯一有效正式轮
   `plan071-formal-20260825T064600Z-qualification-v5` 给出 base/C1/C3 均 `QUALIFIED`，C2 未重验并保持 Plan 068 历史
   `NOT_QUALIFIED`；最终独立验收接受 `BASE_COMPARABILITY_GO`，因此 `m3_c2_prerequisite_satisfied=true`。
-  Plan 073 / M3-C2 已在独立工作树实施但尚未完成或进入主线；M3-D 尚未启动，本结论也不冻结最终模型、threshold 或产品运行配置。
+  Plan 073 / M3-C2 随后以同一冻结协议正式比较 exact base、C1、C3，三者均未达到发布质量底线，终态为 `NO-GO`；没有
+  selection lock 或 unseen-test 释放，也没有最终模型、threshold 或运行配置。Publication Critic 保持 default-off，M3-D 保持锁定；
+  三期当前没有已授权下一工作包，后续是否重新训练或调整路线由用户另行立项决定。
 
 ### 方向 3：Durable Team Runtime 四期
 

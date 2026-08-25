@@ -1994,6 +1994,24 @@ correctness/functionality `remaining_findings=[]`，路线结论为 `GO`。
   写集或重跑全 workspace。未运行 Docker、真实 API/模型、训练、性能测评、CI/PR，也未执行 Plan 069 阶段 E；因此本条只解除
   `#37198` 代码前置，不代表 `M4-S1 PASS`。
 
+## Publication Critic 联合横评与最终选择（Plan 073 / M3-C2，2026-08-25）
+
+**状态**：exact base、C1、C3 的正式同口径 validation 横评、Claude Opus 5 盲化异构判断、三轮独立审查整改与最终验收均已完成；
+验收通过、任务目标完成，终态为 `NO-GO`。最终实现提交为 `67f8ab0977a0371ffae4b86e3218fd78f2f7aeda`，最终独立验收提交为
+`ea0b919df6f8c3bf74203453a360ceb6d5684a62`，主线合并提交为 `a7647a4e28eb77c2968a1116965c7f820f7bf69e`。
+
+- 唯一正式轮 `plan073-formal-20260825T084317Z-selection-v1` 在冻结 v8 validation 的 55 candidates、19 boundary pairs 与
+  7 within-PASS pairs 上使用同一协议和运行时比较三候选。base/C1/C3 的最佳 balanced accuracy 分别仅为 `0.666/0.524/0.616`，
+  ROC AUC 为 `0.6169/0.3894/0.5567`，没有任何 threshold 能达到冻结发布质量底线，因此不选择 base 兜底。
+- Claude Opus 5 经订阅入口盲评全部 55 条，与冻结 GPT-5.6-sol 标签一致 53/55（`0.964`）；异构判断补充而未替代确定性指标，
+  支持“模型未达标而非标签整体失真”的解释。三模型 runtime 门均通过且资源/延迟接近，不参与伪精度排名。
+- 轻量 selection 能力覆盖 split release、threshold/metrics、Judge exchange、selection lock、confirmation 和结果归档。最终整改使
+  validation 只读 canonical Plan 066 train+validation bundle，lock/confirmation/report 从冻结 release、raw score 与成对 Judge
+  package/aggregate 重算并精确绑定；Plan 073 focused `60/60` 与追加 lock metadata 聚焦 `7/7` 通过。
+- 正式 validation release/result/tracked report 可逐字节重建，SHA-256 分别为 `757dd624…a91`、`2b36eb4b…8915`、
+  `f97fcdcc…8e4`。未生成 selection lock，unseen-test 未释放、render、score 或送 Judge；未量化、继续训练、调用付费 API、
+  运行 Docker/Cargo 或启用产品。Publication Critic 保持 default-off，M3-D 保持锁定；后续路线须由用户另行立项决定。
+
 ## M4-S1 Team Session 持久生命周期（Plan 069，2026-08-25）
 
 **状态**：主体实现、六轮独立预验收整改、Plan 074 / `#37198` 精确合流、阶段 E 正式轮与最终独立终审均已完成；结论为

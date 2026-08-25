@@ -1,7 +1,7 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
 最后更新：2026-08-25 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
-状态：**第一期、第二期、M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、Plan 064、Plan 071 与四期 M4-A、M4-C0 已完成；Plan 060 技术 GO、Plan 064 DATA_GO、Plan 066 正式训练 GO；Plan 071 为 `BASE_COMPARABILITY_GO`，Plan 073 / M3-C2 已在独立工作树实施但尚未完成或进入主线；M4-A 为 `M4_A_GO`，M4-C0 为 `M4_C0_PROTOTYPE_PASS`**
+状态：**第一期、第二期、M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、M3-C2、Plan 064、Plan 071、Plan 073 与四期 M4-A、M4-C0、M4-S1 已完成；Plan 060 技术 GO、Plan 064 DATA_GO、Plan 066 正式训练 GO；Plan 071 为 `BASE_COMPARABILITY_GO`，Plan 073 / M3-C2 为 `NO-GO`，M3-D 保持锁定；M4-A 为 `M4_A_GO`，M4-C0 为 `M4_C0_PROTOTYPE_PASS`，M4-S1 为 `M4_S1_PASS`**
 
 ## 当前定位
 
@@ -30,8 +30,9 @@ durable read model 或正式公共控制面。
 
 Plan 067 / M4-A 已收敛 Durable Team Session、Session 控制面与可选 writer binding 共享的产品和生命周期边界，结论为
 `M4_A_GO`。Plan 070 / M4-C0 已以默认关闭的 experimental surface 完成状态投影、owner/cold 操作路由、stale/result-unknown
-与权威重读原型，结论为 `M4_C0_PROTOTYPE_PASS`；正式 Session query 仍等待 M4-S1，正式 control/TUI 再等待 M4-S2。
-M4-S1 与 M4-W0 继续按各自合同推进；M4-Z(core) 不被 W 线阻塞，只有 binding GO 后才立项正式 W1，其 handoff 范围服从价值门证据。
+与权威重读原型，结论为 `M4_C0_PROTOTYPE_PASS`；M4-S1 已完成阶段 E 并取得 `M4_S1_PASS`，正式 Session query M4-C* 可另行立项，
+正式 control/TUI 再等待 M4-S2。M4-W0 继续按自身合同推进；M4-Z(core) 不被 W 线阻塞，只有 binding GO 后才立项正式 W1，其 handoff
+范围服从价值门证据。
 Durable Team Session 的 V1 写 authority 归属于 canonical Root lineage，并持续覆盖成功 Team 提交；现有 Root active-writer
 作为唯一排他基础做架构内扩展，Team State 保持 canonical，并增加与其集成的专用 durability/read 能力，不建设相互竞争的第二套
 写者或状态体系。其他客户端可只读，child Thread writer 不能绕过 Root 归属；只读结果必须是自洽的已提交状态或明确
@@ -85,9 +86,9 @@ M3-B1c 正式分阶段训练与工件回收          │
                        ↓
                  M3-C1 本地部署资格（已完成）
                        ↓ Plan 071 base 同口径重验已通过
-                 M3-C2 联合横评与最终选择
-                       ↓
-                 M3-D 端到端收口
+        M3-C2 联合横评与最终选择（Plan 073 `NO-GO`）
+                       ╳
+                 M3-D 端到端收口（未解锁）
 ```
 
 四阶段叙事保持不变：A 阶段收口产品合同并建立轻量基准；B 阶段让模型链与产品链接力并行；C 阶段串行完成本地资格和
@@ -266,8 +267,9 @@ threshold 的前提下，以同一冻结规则重验 exact base、C1、C3；唯�
 **宏观验收**：发布质量、False PASS/REWRITE、边界样本、延迟和本地资源开销得到联合比较；最终选择有清晰理由且可由现有
 轻量设施复测，未达标则回到对应工作包迭代而非建立模型退役制度。
 
-**当前状态**：前置已满足，Plan 073 已在独立工作树实施但尚未完成或进入主线。该任务承接联合评价、最终模型/threshold 与
-运行配置选择边界；Plan 071 的 `BASE_COMPARABILITY_GO` 本身不自动选择模型、启用 Critic 或授权 M3-D。
+**当前状态**：Plan 073 已完成并进入主线。正式 validation 在同一冻结协议下比较 exact base、C1、C3，三者均未达到
+发布质量底线，终态为 `NO-GO`；没有 selection lock、unseen-test 释放或最终模型/threshold/运行配置。Publication Critic
+保持 default-off，M3-D 保持锁定；三期当前没有已授权下一工作包，详细结果与验收证据见 `doc/WBS-COMPLETED.md`。
 
 ### D 阶段：端到端收口
 
@@ -285,14 +287,17 @@ threshold 的前提下，以同一冻结规则重验 exact base、C1、C3；唯�
 - 相关正确性测试纳入既有测试体系，必要测评可复跑并自动归档；
 - 完成证据归档到 `doc/WBS-COMPLETED.md`，本页只保留最终产品事实和后续仍有效的边界。
 
+**当前状态**：Plan 073 / M3-C2 为 `NO-GO`，本阶段未解锁、未启动或授权。只有未来另行立项取得新的有效选择结论后，
+才能重新评估是否进入 M3-D。
+
 ## 串并行与资源关系
 
 - M3-A1、M3-A2 与 M3-B1a 已完成共同前置。Plan 060 / M3-B1b 与已完成的 Plan 064 构成 M3-B1c 的并列资格门；产品链的
   M3-B2a、M3-B2b 均已完成，两链在 M3-C1 前汇合。
 - M3-B1b 是独立付费资格门；Plan 060 `TECHNICAL_GO`、Plan 064 `DATA_GO` 与正式训练授权均已成立，Plan 066 已据此完成训练执行、
   资源终态、final-02 receipt 与独立验收；Plan 068 已完成本地交接、资格运行和远端止费，没有追加训练消费。
-- M3-B1c 与 M3-B2b 前置、Plan 068 / M3-C1 及 Plan 071 base 同口径重验均已完成；base/C1/C3 已取得资格，Plan 073 / M3-C2
-  已在独立工作树实施但尚未完成或进入主线，M3-D 继续等待其结论后串行收口。
+- M3-B1c 与 M3-B2b 前置、Plan 068 / M3-C1、Plan 071 base 同口径重验及 Plan 073 / M3-C2 均已完成；Plan 073
+  终态为 `NO-GO`，没有最终锁定组合，M3-D 保持锁定。
 - RunPod 云端 smoke/训练不占本地 Cargo build lock，可与产品代码、数据整理和四期非冲突开发并行；真实本地模型、
   Docker 与重型 Cargo 仍按根 `AGENTS.md` 全局串行。
 - 三期与已经正式收口的方向 1 没有产品依赖。如果未来重新启动方向 1，普通工作仍可并行安排，但共享 API 预算、
@@ -392,7 +397,7 @@ threshold 的前提下，以同一冻结规则重验 exact base、C1、C3；唯�
   S1/S2、外部资源或远端操作。
 - RunPod 创建或计费、模型与数据上传、云端训练、权重下载、真实本地模型加载/推理、Docker 和付费 API 均须在对应任务
   开始前取得明确授权；23 USD 是三期训练的总预算上限，不等于已经授权消费。
-- Plan 068 与 Plan 071 的一次性授权已随本地交接、真实推理、资格验收、base 同口径重验和 exact winner 卷删除全部完成，
-  不向后续任务延伸。M3-C2/M3-D、云资源、远端上传、真实 API、继续训练或产品启用均须另建任务并取得相应授权。
+- Plan 068、Plan 071 与 Plan 073 的一次性授权已随本地交接、真实推理、资格/联合横评、独立验收和 exact winner 卷删除全部完成，
+  不向后续任务延伸。M3-D、新候选或继续训练、云资源、远端上传、真实 API 与产品启用均须另建任务并取得相应授权。
 - 训练数据、权重、逐样本输出与私有运行材料留在 `eval-data/` 或仓库外；`training/` 只保存体积合规的轻量合同与数据。
 - 正确性测试随产品能力建设；测评只保留能指导模型选择和产品验收的轻量指标，不建设数据资产审计或可信证明平台。
