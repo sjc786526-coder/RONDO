@@ -785,6 +785,32 @@ class ArchiveAndRunTest(unittest.TestCase):
             self.assertEqual(recovered, (scores, runtime, result))
             self.assertEqual((run_root / "runtime.json").read_bytes(), expected_runtime)
 
+    def test_first_complete_formal_result_blocks_a_second_formal_run(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            runs = Path(directory) / "formal-runs"
+            first = BaseQualityArchive(
+                runs,
+                "plan079-formal-20260825T120000Z-first",
+                "formal",
+            )
+            first.require_formal_unclaimed()
+            first.create()
+            first.claim_formal_result(
+                {
+                    "terminal": "4B_BASE_QUALITY_NO_GO",
+                    "valid_full_quality_run": True,
+                }
+            )
+            second = BaseQualityArchive(
+                runs,
+                "plan079-formal-20260825T130000Z-second",
+                "formal",
+            )
+            with self.assertRaisesRegex(
+                BaseQualityError, "formal_result_already_authoritative"
+            ):
+                second.require_formal_unclaimed()
+
 
 @unittest.skipUnless(
     BUNDLE_ROOT.is_dir(), "local physically unseen-free Plan 066 bundle absent"

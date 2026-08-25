@@ -442,7 +442,9 @@ def run_evaluation(
         or runtime_receipt["gpu_name"] != spec["cloud"]["gpu_model"]
     ):
         raise BaseQualityError("runtime_receipt_cloud_identity_mismatch")
-    archive = BaseQualityArchive(runs_root, spec["run_id"], spec["mode"]).create()
+    archive = BaseQualityArchive(runs_root, spec["run_id"], spec["mode"])
+    archive.require_formal_unclaimed()
+    archive.create()
     archive.bind_json("run-spec.json", spec)
     archive.bind_json("validation-release.json", release)
 
@@ -600,4 +602,6 @@ def run_evaluation(
     archive.bind_json("scores.json", scores)
     archive.bind_json("runtime.json", runtime)
     archive.bind_json("result.json", result)
+    if spec["mode"] == "formal" and result["valid_full_quality_run"] is True:
+        archive.claim_formal_result(result)
     return scores, runtime, result

@@ -6,7 +6,14 @@ import hashlib
 from pathlib import Path
 from typing import Any
 
-from ..full_model_training.contract import pretty_json_bytes, read_json
+from ..full_model_training.contract import (
+    FullModelTrainingError,
+    canonical_json_bytes,
+    pretty_json_bytes,
+    read_json,
+    sha256_bytes,
+    write_exclusive,
+)
 from ..write_once import WriteOnceError, WriteOnceNamespace
 from .contract import BaseQualityError, RUN_ID
 
@@ -29,6 +36,43 @@ class BaseQualityArchive:
     @property
     def path(self) -> Path:
         return self._archive.path
+
+    @property
+    def _formal_authority_path(self) -> Path:
+        return self._archive.runs_root / "formal-authority.json"
+
+    def require_formal_unclaimed(self) -> None:
+        """Reject a second formal run after the first complete valid result."""
+
+        if self.mode != "formal":
+            return
+        marker = self._formal_authority_path
+        if marker.exists() or marker.is_symlink():
+            raise BaseQualityError("formal_result_already_authoritative")
+
+    def claim_formal_result(self, result: Any) -> Path:
+        """Make this campaign's first complete formal result authoritative."""
+
+        if (
+            self.mode != "formal"
+            or not isinstance(result, dict)
+            or result.get("valid_full_quality_run") is not True
+            or result.get("terminal")
+            not in {"4B_BASE_QUALITY_GO", "4B_BASE_QUALITY_NO_GO"}
+        ):
+            raise BaseQualityError("formal_authority_result_invalid")
+        marker = self._formal_authority_path
+        value = {
+            "schema": "rondo-publication-critic-plan079-formal-authority-v1",
+            "run_id": self._archive.run_id,
+            "terminal": result["terminal"],
+            "result_sha256": sha256_bytes(canonical_json_bytes(result)),
+        }
+        try:
+            write_exclusive(marker, pretty_json_bytes(value))
+        except (FullModelTrainingError, OSError) as exc:
+            raise BaseQualityError("formal_result_already_authoritative") from exc
+        return marker
 
     def create(self) -> "BaseQualityArchive":
         try:

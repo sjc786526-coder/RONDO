@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -eu
+umask 077
 
 : "${RONDO_PLAN079_TASK_ROOT:?set the persistent task root}"
 : "${RONDO_PLAN079_SOURCE_ROOT:?set the verified source root}"
