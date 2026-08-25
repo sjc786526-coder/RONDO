@@ -39,6 +39,11 @@ use tokio_tungstenite::tungstenite::Message;
 type RecordedRequests = Arc<Mutex<Vec<JSONRPCRequest>>>;
 type RecordingAppServer = (AppServerSession, RecordedRequests, JoinHandle<Result<()>>);
 
+struct ResponseLossInjection {
+    method: &'static str,
+    committed: oneshot::Sender<()>,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum HistoryCapabilities {
     Current,
@@ -81,8 +86,25 @@ async fn start_recording_app_server(
 async fn start_recording_app_server_with_history(
     config: &Config,
     history_capabilities: HistoryCapabilities,
+    blocked_thread_list: Option<(ThreadId, oneshot::Sender<()>, oneshot::Receiver<()>)>,
+    failed_thread_name: Option<&'static str>,
+) -> Result<RecordingAppServer> {
+    start_recording_app_server_with_injection(
+        config,
+        history_capabilities,
+        blocked_thread_list,
+        failed_thread_name,
+        /*response_loss*/ None,
+    )
+    .await
+}
+
+async fn start_recording_app_server_with_injection(
+    config: &Config,
+    history_capabilities: HistoryCapabilities,
     mut blocked_thread_list: Option<(ThreadId, oneshot::Sender<()>, oneshot::Receiver<()>)>,
     failed_thread_name: Option<&'static str>,
+    response_loss: Option<ResponseLossInjection>,
 ) -> Result<RecordingAppServer> {
     let state_db =
         crate::init_state_db_for_app_server_target(config, &crate::AppServerTarget::Embedded)
@@ -108,6 +130,8 @@ async fn start_recording_app_server_with_history(
     let proxy = tokio::spawn(async move {
         let (stream, _) = listener.accept().await?;
         let mut websocket = accept_async(stream).await?;
+        let mut response_loss = response_loss;
+        let mut lost_response = None;
         while let Some(frame) = websocket.next().await {
             let Message::Text(text) = frame? else {
                 continue;
@@ -129,6 +153,7 @@ async fn start_recording_app_server_with_history(
                         .await?;
                 }
                 JSONRPCMessage::Request(request) => {
+                    let method = request.method.clone();
                     request_sink
                         .lock()
                         .expect("request recorder lock")
@@ -224,9 +249,27 @@ async fn start_recording_app_server_with_history(
                             }
                         }
                     };
+                    if response_loss
+                        .as_ref()
+                        .is_some_and(|injection| injection.method == method)
+                    {
+                        let injection = response_loss
+                            .take()
+                            .expect("matching response-loss injection should be present");
+                        let _ = injection.committed.send(());
+                        lost_response = Some(response);
+                        continue;
+                    }
                     websocket
                         .send(Message::Text(serde_json::to_string(&response)?.into()))
                         .await?;
+                    if method == "experimentalSession/read"
+                        && let Some(late_response) = lost_response.take()
+                    {
+                        websocket
+                            .send(Message::Text(serde_json::to_string(&late_response)?.into()))
+                            .await?;
+                    }
                 }
                 JSONRPCMessage::Notification(notification)
                     if notification.method == "initialized" => {}
@@ -257,6 +300,125 @@ async fn start_recording_app_server_with_history(
         requests,
         proxy,
     ))
+}
+
+#[tokio::test]
+async fn experimental_session_response_loss_is_bounded_unknown_and_never_replayed() -> Result<()> {
+    let (mut app, _app_event_rx, _op_rx) = make_test_app_with_channels().await;
+    app.config
+        .features
+        .set_enabled(Feature::ExperimentalSessionControl, /*enabled*/ true)
+        .expect("enable experimental Session control");
+    let session_id = create_fake_rollout(
+        app.config.codex_home.as_path(),
+        "2026-08-24T15-00-00",
+        "2026-08-24T15:00:00Z",
+        "response-loss Session",
+        Some(app.config.model_provider_id.as_str()),
+        /*git_info*/ None,
+    )
+    .map_err(|error| color_eyre::eyre::eyre!("failed to create test rollout: {error}"))?;
+    let session_id = ThreadId::from_string(&session_id)?;
+    let (committed_tx, committed_rx) = oneshot::channel();
+    let (mut app_server, requests, proxy) = start_recording_app_server_with_injection(
+        &app.config,
+        HistoryCapabilities::Current,
+        /*blocked_thread_list*/ None,
+        /*failed_thread_name*/ None,
+        Some(ResponseLossInjection {
+            method: "thread/unarchive",
+            committed: committed_tx,
+        }),
+    )
+    .await?;
+
+    app_server.thread_archive(session_id).await?;
+    let params = codex_app_server_protocol::ExperimentalSessionReadParams {
+        session_id: session_id.to_string(),
+        prototype_facts: None,
+    };
+    let archived = app_server.experimental_session_read(params).await?;
+    assert_eq!(
+        archived.domain_lifecycle,
+        codex_app_server_protocol::ExperimentalSessionDomainLifecycle::Archived
+    );
+    app_server
+        .set_experimental_session_mutation_attempt_timeout_for_test(Duration::from_millis(50));
+
+    let started = std::time::Instant::now();
+    let error = app_server
+        .experimental_session_unarchive(&session_id.to_string())
+        .await
+        .expect_err("dropped response should end as result unknown");
+    committed_rx
+        .await
+        .expect("the real server should commit before its response is dropped");
+    assert!(started.elapsed() < Duration::from_secs(1));
+    assert_eq!(
+        error.outcome(),
+        crate::app_server_session::ExperimentalSessionMutationAttemptOutcome::ResultUnknown
+    );
+    assert_eq!(
+        app_server.experimental_session_view_freshness(),
+        codex_app_server_client::ViewFreshness::Stale
+    );
+    assert_eq!(
+        app_server.experimental_session_mutation_certainty(),
+        codex_app_server_client::MutationCertainty::Unknown
+    );
+    assert_eq!(
+        recorded_params(&requests, "thread/unarchive").len(),
+        1,
+        "a lost non-idempotent mutation must never be replayed"
+    );
+
+    let reconciled = app_server.experimental_session_refresh().await?;
+    assert_ne!(
+        reconciled.domain_lifecycle,
+        codex_app_server_protocol::ExperimentalSessionDomainLifecycle::Archived
+    );
+    tokio::task::yield_now().await;
+    assert_eq!(
+        app_server.experimental_session_view_freshness(),
+        codex_app_server_client::ViewFreshness::Fresh
+    );
+    assert_eq!(
+        app_server.experimental_session_mutation_certainty(),
+        codex_app_server_client::MutationCertainty::Unknown,
+        "the late unarchive response must not overwrite the reconciled view"
+    );
+    assert_eq!(recorded_params(&requests, "thread/unarchive").len(), 1);
+
+    let preflight_error = app_server
+        .experimental_session_track(
+            codex_app_server_protocol::ExperimentalSessionUpdateTeamLifecycleParams {
+                root_thread_id: session_id.to_string(),
+                version_id: "not-submitted".to_string(),
+                expected_producer_state:
+                    codex_app_server_protocol::ExperimentalSessionTeamProducerState::Open,
+                expected_root_state:
+                    codex_app_server_protocol::ExperimentalSessionTeamRootState::Pending,
+                next_root_state:
+                    codex_app_server_protocol::ExperimentalSessionTeamRootState::Resolved,
+            },
+        )
+        .await
+        .expect_err("cold Session track should fail preflight");
+    assert_eq!(
+        preflight_error.outcome(),
+        crate::app_server_session::ExperimentalSessionMutationAttemptOutcome::NotSubmitted,
+        "historical unknown must not be attributed to an unsubmitted operation"
+    );
+    assert!(recorded_params(&requests, "experimentalSession/updateTeamLifecycle").is_empty());
+    assert_eq!(
+        app_server.experimental_session_mutation_certainty(),
+        codex_app_server_client::MutationCertainty::Unknown,
+        "the historical outcome remains honest but belongs only to the old attempt"
+    );
+
+    app_server.shutdown().await?;
+    proxy.await??;
+    Ok(())
 }
 
 fn create_history_rollout(

@@ -1,0 +1,41 @@
+---
+source: tui/src/experimental_session_control_tests.rs
+expression: rendered
+---
+Session control prototype — facts may be prototype, unknown, or unavailable
+session: loaded
+identity: root=root-loaded source=live-runtime
+domain lifecycle: unknown (not closed) source=unavailable
+owner/runtime residency: loaded owner source=live-runtime
+operations: track=available[source=live-owner] archive=unavailable(unsupported)[source=unavailable] unarchive=unavailable(not-archived)[source=thread-store]
+client sync: view=fresh mutation-result=none
+team prototype: instance=team-loaded revision=7 viewer=root-loaded role=Root omitted-participants=2 omitted-events=4 source=live-owner
+  event=event-a omitted-versions=3
+    version=version-a producer=open root=pending retired=false
+---
+Session control prototype — facts may be prototype, unknown, or unavailable
+session: unloaded
+identity: root=root-unloaded source=state-db-prototype
+domain lifecycle: unknown (not closed) source=unavailable
+owner/runtime residency: unloaded resumable source=state-db-prototype
+operations: track=unavailable(owner-unavailable)[source=state-db-prototype] archive=unavailable(unsupported)[source=unavailable] unarchive=unavailable(not-archived)[source=state-db-prototype]
+client sync: view=fresh mutation-result=none
+team prototype: unavailable source=unavailable
+---
+Session control prototype — facts may be prototype, unknown, or unavailable
+session: archived
+identity: root=root-archived source=thread-store
+domain lifecycle: archived source=thread-store
+owner/runtime residency: unloaded not-resumable source=thread-store
+operations: track=unavailable(archived)[source=thread-store] archive=unavailable(unsupported)[source=unavailable] unarchive=available[source=thread-store]
+client sync: view=fresh mutation-result=none
+team prototype: unavailable source=unavailable
+---
+Session control prototype — facts may be prototype, unknown, or unavailable
+session: owner-away
+identity: root=root-owner-away source=live-runtime
+domain lifecycle: unknown (not closed) source=unavailable
+owner/runtime residency: owner unavailable source=live-runtime
+operations: track=unavailable(owner-unavailable)[source=live-runtime] archive=unavailable(unsupported)[source=unavailable] unarchive=unavailable(not-archived)[source=thread-store]
+client sync: view=fresh mutation-result=none
+team prototype: unavailable source=unavailable

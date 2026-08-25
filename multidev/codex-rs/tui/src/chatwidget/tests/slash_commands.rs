@@ -110,6 +110,27 @@ fn next_add_to_history_event(rx: &mut tokio::sync::mpsc::UnboundedReceiver<AppEv
 }
 
 #[tokio::test]
+async fn sessions_dispatch_requires_the_independent_product_opt_in() {
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.4")).await;
+    while rx.try_recv().is_ok() {}
+
+    chat.dispatch_command_with_args(SlashCommand::Sessions, "list".to_string(), Vec::new());
+    assert!(
+        !std::iter::from_fn(|| rx.try_recv().ok())
+            .any(|event| matches!(event, AppEvent::ExperimentalSessionControlCommand(_)))
+    );
+
+    chat.set_feature_enabled(Feature::ExperimentalSessionControl, /*enabled*/ true);
+    chat.dispatch_command_with_args(SlashCommand::Sessions, "list".to_string(), Vec::new());
+    assert!(
+        std::iter::from_fn(|| rx.try_recv().ok()).any(|event| matches!(
+            event,
+            AppEvent::ExperimentalSessionControlCommand(args) if args == "list"
+        ))
+    );
+}
+
+#[tokio::test]
 async fn service_tier_commands_lowercase_catalog_names() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.4")).await;
     let mut preset = get_available_model(&chat, "gpt-5.4");

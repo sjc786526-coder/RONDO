@@ -36,6 +36,11 @@ impl App {
     ) {
         match event {
             AppServerEvent::Lagged { skipped } => {
+                app_server_client.experimental_session_on_lagged();
+                self.render_experimental_session_sync_loss(
+                    app_server_client,
+                    "app-server event lag; refresh is required",
+                );
                 tracing::warn!(
                     skipped,
                     "app-server event consumer lagged; dropping ignored events"
@@ -52,11 +57,28 @@ impl App {
                     .await;
             }
             AppServerEvent::Disconnected { message } => {
+                app_server_client.experimental_session_on_disconnected();
+                self.render_experimental_session_sync_loss(
+                    app_server_client,
+                    "app-server disconnected; reconnect and refresh are required",
+                );
                 tracing::warn!("app-server event stream disconnected: {message}");
                 self.chat_widget.add_error_message(message.clone());
                 self.app_event_tx.send(AppEvent::FatalExitRequest(message));
             }
         }
+    }
+
+    pub(super) fn handle_app_server_event_stream_closed(
+        &mut self,
+        app_server_client: &AppServerSession,
+    ) {
+        app_server_client.experimental_session_on_event_stream_closed();
+        self.render_experimental_session_sync_loss(
+            app_server_client,
+            "app-server event stream closed; reconnect and refresh are required",
+        );
+        tracing::warn!("app-server event stream closed");
     }
 
     async fn handle_server_notification_event(

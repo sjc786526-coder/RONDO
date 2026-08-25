@@ -187,6 +187,8 @@ pub(crate) enum KeymapCaptureMode {
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
 pub(crate) enum AppEvent {
+    /// User-invoked command for the default-off experimental Session prototype.
+    ExperimentalSessionControlCommand(String),
     /// Open the agent picker for switching active threads.
     OpenAgentPicker,
     /// Merge a completed root-scoped agent-picker refresh without blocking terminal input.

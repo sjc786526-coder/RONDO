@@ -1,7 +1,7 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
 最后更新：2026-08-24 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
-状态：**第一期、第二期、M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、Plan 064 与四期 M4-A 已完成；Plan 060 技术 GO、Plan 064 DATA_GO、Plan 066 正式训练 GO；M3-C1 有训练候选通过但 base 对照未取得同口径资格，M3-C2 仍锁定；M4-A 结论为 `M4_A_GO`**
+状态：**第一期、第二期、M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、Plan 064 与四期 M4-A、M4-C0 已完成；Plan 060 技术 GO、Plan 064 DATA_GO、Plan 066 正式训练 GO；M3-C1 有训练候选通过但 base 对照未取得同口径资格，M3-C2 仍锁定；M4-A 为 `M4_A_GO`，M4-C0 为 `M4_C0_PROTOTYPE_PASS`**
 
 ## 当前定位
 
@@ -23,13 +23,15 @@ Producer、Critic、Harness、Root 的职责及现行 Team State 不变量以该
 Writer Workspace Binding 是先经价值门的可选增强，只绑定调用者已准备且授权的 Git worktree；价值门证明需要时才附加
 minimal handoff。完整路线见
 [`doc/WBS/durable-team-runtime.md`](durable-team-runtime.md)。四期与 Publication Critic 三期正交，不依赖训练、真实模型、
-真实 API 或测评；当前产品在四期完成前仍保持进程内 Team State 与默认 shared workspace 语义。
+真实 API 或测评；Plan 070 的默认关闭原型已经进入主线，但不改变当前进程内 Team State 与默认 shared workspace，也不构成
+durable read model 或正式公共控制面。
 
 ## 四期目标与路线入口
 
 Plan 067 / M4-A 已收敛 Durable Team Session、Session 控制面与可选 writer binding 共享的产品和生命周期边界，结论为
-`M4_A_GO`。M4-S1、M4-C0 与 M4-W0 可分别建立 ExecPlan 并有界并行；M4-Z(core) 不被 W 线阻塞，只有 binding GO 后
-才立项正式 W1，其 handoff 范围服从价值门证据。
+`M4_A_GO`。Plan 070 / M4-C0 已以默认关闭的 experimental surface 完成状态投影、owner/cold 操作路由、stale/result-unknown
+与权威重读原型，结论为 `M4_C0_PROTOTYPE_PASS`；正式 Session query 仍等待 M4-S1，正式 control/TUI 再等待 M4-S2。
+M4-S1 与 M4-W0 继续按各自合同推进；M4-Z(core) 不被 W 线阻塞，只有 binding GO 后才立项正式 W1，其 handoff 范围服从价值门证据。
 Durable Team Session 的 V1 写 authority 归属于 canonical Root lineage，并持续覆盖成功 Team 提交；现有 Root active-writer
 作为唯一排他基础做架构内扩展，Team State 保持 canonical，并增加与其集成的专用 durability/read 能力，不建设相互竞争的第二套
 写者或状态体系。其他客户端可只读，child Thread writer 不能绕过 Root 归属；只读结果必须是自洽的已提交状态或明确
@@ -383,9 +385,10 @@ M3-C2；该修正不得借机改冻结权重、数据、产品语义或最终 th
 
 - M3-A1 产品合同与 Plan 054 / M3-A2 已完成；M3-B2a 已按 Plan 055 完成实现、独立验收与主线整合；M3-B2b 已按 Plan 057 完成实现、
   审查整改、最终独立验收与主线整合。其余后续工作包启动时仍须按 `plan/plan-example.md` 建立任务合同并取得授权。
-- 四期 M4-A / Plan 067 已完成共同合同并通过独立验收，结论为 `M4_A_GO`。后续工作包及控制面拆包以
-  [`doc/WBS/durable-team-runtime.md`](durable-team-runtime.md) 为准，并分别建立 ExecPlan；M4-A 完成不代表下游代码、
-  本地 Git 生命周期操作、外部资源或正式验证已获实施授权。
+- 四期 M4-A / Plan 067 已完成共同合同并通过独立验收，结论为 `M4_A_GO`；M4-C0 / Plan 070 已完成实验性纵向原型并通过
+  独立验收，结论为 `M4_C0_PROTOTYPE_PASS`。后续正式 query/control/TUI 工作包及依赖以
+  [`doc/WBS/durable-team-runtime.md`](durable-team-runtime.md) 为准，并分别建立 ExecPlan；C0 原型不自动授权产品启用、正式 API/TUI、
+  S1/S2、外部资源或远端操作。
 - RunPod 创建或计费、模型与数据上传、云端训练、权重下载、真实本地模型加载/推理、Docker 和付费 API 均须在对应任务
   开始前取得明确授权；23 USD 是三期训练的总预算上限，不等于已经授权消费。
 - Plan 068 的一次性授权已随本地交接、真实推理、资格验收和 exact winner 卷删除全部完成，不向后续任务延伸。后续 base

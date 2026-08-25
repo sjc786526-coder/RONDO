@@ -674,6 +674,24 @@ client_request_definitions! {
         serialization: thread_id(params.thread_id),
         response: v2::ThreadReadResponse,
     },
+    #[experimental("experimentalSession/list")]
+    ExperimentalSessionList => "experimentalSession/list" {
+        params: v2::ExperimentalSessionListParams,
+        serialization: None,
+        response: v2::ExperimentalSessionListResponse,
+    },
+    #[experimental("experimentalSession/read")]
+    ExperimentalSessionRead => "experimentalSession/read" {
+        params: v2::ExperimentalSessionReadParams,
+        serialization: thread_id(params.session_id),
+        response: v2::ExperimentalSessionReadResponse,
+    },
+    #[experimental("experimentalSession/updateTeamLifecycle")]
+    ExperimentalSessionUpdateTeamLifecycle => "experimentalSession/updateTeamLifecycle" {
+        params: v2::ExperimentalSessionUpdateTeamLifecycleParams,
+        serialization: thread_id(params.root_thread_id),
+        response: v2::ExperimentalSessionUpdateTeamLifecycleResponse,
+    },
     #[experimental("thread/turns/list")]
     ThreadTurnsList => "thread/turns/list" {
         params: v2::ThreadTurnsListParams,

@@ -1,6 +1,6 @@
 # 方向 3 四期：RONDO Multi Durable Team Runtime
 
-最后更新：2026-08-24 ｜ 产品线：RONDO Multi（`multidev/`）｜ 状态：**M4-A 已完成（`M4_A_GO`）；M4-S1、M4-C0、M4-W0 已按条件解锁**
+最后更新：2026-08-24 ｜ 产品线：RONDO Multi（`multidev/`）｜ 状态：**M4-A 已完成（`M4_A_GO`）；M4-C0 已完成（`M4_C0_PROTOTYPE_PASS`）；M4-S1、M4-W0 继续按条件推进**
 
 ## 1. 阶段定位
 
@@ -112,8 +112,8 @@ dashboard 或 `/cd`，也不建设第二套 Team State、writer authority、Sess
 ### M4-A：共同产品合同、生命周期边界与上游增量决策
 
 **结论：`M4_A_GO`。** 当前架构存在一条不重复建设权威体系的合理路线：直接复用 lineage 与 canonical Team State，架构内扩展
-Root active-writer、V2 reload、控制面和 gates，并为 canonical Team 增加窄的 durability/read 能力。M4-S1、M4-C0 与 M4-W0
-可分别建立 ExecPlan 并有界并行；正式 W1 仍等待 W0 binding GO 与 M4-S1 持久接缝。
+Root active-writer、V2 reload、控制面和 gates，并为 canonical Team 增加窄的 durability/read 能力。M4-C0 已完成实验性纵向原型；
+M4-S1 与 M4-W0 继续按各自条件推进，正式 W1 仍等待 W0 binding GO 与 M4-S1 持久接缝。
 
 **上游候选决定**（均只形成后续独立回移任务输入，不在 M4-A 实施）：
 
@@ -130,9 +130,10 @@ capability 接缝、提交/读取/重试机制和测试 interleaving，但必须
 只读非 owner、shutdown 失败，以及 Root idle/close 时仍有 mutation-capable live child 的场景，且不得建立第二套 Team 或 writer
 authority。
 
-**M4-C0 可直接建计划的交接**：以同一身份与生命周期矩阵为实验语义，原型验证 Session/Team 只读发现、owner 在线操作边界、
-冷态 lifecycle 与 stale/unknown/unavailable 展示；不承诺正式 RPC/TUI 或复制 read model。C0 自主选择 experimental API、最小 UI 与
-测试形状；`#37198` 未进入主线前，不得把 persisted cwd consistency 写成现有保证。
+**M4-C0 已完成的原型输入**：Plan 070 以同一身份与生命周期矩阵验证了 Session/Team 只读发现、owner 在线操作、代表性 Root-only
+cold unarchive、stale/result-unknown 与权威重读，结论为 `M4_C0_PROTOTYPE_PASS`。原型状态按 identity、domain lifecycle、runtime
+residency、operation availability、freshness/certainty 与 provenance 分轴；state-DB/prototype input 不冒充 S1 durable read model，
+experimental capability 也不替代默认关闭的产品 gate。
 
 **M4-W0 可直接建计划的交接**：只用调用者预置、授权的本地 worktree 和系统 Git，以 deterministic/fake 比较自然语言流程与
 binding/replacement/minimal handoff 的产品价值；不依赖生产 S1，也不借用 `#39616` 作权威 trust。W0 自主选择可丢弃原型形状，最终
@@ -178,9 +179,14 @@ environment/tool context；该增量不承担 Team durability 或 W binding。
 
 ### 控制面子线 C：Session app-server v2 / TUI（必成主线）
 
-#### M4-C0：实验性 Session 协议与 TUI 原型
+#### M4-C0：实验性 Session 协议与 TUI 原型（已完成）
 
 **目标**：在 M4-A 的职责边界上验证 Session、Team 和恢复状态的基本查询、操作流与展示方式，为正式控制面拆包提供真实输入。
+
+**结果：`M4_C0_PROTOTYPE_PASS`。** 默认关闭的 experimental app-server v2→app-server client→TUI 纵向流已经闭合；查询不激活
+Session，在线 mutation 只路由 current/running canonical Root owner，cold unarchive 只由 fresh prototype projection 证明 Root 后调用
+既有权威入口。lag、disconnect、EOF 与真实 response loss 会失效投影或进入 result unknown，不自动重放 mutation；稳定双键 cursor、
+DB unavailable/incomplete、ChildOnly、archived child 和关闭态均有聚焦回归。
 
 **边界**：C0 不承诺稳定公共 API 或正式 TUI 验收。所有新增接口只进入 app-server v2 并保持 experimental；控制面不复制
 Team State 或 Durable Session，不把 Team Lens 离线结果变成在线状态源，也不建设通用 project/session/task dashboard、
@@ -190,10 +196,12 @@ authority 的 owner runtime，未连接 owner 时返回 conflict/unavailable。a
 断开的即时结果只解除附着，但零订阅后的 deferred idle unload 必须调用同一领域 close barrier；存在 mutation-capable descendant
 或其他失败时展示 loaded/closing/failed/unknown，且不得交接 Root authority。
 
-**后续工作包**：M4-C0 完成且 M4-S1 提供真实 Session read model 后，再按当时接缝建立少量可独立验收的 Session query M4-C*；
-M4-S2 的恢复行为收口后，再建立 Session control/TUI M4-C*。当前不预定具体 RPC、UI 布局或包数。
+**正式拆包输入**：Session query 等待 M4-S1 提供真实 durable read model，再保留分轴 projection、provenance、稳定 cursor、
+unavailable/incomplete 与整份权威重读边界；不得保留 prototype input 作为正式事实。Session control/TUI 再等待 M4-S2 的恢复与
+close barrier，保留 loaded-owner routing、expected-state conflict、result unknown/no replay 与显式重同步语义；C0 的 RPC、字段、
+固定 timeout、命令布局和通用 `thread/unarchive` preflight 均不冻结为正式合同。当前不预定具体 RPC、UI 布局或包数。
 
-**子线出口**：操作者可以通过公开 app-server v2/TUI 查看和控制允许的 Team Session 生命周期；断线、重启或结果未知后能从
+**正式 C 线出口**：操作者可以通过公开 app-server v2/TUI 查看和控制允许的 Team Session 生命周期；断线、重启或结果未知后能从
 权威领域状态重建当前视图并安全继续，不绕过现有权限和审批，不自动启动 Agent、模型或真实 API。
 
 ### 子线 W：Writer Workspace Binding（可选 Minimal Handoff）
@@ -262,7 +270,7 @@ handoff 时投影其状态。该扩展不扩张为通用 workspace dashboard，�
 ```text
 M4-A（M4_A_GO）
 ├─ M4-S1 → M4-S2
-└─ M4-C0
+└─ M4-C0（M4_C0_PROTOTYPE_PASS）
 
 M4-S1 + M4-C0 → Session query M4-C*
 Session query M4-C* + M4-S2 → Session control/TUI M4-C* → M4-Z(core)
@@ -281,7 +289,8 @@ W-only delta ─/→ S/C
 ```
 
 - M4-A 已以 `M4_A_GO` 串行完成，S/C/W 共同采用第 2 节身份、生命周期、authority 与启用合同。
-- M4-S1、M4-C0 与 M4-W0 在 M4-A 后可以并行；正式 Session query 等待 M4-S1，正式 Session control/TUI 再等待 M4-S2。
+- M4-C0 已完成并提供正式拆包输入；M4-S1 与 M4-W0 继续按各自条件推进。正式 Session query 等待 M4-S1，正式 Session
+  control/TUI 再等待 M4-S2。
 - M4-W1 只在 binding GO 后开始，并等待 M4-S1 以复用持久接缝；开发可以与 M4-S2 并行，但最终 PASS 必须等待 M4-S2 并把
   resume/replacement binding 收口纳入自身出口，不存在无编号的后置收口包。
 - M4-Z(core) 只依赖 S/C 主线。W 若已经进入主线，由后完成者拥有一次兼容验收；W 未进入主线时不制造空实现或占位平台。
@@ -388,9 +397,9 @@ W-only delta ─/→ S/C
 
 ## 9. 实施与授权边界
 
-本文只是长程 WBS，不是实施授权。M4-A 已完成共同入口；M4-S1、M4-C0 与 M4-W0 已可分别建立 ExecPlan，M4-S2、后续 C*、
-M4-W1 与 M4-Z(core) 继续服从本 WBS 的条件边。每项启动时须按 `plan/plan-example.md` 建立 ExecPlan、确认当时主线和并行
-worktree 状态并取得实施授权。
+本文只是长程 WBS，不是实施授权。M4-A 已完成共同入口，M4-C0 已完成实验性原型；M4-S1 与 M4-W0 继续按各自合同推进，M4-S2、
+后续 C*、M4-W1 与 M4-Z(core) 继续服从本 WBS 的条件边。每项启动时须按 `plan/plan-example.md` 建立 ExecPlan、确认当时主线和
+并行 worktree 状态并取得实施授权。
 
 后续正式 Session M4-C* 等真实 read model 后再更新本 WBS、编号并分别建立 ExecPlan；M4-W1 只有在 M4-W0 形成 binding GO 且
 M4-S1 接缝成立后才可立项，最终 PASS 等待 M4-S2；可选 Workspace 控制面扩展再等待 M4-W1 PASS。任何上游窄回移另建独立

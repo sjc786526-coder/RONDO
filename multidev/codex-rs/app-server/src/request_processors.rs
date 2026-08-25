@@ -527,6 +527,7 @@ mod catalog_processor;
 mod command_exec_processor;
 mod config_processor;
 mod environment_processor;
+mod experimental_session_control;
 mod feedback_doctor_report;
 mod feedback_processor;
 mod fs_processor;
