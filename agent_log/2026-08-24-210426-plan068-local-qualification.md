@@ -42,8 +42,10 @@ review、cleanup 和 shutdown，最终 orphan/body leak 为 0。由于 base 未�
 - 正式 summary：`eval-data/publication-critic/plan068/handoff-evidence/plan068-local-handoff-summary.json`；正式 archive：
   `eval-data/publication-critic/plan068/formal/runs/plan068-formal-20260824T222852Z-qualification-v3/`。archive 中 observations canonical hash
   `d0e0b88473554b2949e7058c4853da3202db2ef18fc5896c843dfab0fc59fafe` 与 result 绑定一致，27 项 raw evidence hash 已直接绑定。
-- 删除门查询：0 Pod；当前唯一卷为 `hi3iaz8rsr`（US-KS-2、Standard 60GB）；compute 持续费 0、volume 约 `$0.005833333/h`。收到独立审查者字面量 `LOCAL_HANDOFF_ACCEPTED` 前保留卷。
+- 独立复验提交 `87122536a324bcd060d9b5df04d618f4760cbc77` 返回 `LOCAL_HANDOFF_ACCEPTED` 后，仅删除 exact volume
+  `hi3iaz8rsr`，RunPod 返回 HTTP 204。删除后为 0 Pod、0 volume；Pod 费用为 0，当前 01:00–02:00 UTC 桶无 volume 记录，
+  00:00–01:00 UTC 的 `$0.005833333` 是删除前历史记录，因此 compute/volume 持续费用均为 0。没有发现或删除无关资源。
 
-WBS 建议 delta：记录 M3-C1 本地交接和资格执行完成，base/C1/C2/C3 分别为 `NOT_QUALIFIED`/`QUALIFIED`/`NOT_QUALIFIED`/`QUALIFIED`；
-由于 base 未通过，M3-C2 前置保持关闭。上游需处理 base BF16 projected/verdict parity 和 C2 direction/ranking。最终卷删除事实应在删除后再写，
-不在本 task branch 抢写共享 WBS。
+WBS 建议 delta：记录 M3-C1 本地交接、资格执行和远端清理已完成，base/C1/C2/C3 分别为
+`NOT_QUALIFIED`/`QUALIFIED`/`NOT_QUALIFIED`/`QUALIFIED`，RunPod 为 0 Pod/0 volume 且持续费用归零。由于 base 未通过，M3-C2
+前置保持关闭；上游需处理 base BF16 projected/verdict parity 和 C2 direction/ranking。不在本 task branch 抢写共享 WBS。

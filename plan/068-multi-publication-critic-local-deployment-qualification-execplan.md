@@ -239,29 +239,29 @@ cache、调试和正式运行原始结果必须直接落在主物理仓库根的
 - ignored 交接根 `eval-data/publication-critic/plan068/` 为 24,386,010,209 bytes（51 目录全 `0700`、269 文件全 `0600`）；任务 env
   6,897,892,345 bytes。公开 HF cache 3,457,214,889 bytes，位于 `0700` 的 `eval-data/models/publication-critic/` 下，内部保持 HF 标准
   `0755/0644`；均保留。Windows C: 当前可用 102,363,279,360 bytes；正式轮后无 GPU compute process 残留。
-- 删除前 provider 事实已刷新：0 Pod；当前卷列表只有 `hi3iaz8rsr`（`rondo-plan060-pcie-assets-20260824`、`US-KS-2`、Standard 60GB）；
-  compute 持续费为 0，卷仍约 `$0.005833333/h`。24 小时账单中的旧 Pod/旧卷记录仅为历史累计。
+- 独立复验在 `87122536a324bcd060d9b5df04d618f4760cbc77` 明确返回 `LOCAL_HANDOFF_ACCEPTED`；随后只删除 exact volume
+  `hi3iaz8rsr`，RunPod 返回 HTTP 204。删除后实时查询为 0 Pod、0 volume；Pod 费用为 0，当前 01:00–02:00 UTC 桶无 volume
+  记录，唯一 `$0.005833333` volume 记录属于 00:00–01:00 UTC 删除前历史，compute/volume 持续费用均已归零。没有发现或删除无关资源。
 
 ### 当前工作
 
-- `AWAITING_LOCAL_HANDOFF_REACCEPTANCE / STAGE_D1`：首次独立审查 findings 已修复，新的 commissioning、v3 四对象正式资格、相称门禁和删除前
-  provider 复核均已完成；正在形成 clean task-branch 提交并交同一审查者复验。收到新的字面量 `LOCAL_HANDOFF_ACCEPTED` 前不得删除 winner 卷。
+- `AWAITING_FINAL_INDEPENDENT_ACCEPTANCE / STAGE_D2`：本地交接、v3 四对象正式资格、删除前独立复验、exact 卷删除与止费复核均已完成；
+  正在形成 final clean task-branch checkpoint 并交同一审查者做删除后终验。M3-C2 继续锁定。
 
 ### 本任务剩余步骤
 
-1. 提交并保持 task worktree clean，由本 turn 唯一干净上下文审查者独立检查本地工件、正式结果、门禁、provider 事实和删除门；普通 finding 窄修后交同一审查者复验。
-2. 只有收到该审查者字面量 `LOCAL_HANDOFF_ACCEPTED` 后，精确删除卷 ID `hi3iaz8rsr`，并复查目标卷不存在、Pod 仍为 0、compute/volume 持续费均为 0；无关资源只报告。
-3. 更新本节和同一精炼日志，提交 final task-branch checkpoint、保持 clean，并交同一独立审查者做删除后最终验收。WBS 只提供建议 delta，不在本分支抢写。
+1. 提交 final task-branch checkpoint 并保持 clean，交同一独立审查者做删除后最终验收；普通 finding 窄修后交同一审查者复验。
+2. WBS 只提供建议 delta，不在本分支抢写；不合并、不推送、不归档分支、不删除 worktree，也不自动启动 M3-C2。
 
 ### 阻塞项
 
-- 无技术或基础设施阻塞；唯一停点是不可逆删除前的 `LOCAL_HANDOFF_ACCEPTED`。卷保留期间持续产生约 `$0.005833333/h` 存储费用。
+- 无技术、基础设施或远端费用阻塞；只待删除后最终独立验收。
 
 ### 当前验收状态
 
-- `LOCAL_HANDOFF_READY_FOR_INDEPENDENT_REVIEW`：任务执行已完成本地交接和有效四对象资格判定；C1/C3 资格通过，base/C2 未通过。
-  由于 base 未通过，M3-C2 前置保持关闭。正式 summary 位于 ignored
-  `eval-data/publication-critic/plan068/handoff-evidence/plan068-local-handoff-summary.json`，卷仍保留并持续计费。
+- `REMOTE_CLEANUP_COMPLETE_READY_FOR_FINAL_REVIEW`：Plan 068 的本地交接、有效四对象资格、独立删除门、远端清理和止费流程均已完成；
+  C1/C3 资格通过，base/C2 未通过。由于 base 未通过，预期的 M3-C2 前置解锁目标未达成并保持关闭。正式 summary 位于 ignored
+  `eval-data/publication-critic/plan068/handoff-evidence/plan068-local-handoff-summary.json`。
 
 ### 交接边界
 
@@ -292,3 +292,4 @@ cache、调试和正式运行原始结果必须直接落在主物理仓库根的
 | 014 | 只接受 `3906152...` clean source 和 `plan068-formal-20260824T222852Z-qualification-v3` write-once archive；旧 `...T201213Z...` 口径失效、`...T221100Z...` 基础设施失败，均不拼接 | 维持正式 source/config/program/artifact/cohort 一致，调试与失败轮诚实隔离 | 正式证据 | 已执行 |
 | 015 | Plan 067 已结束并合并；Plan 068 与当前 069/070 仅并行源码/轻测，重型 Cargo/Docker/真实模型继续共用全局锁串行 | 三任务产品职责独立，但共享宿主重型资源与后续主线整合面 | 并行、资源 | 已执行 |
 | 016 | 正式子进程采用窄环境 allowlist；run/freeze/artifact/cohort/packet/raw-output 与 real-service/probe/python 程序身份均用普通 JSON/SHA-256 直接绑定 | 修复首次独立审查的最小注入与人工错配风险，并防止受控测试 binary 冒充真实 runtime，不建设额外审计平台 | runtime、证据 | 已执行 |
+| 017 | 收到 `LOCAL_HANDOFF_ACCEPTED` 后只删除 exact volume `hi3iaz8rsr`；当前 0 Pod、0 volume，compute/volume 持续费用为 0 | 完成本计划唯一不可逆清理与止费要求；删除前历史账单不冒充当前持续费用 | RunPod、终态 | 已执行 |
