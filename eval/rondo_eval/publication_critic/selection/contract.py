@@ -109,6 +109,12 @@ _RATE_FLOORS = {
 
 JUDGE_COVERAGE = "all_released_candidates_v1"
 
+# Plan 073 authorises exactly one heterogeneous entry: Opus 5 over the existing
+# Claude Code subscription. A judge aggregate carrying any other identity is not
+# the evidence this task was allowed to gather, so the run is INCONCLUSIVE
+# rather than silently judged by something else.
+EXPECTED_JUDGE_IDENTITY = "claude-opus-5"
+
 
 class SelectionError(ValueError):
     """A body-free invalid Plan 073 freeze, release, evidence or invocation."""

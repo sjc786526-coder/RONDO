@@ -53,7 +53,7 @@ balanced accuracy 分别只有 `0.666`、`0.524`、`0.616`，没有任何一点�
   C2 未加载、未评价；unseen-test 未释放。因无暂定赢家，Plan 055 service descriptor 未更新，也未做 service parity 运行——该步骤按协议
   以选出赢家为前提。
 - 重型运行：4 次真实模型加载全部经 worktree canonical wrapper/lock/watchdog，`rc=0 / stop=none / cleanup=none`；运行前后 Windows `C:`
-  可用约 `103.5GiB`，项目占用约 `133.6GB`，均远离门限。
+  可用约 `103.3GB` / `96.2GiB`，项目占用约 `133.6GB`，均远离门限。
 
 ## 主物理根实际创建/修改的 ignored 路径
 
@@ -61,6 +61,43 @@ balanced accuracy 分别只有 `0.666`、`0.524`、`0.616`，没有任何一点�
   含 commissioning 输入/raw/judge/runs 与唯一正式轮的 inputs/raw/judge/runs。未创建 Plan 073 专属 env、cache 或 target；
   只读复用了 Plan 068 handoff 的模型与 Plan 068 serving venv，未复制约 24GB 既有工件，未改写 Plan 066/068/071 任何 namespace。
 - `.claude/worktrees/073-.../.codex/build-watchdog/` —— worktree 内 ignored 的 watchdog metrics，由共享 wrapper 自动生成。
+
+## 独立验收整改
+
+独立验收（`0841748`）判定不通过，两个 correctness 阻塞项均属实，已窄修并复验。
+
+1. **validation release 在过滤前读取了完整 v8。** 原实现用 `DatasetConsumer.from_frozen_directory(allow_evaluation=True)`
+   一次性载入全部 228 行再过滤，因此正式进程在 lock 前确实持有过 unseen 正文。新增 `selection/dataset_source.py`：
+   先从 supervision 建立本 split 成员集，再逐行流式读取 packets/census/pairs，非成员行读到即丢弃，从不保留或返回；
+   unseen 的门禁下沉到该 reader。完整性不降级——仍复用既有 `verify_freeze_manifest` 与 per-row 契约校验器。
+   回归覆盖"validation 源不含任何 unseen id"以及"validation 路径不得调用全量 consumer"（mock 断言）。
+2. **伪造的 `SELECTED` result 能开出有效 lock。** 新增 `validate_validation_result()`：从 result 自带的逐行分数重算
+   threshold search、confusion、ROC AUC，再重算 admission、ranking 和 terminal，全部必须与文档记载一致；
+   `build_selection_lock()` 与 `report` 都先过这道校验。审查演示的伪造样本（仅改 terminal/selected/ranking，
+   以及进一步改 `admission.admissible`）现在均被拒绝。
+
+一并处理的非阻塞项：Judge package id 不再允许包含 split 名（`validation`/`unseen`/`train`/`test`/`holdout`），本轮正式
+package id 确实含明文 `validation`，属形式泄漏，不提供答案，按审查决定不重问 Opus；`evaluate` 增加可选 `--judge-package`
+把 aggregate 绑定到实际发出的 package；Judge 模型身份改为对 `claude-opus-5` 硬校验，其它身份直接 `INCONCLUSIVE`；
+scoring 不完整（typed failure 或行数不足）在 validation 与 unseen confirmation 两处都明确拒绝，不再让部分结果冒充可比证据；
+`score` 今后记录整份 snapshot 的文件摘要。
+
+关于 freeze 只绑定 `model.safetensors`：本轮已直接核验三份 snapshot 的 tokenizer/config 摘要，`tokenizer.json`、
+`tokenizer_config.json`、`vocab.json`、`merges.txt`、`added_tokens.json`、`chat_template.jinja`、`config.json` 七项完全一致；
+`special_tokens_map.json` 只是 pad token `<|vision_pad|>` 的字符串/对象两种序列化写法差异，pad id 仍为 `151654`。
+更硬的证据是 55 行的 `token_count` 与 `dropped_oldest_publications` 在 base/C1/C3 之间逐值相等，输入身份同一性直接成立。
+
+复验（未加载模型、未跑 Cargo/Docker、未碰 unseen）：
+
+- 新 split-scoped reader 重建的 validation release 与归档逐字节相同，SHA-256 仍为
+  `757dd624c3d47f87dd5683d24f9f1753b1dbbffb42fdeff567c9e3e5e0b71a91`。
+- 用归档 raw + Judge package 绑定重建 `evaluate_validation`，与归档 result 逐字节相同（`2b36eb4b…`）；归档 result 通过新的
+  严格校验器，terminal 仍为 `NO_GO`。tracked JSON 重新生成后仍为 `f97fcdcc78c9932dd96eb17c419ef29bf574649d7b67c1c497e861daa2eee8e4`。
+- 测试：Plan 073 focused `51/51`；全部 `test_publication_critic*.py` 共 `308` 项通过、`1` 项 skip（此前日志的 `167`/交接的
+  `184` 是两次不同文件子集的口径，非全量）。
+
+正式结论不变：`NO-GO`，不生成 selection lock，不释放 unseen，不解锁 M3-D，Publication Critic 保持 default-off。
+整改只收紧门禁与校验，不改变任何指标定义、冻结底线或候选证据。
 
 ## 交接建议
 

@@ -13,6 +13,7 @@ from typing import Any
 from ..identity import canonical_json_bytes, sha256_bytes
 from .contract import (
     CANDIDATES,
+    EXPECTED_JUDGE_IDENTITY,
     SELECTION_METHOD,
     SelectionError,
     freeze_sha256,
@@ -25,13 +26,24 @@ from .contract import (
 )
 from .judge import (
     model_agreement,
+    package_sha256,
     reference_agreement,
     validate_aggregate,
+    validate_package,
 )
 from .lock import SCHEMA as LOCK_SCHEMA
 from .lock import TERMINAL as LOCK_TERMINAL
 from .lock import lock_sha256, validate_lock
-from .metrics import PASS, REWRITE, build_labeled_rows, candidate_metrics, select_threshold
+from .metrics import (
+    PASS,
+    REWRITE,
+    LabeledRow,
+    build_labeled_rows,
+    candidate_metrics,
+    confusion_at,
+    roc_auc,
+    select_threshold,
+)
 from .release import release_sha256, validate_release
 
 
@@ -130,6 +142,23 @@ def _ranking_key(report: Mapping[str, Any]) -> tuple[Any, ...]:
     )
 
 
+def _bind_judge_package(
+    aggregate: Any,
+    package_value: Any,
+    release: Mapping[str, Any],
+) -> None:
+    """Tie a judge aggregate to the exact package that was sent out."""
+
+    if aggregate is None:
+        raise SelectionError("Plan 073 judge package binding needs a judge aggregate")
+    package = validate_package(package_value)
+    digest = package_sha256(package)
+    if validate_aggregate(aggregate)["package_sha256"] != digest:
+        raise SelectionError("Plan 073 judge aggregate is not bound to this package")
+    if package["item_count"] != len(release["items"]):
+        raise SelectionError("Plan 073 judge package does not cover the release")
+
+
 def _judge_view(
     release: Mapping[str, Any],
     aggregate: Any,
@@ -145,6 +174,15 @@ def _judge_view(
             "gate_reason": "judge_evidence_absent",
         }
     validated = validate_aggregate(aggregate)
+    if validated["model_identity"] != EXPECTED_JUDGE_IDENTITY:
+        return {
+            "present": False,
+            "aggregate_sha256": None,
+            "model_identity": validated["model_identity"],
+            "reference_agreement": None,
+            "gate_applicable": False,
+            "gate_reason": "judge_model_identity_is_not_the_authorised_model",
+        }
     agreement = reference_agreement(release, validated)
     threshold = float(protocol["judge"]["min_reference_agreement_for_gate"])
     applicable = (
@@ -171,6 +209,7 @@ def evaluate_validation(
     release_value: Any,
     observations: Mapping[str, Any],
     judge_aggregate: Any = None,
+    judge_package: Any = None,
 ) -> dict[str, Any]:
     """Compare the three candidates and, if one qualifies, name the winner."""
 
@@ -182,6 +221,8 @@ def evaluate_validation(
         raise SelectionError("Plan 073 validation release is not the frozen dataset")
     if set(observations) != set(CANDIDATES):
         raise SelectionError("Plan 073 validation requires all three candidates")
+    if judge_package is not None:
+        _bind_judge_package(judge_aggregate, judge_package, release)
 
     protocol = freeze["protocol"]
     floors = protocol["quality_floors"]
@@ -204,6 +245,14 @@ def evaluate_validation(
         facts = validate_runtime_facts(
             observation["runtime"], f"Plan 073 {candidate} runtime"
         )
+        # A candidate that could not score the whole cohort yields no
+        # comparable evidence. That is an INCONCLUSIVE task terminal, not a
+        # quality verdict, so refuse it here rather than ranking a partial run.
+        if facts["typed_failure_count"] or facts["scored_count"] != len(release["items"]):
+            raise SelectionError(
+                "Plan 073 candidate scoring is incomplete; the run cannot produce a "
+                "comparable selection and must be reported INCONCLUSIVE"
+            )
         rows = build_labeled_rows(release, observation["scores"])
         if facts["scored_count"] != len(rows):
             raise SelectionError("Plan 073 scored count does not match the release")
@@ -273,7 +322,7 @@ def _validation_terminal(
             "INCONCLUSIVE",
             None,
             None,
-            ["judge_evidence_absent"],
+            [judge_view["gate_reason"] or "judge_evidence_absent"],
         )
     if not ranked:
         return (
@@ -300,6 +349,166 @@ def _validation_terminal(
     return "SELECTED", winner["candidate"], runner_up, reasons
 
 
+def _rows_from_report(report: Mapping[str, Any]) -> tuple[LabeledRow, ...]:
+    """Rebuild scoring rows from a reported result, for independent recomputation."""
+
+    rows = report["metrics"]["rows"]
+    if not isinstance(rows, list) or not rows:
+        raise SelectionError("Plan 073 candidate report carries no scored rows")
+    rebuilt: list[LabeledRow] = []
+    for row_value in rows:
+        row = require_object(row_value, "Plan 073 reported row")
+        require_exact_keys(
+            row,
+            {"candidate_id", "label", "score", "raw_logit", "predicted", "margin_to_threshold"},
+            "Plan 073 reported row",
+        )
+        if row["label"] not in {PASS, REWRITE}:
+            raise SelectionError("Plan 073 reported row label is invalid")
+        rebuilt.append(
+            LabeledRow(
+                candidate_id=str(row["candidate_id"]),
+                score=require_finite(row["score"], "Plan 073 reported score", minimum=0.0, maximum=1.0),
+                raw_logit=require_finite(row["raw_logit"], "Plan 073 reported raw logit"),
+                label=str(row["label"]),
+                slices=(),
+                facets={},
+            )
+        )
+    if len({row.candidate_id for row in rebuilt}) != len(rebuilt):
+        raise SelectionError("Plan 073 reported rows contain a duplicate candidate")
+    return tuple(rebuilt)
+
+
+def _recheck_candidate(report: Mapping[str, Any], freeze: Mapping[str, Any]) -> None:
+    """Recompute a candidate report from its own rows and the frozen protocol.
+
+    This is what stops a hand-edited result from opening unseen-test: the
+    threshold, its feasibility, the confusion counts, the separability and the
+    admission verdict must all follow from the scored rows the document itself
+    carries.
+    """
+
+    require_exact_keys(
+        report,
+        {
+            "candidate",
+            "deployment_artifact_sha256",
+            "lineage",
+            "threshold_search",
+            "metrics",
+            "runtime",
+            "judge_agreement",
+            "admission",
+        },
+        "Plan 073 candidate report",
+    )
+    candidate = report["candidate"]
+    if candidate not in CANDIDATES:
+        raise SelectionError("Plan 073 candidate report identity is invalid")
+    artifact = freeze["artifacts"][candidate]
+    if (
+        report["deployment_artifact_sha256"] != artifact["deployment_artifact_sha256"]
+        or report["lineage"] != artifact["lineage"]
+    ):
+        raise SelectionError("Plan 073 candidate report artifact identity drifted")
+
+    protocol = freeze["protocol"]
+    floors = protocol["quality_floors"]
+    rows = _rows_from_report(report)
+    metrics = report["metrics"]
+    if select_threshold(rows, floors) != report["threshold_search"]:
+        raise SelectionError("Plan 073 candidate threshold search is not reproducible")
+    threshold = float(report["threshold_search"]["threshold"])
+    if metrics["threshold"] != threshold:
+        raise SelectionError("Plan 073 candidate metrics use a different threshold")
+    if confusion_at(rows, threshold) != metrics["overall"]["confusion"]:
+        raise SelectionError("Plan 073 candidate confusion is not reproducible")
+    if roc_auc(rows) != metrics["roc_auc"]:
+        raise SelectionError("Plan 073 candidate separability is not reproducible")
+
+    facts = validate_runtime_facts(report["runtime"], "Plan 073 candidate runtime")
+    if facts["scored_count"] != len(rows):
+        raise SelectionError("Plan 073 candidate scored count does not match its rows")
+    failures = _quality_gate_failures(
+        report["threshold_search"], metrics, int(facts["typed_failure_count"]), floors
+    ) + _runtime_gate_failures(facts, protocol["runtime_gates"])
+    if report["admission"] != {
+        "admissible": not failures,
+        "failed_gates": failures,
+    }:
+        raise SelectionError("Plan 073 candidate admission does not follow its evidence")
+
+
+def validate_validation_result(
+    value: Any,
+    freeze_value: Any,
+) -> dict[str, Any]:
+    """Accept a validation result only if it re-derives from its own evidence."""
+
+    freeze = validate_freeze(freeze_value)
+    result = require_object(value, "Plan 073 validation result")
+    require_exact_keys(
+        result,
+        {
+            "schema",
+            "mode",
+            "run_id",
+            "method",
+            "selection_freeze_sha256",
+            "release_sha256",
+            "cohort",
+            "judge",
+            "candidates",
+            "ranking",
+            "terminal",
+            "selected",
+            "runner_up",
+            "reasons",
+            "scope_note",
+        },
+        "Plan 073 validation result",
+    )
+    if (
+        result["schema"] != VALIDATION_SCHEMA
+        or result["method"] != SELECTION_METHOD
+        or result["mode"] != freeze["mode"]
+        or result["run_id"] != freeze["run_id"]
+        or result["selection_freeze_sha256"] != freeze_sha256(freeze)
+    ):
+        raise SelectionError("Plan 073 validation result is not bound to this freeze")
+    require_sha256(result["release_sha256"], "Plan 073 validation result release")
+
+    candidates = require_object(result["candidates"], "Plan 073 validation candidates")
+    require_exact_keys(candidates, set(CANDIDATES), "Plan 073 validation candidates")
+    reports = []
+    for candidate in CANDIDATES:
+        report = require_object(candidates[candidate], "Plan 073 candidate report")
+        if report["candidate"] != candidate:
+            raise SelectionError("Plan 073 candidate report is misfiled")
+        _recheck_candidate(report, freeze)
+        reports.append(report)
+
+    judge = require_object(result["judge"], "Plan 073 judge view")
+    ranked = sorted(
+        (report for report in reports if report["admission"]["admissible"]),
+        key=_ranking_key,
+    )
+    if result["ranking"] != [report["candidate"] for report in ranked]:
+        raise SelectionError("Plan 073 ranking does not follow the frozen order")
+    terminal, selected, runner_up, reasons = _validation_terminal(
+        ranked, judge, freeze["protocol"]
+    )
+    if (
+        result["terminal"] != terminal
+        or result["selected"] != selected
+        or result["runner_up"] != runner_up
+        or list(result["reasons"]) != reasons
+    ):
+        raise SelectionError("Plan 073 validation terminal does not follow its evidence")
+    return dict(result)
+
+
 def build_selection_lock(
     validation_result: Mapping[str, Any],
     freeze_value: Any,
@@ -307,17 +516,12 @@ def build_selection_lock(
     """Turn a ``SELECTED`` validation result into the one artifact unseen needs."""
 
     freeze = validate_freeze(freeze_value)
-    if validation_result.get("schema") != VALIDATION_SCHEMA:
-        raise SelectionError("Plan 073 validation result identity is invalid")
-    if validation_result.get("mode") != "formal":
+    validation_result = validate_validation_result(validation_result, freeze)
+    if validation_result["mode"] != "formal":
         raise SelectionError("Plan 073 selection lock requires a formal validation run")
-    if validation_result.get("selection_freeze_sha256") != freeze_sha256(freeze):
-        raise SelectionError("Plan 073 validation result is not bound to this freeze")
-    if validation_result.get("terminal") != "SELECTED":
+    if validation_result["terminal"] != "SELECTED":
         raise SelectionError("Plan 073 selection lock requires a SELECTED terminal")
     selected = validation_result["selected"]
-    if selected not in CANDIDATES:
-        raise SelectionError("Plan 073 selected candidate is invalid")
     report = validation_result["candidates"][selected]
     lock = {
         "schema": LOCK_SCHEMA,
@@ -381,6 +585,11 @@ def evaluate_unseen_confirmation(
     floors = protocol["quality_floors"]
     threshold = float(selected["threshold"]["projected_score"])
     facts = validate_runtime_facts(observation["runtime"], "Plan 073 confirmation runtime")
+    if facts["typed_failure_count"] or facts["scored_count"] != len(release["items"]):
+        raise SelectionError(
+            "Plan 073 confirmation scoring is incomplete; the blind confirmation is "
+            "INCONCLUSIVE rather than a quality verdict"
+        )
     rows = build_labeled_rows(release, observation["scores"])
     if facts["scored_count"] != len(rows):
         raise SelectionError("Plan 073 scored count does not match the release")
@@ -454,7 +663,7 @@ def _confirmation_terminal(
     protocol: Mapping[str, Any],
 ) -> tuple[str, list[str]]:
     if not judge_view["present"]:
-        return "INCONCLUSIVE", ["judge_evidence_absent"]
+        return "INCONCLUSIVE", [judge_view["gate_reason"] or "judge_evidence_absent"]
     if failures:
         return "NO_GO", ["locked_combination_failed_a_frozen_publication_quality_floor"]
     if judge_view["gate_applicable"]:
@@ -482,4 +691,5 @@ __all__ = [
     "evaluate_validation",
     "require_sha256",
     "validate_runtime_facts",
+    "validate_validation_result",
 ]

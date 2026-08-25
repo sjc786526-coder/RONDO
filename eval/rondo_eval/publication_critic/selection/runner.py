@@ -35,6 +35,7 @@ from .decision import (
     evaluate_unseen_confirmation,
     evaluate_validation,
     validate_runtime_facts,
+    validate_validation_result,
 )
 from .judge import (
     aggregate_batches,
@@ -299,6 +300,11 @@ def _score(args: argparse.Namespace) -> int:
         "candidate": args.candidate,
         "deployment_artifact_sha256": expected,
         "snapshot_model_sha256": snapshot_sha256,
+        "snapshot_files_sha256": {
+            entry.name: sha256_file(entry)
+            for entry in sorted(args.snapshot.iterdir())
+            if entry.is_file() and not entry.is_symlink()
+        },
         "runtime_configuration": {
             "device": runtime["device"],
             "dtype": runtime["dtype"],
@@ -418,7 +424,12 @@ def _evaluate(args: argparse.Namespace) -> int:
         if args.judge_aggregate is not None
         else None
     )
-    result = evaluate_validation(freeze, release, observations, judge)
+    package = (
+        _load_json(args.judge_package, "Plan 073 judge package")
+        if args.judge_package is not None
+        else None
+    )
+    result = evaluate_validation(freeze, release, observations, judge, package)
     archive = _archive(args.runs_root, freeze)
     archive.write_json("selection-freeze.json", freeze)
     archive.write_json("validation-release-identity.json", _release_identity(release))
@@ -545,9 +556,9 @@ def _candidate_report(report: Mapping[str, Any]) -> dict[str, Any]:
 
 def _report(args: argparse.Namespace) -> int:
     freeze = validate_freeze(_load_json(args.freeze, "Plan 073 freeze"))
-    result = _load_json(args.validation_result, "Plan 073 validation result")
-    if result.get("selection_freeze_sha256") != freeze_sha256(freeze):
-        raise SelectionError("Plan 073 report is not bound to this freeze")
+    result = validate_validation_result(
+        _load_json(args.validation_result, "Plan 073 validation result"), freeze
+    )
     confirmation = (
         _load_json(args.unseen_confirmation, "Plan 073 unseen confirmation")
         if args.unseen_confirmation is not None
@@ -659,6 +670,7 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate.add_argument("--release", type=Path, required=True)
     evaluate.add_argument("--score", action="append", required=True)
     evaluate.add_argument("--judge-aggregate", type=Path, default=None)
+    evaluate.add_argument("--judge-package", type=Path, default=None)
     evaluate.add_argument("--runs-root", type=Path, required=True)
 
     lock = subparsers.add_parser("lock")

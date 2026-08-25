@@ -13,8 +13,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from ..identity import canonical_json_bytes, sha256_bytes, sha256_file
-from ..training_data.consumer import DatasetConsumer
+from ..identity import canonical_json_bytes, sha256_bytes
 from .contract import (
     SPLITS,
     SelectionError,
@@ -23,11 +22,10 @@ from .contract import (
     require_object,
     require_sha256,
 )
-from .lock import lock_sha256, validate_lock
+from .dataset_source import UNSEEN_SPLIT, load_split
 
 
 SCHEMA = "rondo-publication-critic-plan073-split-release-v1"
-UNSEEN_SPLIT = "unseen_test"
 
 # Only the supervision fields the deterministic metrics and the slice report
 # actually consume.  Reviewer/generator identity stays out of the release.
@@ -64,80 +62,53 @@ def build_split_release(
     repo_root: Path,
     selection_lock: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Release exactly one frozen split; unseen-test requires a valid lock."""
+    """Release exactly one frozen split; unseen-test requires a valid lock.
 
-    if split not in SPLITS:
-        raise SelectionError("Plan 073 release split is invalid")
-    if split == UNSEEN_SPLIT:
-        if selection_lock is None:
-            raise SelectionError(
-                "unseen-test release requires a valid Plan 073 selection lock"
-            )
-        lock = validate_lock(selection_lock)
-        authorization = {
-            "kind": "selection_lock",
-            "selection_lock_sha256": lock_sha256(lock),
-        }
-    else:
-        if selection_lock is not None:
-            raise SelectionError("validation release does not consume a selection lock")
-        authorization = {"kind": "frozen_protocol_split", "selection_lock_sha256": None}
+    The split-scoped reader owns the gate and never materialises a split it was
+    not asked for, so building a validation release cannot put unseen-test
+    content into this process in the first place.
+    """
 
-    manifest = dataset_root / "manifest.json"
-    if manifest.is_symlink() or not manifest.is_file():
-        raise SelectionError("Plan 073 dataset manifest is missing or unsafe")
-    consumer = DatasetConsumer.from_frozen_directory(
+    source = load_split(
         dataset_root,
+        split,
         repo_root=repo_root,
-        allow_evaluation=True,
+        selection_lock=selection_lock,
     )
-    members = sorted(
-        str(row["candidate_id"])
-        for row in consumer.supervision.values()
-        if row["proposed_split"] == split
-    )
-    if not members:
-        raise SelectionError("Plan 073 release split is empty")
-    member_set = set(members)
-
-    items = [
-        {
-            "candidate_id": candidate_id,
-            "packet": consumer.packets[candidate_id]["packet"],
-            "dropped_oldest_publications": consumer.dropped_oldest_publications(
-                candidate_id
-            ),
-        }
-        for candidate_id in members
-    ]
-    supervision = [
-        {
-            "candidate_id": candidate_id,
-            **{
-                name: consumer.supervision[candidate_id][name]
-                for name in _SUPERVISION_PROJECTION
-            },
-        }
-        for candidate_id in members
-    ]
-    pairs = [
-        {
-            "pair_id": str(row["pair_id"]),
-            **{name: row[name] for name in _PAIR_PROJECTION},
-        }
-        for row in sorted(consumer.pairs.values(), key=lambda row: str(row["pair_id"]))
-        if str(row["preferred_candidate_id"]) in member_set
-        and str(row["dispreferred_candidate_id"]) in member_set
-    ]
+    members = source.candidate_ids
     release = {
         "schema": SCHEMA,
-        "split": split,
-        "dataset_revision": str(consumer.membership["dataset_revision"]),
-        "dataset_manifest_sha256": sha256_file(manifest),
-        "authorization": authorization,
-        "items": items,
-        "supervision": supervision,
-        "pairs": pairs,
+        "split": source.split,
+        "dataset_revision": source.dataset_revision,
+        "dataset_manifest_sha256": source.manifest_sha256,
+        "authorization": dict(source.authorization),
+        "items": [
+            {
+                "candidate_id": candidate_id,
+                "packet": source.packets[candidate_id]["packet"],
+                "dropped_oldest_publications": source.dropped_oldest_publications[
+                    candidate_id
+                ],
+            }
+            for candidate_id in members
+        ],
+        "supervision": [
+            {
+                "candidate_id": candidate_id,
+                **{
+                    name: source.supervision[candidate_id][name]
+                    for name in _SUPERVISION_PROJECTION
+                },
+            }
+            for candidate_id in members
+        ],
+        "pairs": [
+            {
+                "pair_id": str(row["pair_id"]),
+                **{name: row[name] for name in _PAIR_PROJECTION},
+            }
+            for row in source.pairs
+        ],
     }
     return validate_release(release)
 

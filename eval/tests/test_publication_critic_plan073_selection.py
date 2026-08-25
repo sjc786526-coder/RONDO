@@ -6,6 +6,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -13,6 +14,9 @@ EVAL_ROOT = REPO_ROOT / "eval"
 if str(EVAL_ROOT) not in sys.path:
     sys.path.insert(0, str(EVAL_ROOT))
 
+from rondo_eval.publication_critic.training_data.consumer import (  # noqa: E402
+    DatasetConsumer,
+)
 from rondo_eval.publication_critic.identity import (  # noqa: E402
     canonical_json_bytes,
     sha256_bytes,
@@ -20,6 +24,7 @@ from rondo_eval.publication_critic.identity import (  # noqa: E402
 from rondo_eval.publication_critic.selection.archive import SelectionArchive  # noqa: E402
 from rondo_eval.publication_critic.selection.contract import (  # noqa: E402
     CANDIDATES,
+    EXPECTED_JUDGE_IDENTITY,
     FREEZE_SCHEMA,
     SELECTION_METHOD,
     SelectionError,
@@ -33,6 +38,7 @@ from rondo_eval.publication_critic.selection.decision import (  # noqa: E402
     build_selection_lock,
     evaluate_unseen_confirmation,
     evaluate_validation,
+    validate_validation_result,
 )
 from rondo_eval.publication_critic.selection import judge as judge_module  # noqa: E402
 from rondo_eval.publication_critic.selection.judge import (  # noqa: E402
@@ -51,6 +57,9 @@ from rondo_eval.publication_critic.selection.metrics import (  # noqa: E402
     candidate_metrics,
     operating_points,
     select_threshold,
+)
+from rondo_eval.publication_critic.selection.dataset_source import (  # noqa: E402
+    load_split,
 )
 from rondo_eval.publication_critic.selection.release import (  # noqa: E402
     SCHEMA as RELEASE_SCHEMA,
@@ -204,7 +213,7 @@ def _freeze(mode: str = "formal") -> dict[str, object]:
 def _judge(
     release: dict[str, object],
     *,
-    package_id: str = "plan073-test",
+    package_id: str = "plan073-case",
     reference_flips: int = 0,
     model_identities: list[str] | None = None,
 ) -> tuple[dict[str, object], dict[str, object], dict[str, object]]:
@@ -235,7 +244,7 @@ def _judge(
                     "reason": "test",
                 }
             )
-        identities = model_identities or ["Claude Opus 5"]
+        identities = model_identities or [EXPECTED_JUDGE_IDENTITY]
         responses.append(
             {
                 "schema": BATCH_SCHEMA,
@@ -289,6 +298,53 @@ class SplitReleaseTest(unittest.TestCase):
         }
         with self.assertRaises(SelectionError):
             validate_release(release)
+
+
+class UnseenContainmentTest(unittest.TestCase):
+    """The validation path must not be able to open unseen-bearing rows."""
+
+    def setUp(self) -> None:
+        supervision = [
+            json.loads(line)
+            for line in (V8_ROOT / "supervision.jsonl").read_text(encoding="utf-8").splitlines()
+        ]
+        self.unseen_ids = {
+            str(row["candidate_id"])
+            for row in supervision
+            if row["proposed_split"] == "unseen_test"
+        }
+        self.assertTrue(self.unseen_ids)
+
+    def test_validation_source_never_retains_an_unseen_row(self) -> None:
+        source = load_split(V8_ROOT, "validation", repo_root=REPO_ROOT)
+        held = set(source.packets) | set(source.supervision) | set(
+            source.dropped_oldest_publications
+        )
+        for row in source.pairs:
+            held.add(str(row["preferred_candidate_id"]))
+            held.add(str(row["dispreferred_candidate_id"]))
+        self.assertEqual(held & self.unseen_ids, set())
+        self.assertEqual(len(source.packets), 55)
+
+    def test_validation_path_does_not_use_the_whole_dataset_consumer(self) -> None:
+        with mock.patch.object(
+            DatasetConsumer,
+            "from_frozen_directory",
+            side_effect=AssertionError("the whole-dataset consumer must not be used"),
+        ):
+            release = build_split_release(V8_ROOT, "validation", repo_root=REPO_ROOT)
+        self.assertEqual(len(release["items"]), 55)
+
+    def test_split_source_gate_matches_the_release_gate(self) -> None:
+        with self.assertRaises(SelectionError):
+            load_split(V8_ROOT, "unseen_test", repo_root=REPO_ROOT)
+        with self.assertRaises(SelectionError):
+            load_split(
+                V8_ROOT,
+                "validation",
+                repo_root=REPO_ROOT,
+                selection_lock=_locked(_freeze()),
+            )
 
 
 class ThresholdSearchTest(unittest.TestCase):
@@ -370,7 +426,7 @@ class JudgeExchangeTest(unittest.TestCase):
 
     def test_real_validation_package_carries_no_dataset_identifier(self) -> None:
         release = build_split_release(V8_ROOT, "validation", repo_root=REPO_ROOT)
-        package, mapping, _ = _judge(release, package_id="plan073-real")
+        package, mapping, _ = _judge(release, package_id="plan073-live")
         bodies = json.dumps(package, ensure_ascii=False)
         # v8 candidate ids encode the pair direction (``-qplus`` / ``-qminus``).
         for leak in ("qplus", "qminus", "pc059-", "candidate_id", "binary_label"):
@@ -409,7 +465,7 @@ class JudgeExchangeTest(unittest.TestCase):
 
     def test_aggregate_refuses_mixed_judging_model_identities(self) -> None:
         package, mapping, responses = _judge(
-            self.release, model_identities=["Claude Opus 5", "Claude Sonnet 5"]
+            self.release, model_identities=[EXPECTED_JUDGE_IDENTITY, "claude-sonnet-5"]
         )
         with self.assertRaises(SelectionError):
             aggregate_batches(package, mapping, responses)
@@ -481,7 +537,7 @@ class ValidationSelectionTest(unittest.TestCase):
     def setUp(self) -> None:
         self.freeze = _freeze()
         self.release = _validation_release()
-        package, mapping, responses = _judge(self.release, package_id="plan073-val")
+        package, mapping, responses = _judge(self.release, package_id="plan073-lead")
         self.aggregate = aggregate_batches(package, mapping, responses)
 
     def test_lower_false_pass_wins_before_any_other_key(self) -> None:
@@ -536,22 +592,6 @@ class ValidationSelectionTest(unittest.TestCase):
         )
         self.assertEqual(result["selected"], "c1")
 
-    def test_typed_failure_blocks_admission(self) -> None:
-        result = evaluate_validation(
-            self.freeze,
-            self.release,
-            _observations(
-                self.release,
-                {"base": 3, "c1": 1, "c3": 0},
-                c3={"typed_failure_count": 1},
-            ),
-            self.aggregate,
-        )
-        self.assertIn(
-            "typed_failure_floor_failed",
-            result["candidates"]["c3"]["admission"]["failed_gates"],
-        )
-
     def test_missing_judge_evidence_is_inconclusive(self) -> None:
         result = evaluate_validation(
             self.freeze,
@@ -604,6 +644,48 @@ class ValidationSelectionTest(unittest.TestCase):
         self.assertEqual(result["terminal"], "INCONCLUSIVE")
         self.assertIsNone(result["selected"])
 
+    def test_unexpected_judging_model_is_inconclusive(self) -> None:
+        package, mapping, responses = _judge(
+            self.release,
+            package_id="plan073-other-model",
+            model_identities=["claude-sonnet-5"],
+        )
+        foreign = aggregate_batches(package, mapping, responses)
+        result = evaluate_validation(
+            self.freeze,
+            self.release,
+            _observations(self.release, {"base": 3, "c1": 1, "c3": 0}),
+            foreign,
+        )
+        self.assertEqual(result["terminal"], "INCONCLUSIVE")
+        self.assertEqual(
+            result["reasons"], ["judge_model_identity_is_not_the_authorised_model"]
+        )
+
+    def test_judge_aggregate_must_bind_to_the_package_it_came_from(self) -> None:
+        package, mapping, responses = _judge(self.release, package_id="plan073-bound")
+        aggregate = aggregate_batches(package, mapping, responses)
+        observations = _observations(self.release, {"base": 3, "c1": 1, "c3": 0})
+        evaluate_validation(
+            self.freeze, self.release, observations, aggregate, package
+        )
+        other, other_mapping, other_responses = _judge(
+            self.release, package_id="plan073-elsewhere"
+        )
+        self.assertNotEqual(other["package_id"], package["package_id"])
+        with self.assertRaises(SelectionError):
+            evaluate_validation(
+                self.freeze, self.release, observations, aggregate, other
+            )
+
+    def test_incomplete_scoring_is_refused_rather_than_ranked(self) -> None:
+        observations = _observations(self.release, {"base": 0, "c1": 0, "c3": 0})
+        observations["c1"]["runtime"]["typed_failure_count"] = 1
+        with self.assertRaises(SelectionError):
+            evaluate_validation(
+                self.freeze, self.release, observations, self.aggregate
+            )
+
     def test_candidate_artifact_drift_is_refused(self) -> None:
         observations = _observations(self.release, {"base": 0, "c1": 0, "c3": 0})
         observations["c1"]["deployment_artifact_sha256"] = "9" * 64
@@ -648,6 +730,63 @@ class SelectionLockTest(unittest.TestCase):
         with self.assertRaises(SelectionError):
             build_selection_lock(result, commissioning)
 
+    def test_forged_selected_result_cannot_open_unseen_test(self) -> None:
+        release = _validation_release()
+        package, mapping, responses = _judge(release, package_id="plan073-forged")
+        aggregate = aggregate_batches(package, mapping, responses)
+        # Every candidate fails the floors, so the honest terminal is NO_GO.
+        rejected = evaluate_validation(
+            self.freeze,
+            release,
+            _observations(release, {"base": 9, "c1": 9, "c3": 9}),
+            aggregate,
+        )
+        self.assertEqual(rejected["terminal"], "NO_GO")
+
+        forged = copy.deepcopy(rejected)
+        forged["terminal"] = "SELECTED"
+        forged["selected"] = "base"
+        forged["ranking"] = ["base"]
+        forged["reasons"] = ["forged"]
+        with self.assertRaises(SelectionError):
+            build_selection_lock(forged, self.freeze)
+
+        # Flipping the admission flag as well is still not enough: admission has
+        # to follow from the scored rows the document itself carries.
+        forged["candidates"]["base"]["admission"] = {
+            "admissible": True,
+            "failed_gates": [],
+        }
+        with self.assertRaises(SelectionError):
+            build_selection_lock(forged, self.freeze)
+        with self.assertRaises(SelectionError):
+            validate_validation_result(forged, self.freeze)
+
+    def test_tampered_metrics_are_caught_by_recomputation(self) -> None:
+        release = _validation_release()
+        package, mapping, responses = _judge(release, package_id="plan073-tamper")
+        aggregate = aggregate_batches(package, mapping, responses)
+        honest = evaluate_validation(
+            self.freeze,
+            release,
+            _observations(release, {"base": 3, "c1": 1, "c3": 0}),
+            aggregate,
+        )
+        validate_validation_result(honest, self.freeze)
+        for path in (
+            ("candidates", "c3", "metrics", "roc_auc"),
+            ("candidates", "c3", "threshold_search", "threshold"),
+            ("candidates", "c3", "metrics", "overall", "confusion", "false_pass"),
+        ):
+            tampered = copy.deepcopy(honest)
+            target = tampered
+            for key in path[:-1]:
+                target = target[key]
+            current = target[path[-1]]
+            target[path[-1]] = current + 7 if isinstance(current, int) else 0.123456
+            with self.assertRaises(SelectionError, msg=str(path)):
+                validate_validation_result(tampered, self.freeze)
+
     def test_lock_refuses_a_result_bound_to_another_freeze(self) -> None:
         other = copy.deepcopy(self.freeze)
         other["source"]["git_commit"] = "1" * 40
@@ -674,7 +813,7 @@ class UnseenConfirmationTest(unittest.TestCase):
             pairs=[(f"u{index}", f"s{index:02d}", f"s{index + 10:02d}") for index in range(10)],
             lock_sha=lock_sha256(self.lock),
         )
-        package, mapping, responses = _judge(self.release, package_id="plan073-unseen")
+        package, mapping, responses = _judge(self.release, package_id="plan073-blind")
         self.aggregate = aggregate_batches(package, mapping, responses)
 
     def _observation(self, flips: int, **runtime: object) -> dict[str, object]:

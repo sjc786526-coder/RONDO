@@ -100,3 +100,14 @@ same rows — the blind confirmation that would have removed that optimism was c
 
 The result is exactly recomputable: `evaluate_validation` rebuilt from the archived freeze,
 release, per-candidate scores and Judge aggregate reproduces the archived result byte for byte.
+
+Two boundary defects found in independent acceptance were fixed after this run and re-verified
+against the same archived evidence, which reproduces unchanged. First, the release builder used
+the whole-dataset consumer, so it loaded all three splits before filtering down to validation —
+no unseen content reached any release, score, Judge package, archive or tracked result, but the
+process did hold it; releases are now built by a split-scoped reader that discards non-members as
+it streams. Second, a hand-edited `SELECTED` result could open unseen-test; the lock now requires
+the threshold, confusion, separability, admission, ranking and terminal to re-derive from the
+scored rows the document itself carries. The Judge package identifier for this run also contained
+the literal `validation`; that names the split but reveals no answer, and package identifiers may
+no longer name a split.

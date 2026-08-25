@@ -88,6 +88,12 @@ def _confusion(rows: Sequence[LabeledRow], threshold: float) -> dict[str, int]:
     return counts
 
 
+def confusion_at(rows: Sequence[LabeledRow], threshold: float) -> dict[str, int]:
+    """The confusion counts at one threshold, for independent recomputation."""
+
+    return _confusion(rows, threshold)
+
+
 def _rates(counts: Mapping[str, int]) -> dict[str, Any]:
     pass_total = counts["true_pass"] + counts["false_rewrite"]
     rewrite_total = counts["true_rewrite"] + counts["false_pass"]
