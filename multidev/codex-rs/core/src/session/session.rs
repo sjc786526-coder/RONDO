@@ -112,6 +112,9 @@ pub(crate) struct Session {
     pub(super) mcp_prewarm_task: std::sync::Mutex<Option<JoinHandle<()>>>,
     pub(crate) conversation: Arc<RealtimeConversationManager>,
     pub(crate) active_turn: Mutex<Option<ActiveTurn>>,
+    /// Serializes idle-turn admission through task installation with terminal runtime teardown.
+    /// A shutdown fence holds the sole permit until task/process teardown is complete.
+    pub(super) task_admission_gate: Arc<Semaphore>,
     /// Serializes binding validation and transactional replacement.
     pub(super) writer_workspace_binding_mutation: Mutex<()>,
     /// Shutdown submissions that were accepted and have not failed before runtime teardown.
@@ -1729,6 +1732,7 @@ impl Session {
                 mcp_prewarm_task: std::sync::Mutex::new(None),
                 conversation: Arc::new(RealtimeConversationManager::new()),
                 active_turn: Mutex::new(None),
+                task_admission_gate: Arc::new(Semaphore::new(/*permits*/ 1)),
                 writer_workspace_binding_mutation: Mutex::new(()),
                 experimental_session_control_shutdown_submissions: Arc::new(AtomicUsize::new(0)),
                 pending_durable_session_shutdown: std::sync::Mutex::new(None),

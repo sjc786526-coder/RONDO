@@ -166,6 +166,7 @@ use futures::prelude::*;
 use rmcp::model::RequestId;
 use serde_json::Value;
 use tokio::sync::Mutex;
+use tokio::sync::OwnedSemaphorePermit;
 use tokio::sync::RwLock;
 use tokio::sync::oneshot;
 use tokio::sync::watch;
@@ -405,6 +406,25 @@ pub(crate) struct SessionIo {
     // Shared future for the background submission loop completion so multiple
     // callers can wait for shutdown.
     pub(crate) session_loop_termination: SessionLoopTermination,
+}
+
+/// Holds the task-admission permit from idle reservation until the task is installed.
+///
+/// Durable shutdown takes the same permit before aborting active work and retains it through
+/// runtime teardown, so a pending-work wakeup cannot cross the terminal boundary.
+pub(crate) struct IdleTurnReservation {
+    turn_state: Arc<Mutex<crate::state::TurnState>>,
+    task_admission: OwnedSemaphorePermit,
+}
+
+impl IdleTurnReservation {
+    pub(crate) fn turn_state(&self) -> &Arc<Mutex<crate::state::TurnState>> {
+        &self.turn_state
+    }
+
+    pub(crate) fn into_parts(self) -> (Arc<Mutex<crate::state::TurnState>>, OwnedSemaphorePermit) {
+        (self.turn_state, self.task_admission)
+    }
 }
 
 pub(crate) type SessionLoopTermination = Shared<BoxFuture<'static, ()>>;
@@ -1952,7 +1972,16 @@ impl Session {
     async fn reserve_idle_turn_for_writer_binding_inner(
         &self,
         expected_turn_context: Option<&TurnContext>,
-    ) -> CodexResult<Arc<Mutex<crate::state::TurnState>>> {
+    ) -> CodexResult<IdleTurnReservation> {
+        let task_admission = Arc::clone(&self.task_admission_gate)
+            .acquire_owned()
+            .await
+            .map_err(|_| CodexErr::InternalAgentDied)?;
+        if self.experimental_session_control_shutdown_in_progress() {
+            return Err(CodexErr::InvalidRequest(
+                "session shutdown is in progress; new task admission is unavailable".to_string(),
+            ));
+        }
         let _mutation = self.writer_workspace_binding_mutation.lock().await;
         self.validate_writer_workspace_binding_locked().await?;
         let (current, authority_revision) = {
@@ -2006,12 +2035,15 @@ impl Session {
                 .await;
             return Err(CodexErr::InvalidRequest(message));
         }
-        Ok(turn_state)
+        Ok(IdleTurnReservation {
+            turn_state,
+            task_admission,
+        })
     }
 
     pub(crate) async fn reserve_idle_turn_for_writer_binding(
         &self,
-    ) -> CodexResult<Arc<Mutex<crate::state::TurnState>>> {
+    ) -> CodexResult<IdleTurnReservation> {
         self.reserve_idle_turn_for_writer_binding_inner(/*expected_binding*/ None)
             .await
     }
@@ -2019,7 +2051,7 @@ impl Session {
     pub(crate) async fn reserve_idle_turn_for_writer_context(
         &self,
         turn_context: &TurnContext,
-    ) -> CodexResult<Arc<Mutex<crate::state::TurnState>>> {
+    ) -> CodexResult<IdleTurnReservation> {
         self.reserve_idle_turn_for_writer_binding_inner(Some(turn_context))
             .await
     }

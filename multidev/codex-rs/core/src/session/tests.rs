@@ -5979,6 +5979,7 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
         mcp_prewarm_task: std::sync::Mutex::new(None),
         conversation: Arc::new(RealtimeConversationManager::new()),
         active_turn: Mutex::new(None),
+        task_admission_gate: Arc::new(Semaphore::new(/*permits*/ 1)),
         writer_workspace_binding_mutation: Mutex::new(()),
         experimental_session_control_shutdown_submissions: Arc::new(AtomicUsize::new(0)),
         pending_durable_session_shutdown: std::sync::Mutex::new(None),
@@ -7895,6 +7896,175 @@ async fn durable_bound_writer_revoke_failure_retains_live_persistence() {
     retry_close.abort();
 }
 
+#[cfg(debug_assertions)]
+#[tokio::test]
+async fn durable_bound_writer_shutdown_fences_pending_trigger_turn_until_teardown() {
+    struct EmptyWritePermit;
+
+    impl codex_team_state::TeamWritePermit for EmptyWritePermit {
+        fn read_snapshot(
+            &mut self,
+        ) -> Result<Option<Vec<u8>>, codex_team_state::TeamDurabilityError> {
+            Ok(None)
+        }
+
+        fn compare_and_swap(
+            &mut self,
+            _expected_generation: u64,
+            _snapshot: Vec<u8>,
+        ) -> Result<(), codex_team_state::TeamDurabilityError> {
+            unreachable!("the shutdown admission test does not commit Team state")
+        }
+    }
+
+    struct SuccessfulClosePermit;
+
+    impl codex_team_state::TeamClosePermit for SuccessfulClosePermit {
+        fn abort(self: Box<Self>) -> codex_team_state::TeamDurabilityFuture<'static, ()> {
+            Box::pin(async { Ok(()) })
+        }
+
+        fn complete(self: Box<Self>) -> codex_team_state::TeamDurabilityFuture<'static, ()> {
+            Box::pin(async { Ok(()) })
+        }
+    }
+
+    struct SuccessfulCloseAuthority {
+        identity: codex_team_state::DurableTeamIdentity,
+        owner_incarnation_id: Uuid,
+    }
+
+    impl codex_team_state::TeamWriteAuthority for SuccessfulCloseAuthority {
+        fn identity(&self) -> codex_team_state::DurableTeamIdentity {
+            self.identity
+        }
+
+        fn owner_incarnation_id(&self) -> Uuid {
+            self.owner_incarnation_id
+        }
+
+        fn begin_write(
+            &self,
+        ) -> Result<Box<dyn codex_team_state::TeamWritePermit>, codex_team_state::TeamDurabilityError>
+        {
+            Ok(Box::new(EmptyWritePermit))
+        }
+
+        fn begin_close(
+            &self,
+        ) -> codex_team_state::TeamDurabilityFuture<'_, Box<dyn codex_team_state::TeamClosePermit>>
+        {
+            Box::pin(async { Ok(Box::new(SuccessfulClosePermit) as Box<_>) })
+        }
+    }
+
+    let (mut session, turn_context) = make_session_and_context().await;
+    let identity =
+        codex_team_state::DurableTeamIdentity::new(session.session_id(), session.thread_id);
+    let authority = Arc::new(SuccessfulCloseAuthority {
+        identity,
+        owner_incarnation_id: Uuid::new_v4(),
+    });
+    let durable_team =
+        codex_team_state::TeamStateHandle::create_durable(authority).expect("create durable Team");
+    session
+        .services
+        .agent_control
+        .install_team(durable_team)
+        .expect("install durable Team");
+    let store = attach_in_memory_thread_store(&mut session).await;
+    let binding_root = session.get_config().await.cwd.clone();
+    {
+        let mut state = session.state.lock().await;
+        state.session_configuration.writer_workspace_binding = Some(
+            crate::writer_workspace_binding::WriterWorkspaceBindingState::available(
+                codex_protocol::protocol::WriterWorkspaceBinding {
+                    generation: 1,
+                    worktree_root: binding_root.clone(),
+                    git_dir: binding_root.clone(),
+                    common_dir: binding_root.clone(),
+                    repository_root: binding_root,
+                    environment_id: codex_exec_server::LOCAL_ENVIRONMENT_ID.to_string(),
+                },
+            ),
+        );
+    }
+
+    let session = Arc::new(session);
+    session
+        .spawn_task(
+            Arc::new(turn_context),
+            Vec::new(),
+            NeverEndingTask {
+                kind: TaskKind::Regular,
+                listen_to_cancellation_token: true,
+            },
+        )
+        .await;
+    session
+        .input_queue
+        .enqueue_mailbox_communication(
+            InterAgentCommunication::new(
+                AgentPath::root(),
+                AgentPath::root(),
+                Vec::new(),
+                "pending shutdown trigger".to_string(),
+                /*trigger_turn*/ true,
+            ),
+            /*parent_turn_id*/ None,
+        )
+        .await;
+    assert!(session.input_queue.has_trigger_turn_mailbox_items().await);
+    let lifecycle_close = session
+        .services
+        .agent_control
+        .begin_durable_team_root_close(session.thread_id)
+        .expect("begin Root lifecycle close");
+    let (completion_tx, completion_rx) = oneshot::channel();
+    assert!(
+        session
+            .install_prepared_durable_session_shutdown(
+                "formal-close".to_string(),
+                PreparedDurableSessionShutdown {
+                    lifecycle_close,
+                    team_close: Box::new(SuccessfulClosePermit),
+                },
+                completion_tx,
+            )
+            .is_ok(),
+        "install formal shutdown handoff"
+    );
+    session
+        .experimental_session_control_shutdown_submissions
+        .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+
+    assert!(handlers::shutdown(&session, "formal-close".to_string()).await);
+    assert!(matches!(
+        completion_rx.await.expect("formal completion"),
+        PreparedDurableSessionShutdownCompletion::Completed
+    ));
+    assert!(session.active_turn.lock().await.is_none());
+    assert!(
+        session.input_queue.has_trigger_turn_mailbox_items().await,
+        "shutdown must not consume pending work into a replacement turn"
+    );
+    session
+        .maybe_start_turn_for_pending_work_with_sub_id("post-close-trigger".to_string())
+        .await;
+    assert!(
+        session.active_turn.lock().await.is_none(),
+        "the successful shutdown fence must reject task admission after runtime teardown"
+    );
+    assert_eq!(
+        codex_thread_store::InMemoryThreadStoreCalls {
+            create_thread: 1,
+            shutdown_thread: 1,
+            ..Default::default()
+        },
+        store.calls().await
+    );
+}
+
 #[tokio::test]
 async fn accepted_formal_shutdown_completion_loss_is_terminal_unknown() {
     let (completion_tx, completion_rx) = oneshot::channel();
@@ -8699,6 +8869,7 @@ where
         mcp_prewarm_task: std::sync::Mutex::new(None),
         conversation: Arc::new(RealtimeConversationManager::new()),
         active_turn: Mutex::new(None),
+        task_admission_gate: Arc::new(Semaphore::new(/*permits*/ 1)),
         writer_workspace_binding_mutation: Mutex::new(()),
         experimental_session_control_shutdown_submissions: Arc::new(AtomicUsize::new(0)),
         pending_durable_session_shutdown: std::sync::Mutex::new(None),

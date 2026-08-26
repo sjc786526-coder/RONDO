@@ -27,6 +27,7 @@ use crate::context::ContextualUserFragment;
 use crate::hook_runtime::inspect_pending_input;
 use crate::hook_runtime::record_additional_contexts;
 use crate::hook_runtime::record_pending_input;
+use crate::session::IdleTurnReservation;
 use crate::session::TurnInput;
 use crate::session::session::Session;
 use crate::session::turn_context::TurnContext;
@@ -300,21 +301,30 @@ impl Session {
         task: T,
     ) -> CodexResult<()> {
         self.abort_all_tasks(TurnAbortReason::Replaced).await;
-        self.reserve_idle_turn_for_writer_context(turn_context.as_ref())
+        let reservation = self
+            .reserve_idle_turn_for_writer_context(turn_context.as_ref())
             .await?;
         self.clear_connector_selection().await;
-        self.start_task(turn_context, input, task, MailboxParentProvenance::Ignore)
-            .await;
+        self.start_task(
+            turn_context,
+            reservation,
+            input,
+            task,
+            MailboxParentProvenance::Ignore,
+        )
+        .await;
         Ok(())
     }
 
     pub(crate) async fn start_task<T: SessionTask>(
         self: &Arc<Self>,
         turn_context: Arc<TurnContext>,
+        reservation: IdleTurnReservation,
         input: Vec<TurnInput>,
         task: T,
         mailbox_parent_provenance: MailboxParentProvenance,
     ) {
+        let (turn_state, _task_admission) = reservation.into_parts();
         let task: Arc<dyn AnySessionTask> = Arc::new(task);
         let task_kind = task.kind();
         let span_name = task.span_name();
@@ -344,12 +354,6 @@ impl Session {
         {
             turn_context.turn_metadata_state.set_parent_turn_id(id);
         }
-        let turn_state = {
-            let mut active = self.active_turn.lock().await;
-            let turn = active.get_or_insert_with(ActiveTurn::default);
-            debug_assert!(turn.task.is_none());
-            Arc::clone(&turn.turn_state)
-        };
         turn_state.lock().await.token_usage_at_turn_start = token_usage_at_turn_start.clone();
         self.input_queue
             .extend_pending_input_for_turn_state(turn_state.as_ref(), pending_items)
@@ -360,6 +364,7 @@ impl Session {
         let mut active = self.active_turn.lock().await;
         let turn = active.get_or_insert_with(ActiveTurn::default);
         debug_assert!(turn.task.is_none());
+        debug_assert!(Arc::ptr_eq(&turn.turn_state, &turn_state));
         let agent_execution_guard = self.services.agent_control.execution_guard(
             turn_context.multi_agent_version,
             &turn_context.session_source,
@@ -479,15 +484,16 @@ impl Session {
             return;
         }
 
-        if self.reserve_idle_turn_for_writer_binding().await.is_err() {
+        let Ok(reservation) = self.reserve_idle_turn_for_writer_binding().await else {
             return;
-        }
+        };
 
         let turn_context = self.new_default_turn_with_sub_id(sub_id).await;
         self.maybe_emit_model_warnings_for_turn(turn_context.as_ref())
             .await;
         self.start_task(
             turn_context,
+            reservation,
             Vec::new(),
             RegularTask::new(),
             MailboxParentProvenance::Attribute,
@@ -496,6 +502,22 @@ impl Session {
     }
 
     pub async fn abort_all_tasks(self: &Arc<Self>, reason: TurnAbortReason) {
+        self.abort_all_tasks_inner(reason, /*restart_pending_work*/ true)
+            .await;
+    }
+
+    /// Aborts active work for terminal teardown without starting queued mailbox or durable-sleep
+    /// work. The caller must hold the task-admission fence until runtime teardown completes.
+    pub(crate) async fn abort_all_tasks_for_shutdown(self: &Arc<Self>, reason: TurnAbortReason) {
+        self.abort_all_tasks_inner(reason, /*restart_pending_work*/ false)
+            .await;
+    }
+
+    async fn abort_all_tasks_inner(
+        self: &Arc<Self>,
+        reason: TurnAbortReason,
+        restart_pending_work: bool,
+    ) {
         let mut aborted_turn = false;
         let mut writer_cleanup_succeeded = true;
         let mut active_turn_to_clear = None;
@@ -527,7 +549,11 @@ impl Session {
                 }
             }
         }
-        if reason == TurnAbortReason::Interrupted && aborted_turn && writer_cleanup_succeeded {
+        if restart_pending_work
+            && reason == TurnAbortReason::Interrupted
+            && aborted_turn
+            && writer_cleanup_succeeded
+        {
             self.maybe_start_turn_for_pending_work().await;
         }
     }

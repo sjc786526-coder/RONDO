@@ -66,8 +66,8 @@ impl Session {
             ));
         }
 
-        let turn_state = match self.reserve_idle_turn_for_writer_binding().await {
-            Ok(turn_state) => turn_state,
+        let reservation = match self.reserve_idle_turn_for_writer_binding().await {
+            Ok(reservation) => reservation,
             Err(_) => {
                 return Err(TryStartTurnIfIdleError::new(
                     TryStartTurnIfIdleRejectionReason::Busy,
@@ -75,6 +75,7 @@ impl Session {
                 ));
             }
         };
+        let turn_state = Arc::clone(reservation.turn_state());
 
         if self.input_queue.has_trigger_turn_mailbox_items().await {
             self.clear_reserved_idle_turn(&turn_state).await;
@@ -136,6 +137,7 @@ impl Session {
         };
         self.start_task(
             turn_context,
+            reservation,
             task_input,
             RegularTask::new(),
             MailboxParentProvenance::Ignore,

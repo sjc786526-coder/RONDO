@@ -335,10 +335,18 @@ XXX用以下内容代替：
 - 上述四组聚焦回归及 app-server tombstone 邻接测试均通过，`codex-core + codex-protocol` scoped clippy 无 warning，fmt/diff 通过。最终
   fresh app-server OS 正式链 `1/1` 通过并断言 offline Critic 恰好一次调用；watchdog 为 `stop=none / cleanup=none`。验证全程未触发
   Windows 50GB 门、项目主动停止或 35GB 临时例外，也未进行额外清理。
+- 第三轮独立复验报告 `agent_log/2026-08-26-151617-plan089-m4-w1-final-remediation-review.md` 唯一 finding 已关闭：durable close 的
+  pre-persistence quiescence 使用 shutdown-specific task abort，禁止 trigger-turn/durable-sleep pending work 自动重启；单一窄
+  task-admission gate 从 idle reservation 保持到 task install，并与 terminal teardown 串行。close 持有 gate 到 runtime teardown 完成，
+  同时复用既有 shutdown-in-progress marker 拒绝终态后的新 admission；失败路径仍按既有规则恢复 marker 与 admission。
+- shutdown + pending-work 聚焦回归 `1/1`、`codex-core` scoped clippy、fmt/diff 及 exact app-server build 均通过。冻结代码的 fresh
+  app-server OS + unique offline Critic 正式链 `1/1` 通过（JUnit SHA-256
+  `7ff58d6e6971654c1e6ad374698bfbd4534c364cee95f377596e90e00b8fdcef`），`stop=none / cleanup=none`；未触发项目/Windows stop、
+  35GB 临时例外或任何额外清理。
 
 ### 当前工作
 
-- 完成第二轮窄整改提交，并按指定 queue 请求独立复验。
+- 完成最终生命周期整改提交，并按指定 queue 请求独立复验。
 
 ### 本任务剩余步骤
 
@@ -353,7 +361,8 @@ XXX用以下内容代替：
 
 ### 当前验收状态
 
-- `SECOND_REMEDIATION_COMPLETE / FORMAL_CHAIN_PASS / REVIEW_PENDING / INTEGRATION_NOT_AUTHORIZED / M4_W1_PASS_NOT_YET_ESTABLISHED`。
+- `FINAL_LIFECYCLE_REMEDIATION_COMPLETE / FORMAL_CHAIN_PASS / REVIEW_PENDING / INTEGRATION_NOT_AUTHORIZED /
+  M4_W1_PASS_NOT_YET_ESTABLISHED`。
 
 ### 交接边界
 
@@ -378,3 +387,4 @@ XXX用以下内容代替：
 | 012 | bound writer 在 turn terminal、replacement、invalidation 与 shutdown 使用 confirmed unified-exec 撤销屏障，失败句柄保留以便重试 | turn-only W1 不能被长驻进程带过生命周期，部分失败也不能伪报清理完成 | turn/session lifecycle、unified-exec | 已采纳 |
 | 013 | bound active turn 拒绝 authority-relevant settings 变化；idle 变化推进 runtime-only authority revision | 旧 OS sandbox 与 TurnContext 不能在权限收窄后继续代表当前 writer，同时无需持久化或建设第二套 authority | settings、turn admission | 已采纳 |
 | 014 | durable close 在 canonical persistence shutdown 前 confirmed quiesce bound process，并在 abort 后复验 late insertion | revoke 失败必须保留可持久 mutation 的 Root runtime，成功后才跨不可逆关闭边界 | Session Control、durable close | 已采纳 |
+| 015 | durable close 使用 shutdown-specific task abort，并以单一 admission gate 串行 task install 与 terminal teardown | 普通 Interrupted abort 会自动启动 pending work；关闭必须阻止重启并覆盖 reserve 到 install 的竞态，同时复用既有 shutdown marker | Session task admission、durable close | 已采纳 |

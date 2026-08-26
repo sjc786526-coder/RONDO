@@ -58,6 +58,7 @@ use codex_rmcp_client::ElicitationAction;
 use codex_rmcp_client::ElicitationResponse;
 use serde_json::Value;
 use std::sync::Arc;
+use tokio::sync::OwnedSemaphorePermit;
 use tracing::debug;
 use tracing::info;
 use tracing::warn;
@@ -585,10 +586,11 @@ pub async fn set_thread_memory_mode(sess: &Arc<Session>, sub_id: String, mode: T
     }
 }
 
-#[derive(Clone, Copy)]
 enum RuntimeShutdownMode {
     Standard,
-    BoundWriterAlreadyQuiesced,
+    BoundWriterAlreadyQuiesced {
+        _task_admission_fence: OwnedSemaphorePermit,
+    },
 }
 
 async fn quiesce_bound_writer_before_durable_persistence(
@@ -597,12 +599,17 @@ async fn quiesce_bound_writer_before_durable_persistence(
     if sess.writer_workspace_binding_snapshot().await.is_none() {
         return Ok(RuntimeShutdownMode::Standard);
     }
+    let task_admission_fence = Arc::clone(&sess.task_admission_gate)
+        .acquire_owned()
+        .await
+        .map_err(|_| "task admission gate closed during durable shutdown".to_string())?;
     sess.services
         .unified_exec_manager
         .terminate_all_processes_confirmed()
         .await
         .map_err(|err| format!("failed to revoke bound writer processes: {err}"))?;
-    sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
+    sess.abort_all_tasks_for_shutdown(TurnAbortReason::Interrupted)
+        .await;
     // A tool may have crossed its final authority check before the first snapshot and inserted a
     // process while its task was being cancelled. Close that window before persistence becomes
     // irreversible.
@@ -611,19 +618,28 @@ async fn quiesce_bound_writer_before_durable_persistence(
         .terminate_all_processes_confirmed()
         .await
         .map_err(|err| format!("failed to revoke late bound writer processes: {err}"))?;
-    Ok(RuntimeShutdownMode::BoundWriterAlreadyQuiesced)
+    Ok(RuntimeShutdownMode::BoundWriterAlreadyQuiesced {
+        _task_admission_fence: task_admission_fence,
+    })
 }
 
 async fn shutdown_session_runtime(
     sess: &Arc<Session>,
     mode: RuntimeShutdownMode,
 ) -> Result<(), String> {
+    let (_bound_writer_already_quiesced, _task_admission_fence) = match mode {
+        RuntimeShutdownMode::Standard => (false, None),
+        RuntimeShutdownMode::BoundWriterAlreadyQuiesced {
+            _task_admission_fence,
+        } => (true, Some(_task_admission_fence)),
+    };
     if let Some(startup_prewarm) = sess.take_session_startup_prewarm().await {
         startup_prewarm.abort().await;
     }
     let _ = sess.conversation.shutdown().await;
-    if matches!(mode, RuntimeShutdownMode::Standard) {
-        sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
+    if !_bound_writer_already_quiesced {
+        sess.abort_all_tasks_for_shutdown(TurnAbortReason::Interrupted)
+            .await;
         if sess.writer_workspace_binding_snapshot().await.is_some() {
             sess.services
                 .unified_exec_manager

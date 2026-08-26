@@ -3,9 +3,9 @@
 ## 结果
 
 - 在 `worktree-089-m4-w1-writer-workspace-binding@adbc33c` 上完成生产实现、生成物、分层验证和 final fresh 正式全链。
-- 首轮独立审查和第二轮窄复验的 finding 均已完成整改，并通过相称聚焦门禁与最终 fresh 正式全链；当前状态为
-  `SECOND_REMEDIATION_COMPLETE / FORMAL_CHAIN_PASS / REVIEW_PENDING / INTEGRATION_NOT_AUTHORIZED`。尚未独立复验接受、合并或推送，
-  因此不宣告 `M4_W1_PASS / PHASE_4_COMPLETE`。
+- 三轮独立审查提出的 finding 均已完成整改，并通过相称聚焦门禁与最终 fresh 正式全链；当前状态为
+  `FINAL_LIFECYCLE_REMEDIATION_COMPLETE / FORMAL_CHAIN_PASS / REVIEW_PENDING / INTEGRATION_NOT_AUTHORIZED`。尚未独立复验接受、
+  合并或推送，因此不宣告 `M4_W1_PASS / PHASE_4_COMPLETE`。
 
 ## 实现
 
@@ -69,6 +69,13 @@
 - R2-F4：durable Root 在关闭 canonical rollout persistence 前先 confirmed revoke bound process、abort tasks，再次 revoke 关闭 late insert
   窗口；任一 revoke 失败均 abort Team/lifecycle close，保留 canonical persistence、Root authority 和 retryable process handle。
 
+### 最终生命周期整改
+
+- R3-F1：durable close 的 pre-persistence quiescence 改用 shutdown-specific task abort，不再消费 trigger-turn mailbox 或启动
+  durable-sleep pending work；新增单一窄 task-admission gate，将 idle reservation 到 task install 与 terminal teardown 串行。close 取得
+  gate 后保持到 runtime teardown 完成，并复用既有 shutdown-in-progress 计数作为终态 admission marker；关闭失败时仍按既有路径撤销
+  marker 并释放 gate，不新增 scheduler、持久事实或第二套生命周期权威。
+
 ## 正式验证
 
 所有 Rust 重型命令均经 `multidev/justfile` → shared `scripts/with-build-lock.sh`，复用用户指定 069 target，项目门限保持
@@ -117,6 +124,19 @@
   仅在完全离线验证命令中移除代理变量，使 127.0.0.1 直连。测试桩同时按 `generate=false` 区分启动 prewarm，并只统计真实模型生成回合，
   避免 websocket continuation 省略原 prompt 造成脆弱匹配；未改变生产配置或访问真实网络。
 
+### 最终生命周期整改复验
+
+- shutdown + pending trigger-turn 聚焦回归 `1/1` 通过（`20260826-152832-1000-406903`），断言正式 durable close 后 mailbox 未被消费、
+  无 active task，且 teardown 后显式 pending-work admission 仍被拒绝。首次调试 fixture 因未安装正式 close handoff 而在目标断言前返回
+  false；补齐与正式链一致的 prepared handoff 后通过，未放宽产品断言。
+- `codex-core` scoped clippy 无 warning（`20260826-152910-1000-408527`）；exact app-server binary build 通过
+  （`20260826-153048-1000-412550`）；最终 `just fmt`、`git diff --check` 通过。
+- 冻结代码的 fresh app-server OS + unique offline Critic 正式链 `1/1`（`20260826-153204-1000-418352`），nextest run id
+  `0041026b-2574-4c36-9bdc-6813fc5219a6`，JUnit SHA-256
+  `7ff58d6e6971654c1e6ad374698bfbd4534c364cee95f377596e90e00b8fdcef`。该轮重新覆盖 fresh repository/two linked worktrees、真实旧/新
+  app-server OS 进程、两 writer 隔离、scoped 外写、cold resume、binding invalidation/replacement、Query/Control/lifecycle，并断言
+  offline Critic 恰好一次实际调用；`stop=none / cleanup=none`。
+
 ## 资源与边界
 
 - 首次 app full-chain 编译在 `20260826-112652-1000-3557648` 达到项目主动停止线：`285,001,187,328 B`，Windows C: 实际余量从
@@ -139,11 +159,14 @@
 - 第二轮窄整改未再清理任何文件。最终正式链项目空间为 `253,251,665,920 -> 253,255,639,040 B`，target
   `194,349,666,304 B`，Windows C: 实际余量为 `50,020,118,528 -> 50,019,590,144 B`，仍高于 50GB 门；未触发 project stop、
   Windows stop 或 35GB 临时例外。
+- 最终生命周期整改同样未清理任何文件。聚焦回归和 core clippy 均为 `stop=none / cleanup=none`；最终 fresh 正式链项目空间为
+  `255,459,491,840 -> 255,721,639,936 B`，target `196,814,958,592 B`，Windows C: 实际余量为
+  `50,058,534,912 -> 50,049,744,896 B`。仍未触发项目/Windows stop 或 35GB 临时例外，且未扩大任何资源处理范围。
 
 ## 自审与交接
 
-- 执行者在两轮独立复验后再次按 local/remote process revoke、Forked strict durability/tombstone、turn 内 authority revocation、durable
-  close ordering、child authority、review/path TOCTOU 和 Critic invocation 逐项静态自审；当前没有已知未关闭的 W1 高/中等级
-  correctness finding。
+- 执行者在三轮独立复验后再次按 local/remote process revoke、Forked strict durability/tombstone、turn 内 authority revocation、durable
+  close ordering/pending-work admission、child authority、review/path TOCTOU 和 Critic invocation 逐项静态自审；当前没有已知未关闭的
+  W1 高/中等级 correctness finding。
 - 089 分支只提交、不合并、不推送、不关闭 worktree、不归档分支。独立验收接受后也只能记录 `ACCEPTED / PENDING_INTEGRATION`；
   用户另行批准且成果成功进入并推送 `main` 后，才允许形成 `M4_W1_PASS / PHASE_4_COMPLETE`。
