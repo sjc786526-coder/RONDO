@@ -2246,3 +2246,23 @@ formal retry 整改为 `d29e857`，最终独立验收提交为 `43cf0eeb3e1b4826
   实树 bytes/权限和 manifest/receipt 闭合关系；无遗留高/中等级 correctness/functionality finding。
 - 最终验收后，用户本人明确决定继续保留 40GB Standard 网络卷 `mwemzrn33y`；该卷当前仍未删除并继续产生约 `$0.003889/h` 的卷费。
   未来若改变决定，删除仍须新的明确人工授权。
+
+## Linked-Worktree Trust RONDO 窄适配（Plan 086，2026-08-26）
+
+**状态**：`#39616@bc3545b805de6e91a11b88114fe1673b678633ca` 的产品安全语义窄适配、一次独立审查整改与最终复验均已完成；
+验收通过、任务目标完成，结论为 `M4_W_39616_ADAPTATION_PASS`。主体提交为
+`3dc31d5f39edaef7d8f4a440c364db98dc0f9039`，nested cwd 整改提交为
+`fdbdaf8e2ba2c33fbe3162858b07bffe90be87ba`。
+
+- linked worktree 只有在 `.git` pointer、worktree admin directory、`gitdir` backlink、`commondir`、registered checkout、canonical
+  identity、common directory 与 main checkout ownership 全部可证明时才继承主仓 trust；缺失、伪造、失配、symlink、超限和代表性
+  metadata 变化均 fail-closed。
+- project config、hooks、permission/active-project、host MCP、app-server/TUI trust target 与邻接 resolver 消费采用同一 hardened
+  结论。独立审查发现并关闭 nested linked-worktree cwd 跳过 checkout root 显式 trust 的 P2；最终顺序为 exact cwd、当前 checkout
+  root、已验证继承 root，直接显式 `trusted/untrusted` 保持优先。
+- resolver/path/config 正式聚焦簇 21/21、合法 config/hooks 2/2、host MCP 1/1、app-server hooks 1/1 通过；整改正式轮 Nextest
+  `cf9287bf-ed1d-4a47-aaaf-d4b874877c29` 为 2/2，相关 scoped fix、fmt 与 diff 门禁通过。一次组合批次被 watchdog 因 memory full
+  PSI 以 exit 125 主动停止，随后拆窄通过；该设施停止未冒充产品测试失败，也未清理 target。
+- 未建设 workspace registry、第二套 permission/trust、审计或可信平台，未升级冻结基线，也未运行 workspace 全量、Docker、真实
+  API/模型、训练、测评、CI/PR 或远端操作。086 分支尚未合入本地 `main`、未推送；获用户批准进入 `main` 后，`#39153` 才获得
+  启动资格，M4-W1 继续锁定。

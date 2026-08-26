@@ -22,33 +22,33 @@
 
 ### 完成/验收标准
 
-- [ ] 普通主仓、其嵌套目录，以及由该主仓合法注册且归属关系可证明的 linked worktree，继续得到正确的 project trust 结论；合法
+- [x] 普通主仓、其嵌套目录，以及由该主仓合法注册且归属关系可证明的 linked worktree，继续得到正确的 project trust 结论；合法
       linked worktree 仍能使用主仓信任所允许的现有 project config、hooks、MCP 和其他 trust-controlled 能力。
-- [ ] linked worktree 继承主仓 trust 前，必须闭合当前 checkout、worktree Git directory、其指向当前 checkout 的回链、common Git
+- [x] linked worktree 继承主仓 trust 前，必须闭合当前 checkout、worktree Git directory、其指向当前 checkout 的回链、common Git
       directory、主 checkout 与 common directory 归属之间的验证；其中任一必要关系不能证明时，不得返回主仓 trust key。
-- [ ] 伪造、未注册、缺失、不完整、归属不一致、回链或 common directory 不匹配、symlink/异常体积元数据，以及验证期间发生代表性
+- [x] 伪造、未注册、缺失、不完整、归属不一致、回链或 common directory 不匹配、symlink/异常体积元数据，以及验证期间发生代表性
       替换或变化的现场均 fail-closed；不得通过 fallback、路径形状猜测或旧缓存继承受信任主仓。
-- [ ] 在只信任目标主仓、没有单独信任非法 checkout 的现场中，该 checkout 的 project config、hooks、MCP server 和其他现有
+- [x] 在只信任目标主仓、没有单独信任非法 checkout 的现场中，该 checkout 的 project config、hooks、MCP server 和其他现有
       trust-controlled 设置保持 disabled/不可用；至少有行为级证据证明 host MCP 不会因为伪造的 linked-worktree 关系而启动，而合法
       registered linked worktree 的对应行为不退化。用户对当前 checkout 的独立显式 trust 仍按既有优先级工作。
-- [ ] 所有把 repository root 用作 trust 查询、trust 持久化目标或 trust-controlled config 消费依据的现有入口采用一致的已验证结论，
+- [x] 所有把 repository root 用作 trust 查询、trust 持久化目标或 trust-controlled config 消费依据的现有入口采用一致的已验证结论，
       不留下可借用旧 resolver 或并行路径绕过窄适配的入口；非安全用途的邻接消费者只做保持兼容所必需的调整。
-- [ ] 合法 linked worktree 的既有受支持形式保持可用，包括相称覆盖的路径 alias、独立 Git directory 和平台相关原生路径；不得为了
+- [x] 合法 linked worktree 的既有受支持形式保持可用，包括相称覆盖的路径 alias、独立 Git directory 和平台相关原生路径；不得为了
       拒绝伪造现场而把 linked worktree 普遍降级为 untrusted。
-- [ ] 普通非 worktree、明确 untrusted、仓库外路径、找不到 Git 元数据、shared workspace 和现有 S/C/W0 关闭态不发生无关变化；
+- [x] 普通非 worktree、明确 untrusted、仓库外路径、找不到 Git 元数据、shared workspace 和现有 S/C/W0 关闭态不发生无关变化；
       Plan 084 的 `BINDING_ONLY_GO`、四期 S/C 既有 PASS 以及三期现场保持不变。
-- [ ] 正反场景完全使用测试自有的临时 Git repository/worktree、deterministic/fake/offline 设施；不得修改 RONDO 主工作区、其他任务
+- [x] 正反场景完全使用测试自有的临时 Git repository/worktree、deterministic/fake/offline 设施；不得修改 RONDO 主工作区、其他任务
       worktree 或真实用户 repository，也不建设通用 workspace registry、审计/可信平台或第二套权限体系。
-- [ ] 调试阶段允许保留已验证进度，从首个未打通处自主窄修、重跑；全流程稳定后冻结代码与配置，并从全新临时 Git 现场完整运行一轮
+- [x] 调试阶段允许保留已验证进度，从首个未打通处自主窄修、重跑；全流程稳定后冻结代码与配置，并从全新临时 Git 现场完整运行一轮
       正反主场景和必要聚焦门禁，以该干净轮作为正式结果。影响正式链的后续修复须重新形成干净正式轮。
-- [ ] 按实际写集完成格式化、必要生成物、局部 fix/lint、受影响 crate 的聚焦测试及相称邻接回归；资源拒绝、skip、未运行和基础设施
+- [x] 按实际写集完成格式化、必要生成物、局部 fix/lint、受影响 crate 的聚焦测试及相称邻接回归；资源拒绝、skip、未运行和基础设施
       失败如实记录，不冒充通过，也不通过删测试、弱化断言或扩大 fallback 凑绿。
-- [ ] 执行者完成自审并形成 clean 的待验收本地提交；指定审查者完成独立 correctness/security 审查，普通 finding 允许执行者在同一
+- [x] 执行者完成自审并形成 clean 的待验收本地提交；指定审查者完成独立 correctness/security 审查，普通 finding 允许执行者在同一
       worktree 自主整改、复验、提交并再次通知，直至没有未关闭的高/中等级 finding 或审查者明确判定任务失败。
-- [ ] 独立验收通过后，精炼更新 `doc/WBS.md` 与 `doc/WBS/durable-team-runtime.md`：标记 `#39616` 已完成并把下一工作包指向
+- [x] 独立验收通过后，精炼更新 `doc/WBS.md` 与 `doc/WBS/durable-team-runtime.md`：标记 `#39616` 已完成并把下一工作包指向
       `#39153`；向 `doc/WBS-COMPLETED.md` 追加一次历史摘要，冻结本计划并记录 `M4_W_39616_ADAPTATION_PASS`。不得提前启动或实现
       `#39153`、M4-W1 或其他后续任务。
-- [ ] 最终检查精确写集、临时产物、`git diff --check`、主工作区和全部 worktree 元数据；只提交
+- [x] 最终检查精确写集、临时产物、`git diff --check`、主工作区和全部 worktree 元数据；只提交
       `worktree-086-linked-worktree-trust-adaptation` 本地分支并保持 086 worktree clean，不合并、不推送、不关闭 worktree，也不归档或
       重命名分支，等待用户另行批准整合。
 
@@ -267,15 +267,16 @@ XXX用以下内容代替：
 - 2026-08-26：独立审查确认 resolver 闭环正确，但发现 nested linked-worktree cwd 的 `active_project` 未读取 checkout root 显式 trust。执行者
   复用 config loader 的 checkout-root 定位能力，将 active-project 优先级统一为 exact cwd、checkout root、已验证继承 root；nested cwd 的
   trusted/untrusted 正反覆盖与 host MCP/config/permission 行为共 2/2 通过，受影响 `codex-config`/`codex-core` scoped fix 通过。
+- 2026-08-26：最终独立复验确认第一轮 P2 已关闭，无剩余高、中等级 correctness/security finding；接受
+  `M4_W_39616_ADAPTATION_PASS`，并按合同同步 Plan/WBS/COMPLETED。未重复运行已通过的重型安全矩阵。
 
 ### 当前工作
 
-- 独立审查 P2 已完成窄修和复验，正在形成 clean 整改提交并按指定队列请求复验；WBS 当前指针和完成历史尚未提前修改。
+- 本任务实现、整改、独立复验与权威文档收口均已完成；计划冻结，等待用户批准本地整合。
 
 ### 本任务剩余步骤
 
-- 完成阶段 D 的整改提交并通知指定审查者复验；审查通过后由审查者同步最终 Plan/WBS/COMPLETED。
-- 等待用户另行批准整合；不得在本任务启动 `#39153`、M4-W1 或其他下游工作。
+- 无任务内剩余步骤。等待用户另行批准整合；086 进入本地 `main` 后，`#39153` 才获得启动资格，M4-W1 继续锁定。
 
 ### 阻塞项
 
@@ -284,8 +285,8 @@ XXX用以下内容代替：
 
 ### 当前验收状态
 
-- `REMEDIATED / AWAITING_INDEPENDENT_REREVIEW`；审查 P2 已修复且聚焦门禁通过，但 `M4_W_39616_ADAPTATION_PASS` 仍须独立审查接受，WBS 继续把
-  `#39616` 作为当前任务、`#39153` 作为严格后继。
+- `COMPLETED / ACCEPTED / AWAITING_USER_INTEGRATION`；验收通过、任务目标完成，结论为
+  `M4_W_39616_ADAPTATION_PASS`。下一工作包为 `#39153`，但尚未启动，也不得在 086 进入本地 `main` 前启动。
 
 ### 交接边界
 
@@ -317,3 +318,4 @@ XXX用以下内容代替：
 | 016 | 行为测试同时覆盖非法继承、合法注册与当前 checkout 独立显式 trust，直接观察 config/permission、MCP ready 与启动 marker | 证明 fail-closed 不会把显式用户授权或合法 worktree 一并降级 | 消费/测试 | 已采纳 |
 | 017 | 合并 core/app-server 行为批次被 memory PSI 停止后保留编译进度并拆成窄批次，不清理 target | 遵循调试保留进度和资源 fail-closed 约束，避免把设施停止冒充产品失败 | 构建/资源 | 已采纳 |
 | 018 | active project 复用 config loader 的 checkout-root 定位，按 exact cwd、checkout root、已验证继承 root 查询显式 trust | 与 config layer 的既有优先级一致；checkout root 仅用于当前 checkout 的直接决定，主仓继承仍只由 hardened resolver 授权 | config/trust | 已采纳 |
+| 019 | 最终独立复验接受 `M4_W_39616_ADAPTATION_PASS`；`#39153` 只成为下一工作包，不因 086 尚未整合而提前启动 | 第一轮 P2 已关闭，安全闭环与相称行为证据完整；继续遵守本地整合授权边界 | 验收/WBS | 已采纳 |
