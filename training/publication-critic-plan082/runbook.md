@@ -59,21 +59,31 @@ ignored caches, unseen data, model weights, or unrelated project files.
 
 ## 3. Bootstrap and commissioning
 
-Set task-owned absolute paths, including `RONDO_PLAN082_SOURCE_COMMIT`, then run
-`runpod-bootstrap.sh`. The first invocation may be streamed from the archive
+Set task-owned absolute paths, including `RONDO_PLAN082_SOURCE_COMMIT`, and set
+`RONDO_PLAN082_IMAGE_IDENTITY` to the exact approved container image identity,
+then run `runpod-bootstrap.sh`. The first invocation may be streamed from the archive
 after checking its known SHA-256; the script verifies the archive again before
 using its code. It stages and exactly verifies source before atomic publication,
 re-verifies correct existing source/data on retry, installs the small locked
 dependency set without replacing image Torch, downloads only the exact public
-1.7B revision, and verifies every model file against the tracked lock. Its
-ready receipt reports the source receipt, data root and model root.
+1.7B revision, and verifies every model file against the tracked lock.
+Dependency/install/download output is isolated in the task-owned bootstrap log.
+Successful stdout contains only one canonical ready result, also published as a
+stable task-owned receipt; that receipt binds source, data, exact snapshot,
+actual installed-environment receipt, and all three roots. An identical retry
+reuses the same receipts, while a changed input fails instead of overwriting them.
 
 After bootstrap, create a run spec from the observed `named_parameters()`
 inventory. Start with a partial original-parameter scope. The tracked recipe is
 only a commissioning candidate; adjust the optimizer/batch/scope/control
 parameters from real memory and training behavior as needed, while preserving
 the fixed scalar, direction, Binary/Pair losses and equal component weights.
-The run-spec schema is:
+The recipe also selects `parameter_dtype` (`float32` or `bfloat16`); this is a
+commissioning parameter, not a hidden loader default. Every accepted macro
+update records one current-scope original parameter whose stored numeric value
+changed across the optimizer step. A nonzero gradient with no representable
+change is rejected, so commissioning must adjust dtype, learning rate, or scope
+before freezing. The run-spec schema is:
 
 ```json
 {
@@ -114,6 +124,10 @@ env PYTHONPATH="$source_root/eval" "$task_root/venv/bin/python" -B -P -m \
 
 The same source triple is mandatory for `resume`; additionally pass the
 qualified checkpoint ID, source process receipt and new recovery receipt output.
+Give start and resume distinct state, process-receipt, and recovery-receipt
+paths, all outside the artifact namespace. The CLI rejects existing, symlinked,
+or aliased segment outputs before creating the artifact namespace or performing
+an update.
 `--stop-after` supports bounded commissioning. Resume only from a qualified
 checkpoint with `plan082_cli resume`, passing the source process receipt and a
 new recovery receipt output. Resume rejects the same host PID and proves at
@@ -154,11 +168,16 @@ section with the same explicit venv/PYTHONPATH form:
 env PYTHONPATH="$source_root/eval" "$task_root/venv/bin/python" -B -P -m \
   rondo_eval.publication_critic.full_model_training.plan082_cli \
   finalize-formal --freeze "$FREEZE" --controller-state "$FINAL_STATE" \
-  --recovery-receipt "$RECOVERY_RECEIPT" --output "$FORMAL_RESULT"
+  --recovery-receipt "$RECOVERY_RECEIPT" --artifact-root "$artifact_root" \
+  --output "$FORMAL_RESULT"
 ```
 
-The final candidate is the best validation observation that has a complete
-qualified checkpoint; the all-observation training best remains diagnostic.
+The finalizer reopens that exact artifact root and verifies the exact-base
+observation, all completed-history observation/snapshot/checkpoint relations,
+selection, latest and recovery checkpoint identities, retained artifact set,
+content identities and retention-completion marker. The final candidate is the
+best validation observation that has a complete qualified checkpoint; the
+all-observation training best remains diagnostic.
 Its checkpoint and small snapshot reference are retained even when a better
 non-checkpoint observation exists. An improved frozen comparison produces
 `TRAINING_IMPROVEMENT_FOUND`; a valid complete run without improvement produces
@@ -167,12 +186,24 @@ and rerun a valid result to seek a positive outcome.
 
 ## 5. GPU review, release, and zero-Pod handoff
 
-Generate a small bootstrap manifest binding the freeze SHA and every retained
-object's relative key, byte size, SHA-256 and roles. The nonsecret Plan 082 S3
+Before GPU review, generate the small bootstrap directly from the formal result
+and retained artifact store. The producer verifies the exact retained ID set
+and artifact manifests, then scans only those task-root artifact trees for
+ordinary files—including the base and every permanent validation observation—
+and derives every relative key, byte size, SHA-256 and role:
+
+```bash
+env PYTHONPATH="$source_root/eval" "$task_root/venv/bin/python" -B -P -m \
+  rondo_eval.publication_critic.full_model_training.plan082_cli \
+  create-handoff-bootstrap --freeze-sha256 "$FREEZE_SHA256" \
+  --task-root "$task_root" --artifact-root "$artifact_root" \
+  --formal-result "$FORMAL_RESULT" --output "$BOOTSTRAP_MANIFEST"
+```
+
+The nonsecret Plan 082 S3
 binding records the live volume ID, region-matching HTTPS RunPod endpoint, task
 root, allowed prefixes, ignored destination and exact bootstrap key/bytes/hash.
-Use `create-handoff-bootstrap --objects <json-list>` and then
-`create-handoff-binding`; the latter derives the RunPod endpoint from the live
+Then use `create-handoff-binding`; it derives the RunPod endpoint from the live
 region and the ignored destination from the run ID. The transfer CLI accepts
 this one binding and has no per-field endpoint/root overrides. Upload the
 bootstrap to its bound key only after it and the retained inventory are final.
@@ -183,18 +214,26 @@ and Pod/volume state. Keep Pod and volume. Do not download a large checkpoint.
 Release the Pod only after the reviewer explicitly says no further GPU work is
 needed, then confirm zero Pod and zero compute billing. Keep the volume.
 
-Wait for a Plan 083-free and capacity-safe local window. With zero Pod, run:
+Wait for a Plan 083-free and capacity-safe local window. From the exact retained
+Plan 082 worktree, prepare the one project-local pinned handoff environment
+once. It lives in the main physical root's ignored Plan 082 directory:
 
 ```bash
-python -B -P -m \
-  rondo_eval.publication_critic.full_model_training.plan082_cli \
-  handoff-inventory --binding "$PLAN082_S3_BINDING"
-python -B -P -m \
-  rondo_eval.publication_critic.full_model_training.plan082_cli \
-  handoff-download --binding "$PLAN082_S3_BINDING"
+training/publication-critic-plan082/prepare-local-handoff.sh
+training/publication-critic-plan082/run-local-handoff.sh \
+  --dry-run inventory --binding "$PLAN082_S3_BINDING"
+training/publication-critic-plan082/run-local-handoff.sh \
+  --dry-run download --binding "$PLAN082_S3_BINDING"
+training/publication-critic-plan082/run-local-handoff.sh \
+  inventory --binding "$PLAN082_S3_BINDING"
+training/publication-critic-plan082/run-local-handoff.sh \
+  download --binding "$PLAN082_S3_BINDING"
 ```
 
-The strict loader reads only the two allowlisted RunPod S3 values from the main
+Both dry-runs validate the exact boto3 environment, worktree source and ignored
+destination without reading secrets or touching the network. Both real commands
+use that same interpreter and explicit `PYTHONPATH`. The strict loader reads
+only the two allowlisted RunPod S3 values from the main
 root `.env.local` and injects them directly into the client. Never put secrets
 in arguments, receipts or logs. Inventory downloads/verifies the small
 bootstrap first; download then uses its exact manifest, `.part` Range resume,

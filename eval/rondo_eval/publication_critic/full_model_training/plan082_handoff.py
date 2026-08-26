@@ -10,11 +10,13 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 import hashlib
+import importlib.metadata
 import json
 import os
 from pathlib import Path, PurePosixPath
 import re
 import stat
+import sys
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -34,6 +36,8 @@ from .contract import (
     sha256_file,
     write_exclusive,
 )
+from .plan081_artifacts import Plan081ArtifactStore
+from .plan082_formal import RESULT_SCHEMA
 
 
 HANDOFF_SCHEMA = "rondo-publication-critic-plan082-s3-handoff-v1"
@@ -284,6 +288,136 @@ def create_bootstrap_manifest(
     }
 
 
+def create_retained_bootstrap_manifest(
+    destination: Path,
+    *,
+    freeze_sha256: str,
+    task_root: Path,
+    artifact_root: Path,
+    formal_result: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Project verified retained artifacts into the cloud-side bootstrap."""
+
+    freeze = _require_sha256(freeze_sha256)
+    if (
+        not isinstance(formal_result, Mapping)
+        or formal_result.get("schema") != RESULT_SCHEMA
+        or formal_result.get("freeze_content_sha256") != freeze
+        or not isinstance(formal_result.get("retention"), Mapping)
+    ):
+        raise HandoffError("plan082_formal_retention_invalid")
+    task = _existing_directory(task_root, "plan082_handoff_task_root_invalid")
+    artifact = _existing_directory(
+        artifact_root, "plan082_handoff_artifact_root_invalid"
+    )
+    if artifact == task or not artifact.is_relative_to(task):
+        raise HandoffError("plan082_handoff_artifact_root_invalid")
+    store = Plan081ArtifactStore(artifact)
+    retention = formal_result["retention"]
+    rows_by_kind: dict[str, list[Mapping[str, Any]]] = {}
+    for key in ("observations", "checkpoints", "snapshots"):
+        rows = retention.get(key)
+        if (
+            not isinstance(rows, list)
+            or not rows
+            or any(not isinstance(row, Mapping) for row in rows)
+        ):
+            raise HandoffError("plan082_formal_retention_invalid")
+        rows_by_kind[key] = rows
+    expected_checkpoint_ids = {
+        str(row.get("artifact_id")) for row in rows_by_kind["checkpoints"]
+    }
+    expected_snapshot_ids = {
+        str(row.get("artifact_id")) for row in rows_by_kind["snapshots"]
+    }
+    expected_observation_ids = {
+        str(row.get("artifact_id")) for row in rows_by_kind["observations"]
+    }
+    if (
+        set(store.verified_checkpoint_ids()) != expected_checkpoint_ids
+        or set(store.verified_snapshot_ids()) != expected_snapshot_ids
+        or set(store.verified_observation_ids()) != expected_observation_ids
+    ):
+        raise HandoffError("plan082_retained_artifact_set_mismatch")
+
+    objects: list[dict[str, Any]] = []
+    for row in rows_by_kind["observations"]:
+        if (
+            set(row) != {"artifact_id", "sha256", "roles"}
+            or not isinstance(row.get("artifact_id"), str)
+            or not isinstance(row.get("roles"), list)
+            or not row["roles"]
+            or any(not isinstance(role, str) or not role for role in row["roles"])
+        ):
+            raise HandoffError("plan082_formal_retention_invalid")
+        receipt = store.verify_observation(row["artifact_id"])
+        if receipt["sha256"] != _require_sha256(row.get("sha256")):
+            raise HandoffError("plan082_retained_artifact_identity_mismatch")
+        path = artifact / "observations" / row["artifact_id"] / "observation.json"
+        try:
+            info = os.lstat(path)
+        except OSError:
+            raise HandoffError("plan082_retained_artifact_scan_failed") from None
+        if not stat.S_ISREG(info.st_mode) or stat.S_ISLNK(info.st_mode):
+            raise HandoffError("plan082_retained_artifact_nonregular")
+        objects.append(
+            {
+                "relative_key": path.relative_to(task).as_posix(),
+                "bytes": info.st_size,
+                "sha256": _sha256_regular(path),
+                "roles": sorted(
+                    {"retained_observation", *[str(role) for role in row["roles"]]}
+                ),
+            }
+        )
+    for key, directory, verifier in (
+        ("checkpoints", "recovery-checkpoints", store.verify_checkpoint),
+        ("snapshots", "model-snapshots", store.verify_snapshot),
+    ):
+        for row in rows_by_kind[key]:
+            if (
+                set(row) != {"artifact_id", "content_sha256", "roles"}
+                or not isinstance(row.get("artifact_id"), str)
+                or not isinstance(row.get("roles"), list)
+                or not row["roles"]
+                or any(not isinstance(role, str) or not role for role in row["roles"])
+            ):
+                raise HandoffError("plan082_formal_retention_invalid")
+            receipt = verifier(row["artifact_id"])
+            if receipt["content_sha256"] != _require_sha256(row.get("content_sha256")):
+                raise HandoffError("plan082_retained_artifact_identity_mismatch")
+            root = artifact / directory / row["artifact_id"]
+            for path in sorted(root.rglob("*")):
+                try:
+                    info = os.lstat(path)
+                except OSError:
+                    raise HandoffError(
+                        "plan082_retained_artifact_scan_failed"
+                    ) from None
+                if stat.S_ISDIR(info.st_mode) and not stat.S_ISLNK(info.st_mode):
+                    continue
+                if not stat.S_ISREG(info.st_mode) or stat.S_ISLNK(info.st_mode):
+                    raise HandoffError("plan082_retained_artifact_nonregular")
+                objects.append(
+                    {
+                        "relative_key": path.relative_to(task).as_posix(),
+                        "bytes": info.st_size,
+                        "sha256": _sha256_regular(path),
+                        "roles": sorted(
+                            {
+                                f"retained_{key[:-1]}",
+                                *[str(role) for role in row["roles"]],
+                            }
+                        ),
+                    }
+                )
+    return create_bootstrap_manifest(
+        destination,
+        freeze_sha256=freeze,
+        objects=objects,
+    )
+
+
 def create_handoff_binding(
     destination: Path,
     *,
@@ -368,6 +502,69 @@ def create_handoff_client(
     except Exception:
         raise HandoffError("handoff_client_create_failed") from None
     return ScopedHandoffClient(client, scope=binding.scope)
+
+
+def local_handoff_preflight(
+    binding: Plan082Handoff,
+    *,
+    operation: str,
+    requirements_path: Path,
+    source_root: Path,
+    destination_root: Path,
+) -> dict[str, Any]:
+    """Validate the local zero-Pod runtime without secrets or network access."""
+
+    binding = validate_handoff(handoff_value(binding))
+    if operation not in {"inventory", "download"}:
+        raise HandoffError("plan082_handoff_operation_invalid")
+    requirements_file = regular_file(Path(requirements_path), maximum_bytes=64 * 1024)
+    try:
+        lines = requirements_file.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeError):
+        raise HandoffError("plan082_handoff_requirements_invalid") from None
+    requirements: dict[str, str] = {}
+    for line in lines:
+        if not line or line.startswith("#"):
+            continue
+        if line.count("==") != 1:
+            raise HandoffError("plan082_handoff_requirements_invalid")
+        name, version = line.split("==", 1)
+        canonical = re.sub(r"[-_.]+", "-", name).lower()
+        if (
+            not re.fullmatch(r"[a-z0-9][a-z0-9-]*", canonical)
+            or not version
+            or canonical in requirements
+        ):
+            raise HandoffError("plan082_handoff_requirements_invalid")
+        requirements[canonical] = version
+    if not {"boto3", "botocore", "s3transfer", "jmespath"} <= set(requirements):
+        raise HandoffError("plan082_handoff_requirements_invalid")
+    installed: dict[str, str] = {}
+    for name, expected in sorted(requirements.items()):
+        try:
+            observed = importlib.metadata.version(name)
+        except importlib.metadata.PackageNotFoundError:
+            raise HandoffError("plan082_handoff_dependency_missing") from None
+        if observed != expected:
+            raise HandoffError("plan082_handoff_dependency_version_mismatch")
+        installed[name] = observed
+    source = _existing_directory(source_root, "plan082_handoff_source_root_invalid")
+    destination = Path(destination_root).resolve()
+    if str(destination) != str(Path(destination_root)):
+        raise HandoffError("plan082_handoff_destination_root_invalid")
+    return {
+        "schema": "rondo-publication-critic-plan082-handoff-preflight-v1",
+        "operation": operation,
+        "binding_freeze_sha256": binding.freeze_sha256,
+        "source_root": str(source),
+        "destination_root": str(destination),
+        "python": str(Path(sys.executable).absolute()),
+        "python_prefix": str(Path(sys.prefix).resolve()),
+        "dependencies": installed,
+        "dependencies_sha256": sha256_bytes(canonical_json_bytes(installed)),
+        "secret_access": False,
+        "network_access": False,
+    }
 
 
 def bootstrap_manifest_specs(
@@ -610,6 +807,13 @@ def _safe_endpoint(value: str) -> bool:
         )
     except ValueError:
         return False
+
+
+def _existing_directory(value: Path, code: str) -> Path:
+    path = Path(value)
+    if path.is_symlink() or not path.is_dir():
+        raise HandoffError(code)
+    return path.resolve()
 
 
 def _safe_relative(value: str) -> PurePosixPath:

@@ -35,6 +35,7 @@ from .plan081_observation import (
     validation_identity_sha256,
 )
 from .plan082_bundle import MODEL_LOCK_SHA256
+from .plan082_environment import observe_environment
 
 
 RECIPE_SCHEMA = "rondo-publication-critic-plan082-training-recipe-v1"
@@ -57,6 +58,7 @@ def validate_recipe(value: Any) -> dict[str, Any]:
         "seed",
         "optimizer",
         "scheduler",
+        "parameter_dtype",
         "binary_micro_batch_size",
         "pair_micro_batch_size",
         "gradient_clip_norm",
@@ -89,6 +91,7 @@ def validate_recipe(value: Any) -> dict[str, Any]:
         or not _nonnegative_finite(optimizer.get("weight_decay"))
         or type(optimizer.get("fused")) is not bool
         or scheduler != {"name": "constant"}
+        or value.get("parameter_dtype") not in {"float32", "bfloat16"}
         or not _positive_int(value.get("binary_micro_batch_size"))
         or not _positive_int(value.get("pair_micro_batch_size"))
         or not _nonnegative_finite(value.get("gradient_clip_norm"))
@@ -258,7 +261,7 @@ class TorchContinuousTrainingAdapter:
                 snapshot_root,
                 local_files_only=True,
                 trust_remote_code=False,
-                torch_dtype=torch.bfloat16,
+                torch_dtype=_recipe_torch_dtype(torch, recipe_value),
                 attn_implementation="sdpa",
             )
         except Exception as exc:
@@ -292,6 +295,10 @@ class TorchContinuousTrainingAdapter:
                 "model_revision": MODEL_REVISION,
                 "peft": False,
                 "quantized_training": False,
+                "environment": observe_environment(
+                    torch_module=torch,
+                    image_identity=os.getenv("RONDO_PLAN082_IMAGE_IDENTITY"),
+                ),
             },
         )
         adapter._factory = lambda: cls.from_snapshot(
@@ -534,7 +541,22 @@ class TorchContinuousTrainingAdapter:
         norm_value = float(norm.item() if hasattr(norm, "item") else norm)
         if not math.isfinite(norm_value) or norm_value <= 0:
             raise FullModelTrainingError("plan082_gradient_invalid")
+        changed_name, changed_parameter, before_value = self._parameter_change_probe(
+            scope
+        )
         self.optimizer.step()
+        if self.torch.equal(before_value, changed_parameter.detach()):
+            self.optimizer.zero_grad(set_to_none=True)
+            raise FullModelTrainingError("plan082_update_parameter_unchanged")
+        maximum_change = float(
+            (changed_parameter.detach().float() - before_value.float())
+            .abs()
+            .max()
+            .item()
+        )
+        if not math.isfinite(maximum_change) or maximum_change <= 0:
+            self.optimizer.zero_grad(set_to_none=True)
+            raise FullModelTrainingError("plan082_update_parameter_change_invalid")
         self.scheduler.step()
         self.optimizer.zero_grad(set_to_none=True)
         self.global_step = step
@@ -563,6 +585,12 @@ class TorchContinuousTrainingAdapter:
             "training_pair_count": len(training_dataset.pairs),
             "scope": scope.as_dict(),
             "data_cursor": copy.deepcopy(self.data_cursor),
+            "parameter_change": {
+                "method": "torch.equal_selected_nonzero_gradient_parameter",
+                "parameter_name": changed_name,
+                "parameter_elements": int(changed_parameter.numel()),
+                "maximum_absolute_change": maximum_change,
+            },
         }
 
     def evaluate_validation(self, dataset: ValidationDataset) -> dict[str, Any]:
@@ -591,7 +619,7 @@ class TorchContinuousTrainingAdapter:
                 self.model.train()
         self._require_no_gradients()
         after = self._training_state_guard()
-        if before != after:
+        if not self._values_equal(before, after):
             raise FullModelTrainingError("plan082_validation_mutated_training_state")
         return {
             "raw_logits": scores,
@@ -683,7 +711,7 @@ class TorchContinuousTrainingAdapter:
                     model_root,
                     local_files_only=True,
                     trust_remote_code=False,
-                    torch_dtype=self.torch.bfloat16,
+                    torch_dtype=_recipe_torch_dtype(self.torch, self.recipe),
                     attn_implementation="sdpa",
                 )
             )
@@ -786,6 +814,27 @@ class TorchContinuousTrainingAdapter:
         if any(parameter.grad is not None for parameter in self.model.parameters()):
             raise FullModelTrainingError("plan082_validation_gradient_present")
 
+    def _parameter_change_probe(self, scope: TrainableScope) -> tuple[str, Any, Any]:
+        named = dict(self.model.named_parameters())
+        candidates = sorted(
+            (
+                (int(named[name].numel()), name, named[name])
+                for name in scope.parameter_names
+                if named[name].grad is not None
+            ),
+            key=lambda item: (item[0], item[1]),
+        )
+        for _elements, name, parameter in candidates:
+            try:
+                nonzero = bool(self.torch.count_nonzero(parameter.grad).item())
+            except Exception as exc:
+                raise FullModelTrainingError(
+                    "plan082_update_parameter_probe_failed"
+                ) from exc
+            if nonzero:
+                return name, parameter, parameter.detach().clone()
+        raise FullModelTrainingError("plan082_update_parameter_probe_missing")
+
     def _training_state_guard(self) -> dict[str, Any]:
         if self.optimizer is None or self.scheduler is None:
             raise FullModelTrainingError("plan082_training_state_unavailable")
@@ -803,13 +852,40 @@ class TorchContinuousTrainingAdapter:
                     )
                 )
             versions.append(row)
+        parameters = [
+            self._tensor_identity(name, value)
+            for name, value in self.model.named_parameters()
+        ]
+        buffers = [
+            self._tensor_identity(name, value)
+            for name, value in self.model.named_buffers()
+        ]
         return {
             "optimizer_versions": versions,
-            "scheduler": repr(self.scheduler.state_dict()),
+            "scheduler": copy.deepcopy(self.scheduler.state_dict()),
             "data_cursor": copy.deepcopy(self.data_cursor),
             "global_step": self.global_step,
             "model_training": bool(self.model.training),
+            "parameters": parameters,
+            "buffers": buffers,
+            "rng": self._capture_rng(),
         }
+
+    @staticmethod
+    def _tensor_identity(name: str, value: Any) -> tuple[Any, ...]:
+        try:
+            pointer = int(value.data_ptr())
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            pointer = None
+        return (
+            name,
+            id(value),
+            pointer,
+            getattr(value, "_version", None),
+            str(getattr(value, "dtype", type(value).__name__)),
+            str(getattr(value, "device", "")),
+            tuple(getattr(value, "shape", ())),
+        )
 
     def _capture_rng(self) -> dict[str, Any]:
         value: dict[str, Any] = {
@@ -889,6 +965,14 @@ class TorchContinuousTrainingAdapter:
 
 def _positive_int(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value > 0
+
+
+def _recipe_torch_dtype(torch_module: Any, recipe: Mapping[str, Any]) -> Any:
+    name = str(recipe["parameter_dtype"])
+    value = getattr(torch_module, name, None)
+    if value is None:
+        raise FullModelTrainingError("plan082_parameter_dtype_unavailable")
+    return value
 
 
 def _positive_finite(value: Any) -> bool:

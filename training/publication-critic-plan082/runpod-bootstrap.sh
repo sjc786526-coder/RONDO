@@ -9,6 +9,7 @@ umask 077
 : "${RONDO_PLAN082_SOURCE_COMMIT:?set the frozen 40-hex source commit}"
 : "${RONDO_PLAN082_DATA_ARCHIVE:?set the uploaded data archive}"
 : "${RONDO_PLAN082_DATA_SHA256:?set the data archive SHA-256}"
+: "${RONDO_PLAN082_IMAGE_IDENTITY:?set the exact approved container image identity}"
 
 case "$RONDO_PLAN082_TASK_ROOT" in /workspace/*) ;; *) exit 2 ;; esac
 task_root="$(realpath -e -- "$RONDO_PLAN082_TASK_ROOT")"
@@ -31,16 +32,35 @@ printf '%s  %s\n' "$RONDO_PLAN082_DATA_SHA256" "$data_archive" | sha256sum --che
 export PYTHONDONTWRITEBYTECODE=1
 receipt_dir="$task_root/receipts"
 mkdir -m 700 -p "$receipt_dir"
+log_dir="$task_root/logs"
+mkdir -m 700 -p "$log_dir"
+bootstrap_log="$log_dir/bootstrap-${RONDO_PLAN082_SOURCE_SHA256}-${RONDO_PLAN082_DATA_SHA256}.log"
+exec 3>>"$bootstrap_log"
 source_receipt="$receipt_dir/source-${RONDO_PLAN082_SOURCE_SHA256}.json"
 receipt_tmp="$source_receipt.tmp.$$"
+data_receipt_tmp=""
+snapshot_receipt_tmp=""
 bootstrap_root="$task_root/.source-bootstrap-${RONDO_PLAN082_SOURCE_SHA256}-$$"
 cleanup() {
-  rm -f -- "$receipt_tmp"
+  rm -f -- "$receipt_tmp" "$data_receipt_tmp" "$snapshot_receipt_tmp"
   if [ -d "$bootstrap_root" ] && [ ! -L "$bootstrap_root" ]; then
     rm -rf -- "$bootstrap_root"
   fi
 }
 trap cleanup EXIT
+
+publish_candidate() {
+  candidate="$1"
+  destination="$2"
+  if [ -e "$destination" ] || [ -L "$destination" ]; then
+    if [ ! -f "$destination" ] || [ -L "$destination" ]; then exit 2; fi
+    cmp --silent -- "$destination" "$candidate" || exit 2
+    rm -f -- "$candidate"
+  else
+    chmod 600 "$candidate"
+    mv "$candidate" "$destination"
+  fi
+}
 
 if [ -e "$source_root" ] || [ -L "$source_root" ]; then
   if [ ! -d "$source_root" ] || [ -L "$source_root" ]; then exit 2; fi
@@ -65,26 +85,22 @@ else
     --output "$source_root" > "$receipt_tmp"
   export PYTHONPATH="$source_root/eval"
 fi
-if [ -e "$source_receipt" ] || [ -L "$source_receipt" ]; then
-  if [ ! -f "$source_receipt" ] || [ -L "$source_receipt" ]; then exit 2; fi
-  cmp --silent -- "$source_receipt" "$receipt_tmp" || exit 2
-  rm -f -- "$receipt_tmp"
-else
-  chmod 600 "$receipt_tmp"
-  mv "$receipt_tmp" "$source_receipt"
-fi
+publish_candidate "$receipt_tmp" "$source_receipt"
 
 data_root="$task_root/data-${RONDO_PLAN082_DATA_SHA256}"
+data_receipt="$receipt_dir/data-${RONDO_PLAN082_DATA_SHA256}.json"
+data_receipt_tmp="$data_receipt.tmp.$$"
 if [ -e "$data_root" ] || [ -L "$data_root" ]; then
   if [ ! -d "$data_root" ] || [ -L "$data_root" ]; then exit 2; fi
   python3 -B -P -m rondo_eval.publication_critic.full_model_training.plan082_cli \
-    verify-data --bundle "$data_root" > /dev/null
+    verify-data --bundle "$data_root" > "$data_receipt_tmp"
 else
   python3 -B -P -m rondo_eval.publication_critic.full_model_training.plan082_cli \
     extract-data-archive --archive "$data_archive" \
     --expected-sha256 "$RONDO_PLAN082_DATA_SHA256" --output "$data_root" \
-    > /dev/null
+    > "$data_receipt_tmp"
 fi
+publish_candidate "$data_receipt_tmp" "$data_receipt"
 
 venv="$task_root/venv"
 if [ ! -x "$venv/bin/python" ]; then
@@ -92,9 +108,14 @@ if [ ! -x "$venv/bin/python" ]; then
 fi
 "$venv/bin/python" -B -m pip install --disable-pip-version-check \
   --upgrade-strategy only-if-needed -r \
-  "$source_root/training/publication-critic-plan082/dependencies-v1.txt"
-"$venv/bin/python" -B -m pip check
-"$venv/bin/python" -B -c 'import torch; assert torch.__version__.split("+", 1)[0] == "2.8.0"'
+  "$source_root/training/publication-critic-plan082/dependencies-v1.txt" >&3 2>&3
+"$venv/bin/python" -B -m pip check >&3 2>&3
+"$venv/bin/python" -B -c 'import torch; assert torch.__version__.split("+", 1)[0] == "2.8.0"' >&3 2>&3
+
+environment_receipt="$receipt_dir/environment-${RONDO_PLAN082_SOURCE_SHA256}.json"
+"$venv/bin/python" -B -P -m \
+  rondo_eval.publication_critic.full_model_training.plan082_cli \
+  capture-environment --output "$environment_receipt" >&3 2>&3
 
 unset HF_TOKEN HUGGING_FACE_HUB_TOKEN HUGGINGFACEHUB_API_TOKEN
 export HF_HOME="$task_root/hf-home"
@@ -107,10 +128,20 @@ model="$task_root/model-e51ea3e0"
   chat_template.jinja config.json merges.txt model.safetensors \
   special_tokens_map.json tokenizer.json tokenizer_config.json vocab.json \
   --revision e51ea3e08fb81326c3b812a7ff0cb9cee83e59cc \
-  --local-dir "$model"
+  --local-dir "$model" >&3 2>&3
+snapshot_receipt="$receipt_dir/snapshot-e51ea3e0.json"
+snapshot_receipt_tmp="$snapshot_receipt.tmp.$$"
 "$venv/bin/python" -B -P -m \
   rondo_eval.publication_critic.full_model_training.plan082_cli verify-snapshot \
   --snapshot "$model" \
-  --model-lock "$source_root/eval/model-locks/publication-critic/skywork-reward-v2-qwen3-1.7b-e51ea3e0.json"
-printf '{"status":"ready","source_receipt":"%s","data_root":"%s","model_root":"%s"}\n' \
-  "$source_receipt" "$data_root" "$model"
+  --model-lock "$source_root/eval/model-locks/publication-critic/skywork-reward-v2-qwen3-1.7b-e51ea3e0.json" \
+  > "$snapshot_receipt_tmp"
+publish_candidate "$snapshot_receipt_tmp" "$snapshot_receipt"
+
+ready_receipt="$receipt_dir/bootstrap-ready-${RONDO_PLAN082_SOURCE_SHA256}-${RONDO_PLAN082_DATA_SHA256}.json"
+"$venv/bin/python" -B -P -m \
+  rondo_eval.publication_critic.full_model_training.plan082_cli \
+  publish-bootstrap-ready --source-receipt "$source_receipt" \
+  --data-receipt "$data_receipt" --snapshot-receipt "$snapshot_receipt" \
+  --environment-receipt "$environment_receipt" --source-root "$source_root" \
+  --data-root "$data_root" --model-root "$model" --output "$ready_receipt"

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 import copy
 import json
 from pathlib import Path
@@ -21,6 +21,7 @@ from rondo_eval.publication_critic.full_model_training.contract import (  # noqa
     MODEL_REVISION,
     FullModelTrainingError,
     canonical_json_bytes,
+    pretty_json_bytes,
     read_json,
     sha256_bytes,
 )
@@ -55,6 +56,7 @@ from rondo_eval.publication_critic.full_model_training.plan082_bundle import (  
 )
 from rondo_eval.publication_critic.full_model_training.plan082_cli import (  # noqa: E402
     _load_process_receipt,
+    _preflight_segment_outputs,
     _require_new_process,
     _run_with_adapter,
     _verify_executing_source,
@@ -67,6 +69,12 @@ from rondo_eval.publication_critic.full_model_training.plan082_formal import (  
     RECOVERY_SCHEMA,
     create_formal_freeze,
     finalize_formal_run,
+)
+from rondo_eval.publication_critic.full_model_training.plan082_environment import (  # noqa: E402
+    ENVIRONMENT_SCHEMA,
+    publish_bootstrap_ready_receipt,
+    publish_environment_receipt,
+    validate_environment_receipt,
 )
 from rondo_eval.publication_critic.full_model_training.plan082_run import (  # noqa: E402
     RUN_SPEC_SCHEMA,
@@ -82,6 +90,24 @@ from eval.tests.test_publication_critic_plan081_training import (  # noqa: E402
 
 PLAN081_ROUTE = REPO_ROOT / "training/publication-critic-plan081/route-contract-v1.json"
 RECIPE_PATH = REPO_ROOT / "training/publication-critic-plan082/recipe-candidate-v1.json"
+
+
+class _Plan082FakeAdapter(_Plan081FakeAdapter):
+    def apply_update(self, step, scope, training_dataset):
+        receipt = super().apply_update(step, scope, training_dataset)
+        receipt["parameter_change"] = {
+            "method": "torch.equal_selected_nonzero_gradient_parameter",
+            "parameter_name": scope.parameter_names[0],
+            "parameter_elements": 1,
+            "maximum_absolute_change": 0.01,
+        }
+        return receipt
+
+    @contextmanager
+    def checkpoint_recovery_probe(self):
+        with super().checkpoint_recovery_probe() as probe:
+            probe.plan082_runtime_identity = self.plan082_runtime_identity
+            yield probe
 
 
 def _scope(name: str, names: list[str], elements: int) -> dict:
@@ -145,6 +171,32 @@ def _runtime_identity() -> dict:
         "parameter_inventory_sha256": inventory["inventory_sha256"],
         "parameter_tensors": 2,
         "parameter_elements": 3,
+        "environment": _environment_receipt(),
+    }
+
+
+def _environment_receipt() -> dict:
+    distributions = ["torch==2.8.0", "transformers==4.52.3"]
+    core = {
+        "schema": ENVIRONMENT_SCHEMA,
+        "container_image": "fixture-image@sha256:" + "f" * 64,
+        "python_version": "3.13.7",
+        "python_implementation": "CPython",
+        "python_executable_name": "python",
+        "driver_version": "570.00",
+        "torch_cuda_runtime": "12.8",
+        "nvidia_smi_cuda_version": "12.8",
+        "gpu_count": 1,
+        "gpu_names": ["NVIDIA A40"],
+        "gpu_compute_capabilities": ["8.6"],
+        "installed_distributions": distributions,
+        "installed_distributions_sha256": sha256_bytes(
+            ("\n".join(distributions) + "\n").encode()
+        ),
+    }
+    return {
+        **core,
+        "content_sha256": sha256_bytes(canonical_json_bytes(core)),
     }
 
 
@@ -183,18 +235,27 @@ def _training() -> PortableTrainingDataset:
         packets={key: {"candidate_id": key, "packet": {}} for key in supervision},
         supervision=supervision,
         pairs={
-            "pair": {
-                "pair_id": "pair",
+            "boundary": {
+                "pair_id": "boundary",
                 "kind": "boundary",
                 "preferred_candidate_id": "train-pass",
                 "dispreferred_candidate_id": "train-rewrite",
-            }
+            },
+            "within": {
+                "pair_id": "within",
+                "kind": "within_pass",
+                "preferred_candidate_id": "train-pass",
+                "dispreferred_candidate_id": "train-rewrite",
+            },
         },
         membership={
             "schema_version": 1,
             "dataset_revision": "v8",
             "stages": {
-                "fixture": {"candidate_ids": sorted(supervision), "pair_ids": ["pair"]}
+                "fixture": {
+                    "candidate_ids": sorted(supervision),
+                    "pair_ids": ["boundary", "within"],
+                }
             },
         },
     )
@@ -297,12 +358,47 @@ class _Parameter:
         self.dtype = "torch.bfloat16"
         self.requires_grad = True
         self.grad = None
+        self._version = 0
+        self.shape = (elements,)
+        self.device = "fixture"
+        self.values = [0.0] * elements
 
     def numel(self) -> int:
         return self.elements
 
     def requires_grad_(self, value: bool) -> None:
         self.requires_grad = value
+
+    def data_ptr(self) -> int:
+        return id(self)
+
+    def detach(self):
+        return self
+
+    def clone(self):
+        return _ValueTensor(list(self.values))
+
+    def float(self):
+        return _ValueTensor(list(self.values))
+
+
+class _ValueTensor:
+    def __init__(self, values: list[float]) -> None:
+        self.values = values
+
+    def float(self):
+        return self
+
+    def __sub__(self, other):
+        return _ValueTensor(
+            [left - right for left, right in zip(self.values, other.values)]
+        )
+
+    def abs(self):
+        return _ValueTensor([abs(value) for value in self.values])
+
+    def max(self):
+        return _Scalar(max(self.values))
 
 
 class _Model:
@@ -311,6 +407,7 @@ class _Model:
             "tail.weight": _Parameter(2),
             "tail.bias": _Parameter(1),
         }
+        self.buffers = {"running": _Parameter(1)}
         self.training = True
 
     def named_parameters(self):
@@ -318,6 +415,9 @@ class _Model:
 
     def parameters(self):
         return list(self.rows.values())
+
+    def named_buffers(self):
+        return list(self.buffers.items())
 
     def train(self) -> None:
         self.training = True
@@ -330,12 +430,28 @@ class _Optimizer:
     def __init__(self, parameters, **_kwargs) -> None:
         self.param_groups = [{"params": list(parameters)}]
         self.state = {}
+        self.mutate_on_step = True
 
     def add_param_group(self, group: dict) -> None:
         self.param_groups.append(group)
 
     def state_dict(self) -> dict:
         return {"groups": len(self.param_groups)}
+
+    def zero_grad(self, *, set_to_none: bool) -> None:
+        del set_to_none
+        for group in self.param_groups:
+            for parameter in group["params"]:
+                parameter.grad = None
+
+    def step(self) -> None:
+        if not self.mutate_on_step:
+            return
+        for group in self.param_groups:
+            for parameter in group["params"]:
+                if parameter.grad is not None:
+                    parameter.values[0] += 0.125
+                    parameter._version += 1
 
 
 class _Scheduler:
@@ -347,8 +463,14 @@ class _Scheduler:
     def state_dict(self) -> dict:
         return {"base_lrs": list(self.base_lrs)}
 
+    def step(self) -> None:
+        pass
+
 
 class _Torch:
+    float32 = "torch.float32"
+    bfloat16 = "torch.bfloat16"
+
     class optim:
         AdamW = _Optimizer
 
@@ -362,6 +484,32 @@ class _Torch:
     @staticmethod
     def is_tensor(_value: object) -> bool:
         return False
+
+    @staticmethod
+    def get_rng_state():
+        return ("torch-cpu",)
+
+    @staticmethod
+    def equal(left: object, right: object) -> bool:
+        if hasattr(left, "values") and hasattr(right, "values"):
+            return left.values == right.values
+        return left == right
+
+    class cuda:
+        @staticmethod
+        def get_rng_state_all():
+            return [("torch-cuda",)]
+
+    class nn:
+        class utils:
+            @staticmethod
+            def clip_grad_norm_(parameters, _clip, *, error_if_nonfinite):
+                del parameters, error_if_nonfinite
+                return _Scalar(1.0)
+
+    @staticmethod
+    def count_nonzero(value):
+        return _Scalar(1.0 if value is not None else 0.0)
 
 
 class _Tokenizer:
@@ -384,7 +532,33 @@ class _Scalar:
 
 class _Vector:
     def __getitem__(self, index: int) -> _Scalar:
+        if isinstance(index, slice):
+            return self
         return _Scalar(float(index + 1))
+
+    def float(self):
+        return self
+
+
+class _Loss:
+    def __init__(self, model: _Model) -> None:
+        self.model = model
+
+    def __mul__(self, _value):
+        return self
+
+    __rmul__ = __mul__
+
+    def backward(self) -> None:
+        for parameter in self.model.parameters():
+            if parameter.requires_grad:
+                parameter.grad = object()
+
+    def detach(self):
+        return self
+
+    def item(self) -> float:
+        return 1.0
 
 
 class _EvalAdapter(TorchContinuousTrainingAdapter):
@@ -437,6 +611,99 @@ def _data_receipt() -> dict:
 
 
 class Plan082TrainingTests(unittest.TestCase):
+    def test_environment_and_bootstrap_ready_receipts_are_stable(self) -> None:
+        environment = _environment_receipt()
+        self.assertEqual(
+            validate_environment_receipt(environment)["container_image"],
+            environment["container_image"],
+        )
+        drifted = json.loads(json.dumps(environment))
+        drifted["driver_version"] = "changed"
+        with self.assertRaisesRegex(
+            FullModelTrainingError, "plan082_environment_receipt_invalid"
+        ):
+            validate_environment_receipt(drifted)
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            environment_path = root / "environment.json"
+            with mock.patch(
+                "rondo_eval.publication_critic.full_model_training."
+                "plan082_environment.observe_environment",
+                return_value=environment,
+            ):
+                publish_environment_receipt(environment_path)
+                inode = environment_path.stat().st_ino
+                publish_environment_receipt(environment_path)
+            self.assertEqual(environment_path.stat().st_ino, inode)
+            self.assertEqual(environment_path.stat().st_mode & 0o777, 0o600)
+
+            receipts = {}
+            for role in ("source", "data", "snapshot"):
+                path = root / f"{role}.json"
+                path.write_bytes(pretty_json_bytes({"role": role}))
+                receipts[role] = path
+            source_root = root / "source-root"
+            data_root = root / "data-root"
+            model_root = root / "model-root"
+            for path in (source_root, data_root, model_root):
+                path.mkdir()
+            ready_path = root / "ready.json"
+            first = publish_bootstrap_ready_receipt(
+                ready_path,
+                source_receipt=receipts["source"],
+                data_receipt=receipts["data"],
+                snapshot_receipt=receipts["snapshot"],
+                environment_receipt=environment_path,
+                source_root=source_root,
+                data_root=data_root,
+                model_root=model_root,
+            )
+            ready_inode = ready_path.stat().st_ino
+            second = publish_bootstrap_ready_receipt(
+                ready_path,
+                source_receipt=receipts["source"],
+                data_receipt=receipts["data"],
+                snapshot_receipt=receipts["snapshot"],
+                environment_receipt=environment_path,
+                source_root=source_root,
+                data_root=data_root,
+                model_root=model_root,
+            )
+            self.assertEqual(first, second)
+            self.assertEqual(ready_path.stat().st_ino, ready_inode)
+
+            receipts["source"].write_bytes(pretty_json_bytes({"role": "changed"}))
+            with self.assertRaisesRegex(
+                FullModelTrainingError, "plan082_receipt_existing_mismatch"
+            ):
+                publish_bootstrap_ready_receipt(
+                    ready_path,
+                    source_receipt=receipts["source"],
+                    data_receipt=receipts["data"],
+                    snapshot_receipt=receipts["snapshot"],
+                    environment_receipt=environment_path,
+                    source_root=source_root,
+                    data_root=data_root,
+                    model_root=model_root,
+                )
+
+            ready_path.unlink()
+            ready_path.symlink_to(root / "missing-ready")
+            with self.assertRaisesRegex(
+                FullModelTrainingError, "plan082_receipt_existing_invalid"
+            ):
+                publish_bootstrap_ready_receipt(
+                    ready_path,
+                    source_receipt=receipts["source"],
+                    data_receipt=receipts["data"],
+                    snapshot_receipt=receipts["snapshot"],
+                    environment_receipt=environment_path,
+                    source_root=source_root,
+                    data_root=data_root,
+                    model_root=model_root,
+                )
+
     def test_recipe_and_scope_schedule_are_typed_but_not_hardcoded(self) -> None:
         recipe = validate_recipe(read_json(RECIPE_PATH))
         self.assertEqual(recipe["macro_update"], "one_full_v8_train_cohort")
@@ -604,6 +871,21 @@ class Plan082TrainingTests(unittest.TestCase):
         class MissingRuntime(_ControllerAdapter):
             plan082_runtime_identity = None
 
+        class DriftedEnvironment(_ControllerAdapter):
+            def plan082_runtime_identity(self):
+                identity = _runtime_identity()
+                environment = identity["environment"]
+                environment["driver_version"] = "571.00"
+                core = {
+                    key: value
+                    for key, value in environment.items()
+                    if key != "content_sha256"
+                }
+                environment["content_sha256"] = sha256_bytes(
+                    canonical_json_bytes(core)
+                )
+                return identity
+
         with tempfile.TemporaryDirectory() as directory:
             spec = _run_spec()
             controller = Plan082ContinuousTrainingController(
@@ -624,6 +906,12 @@ class Plan082TrainingTests(unittest.TestCase):
                 FullModelTrainingError, "plan082_real_adapter_required"
             ):
                 controller.initialize(MissingRuntime())
+
+            controller.initialize(_ControllerAdapter())
+            with self.assertRaisesRegex(
+                FullModelTrainingError, "plan082_runtime_identity_drifted"
+            ):
+                controller._validate_adapter(DriftedEnvironment())
 
     def test_checkpoint_resumes_in_new_process_and_continues(self) -> None:
         spec = _run_spec()
@@ -646,14 +934,14 @@ class Plan082TrainingTests(unittest.TestCase):
         with (
             tempfile.TemporaryDirectory() as directory,
             mock.patch.object(
-                _Plan081FakeAdapter,
+                _Plan082FakeAdapter,
                 "plan082_runtime_identity",
                 lambda _self: _runtime_identity(),
                 create=True,
             ),
         ):
             store = Plan081ArtifactStore(Path(directory))
-            first_adapter = _Plan081FakeAdapter(observations)
+            first_adapter = _Plan082FakeAdapter(observations)
             first = Plan082ContinuousTrainingController(
                 route_contract=read_json(PLAN081_ROUTE),
                 control_plan=ControlPlan.from_value(spec["control_plan"]),
@@ -673,7 +961,7 @@ class Plan082TrainingTests(unittest.TestCase):
             self.assertIsInstance(checkpoint_id, str)
             checkpoint = store.verify_checkpoint(checkpoint_id)
 
-            second_adapter = _Plan081FakeAdapter(observations)
+            second_adapter = _Plan082FakeAdapter(observations)
             resumed = Plan082ContinuousTrainingController.resume(
                 route_contract=read_json(PLAN081_ROUTE),
                 control_plan=ControlPlan.from_value(spec["control_plan"]),
@@ -705,7 +993,7 @@ class Plan082TrainingTests(unittest.TestCase):
 
     def test_process_receipt_exists_before_training_segment_can_interrupt(self) -> None:
         spec = _run_spec()
-        adapter = _Plan081FakeAdapter({0: _plan081_logits(0.0)})
+        adapter = _Plan082FakeAdapter({0: _plan081_logits(0.0)})
         source = {
             "schema": SOURCE_BUNDLE_SCHEMA,
             "commit": "6" * 40,
@@ -718,14 +1006,13 @@ class Plan082TrainingTests(unittest.TestCase):
         with (
             tempfile.TemporaryDirectory() as directory,
             mock.patch.object(
-                _Plan081FakeAdapter,
+                _Plan082FakeAdapter,
                 "plan082_runtime_identity",
                 lambda _self: _runtime_identity(),
                 create=True,
             ),
             mock.patch(
-                "rondo_eval.publication_critic.full_model_training.plan082_cli."
-                "run_scheduled",
+                "rondo_eval.publication_critic.full_model_training.plan082_cli.run_scheduled",
                 side_effect=FullModelTrainingError("simulated_interruption"),
             ),
         ):
@@ -760,6 +1047,130 @@ class Plan082TrainingTests(unittest.TestCase):
             receipt = _load_process_receipt(args.process_receipt_output)
             self.assertEqual(receipt["status"], "started")
             self.assertEqual(receipt["global_step"], 0)
+
+    def test_segment_output_conflicts_fail_before_artifacts_or_updates(self) -> None:
+        spec = _run_spec()
+        source = {
+            "schema": SOURCE_BUNDLE_SCHEMA,
+            "commit": "6" * 40,
+            "archive_bytes": 100,
+            "archive_sha256": "7" * 64,
+            "source_content_sha256": "8" * 64,
+            "file_count": 20,
+            "directory_count": 4,
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state = root / "state.json"
+            state.write_text("occupied", encoding="utf-8")
+            args = SimpleNamespace(
+                formal_freeze=None,
+                artifact_root=root / "formal-artifacts",
+                stop_after=1,
+                process_receipt_output=root / "process.json",
+                state_output=state,
+            )
+            adapter = _Plan082FakeAdapter({0: _plan081_logits(0.0)})
+            with self.assertRaisesRegex(
+                FullModelTrainingError, "plan082_segment_output_conflict"
+            ):
+                _run_with_adapter(
+                    args,
+                    resume=False,
+                    source_receipt=source,
+                    route=read_json(PLAN081_ROUTE),
+                    data_receipt=_data_receipt(),
+                    datasets=SimpleNamespace(
+                        train=_training(), validation=_validation()
+                    ),
+                    run_spec=spec,
+                    initial_scope=TrainableScope.from_value(spec["initial_scope"]),
+                    control=ControlPlan.from_value(spec["control_plan"]),
+                    comparison=ComparisonPolicy.from_value(spec["comparison_policy"]),
+                    threshold=float(spec["report_threshold"]),
+                    adapter=adapter,
+                )
+            self.assertEqual(adapter.update_calls, 0)
+            self.assertFalse(args.artifact_root.exists())
+
+            alias = SimpleNamespace(
+                artifact_root=root / "other-artifacts",
+                state_output=root / "same.json",
+                process_receipt_output=root / "same.json",
+            )
+            with self.assertRaisesRegex(
+                FullModelTrainingError, "plan082_segment_output_alias_invalid"
+            ):
+                _preflight_segment_outputs(alias, resume=False)
+
+            ancestor_adapter = _Plan082FakeAdapter({0: _plan081_logits(0.0)})
+            ancestor = SimpleNamespace(
+                formal_freeze=None,
+                artifact_root=root / "late-parent" / "artifacts",
+                stop_after=1,
+                process_receipt_output=root / "ancestor-process.json",
+                state_output=root / "late-parent",
+            )
+            with self.assertRaisesRegex(
+                FullModelTrainingError, "plan082_segment_output_alias_invalid"
+            ):
+                _run_with_adapter(
+                    ancestor,
+                    resume=False,
+                    source_receipt=source,
+                    route=read_json(PLAN081_ROUTE),
+                    data_receipt=_data_receipt(),
+                    datasets=SimpleNamespace(
+                        train=_training(), validation=_validation()
+                    ),
+                    run_spec=spec,
+                    initial_scope=TrainableScope.from_value(spec["initial_scope"]),
+                    control=ControlPlan.from_value(spec["control_plan"]),
+                    comparison=ComparisonPolicy.from_value(
+                        spec["comparison_policy"]
+                    ),
+                    threshold=float(spec["report_threshold"]),
+                    adapter=ancestor_adapter,
+                )
+            self.assertEqual(ancestor_adapter.update_calls, 0)
+            self.assertFalse(ancestor.artifact_root.exists())
+
+            nested_outputs = SimpleNamespace(
+                artifact_root=root / "nested-output-artifacts",
+                state_output=root / "nested-output",
+                process_receipt_output=root / "nested-output" / "process.json",
+            )
+            with self.assertRaisesRegex(
+                FullModelTrainingError, "plan082_segment_output_alias_invalid"
+            ):
+                _preflight_segment_outputs(nested_outputs, resume=False)
+
+            dangling = root / "dangling.json"
+            dangling.symlink_to(root / "missing-target")
+            symlinked = SimpleNamespace(
+                artifact_root=root / "third-artifacts",
+                state_output=dangling,
+                process_receipt_output=root / "new-process.json",
+            )
+            with self.assertRaisesRegex(
+                FullModelTrainingError, "plan082_segment_output_conflict"
+            ):
+                _preflight_segment_outputs(symlinked, resume=False)
+
+            resume_root = root / "resume-artifacts"
+            resume_root.mkdir()
+            recovery = root / "recovery.json"
+            recovery.write_text("occupied", encoding="utf-8")
+            resumed = SimpleNamespace(
+                artifact_root=resume_root,
+                state_output=root / "resume-state.json",
+                process_receipt_output=root / "resume-process.json",
+                recovery_receipt_output=recovery,
+            )
+            with self.assertRaisesRegex(
+                FullModelTrainingError, "plan082_segment_output_conflict"
+            ):
+                _preflight_segment_outputs(resumed, resume=True)
 
     def test_adapter_records_actual_parameter_inventory_and_expansion(self) -> None:
         adapter = _component_adapter()
@@ -796,6 +1207,113 @@ class Plan082TrainingTests(unittest.TestCase):
             FullModelTrainingError, "plan082_validation_gradient_present"
         ):
             adapter.evaluate_validation(dataset)
+
+    def test_update_rejects_numeric_noop_and_records_real_parameter_change(
+        self,
+    ) -> None:
+        scope = TrainableScope.from_value(_run_spec()["initial_scope"])
+
+        def exercise(adapter):
+            adapter.configure_trainable_scope(scope)
+            with (
+                mock.patch(
+                    "rondo_eval.publication_critic.full_model_training.plan082_adapter."
+                    "tokenize_dataset",
+                    return_value={},
+                ),
+                mock.patch(
+                    "rondo_eval.publication_critic.full_model_training.plan082_adapter.binary_loss",
+                    return_value=_Loss(adapter.model),
+                ),
+                mock.patch(
+                    "rondo_eval.publication_critic.full_model_training.plan082_adapter.pair_loss",
+                    return_value=_Loss(adapter.model),
+                ),
+                mock.patch.object(adapter, "_require_finite_loss"),
+            ):
+                return adapter.apply_update(1, scope, _training())
+
+        noop = _component_adapter(_EvalAdapter)
+        noop.configure_trainable_scope(scope)
+        noop.optimizer.mutate_on_step = False
+        with (
+            mock.patch(
+                "rondo_eval.publication_critic.full_model_training.plan082_adapter."
+                "tokenize_dataset",
+                return_value={},
+            ),
+            mock.patch(
+                "rondo_eval.publication_critic.full_model_training.plan082_adapter.binary_loss",
+                return_value=_Loss(noop.model),
+            ),
+            mock.patch(
+                "rondo_eval.publication_critic.full_model_training.plan082_adapter.pair_loss",
+                return_value=_Loss(noop.model),
+            ),
+            mock.patch.object(noop, "_require_finite_loss"),
+            self.assertRaisesRegex(
+                FullModelTrainingError, "plan082_update_parameter_unchanged"
+            ),
+        ):
+            noop.apply_update(1, scope, _training())
+        self.assertEqual(noop.global_step, 0)
+        self.assertEqual(noop.data_cursor, {"macro_update": 0})
+
+        changed = _component_adapter(_EvalAdapter)
+        receipt = exercise(changed)
+        self.assertEqual(receipt["parameter_change"]["parameter_name"], "tail.weight")
+        self.assertGreater(receipt["parameter_change"]["maximum_absolute_change"], 0)
+
+    def test_validation_rejects_parameter_buffer_and_rng_drift(self) -> None:
+        dataset = _validation()
+
+        class ParameterMutation(_EvalAdapter):
+            def _forward(self, tokenized, candidate_ids):
+                self.model.rows["tail.weight"]._version += 1
+                return super()._forward(tokenized, candidate_ids)
+
+        class BufferMutation(_EvalAdapter):
+            def _forward(self, tokenized, candidate_ids):
+                self.model.buffers["running"]._version += 1
+                return super()._forward(tokenized, candidate_ids)
+
+        for adapter_type in (ParameterMutation, BufferMutation):
+            adapter = _component_adapter(adapter_type)
+            adapter.configure_trainable_scope(
+                TrainableScope.from_value(_run_spec()["initial_scope"])
+            )
+            adapter._validation_cache[validation_identity_sha256(dataset)] = {
+                candidate_id: SimpleNamespace(input_ids=(1,))
+                for candidate_id in dataset.supervision
+            }
+            with (
+                self.subTest(adapter=adapter_type.__name__),
+                self.assertRaisesRegex(
+                    FullModelTrainingError,
+                    "plan082_validation_mutated_training_state",
+                ),
+            ):
+                adapter.evaluate_validation(dataset)
+
+        rng = _component_adapter(_EvalAdapter)
+        rng.configure_trainable_scope(
+            TrainableScope.from_value(_run_spec()["initial_scope"])
+        )
+        rng._validation_cache[validation_identity_sha256(dataset)] = {
+            candidate_id: SimpleNamespace(input_ids=(1,))
+            for candidate_id in dataset.supervision
+        }
+        with (
+            mock.patch.object(
+                rng,
+                "_capture_rng",
+                side_effect=[{"fixture": 1}, {"fixture": 2}],
+            ),
+            self.assertRaisesRegex(
+                FullModelTrainingError, "plan082_validation_mutated_training_state"
+            ),
+        ):
+            rng.evaluate_validation(dataset)
 
     def test_numpy_rng_state_comparator_round_trips(self) -> None:
         class Array:
@@ -846,14 +1364,20 @@ class Plan082TrainingTests(unittest.TestCase):
                 "recovery_proven",
             ],
         }
+        formal_data_receipt = {
+            **_data_receipt(),
+            "train_candidate_count": len(_training().supervision),
+            "train_pair_count": len(_training().pairs),
+        }
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             freeze_path = root / "freeze.json"
             namespace = root / "formal-run"
-            with mock.patch(
+            data_patch = mock.patch(
                 "rondo_eval.publication_critic.full_model_training.plan082_formal.verify_data_bundle",
-                return_value=_data_receipt(),
-            ):
+                return_value=formal_data_receipt,
+            )
+            with data_patch:
                 freeze = create_formal_freeze(
                     freeze_path,
                     run_id="plan082-formal-fixture",
@@ -866,10 +1390,11 @@ class Plan082TrainingTests(unittest.TestCase):
                     run_spec=spec,
                     retention=retention,
                 )["freeze"]
-            namespace.mkdir()
+            occupied = root / "occupied"
+            occupied.mkdir()
             with mock.patch(
                 "rondo_eval.publication_critic.full_model_training.plan082_formal.verify_data_bundle",
-                return_value=_data_receipt(),
+                return_value=formal_data_receipt,
             ):
                 all_parameters = copy.deepcopy(spec)
                 all_parameters["initial_scope"] = _scope(
@@ -899,7 +1424,7 @@ class Plan082TrainingTests(unittest.TestCase):
                     create_formal_freeze(
                         root / "other-freeze.json",
                         run_id="plan082-formal-too-late",
-                        formal_namespace=namespace,
+                        formal_namespace=occupied,
                         source_receipt=source,
                         data_bundle_root=root / "data",
                         route_contract=route,
@@ -909,132 +1434,231 @@ class Plan082TrainingTests(unittest.TestCase):
                         retention=retention,
                     )
 
-        state = {
-            "schema": CONTROLLER_SCHEMA,
-            "status": "completed",
-            "evidence_kind": "torch_real_direct_original_parameters",
-            "plan082": {
-                "runtime_identity": runtime,
-                "process_identity": {
-                    "instance_id": "c" * 32,
-                    "hostname": "fixture",
-                    "pid": 13,
-                },
-                "formal_freeze_sha256": freeze["freeze_content_sha256"],
-                "recovery_proven_checkpoints": {
-                    "checkpoint-attempt-0-step-1": "9" * 64
-                },
-            },
-            "route_contract_sha256": freeze["route_contract_sha256"],
-            "control_plan": spec["control_plan"],
-            "comparison_policy": spec["comparison_policy"],
-            "report_threshold": spec["report_threshold"],
-            "scope_history": frozen_scope_history(spec),
-            "scope_decisions": [
-                {
-                    "before_update": 2,
-                    "scope": spec["scope_schedule"][0]["scope"],
+            def completed_run(frozen, logits):
+                store = Plan081ArtifactStore(Path(frozen["formal_namespace"]))
+                first_adapter = _Plan082FakeAdapter(logits)
+                first = Plan082ContinuousTrainingController(
+                    route_contract=route,
+                    control_plan=ControlPlan.from_value(spec["control_plan"]),
+                    initial_scope=TrainableScope.from_value(spec["initial_scope"]),
+                    comparison_policy=ComparisonPolicy.from_value(
+                        spec["comparison_policy"]
+                    ),
+                    training_dataset=_training(),
+                    validation_dataset=_validation(),
+                    artifact_store=store,
+                    report_threshold=float(spec["report_threshold"]),
+                )
+                first.begin_process(
+                    {"instance_id": "d" * 32, "hostname": "fixture", "pid": 12}
+                )
+                first.bind_formal_freeze(frozen["freeze_content_sha256"])
+                first.initialize(first_adapter)
+                run_scheduled(first, first_adapter, spec, stop_after=1)
+                checkpoint_id = first.state["latest_checkpoint_id"]
+                checkpoint = store.verify_checkpoint(checkpoint_id)
+
+                second_adapter = _Plan082FakeAdapter(logits)
+                resumed = Plan082ContinuousTrainingController.resume(
+                    route_contract=route,
+                    control_plan=ControlPlan.from_value(spec["control_plan"]),
+                    comparison_policy=ComparisonPolicy.from_value(
+                        spec["comparison_policy"]
+                    ),
+                    training_dataset=_training(),
+                    validation_dataset=_validation(),
+                    artifact_store=store,
+                    adapter=second_adapter,
+                    checkpoint_id=checkpoint_id,
+                    report_threshold=float(spec["report_threshold"]),
+                )
+                resumed.begin_process(
+                    {"instance_id": "c" * 32, "hostname": "fixture", "pid": 13}
+                )
+                resumed.record_new_process_recovery(
+                    checkpoint_id, checkpoint["content_sha256"]
+                )
+                run_scheduled(resumed, second_adapter, spec)
+                recovery = {
+                    "schema": RECOVERY_SCHEMA,
+                    "checkpoint_id": checkpoint_id,
+                    "checkpoint_sha256": checkpoint["content_sha256"],
+                    "formal_freeze_sha256": frozen["freeze_content_sha256"],
+                    "run_id": frozen["run_id"],
+                    "formal_namespace": frozen["formal_namespace"],
+                    "runtime_identity_sha256": sha256_bytes(
+                        canonical_json_bytes(frozen["runtime_identity"])
+                    ),
+                    "source_process_id": "d" * 32,
+                    "recovery_process_id": "c" * 32,
+                    "fresh_adapter": True,
+                    "model_loaded": True,
+                    "optimizer_scheduler_rng_data_equal": True,
+                    "probe_update_completed": True,
                 }
-            ],
-            "current_step": 3,
-            "updates": [
-                {"global_step": 1},
-                {"global_step": 2},
-                {"global_step": 3},
-            ],
-            "base": {"comparison_value": 0.0},
-            "latest_checkpoint_id": "checkpoint-attempt-0-step-3",
-            "observations": [
-                {
-                    "global_step": 1,
-                    "comparison_value": 0.5,
-                    "snapshot_id": "snapshot-attempt-0-step-1",
-                    "checkpoint_id": "checkpoint-attempt-0-step-1",
-                },
-                {
-                    "global_step": 2,
-                    "comparison_value": 2.0,
-                    "snapshot_id": "snapshot-attempt-0-step-2",
-                    "checkpoint_id": None,
-                },
-                {
-                    "global_step": 3,
-                    "comparison_value": 1.0,
-                    "snapshot_id": "snapshot-attempt-0-step-3",
-                    "checkpoint_id": "checkpoint-attempt-0-step-3",
-                },
-            ],
-            "selection": {
-                "base_incumbent_snapshot_id": "exact-base-incumbent",
-                "training_best_snapshot_id": "snapshot-attempt-0-step-2",
-                "latest_snapshot_id": "snapshot-attempt-0-step-3",
-                "control_candidate_snapshot_id": "snapshot-attempt-0-step-2",
-            },
-        }
-        recovery = {
-            "schema": RECOVERY_SCHEMA,
-            "checkpoint_id": "checkpoint-attempt-0-step-1",
-            "checkpoint_sha256": "9" * 64,
-            "formal_freeze_sha256": freeze["freeze_content_sha256"],
-            "run_id": freeze["run_id"],
-            "formal_namespace": freeze["formal_namespace"],
-            "runtime_identity_sha256": sha256_bytes(
-                canonical_json_bytes(freeze["runtime_identity"])
-            ),
-            "source_process_id": "d" * 32,
-            "recovery_process_id": "c" * 32,
-            "fresh_adapter": True,
-            "model_loaded": True,
-            "optimizer_scheduler_rng_data_equal": True,
-            "probe_update_completed": True,
-        }
-        result = finalize_formal_run(
-            freeze=freeze,
-            controller_state=state,
-            recovery_receipt=recovery,
-        )
-        self.assertEqual(result["terminal"], "TRAINING_IMPROVEMENT_FOUND")
-        self.assertEqual(
-            result["research_candidate_checkpoint_id"],
-            "checkpoint-attempt-0-step-3",
-        )
-        self.assertFalse(result["claims"]["product_go"])
-        mismatched_process = copy.deepcopy(recovery)
-        mismatched_process["recovery_process_id"] = "e" * 32
-        with self.assertRaisesRegex(
-            FullModelTrainingError, "plan082_formal_state_not_frozen"
-        ):
-            finalize_formal_run(
-                freeze=freeze,
-                controller_state=state,
-                recovery_receipt=mismatched_process,
-            )
-        malformed_process = copy.deepcopy(recovery)
-        malformed_process["source_process_id"] = "source"
-        with self.assertRaisesRegex(
-            FullModelTrainingError, "plan082_recovery_receipt_invalid"
-        ):
-            finalize_formal_run(
-                freeze=freeze,
-                controller_state=state,
-                recovery_receipt=malformed_process,
-            )
-        no_improvement = copy.deepcopy(state)
-        no_improvement["base"]["comparison_value"] = 2.0
-        no_improvement["selection"].update(
-            {
-                "training_best_snapshot_id": "snapshot-attempt-0-step-2",
-                "control_candidate_snapshot_id": None,
-            }
-        )
-        self.assertEqual(
-            finalize_formal_run(
-                freeze=freeze,
-                controller_state=no_improvement,
-                recovery_receipt=recovery,
-            )["terminal"],
-            "VALID_NO_IMPROVEMENT",
-        )
+                return resumed.state, recovery, store
+
+            with mock.patch.object(
+                _Plan082FakeAdapter,
+                "plan082_runtime_identity",
+                lambda _self: runtime,
+                create=True,
+            ):
+                state, recovery, store = completed_run(
+                    freeze,
+                    {
+                        0: _plan081_logits(0.0),
+                        1: _plan081_logits(0.5),
+                        2: _plan081_logits(2.0),
+                        3: _plan081_logits(1.0),
+                    },
+                )
+                result = finalize_formal_run(
+                    freeze=freeze,
+                    controller_state=state,
+                    recovery_receipt=recovery,
+                    artifact_store=store,
+                )
+                self.assertEqual(result["terminal"], "TRAINING_IMPROVEMENT_FOUND")
+                self.assertEqual(
+                    result["research_candidate_checkpoint_id"],
+                    "checkpoint-attempt-001-step-000003",
+                )
+                self.assertFalse(result["claims"]["product_go"])
+
+                wrong_base = copy.deepcopy(state)
+                wrong_base["base"]["model"] = {
+                    "repository": "commissioning",
+                    "revision": "commissioning",
+                }
+                with self.assertRaisesRegex(
+                    FullModelTrainingError, "plan082_formal_base_invalid"
+                ):
+                    finalize_formal_run(
+                        freeze=freeze,
+                        controller_state=wrong_base,
+                        recovery_receipt=recovery,
+                        artifact_store=store,
+                    )
+                wrong_selection = copy.deepcopy(state)
+                wrong_selection["selection"]["base_incumbent_snapshot_id"] = (
+                    "commissioning-base"
+                )
+                with self.assertRaisesRegex(
+                    FullModelTrainingError, "plan082_formal_selection_invalid"
+                ):
+                    finalize_formal_run(
+                        freeze=freeze,
+                        controller_state=wrong_selection,
+                        recovery_receipt=recovery,
+                        artifact_store=store,
+                    )
+                wrong_update = copy.deepcopy(state)
+                wrong_update["updates"][0]["parameter_change"][
+                    "maximum_absolute_change"
+                ] = 0
+                with self.assertRaisesRegex(
+                    FullModelTrainingError, "plan082_formal_history_invalid"
+                ):
+                    finalize_formal_run(
+                        freeze=freeze,
+                        controller_state=wrong_update,
+                        recovery_receipt=recovery,
+                        artifact_store=store,
+                    )
+                wrong_turning = copy.deepcopy(state)
+                wrong_turning["turning_points"] = []
+                with self.assertRaisesRegex(
+                    FullModelTrainingError, "plan082_formal_history_invalid"
+                ):
+                    finalize_formal_run(
+                        freeze=freeze,
+                        controller_state=wrong_turning,
+                        recovery_receipt=recovery,
+                        artifact_store=store,
+                    )
+                extra_terminal_field = copy.deepcopy(state)
+                extra_terminal_field["unexpected"] = "not-in-terminal-checkpoint"
+                with self.assertRaisesRegex(
+                    FullModelTrainingError,
+                    "plan082_formal_terminal_state_mismatch",
+                ):
+                    finalize_formal_run(
+                        freeze=freeze,
+                        controller_state=extra_terminal_field,
+                        recovery_receipt=recovery,
+                        artifact_store=store,
+                    )
+                nonexistent = copy.deepcopy(state)
+                nonexistent["observations"][-1]["checkpoint_id"] = "missing"
+                with self.assertRaisesRegex(
+                    FullModelTrainingError,
+                    "plan082_formal_(history|observation|latest_checkpoint)_invalid",
+                ):
+                    finalize_formal_run(
+                        freeze=freeze,
+                        controller_state=nonexistent,
+                        recovery_receipt=recovery,
+                        artifact_store=store,
+                    )
+                mismatched_process = copy.deepcopy(recovery)
+                mismatched_process["recovery_process_id"] = "e" * 32
+                with self.assertRaisesRegex(
+                    FullModelTrainingError, "plan082_formal_state_not_frozen"
+                ):
+                    finalize_formal_run(
+                        freeze=freeze,
+                        controller_state=state,
+                        recovery_receipt=mismatched_process,
+                        artifact_store=store,
+                    )
+                malformed_process = copy.deepcopy(recovery)
+                malformed_process["source_process_id"] = "source"
+                with self.assertRaisesRegex(
+                    FullModelTrainingError, "plan082_recovery_receipt_invalid"
+                ):
+                    finalize_formal_run(
+                        freeze=freeze,
+                        controller_state=state,
+                        recovery_receipt=malformed_process,
+                        artifact_store=store,
+                    )
+
+                no_improvement_namespace = root / "formal-no-improvement"
+                with mock.patch(
+                    "rondo_eval.publication_critic.full_model_training.plan082_formal.verify_data_bundle",
+                    return_value=formal_data_receipt,
+                ):
+                    no_improvement_freeze = create_formal_freeze(
+                        root / "no-improvement-freeze.json",
+                        run_id="plan082-formal-no-improvement",
+                        formal_namespace=no_improvement_namespace,
+                        source_receipt=source,
+                        data_bundle_root=root / "data",
+                        route_contract=route,
+                        runtime_identity=runtime,
+                        parameter_inventory=_parameter_inventory(),
+                        run_spec=spec,
+                        retention=retention,
+                    )["freeze"]
+                no_state, no_recovery, no_store = completed_run(
+                    no_improvement_freeze,
+                    {
+                        0: _plan081_logits(2.0),
+                        1: _plan081_logits(0.5),
+                        2: _plan081_logits(0.2),
+                        3: _plan081_logits(0.1),
+                    },
+                )
+                self.assertEqual(
+                    finalize_formal_run(
+                        freeze=no_improvement_freeze,
+                        controller_state=no_state,
+                        recovery_receipt=no_recovery,
+                        artifact_store=no_store,
+                    )["terminal"],
+                    "VALID_NO_IMPROVEMENT",
+                )
 
     def test_new_process_receipt_rejects_same_os_process(self) -> None:
         source = {"instance_id": "d" * 32, "hostname": "pod", "pid": 44}

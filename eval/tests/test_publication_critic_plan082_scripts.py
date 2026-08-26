@@ -13,11 +13,19 @@ SCRIPT_ROOT = REPO_ROOT / "training/publication-critic-plan082"
 BOOTSTRAP = SCRIPT_ROOT / "runpod-bootstrap.sh"
 LAUNCHER = SCRIPT_ROOT / "runpod-launch.sh"
 WORKER = SCRIPT_ROOT / "runpod-worker.sh"
+PREPARE_HANDOFF = SCRIPT_ROOT / "prepare-local-handoff.sh"
+RUN_HANDOFF = SCRIPT_ROOT / "run-local-handoff.sh"
 
 
 class Plan082ScriptTests(unittest.TestCase):
     def test_shell_entries_parse_and_require_bounded_arguments(self) -> None:
-        for script in (BOOTSTRAP, LAUNCHER, WORKER):
+        for script in (
+            BOOTSTRAP,
+            LAUNCHER,
+            WORKER,
+            PREPARE_HANDOFF,
+            RUN_HANDOFF,
+        ):
             subprocess.run(["bash", "-n", str(script)], check=True, timeout=10)
         self.assertEqual(
             subprocess.run(["bash", str(WORKER)], check=False, timeout=10).returncode,
@@ -35,6 +43,12 @@ class Plan082ScriptTests(unittest.TestCase):
                     "RONDO_PLAN082_LAUNCH_NAME": "fixture",
                     "RONDO_PLAN082_MAX_SECONDS": "60",
                 },
+            ).returncode,
+            2,
+        )
+        self.assertEqual(
+            subprocess.run(
+                ["bash", str(RUN_HANDOFF)], check=False, timeout=10
             ).returncode,
             2,
         )

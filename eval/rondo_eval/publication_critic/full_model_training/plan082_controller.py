@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 import json
+import math
 from typing import Any
 
 from .contract import (
@@ -18,10 +19,11 @@ from .contract import (
     FullModelTrainingError,
 )
 from .plan081_controller import (
-    ContinuousTrainingController,
     ControllerEvidenceProfile,
+    _ContinuousTrainingControllerCore,
 )
 from .plan082_adapter import ALLOWED_GPUS, RUNTIME_KIND
+from .plan082_environment import validate_environment_receipt
 
 
 CONTROLLER_SCHEMA = "rondo-publication-critic-plan082-controller-state-v1"
@@ -34,15 +36,15 @@ REAL_RUNTIME_PROFILE = ControllerEvidenceProfile(
 )
 
 
-class Plan082ContinuousTrainingController(ContinuousTrainingController):
+class Plan082ContinuousTrainingController(_ContinuousTrainingControllerCore):
     """Plan 081 mechanics gated by an exact Plan 082 runtime identity."""
 
     def __init__(self, **kwargs: Any) -> None:
-        if "_evidence_profile" in kwargs:
+        if "evidence_profile" in kwargs or "_evidence_profile" in kwargs:
             raise FullModelTrainingError(
                 "plan082_controller_profile_override_forbidden"
             )
-        super().__init__(**kwargs, _evidence_profile=REAL_RUNTIME_PROFILE)
+        super().__init__(**kwargs, evidence_profile=REAL_RUNTIME_PROFILE)
         self.state["plan082"] = {
             "runtime_identity": None,
             "process_identity": None,
@@ -129,6 +131,32 @@ class Plan082ContinuousTrainingController(ContinuousTrainingController):
             self.state["plan082"]["runtime_identity"] = json.loads(json.dumps(identity))
         elif bound != identity:
             raise FullModelTrainingError("plan082_runtime_identity_drifted")
+
+    def _accept_update_receipt(self, value: Any, *, step: int, scope: Any) -> None:
+        change = value.get("parameter_change") if isinstance(value, Mapping) else None
+        if (
+            not isinstance(value, Mapping)
+            or not isinstance(change, Mapping)
+            or set(change)
+            != {
+                "method",
+                "parameter_name",
+                "parameter_elements",
+                "maximum_absolute_change",
+            }
+            or change.get("method") != "torch.equal_selected_nonzero_gradient_parameter"
+            or change.get("parameter_name") not in scope.parameter_names
+            or not isinstance(change.get("parameter_elements"), int)
+            or isinstance(change["parameter_elements"], bool)
+            or change["parameter_elements"] <= 0
+            or not isinstance(change.get("maximum_absolute_change"), (int, float))
+            or isinstance(change["maximum_absolute_change"], bool)
+            or not math.isfinite(float(change["maximum_absolute_change"]))
+            or float(change["maximum_absolute_change"]) <= 0
+        ):
+            raise FullModelTrainingError("plan082_update_parameter_change_invalid")
+        core = {key: item for key, item in value.items() if key != "parameter_change"}
+        super()._accept_update_receipt(core, step=step, scope=scope)
 
     def _accept_resumed_state(
         self,
@@ -223,6 +251,7 @@ def validate_runtime_identity(value: Any) -> dict[str, Any]:
         "parameter_inventory_sha256",
         "parameter_tensors",
         "parameter_elements",
+        "environment",
     }
     if (
         not isinstance(value, Mapping)
@@ -234,6 +263,9 @@ def validate_runtime_identity(value: Any) -> dict[str, Any]:
         or value.get("model_revision") != MODEL_REVISION
         or value.get("peft") is not False
         or value.get("quantized_training") is not False
+        or validate_environment_receipt(value.get("environment"))["gpu_names"]
+        != [value.get("gpu_name")]
+        or value["environment"]["torch_cuda_runtime"] != value.get("cuda_version")
         or any(
             not isinstance(value.get(key), str) or not value[key]
             for key in (

@@ -12,10 +12,13 @@ points and any adjusted recipe are recorded in a typed run spec after the real
 parameter inventory and commissioning results are available. The formal
 freeze must be written before its new artifact namespace exists.
 
-`runbook.md` is the operator entry. The bootstrap verifies task-owned inputs;
+`runbook.md` is the operator entry. The bootstrap verifies task-owned inputs,
+publishes one stable ready receipt, and binds the actual image, Python, driver,
+CUDA, GPU and installed-distribution environment;
 the detach wrapper only enforces one launch, a unique local receipt set and a
 finite timeout, while the typed Python CLI validates the command's training
-paths and contracts. These scripts do not create or delete Pods or network
+paths and contracts. `handoff-dependencies-v1.txt` and the two local handoff
+scripts provide one pinned explicit-PYTHONPATH 0 Pod S3 runtime. These scripts do not create or delete Pods or network
 volumes. Stage A does not run the cloud commands, download the model, or access
 RunPod.
 

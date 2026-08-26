@@ -14,8 +14,18 @@ EVAL_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(EVAL_ROOT))
 
 from rondo_eval.publication_critic.full_model_training.contract import (  # noqa: E402
+    FullModelTrainingError,
     canonical_json_bytes,
     pretty_json_bytes,
+)
+from rondo_eval.publication_critic.full_model_training.plan081_artifacts import (  # noqa: E402
+    Plan081ArtifactStore,
+)
+from rondo_eval.publication_critic.full_model_training.plan081_observation import (  # noqa: E402
+    OBSERVATION_SCHEMA,
+)
+from rondo_eval.publication_critic.full_model_training.plan082_formal import (  # noqa: E402
+    RESULT_SCHEMA,
 )
 from rondo_eval.publication_critic.full_model_training.plan082_handoff import (  # noqa: E402
     BOOTSTRAP_SCHEMA,
@@ -26,8 +36,10 @@ from rondo_eval.publication_critic.full_model_training.plan082_handoff import ( 
     create_bootstrap_manifest,
     create_handoff_binding,
     create_handoff_client,
+    create_retained_bootstrap_manifest,
     download,
     inventory,
+    local_handoff_preflight,
     load_handoff,
     validate_handoff,
 )
@@ -127,6 +139,236 @@ def _bootstrap(payload: bytes) -> bytes:
 
 
 class Plan082HandoffTests(unittest.TestCase):
+    def test_retained_bootstrap_is_derived_from_verified_artifact_files(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            task_root = Path(directory) / "rondo-plan082-formal-fixture"
+            artifact_root = task_root / "runs" / "formal"
+            store = Plan081ArtifactStore(artifact_root)
+            snapshot_id = "snapshot-attempt-001-step-000001"
+            checkpoint_id = "checkpoint-attempt-001-step-000001"
+            base_observation = store.write_observation(
+                "base-step-000000", {"schema": OBSERVATION_SCHEMA, "step": 0}
+            )
+            training_observation = store.write_observation(
+                "observation-attempt-001-step-000001",
+                {"schema": OBSERVATION_SCHEMA, "step": 1},
+            )
+            snapshot = store.save_snapshot(
+                snapshot_id,
+                model_saver=lambda payload: (payload / "weights.bin").write_bytes(
+                    b"snapshot"
+                ),
+                metadata={"global_step": 1},
+            )
+            checkpoint = store.save_checkpoint(
+                checkpoint_id,
+                model_saver=lambda payload: (payload / "weights.bin").write_bytes(
+                    b"checkpoint"
+                ),
+                training_state={"step": 1},
+                controller_state={"step": 1},
+                metadata={"global_step": 1},
+            )
+            result = {
+                "schema": RESULT_SCHEMA,
+                "freeze_content_sha256": "a" * 64,
+                "retention": {
+                    "observations": [
+                        {
+                            "artifact_id": "base-step-000000",
+                            "sha256": base_observation["sha256"],
+                            "roles": ["base_observation"],
+                        },
+                        {
+                            "artifact_id": "observation-attempt-001-step-000001",
+                            "sha256": training_observation["sha256"],
+                            "roles": ["validation_observation"],
+                        },
+                    ],
+                    "checkpoints": [
+                        {
+                            "artifact_id": checkpoint_id,
+                            "content_sha256": checkpoint["content_sha256"],
+                            "roles": ["latest_checkpoint", "recovery_proven"],
+                        }
+                    ],
+                    "snapshots": [
+                        {
+                            "artifact_id": snapshot_id,
+                            "content_sha256": snapshot["content_sha256"],
+                            "roles": ["training_best_snapshot"],
+                        }
+                    ],
+                },
+            }
+            destination = task_root / "bootstrap.json"
+            create_retained_bootstrap_manifest(
+                destination,
+                freeze_sha256="a" * 64,
+                task_root=task_root,
+                artifact_root=artifact_root,
+                formal_result=result,
+            )
+            value = json.loads(destination.read_text(encoding="utf-8"))
+            keys = {row["relative_key"] for row in value["objects"]}
+            self.assertIn(
+                f"runs/formal/recovery-checkpoints/{checkpoint_id}/artifact-manifest.json",
+                keys,
+            )
+            self.assertIn(
+                f"runs/formal/model-snapshots/{snapshot_id}/payload/weights.bin",
+                keys,
+            )
+            self.assertIn(
+                "runs/formal/observations/base-step-000000/observation.json",
+                keys,
+            )
+            self.assertIn(
+                "runs/formal/observations/observation-attempt-001-step-000001/observation.json",
+                keys,
+            )
+            self.assertTrue(
+                all(
+                    Path(row["relative_key"]).is_relative_to("runs/formal")
+                    for row in value["objects"]
+                )
+            )
+
+            stale = json.loads(json.dumps(result))
+            stale["retention"]["checkpoints"][0]["content_sha256"] = "b" * 64
+            with self.assertRaisesRegex(
+                HandoffError, "plan082_retained_artifact_identity_mismatch"
+            ):
+                create_retained_bootstrap_manifest(
+                    task_root / "stale.json",
+                    freeze_sha256="a" * 64,
+                    task_root=task_root,
+                    artifact_root=artifact_root,
+                    formal_result=stale,
+                )
+
+            missing = json.loads(json.dumps(result))
+            missing["retention"]["snapshots"][0]["artifact_id"] = (
+                "snapshot-attempt-001-step-000002"
+            )
+            with self.assertRaisesRegex(
+                HandoffError, "plan082_retained_artifact_set_mismatch"
+            ):
+                create_retained_bootstrap_manifest(
+                    task_root / "missing.json",
+                    freeze_sha256="a" * 64,
+                    task_root=task_root,
+                    artifact_root=artifact_root,
+                    formal_result=missing,
+                )
+
+            missing_observation = json.loads(json.dumps(result))
+            missing_observation["retention"]["observations"].pop()
+            with self.assertRaisesRegex(
+                HandoffError, "plan082_retained_artifact_set_mismatch"
+            ):
+                create_retained_bootstrap_manifest(
+                    task_root / "missing-observation.json",
+                    freeze_sha256="a" * 64,
+                    task_root=task_root,
+                    artifact_root=artifact_root,
+                    formal_result=missing_observation,
+                )
+
+            link = (
+                artifact_root
+                / "model-snapshots"
+                / snapshot_id
+                / "payload"
+                / "unexpected-link"
+            )
+            link.symlink_to("weights.bin")
+            with self.assertRaises(FullModelTrainingError):
+                create_retained_bootstrap_manifest(
+                    task_root / "nonregular.json",
+                    freeze_sha256="a" * 64,
+                    task_root=task_root,
+                    artifact_root=artifact_root,
+                    formal_result=result,
+                )
+
+            unrelated_root = Path(directory) / "unrelated-task"
+            unrelated_root.mkdir()
+            with self.assertRaisesRegex(
+                HandoffError, "plan082_handoff_artifact_root_invalid"
+            ):
+                create_retained_bootstrap_manifest(
+                    task_root / "outside-root.json",
+                    freeze_sha256="a" * 64,
+                    task_root=unrelated_root,
+                    artifact_root=artifact_root,
+                    formal_result=result,
+                )
+
+    def test_local_handoff_preflight_binds_source_environment_without_secrets(
+        self,
+    ) -> None:
+        manifest = _bootstrap(b"payload")
+        binding = validate_handoff(_binding(manifest))
+        requirements = {
+            "boto3": "1.40.21",
+            "botocore": "1.40.21",
+            "jmespath": "1.0.1",
+            "s3transfer": "0.13.1",
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            source = root / "source"
+            source.mkdir()
+            requirements_path = root / "requirements.txt"
+            requirements_path.write_text(
+                "".join(
+                    f"{name}=={version}\n" for name, version in requirements.items()
+                ),
+                encoding="utf-8",
+            )
+            with (
+                mock.patch(
+                    "rondo_eval.publication_critic.full_model_training."
+                    "plan082_handoff.importlib.metadata.version",
+                    side_effect=requirements.__getitem__,
+                ),
+                mock.patch(
+                    "rondo_eval.publication_critic.full_model_training."
+                    "plan082_handoff.load_allowlisted_secret_values"
+                ) as secret_loader,
+            ):
+                receipt = local_handoff_preflight(
+                    binding,
+                    operation="inventory",
+                    requirements_path=requirements_path,
+                    source_root=source,
+                    destination_root=root / "destination",
+                )
+            secret_loader.assert_not_called()
+            self.assertFalse(receipt["secret_access"])
+            self.assertFalse(receipt["network_access"])
+            self.assertEqual(receipt["source_root"], str(source))
+            self.assertEqual(receipt["dependencies"], requirements)
+
+            with (
+                mock.patch(
+                    "rondo_eval.publication_critic.full_model_training.plan082_handoff."
+                    "importlib.metadata.version",
+                    return_value="0.0",
+                ),
+                self.assertRaisesRegex(
+                    HandoffError, "plan082_handoff_dependency_version_mismatch"
+                ),
+            ):
+                local_handoff_preflight(
+                    binding,
+                    operation="download",
+                    requirements_path=requirements_path,
+                    source_root=source,
+                    destination_root=root / "destination",
+                )
+
     def test_pure_producers_create_valid_bootstrap_and_binding(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

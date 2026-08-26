@@ -58,7 +58,7 @@ PLAN081_FIXTURE_PROFILE = ControllerEvidenceProfile(
 )
 
 
-class ContinuousTrainingController:
+class _ContinuousTrainingControllerCore:
     """Drive updates and observations through a small explicit adapter seam.
 
     Plan 081 intentionally supports only ``fixture_fake`` evidence.  A future
@@ -77,7 +77,7 @@ class ContinuousTrainingController:
         validation_dataset: ValidationDataset,
         artifact_store: Plan081ArtifactStore,
         report_threshold: float = 0.5,
-        _evidence_profile: ControllerEvidenceProfile = PLAN081_FIXTURE_PROFILE,
+        evidence_profile: ControllerEvidenceProfile,
     ) -> None:
         validated = validate_route_contract(route_contract)
         if (
@@ -103,9 +103,9 @@ class ContinuousTrainingController:
         self.validation_dataset = validation_dataset
         self.artifact_store = artifact_store
         self.report_threshold = float(report_threshold)
-        if not isinstance(_evidence_profile, ControllerEvidenceProfile):
+        if not isinstance(evidence_profile, ControllerEvidenceProfile):
             raise FullModelTrainingError("continuous_controller_profile_invalid")
-        self.evidence_profile = _evidence_profile
+        self.evidence_profile = evidence_profile
         validation_identity = validation_identity_sha256(validation_dataset)
         training_identity = training_identity_sha256(training_dataset)
         if set(training_dataset.supervision) & set(validation_dataset.supervision):
@@ -1067,6 +1067,17 @@ class ContinuousTrainingController:
         )
         if value["turning_points"] != expected_turning:
             raise FullModelTrainingError("plan081_checkpoint_retention_state_invalid")
+
+
+class ContinuousTrainingController(_ContinuousTrainingControllerCore):
+    """Concrete Plan 081 controller permanently bound to fixture evidence."""
+
+    def __init__(self, **kwargs: Any) -> None:
+        if "evidence_profile" in kwargs or "_evidence_profile" in kwargs:
+            raise FullModelTrainingError(
+                "plan081_controller_profile_override_forbidden"
+            )
+        super().__init__(**kwargs, evidence_profile=PLAN081_FIXTURE_PROFILE)
 
 
 def _empty_selection(profile: ControllerEvidenceProfile) -> dict[str, Any]:

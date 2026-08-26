@@ -1,7 +1,7 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
 最后更新：2026-08-25 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
-状态：**第一期、第二期、M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、M3-C2、Plan 064、Plan 071、Plan 073、Plan 075、Plan 079、Plan 081 与四期 M4-A、M4-C0、M4-S1、M4-C1、M4-S2、M4-C2 已完成；Plan 060 技术 GO、Plan 064 DATA_GO、Plan 066 正式训练 GO；Plan 071 为 `BASE_COMPARABILITY_GO`，Plan 073 / M3-C2 为 `NO-GO`，Plan 079 为 `4B_BASE_QUALITY_NO_GO`，Plan 081 为 `LOCAL_TRAINING_READINESS_PASS`；Plan 082 付费前阶段 A 已完成实现与本地验证并等待最终审查者验收，付费阶段仍须用户本人明确人工批准，M3-D 保持锁定；M4-A 为 `M4_A_GO`，M4-C0 为 `M4_C0_PROTOTYPE_PASS`，M4-S1 为 `M4_S1_PASS`，M4-C1 为 `M4_C1_QUERY_PASS`，M4-S2 为 `M4_S2_PASS`，M4-C2 为 `M4_C2_CONTROL_PASS`；下一四期必成工作包为须另行立项授权的 M4-Z(core)**
+状态：**第一期、第二期、M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、M3-C2、Plan 064、Plan 071、Plan 073、Plan 075、Plan 079、Plan 081 与四期 M4-A、M4-C0、M4-S1、M4-C1、M4-S2、M4-C2 已完成；Plan 060 技术 GO、Plan 064 DATA_GO、Plan 066 正式训练 GO；Plan 071 为 `BASE_COMPARABILITY_GO`，Plan 073 / M3-C2 为 `NO-GO`，Plan 079 为 `4B_BASE_QUALITY_NO_GO`，Plan 081 为 `LOCAL_TRAINING_READINESS_PASS`；Plan 082 付费前阶段 A 已完成首轮审查整改和非付费验证并等待复验，付费阶段仍须用户本人明确人工批准，M3-D 保持锁定；M4-A 为 `M4_A_GO`，M4-C0 为 `M4_C0_PROTOTYPE_PASS`，M4-S1 为 `M4_S1_PASS`，M4-C1 为 `M4_C1_QUERY_PASS`，M4-S2 为 `M4_S2_PASS`，M4-C2 为 `M4_C2_CONTROL_PASS`；下一四期必成工作包为须另行立项授权的 M4-Z(core)**
 
 ## 当前定位
 
@@ -337,7 +337,7 @@ A40 48GB 首选、L40S 48GB 备选，实际训练活动不超过 12 小时/15 US
 **任务合同**：[`Plan 082 ExecPlan`](../../plan/082-publication-critic-cloud-continuous-training-execplan.md)。
 
 **当前状态**：付费前阶段 A 已完成真实训练 adapter/runner、物理无 unseen 的 source/data bundle、云端入口、freeze/finalize、
-恢复/归档接缝和聚焦轻量验证，当前等待最终审查者验收；任何计费 Pod/网络卷、数据上传、真实模型下载和云端训练仍须先通过阶段 A 验收，再等待用户本人
+恢复/归档接缝和聚焦轻量验证；首轮审查确认的 9 项 correctness/functionality finding 已局部整改，当前等待复验。任何计费 Pod/网络卷、数据上传、真实模型下载和云端训练仍须先通过阶段 A 验收，再等待用户本人
 明确人工批准进入付费阶段。审查者验收通过本身不构成付费批准。任务依次经过阶段 A 付费申请、保留 Pod 的 GPU 阶段小型证据验收和
 0 Pod 大型资产回传后的最终验收三个主要队列门。
 

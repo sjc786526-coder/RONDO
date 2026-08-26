@@ -44,6 +44,7 @@ from rondo_eval.publication_critic.full_model_training.plan081_contract import (
 )
 from rondo_eval.publication_critic.full_model_training.plan081_controller import (  # noqa: E402
     ContinuousTrainingController,
+    ControllerEvidenceProfile,
 )
 from rondo_eval.publication_critic.full_model_training.plan081_observation import (  # noqa: E402
     build_validation_observation,
@@ -793,6 +794,33 @@ class Plan081ControllerTests(unittest.TestCase):
         )
         controller.initialize(adapter)
         return controller, store
+
+    def test_public_controller_rejects_forged_real_evidence_profile(self) -> None:
+        forged = ControllerEvidenceProfile(
+            controller_schema="forged-real",
+            evidence_kind="real",
+            research_candidate_eligible=True,
+            real_quality_claim=True,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(
+                FullModelTrainingError,
+                "plan081_controller_profile_override_forbidden",
+            ):
+                ContinuousTrainingController(
+                    route_contract=load_route_contract(
+                        PLAN081_ROOT / "route-contract-v1.json"
+                    ),
+                    control_plan=_control_plan(maximum=1),
+                    initial_scope=_scope("partial", ("score_head",), 10),
+                    comparison_policy=ComparisonPolicy(
+                        "boundary_pair_mean_margin", 0.05
+                    ),
+                    training_dataset=_training_dataset(),
+                    validation_dataset=_validation_dataset(),
+                    artifact_store=Plan081ArtifactStore(Path(directory)),
+                    _evidence_profile=forged,
+                )
 
     def test_actual_training_best_is_not_filtered_by_candidate_tolerance(self) -> None:
         observations = {0: _logits(2.0), 1: _logits(2.04), 2: _logits(2.08)}
@@ -2142,7 +2170,7 @@ class Plan081ControllerTests(unittest.TestCase):
             original_mark = store.mark_retention_complete
 
             def mark_then_raise(checkpoint_id: str) -> dict:
-                result = original_mark(checkpoint_id)
+                original_mark(checkpoint_id)
                 raise FullModelTrainingError(
                     "fixture_retention_marker_postpublish_failed"
                 )

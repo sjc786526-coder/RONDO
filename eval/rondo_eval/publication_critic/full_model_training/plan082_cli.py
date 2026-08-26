@@ -19,6 +19,7 @@ from .contract import (
     canonical_json_bytes,
     pretty_json_bytes,
     read_json,
+    safe_directory,
     sha256_bytes,
     write_exclusive,
 )
@@ -45,15 +46,20 @@ from .plan082_formal import (
     finalize_formal_run,
     load_formal_freeze,
 )
+from .plan082_environment import (
+    publish_bootstrap_ready_receipt,
+    publish_environment_receipt,
+)
 from .plan082_handoff import (
     MAX_OBJECTS,
     MAX_TOTAL_BYTES,
-    create_bootstrap_manifest,
     create_handoff_binding,
     create_handoff_client,
+    create_retained_bootstrap_manifest,
     download,
     inventory,
     load_handoff,
+    local_handoff_preflight,
 )
 from .plan082_run import run_scheduled, run_spec_objects, validate_run_spec
 
@@ -102,6 +108,19 @@ def _parser() -> argparse.ArgumentParser:
     snapshot.add_argument("--snapshot", type=Path, required=True)
     snapshot.add_argument("--model-lock", type=Path, required=True)
 
+    environment = commands.add_parser("capture-environment")
+    environment.add_argument("--output", type=Path, required=True)
+
+    ready = commands.add_parser("publish-bootstrap-ready")
+    ready.add_argument("--source-receipt", type=Path, required=True)
+    ready.add_argument("--data-receipt", type=Path, required=True)
+    ready.add_argument("--snapshot-receipt", type=Path, required=True)
+    ready.add_argument("--environment-receipt", type=Path, required=True)
+    ready.add_argument("--source-root", type=Path, required=True)
+    ready.add_argument("--data-root", type=Path, required=True)
+    ready.add_argument("--model-root", type=Path, required=True)
+    ready.add_argument("--output", type=Path, required=True)
+
     freeze = commands.add_parser("freeze-formal")
     freeze.add_argument("--run-id", required=True)
     freeze.add_argument("--formal-namespace", type=Path, required=True)
@@ -125,11 +144,14 @@ def _parser() -> argparse.ArgumentParser:
     finalize.add_argument("--freeze", type=Path, required=True)
     finalize.add_argument("--controller-state", type=Path, required=True)
     finalize.add_argument("--recovery-receipt", type=Path, required=True)
+    finalize.add_argument("--artifact-root", type=Path, required=True)
     finalize.add_argument("--output", type=Path, required=True)
 
     bootstrap_manifest = commands.add_parser("create-handoff-bootstrap")
     bootstrap_manifest.add_argument("--freeze-sha256", required=True)
-    bootstrap_manifest.add_argument("--objects", type=Path, required=True)
+    bootstrap_manifest.add_argument("--task-root", type=Path, required=True)
+    bootstrap_manifest.add_argument("--artifact-root", type=Path, required=True)
+    bootstrap_manifest.add_argument("--formal-result", type=Path, required=True)
     bootstrap_manifest.add_argument("--output", type=Path, required=True)
 
     handoff_binding = commands.add_parser("create-handoff-binding")
@@ -148,6 +170,12 @@ def _parser() -> argparse.ArgumentParser:
     for name in ("handoff-inventory", "handoff-download"):
         handoff = commands.add_parser(name)
         handoff.add_argument("--binding", type=Path, required=True)
+    handoff_preflight = commands.add_parser("handoff-preflight")
+    handoff_preflight.add_argument(
+        "--operation", choices=("inventory", "download"), required=True
+    )
+    handoff_preflight.add_argument("--binding", type=Path, required=True)
+    handoff_preflight.add_argument("--requirements", type=Path, required=True)
     return parser
 
 
@@ -220,6 +248,19 @@ def _dispatch(args: argparse.Namespace) -> Any:
         )
     if args.command == "verify-snapshot":
         return verify_snapshot(args.snapshot, args.model_lock)
+    if args.command == "capture-environment":
+        return publish_environment_receipt(args.output)
+    if args.command == "publish-bootstrap-ready":
+        return publish_bootstrap_ready_receipt(
+            args.output,
+            source_receipt=args.source_receipt,
+            data_receipt=args.data_receipt,
+            snapshot_receipt=args.snapshot_receipt,
+            environment_receipt=args.environment_receipt,
+            source_root=args.source_root,
+            data_root=args.data_root,
+            model_root=args.model_root,
+        )
     if args.command == "freeze-formal":
         run_spec = validate_run_spec(read_json(args.run_spec))
         adapter = TorchContinuousTrainingAdapter.from_snapshot(
@@ -245,19 +286,22 @@ def _dispatch(args: argparse.Namespace) -> Any:
     if args.command in {"start", "resume"}:
         return _run(args, resume=args.command == "resume")
     if args.command == "finalize-formal":
+        artifact_root = safe_directory(args.artifact_root)
         result = finalize_formal_run(
             freeze=load_formal_freeze(args.freeze),
             controller_state=read_json(args.controller_state),
             recovery_receipt=read_json(args.recovery_receipt),
+            artifact_store=Plan081ArtifactStore(artifact_root),
         )
         write_exclusive(args.output, pretty_json_bytes(result))
         return result
     if args.command == "create-handoff-bootstrap":
-        objects = read_json(args.objects)
-        return create_bootstrap_manifest(
+        return create_retained_bootstrap_manifest(
             args.output,
             freeze_sha256=args.freeze_sha256,
-            objects=objects,
+            task_root=args.task_root,
+            artifact_root=args.artifact_root,
+            formal_result=read_json(args.formal_result),
         )
     if args.command == "create-handoff-binding":
         return create_handoff_binding(
@@ -286,10 +330,24 @@ def _dispatch(args: argparse.Namespace) -> Any:
             "destination": binding.destination_relative,
             "records": list(operation(client, binding, destination)),
         }
+    if args.command == "handoff-preflight":
+        paths = RepoPaths.discover(Path.cwd())
+        binding = load_handoff(args.binding)
+        destination = paths.common_root.joinpath(
+            *Path(binding.destination_relative).parts
+        )
+        return local_handoff_preflight(
+            binding,
+            operation=args.operation,
+            requirements_path=args.requirements,
+            source_root=paths.worktree_root,
+            destination_root=destination,
+        )
     raise FullModelTrainingError("plan082_command_not_implemented")
 
 
 def _run(args: argparse.Namespace, *, resume: bool) -> dict[str, Any]:
+    _preflight_segment_outputs(args, resume=resume)
     source_receipt = _verify_executing_source(
         source_archive=args.source_archive,
         source_root=args.source_root,
@@ -339,6 +397,7 @@ def _run_with_adapter(
     threshold: float,
     adapter: TorchContinuousTrainingAdapter,
 ) -> dict[str, Any]:
+    _preflight_segment_outputs(args, resume=resume)
     freeze = (
         load_formal_freeze(args.formal_freeze)
         if args.formal_freeze is not None
@@ -466,6 +525,33 @@ def _run_with_adapter(
         "process_receipt": process_receipt,
         "recovery_receipt": checkpoint_receipt,
     }
+
+
+def _preflight_segment_outputs(args: argparse.Namespace, *, resume: bool) -> None:
+    artifact = Path(args.artifact_root)
+    if resume:
+        if artifact.is_symlink() or not artifact.is_dir():
+            raise FullModelTrainingError("plan082_segment_artifact_root_invalid")
+    elif artifact.exists() or artifact.is_symlink():
+        raise FullModelTrainingError("plan082_segment_artifact_root_conflict")
+    outputs = [Path(args.state_output), Path(args.process_receipt_output)]
+    if resume:
+        outputs.append(Path(args.recovery_receipt_output))
+    resolved_artifact = artifact.resolve(strict=False)
+    resolved_outputs: list[Path] = []
+    for output in outputs:
+        if output.exists() or output.is_symlink():
+            raise FullModelTrainingError("plan082_segment_output_conflict")
+        resolved = output.resolve(strict=False)
+        if _paths_alias(resolved, resolved_artifact):
+            raise FullModelTrainingError("plan082_segment_output_alias_invalid")
+        if any(_paths_alias(resolved, previous) for previous in resolved_outputs):
+            raise FullModelTrainingError("plan082_segment_output_alias_invalid")
+        resolved_outputs.append(resolved)
+
+
+def _paths_alias(left: Path, right: Path) -> bool:
+    return left == right or left.is_relative_to(right) or right.is_relative_to(left)
 
 
 def _bind_optional_freeze(

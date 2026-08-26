@@ -29,6 +29,7 @@
     "weight_decay": 0.01
   },
   "pair_micro_batch_size": 1,
+  "parameter_dtype": "float32",
   "scheduler": {
     "name": "constant"
   },

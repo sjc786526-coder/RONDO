@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 import json
+import math
 from pathlib import Path
 import re
 from typing import Any
@@ -20,10 +21,13 @@ from .contract import (
     write_exclusive,
 )
 from .plan081_contract import ComparisonPolicy, compare_values, validate_route_contract
+from .plan081_artifacts import Plan081ArtifactStore
+from .plan081_controller import _selection_from_records, _turning_points_from_records
 from .plan082_adapter import MODEL_LOCK_SHA256
 from .plan082_bundle import SOURCE_BUNDLE_SCHEMA, verify_data_bundle
 from .plan082_controller import (
     CONTROLLER_SCHEMA,
+    REAL_RUNTIME_PROFILE,
     Plan082ContinuousTrainingController,
     validate_process_identity,
     validate_runtime_identity,
@@ -247,15 +251,20 @@ def finalize_formal_run(
     controller: Plan082ContinuousTrainingController | None = None,
     controller_state: Mapping[str, Any] | None = None,
     recovery_receipt: Mapping[str, Any],
+    artifact_store: Plan081ArtifactStore,
 ) -> dict[str, Any]:
     frozen = validate_formal_freeze(freeze)
     recovery = validate_recovery_receipt(recovery_receipt)
+    if not isinstance(artifact_store, Plan081ArtifactStore):
+        raise FullModelTrainingError("plan082_formal_artifact_store_required")
     if (controller is None) == (controller_state is None):
         raise FullModelTrainingError("plan082_formal_controller_state_invalid")
     if controller is not None:
         if not isinstance(controller, Plan082ContinuousTrainingController):
             raise FullModelTrainingError("plan082_formal_controller_required")
         state: Mapping[str, Any] = controller.state
+        if controller.artifact_store is not artifact_store:
+            raise FullModelTrainingError("plan082_formal_artifact_store_mismatch")
     elif isinstance(controller_state, Mapping):
         state = controller_state
     else:
@@ -282,7 +291,13 @@ def finalize_formal_run(
         or state.get("scope_history") != frozen_scope_history(frozen["run_spec"])
         or state.get("current_step")
         != frozen["run_spec"]["control_plan"]["maximum_updates"]
+        or not isinstance(state.get("updates"), list)
         or len(state.get("updates", [])) != state.get("current_step")
+        or not isinstance(state.get("observations"), list)
+        or any(
+            not isinstance(record, Mapping)
+            for record in state.get("observations", [])
+        )
         or [record.get("global_step") for record in state.get("observations", [])]
         != frozen["run_spec"]["control_plan"]["observation_steps"]
         or [
@@ -318,29 +333,15 @@ def finalize_formal_run(
         != sha256_bytes(canonical_json_bytes(frozen["runtime_identity"]))
     ):
         raise FullModelTrainingError("plan082_formal_state_not_frozen")
+    artifact_state = _validate_formal_artifacts(
+        state=state,
+        frozen=frozen,
+        recovery=recovery,
+        artifact_store=artifact_store,
+    )
     selection = state["selection"]
-    observations = state["observations"]
-    training_best = max(observations, key=lambda record: record["comparison_value"])
-    checkpoint_observations = [
-        record
-        for record in observations
-        if isinstance(record.get("checkpoint_id"), str)
-    ]
-    if not checkpoint_observations:
-        raise FullModelTrainingError("plan082_formal_checkpoint_observation_missing")
-    candidate = max(
-        checkpoint_observations,
-        key=lambda record: record["comparison_value"],
-    )
+    candidate = artifact_state["checkpoint_backed_best"]
     policy = ComparisonPolicy.from_value(frozen["run_spec"]["comparison_policy"])
-    controller_improved = (
-        compare_values(
-            training_best["comparison_value"],
-            state["base"]["comparison_value"],
-            policy,
-        )
-        == "improved"
-    )
     candidate_improved = (
         compare_values(
             candidate["comparison_value"],
@@ -349,15 +350,6 @@ def finalize_formal_run(
         )
         == "improved"
     )
-    expected_control_candidate = (
-        training_best["snapshot_id"] if controller_improved else None
-    )
-    if (
-        selection.get("training_best_snapshot_id") != training_best["snapshot_id"]
-        or selection.get("latest_snapshot_id") != observations[-1]["snapshot_id"]
-        or selection.get("control_candidate_snapshot_id") != expected_control_candidate
-    ):
-        raise FullModelTrainingError("plan082_formal_selection_invalid")
     terminal = (
         "TRAINING_IMPROVEMENT_FOUND" if candidate_improved else "VALID_NO_IMPROVEMENT"
     )
@@ -375,7 +367,15 @@ def finalize_formal_run(
         "research_candidate_checkpoint_id": (
             candidate["checkpoint_id"] if candidate_improved else None
         ),
+        "research_candidate_checkpoint_sha256": (
+            artifact_state["checkpoint_content_sha256"][candidate["checkpoint_id"]]
+            if candidate_improved
+            else None
+        ),
+        "checkpoint_backed_best_snapshot_id": candidate["snapshot_id"],
+        "checkpoint_backed_best_checkpoint_id": candidate["checkpoint_id"],
         "latest_checkpoint_id": state["latest_checkpoint_id"],
+        "retention": artifact_state["retention"],
         "recovery": recovery,
         "observation_count": len(state["observations"]),
         "claims": {
@@ -386,6 +386,357 @@ def finalize_formal_run(
             "m3_c2_evidence": False,
         },
     }
+
+
+def _validate_formal_artifacts(
+    *,
+    state: Mapping[str, Any],
+    frozen: Mapping[str, Any],
+    recovery: Mapping[str, Any],
+    artifact_store: Plan081ArtifactStore,
+) -> dict[str, Any]:
+    if artifact_store.root.resolve() != Path(frozen["formal_namespace"]).resolve():
+        raise FullModelTrainingError("plan082_formal_artifact_root_mismatch")
+    base = state.get("base")
+    if (
+        not isinstance(base, Mapping)
+        or set(base)
+        != {"role", "model", "snapshot_id", "observation", "comparison_value"}
+        or base.get("role") != "base_incumbent"
+        or base.get("model")
+        != {"repository": MODEL_REPOSITORY, "revision": MODEL_REVISION}
+        or base.get("snapshot_id") != "exact-base-incumbent"
+        or base.get("observation")
+        != artifact_store.verify_observation("base-step-000000")
+    ):
+        raise FullModelTrainingError("plan082_formal_base_invalid")
+    stored_base = artifact_store.read_observation("base-step-000000")
+    if (
+        stored_base.get("global_step") != 0
+        or stored_base.get("scope") != frozen["run_spec"]["initial_scope"]
+        or stored_base.get("comparison_value") != base.get("comparison_value")
+        or stored_base.get("validation", {}).get("identity_sha256")
+        != state.get("validation_identity_sha256")
+        or stored_base.get("evidence")
+        != {
+            "kind": "torch_real_direct_original_parameters",
+            "research_candidate_eligible": False,
+            "real_quality_claim": True,
+        }
+    ):
+        raise FullModelTrainingError("plan082_formal_base_invalid")
+
+    observations = state["observations"]
+    observation_fields = {
+        "observation_id",
+        "artifact_generation",
+        "global_step",
+        "snapshot_id",
+        "checkpoint_id",
+        "scope",
+        "comparison_value",
+        "comparisons",
+        "observation",
+        "turning_point_reasons",
+    }
+    checkpoint_steps = set(frozen["run_spec"]["control_plan"]["checkpoint_steps"])
+    scopes = frozen_scope_history(frozen["run_spec"])
+    for record in observations:
+        step = record.get("global_step")
+        generation = record.get("artifact_generation")
+        if (
+            not isinstance(step, int)
+            or isinstance(step, bool)
+            or not isinstance(generation, int)
+            or isinstance(generation, bool)
+            or generation < 0
+        ):
+            raise FullModelTrainingError("plan082_formal_observation_invalid")
+        observation_id = f"observation-attempt-{generation:03d}-step-{step:06d}"
+        snapshot_id = f"snapshot-attempt-{generation:03d}-step-{step:06d}"
+        checkpoint_id = (
+            f"checkpoint-attempt-{generation:03d}-step-{step:06d}"
+            if step in checkpoint_steps
+            else None
+        )
+        active_scope = max(
+            (item for item in scopes if item["effective_before_update"] <= step),
+            key=lambda item: item["effective_before_update"],
+        )["scope"]
+        if (
+            set(record) != observation_fields
+            or record.get("observation_id") != observation_id
+            or record.get("snapshot_id") != snapshot_id
+            or record.get("checkpoint_id") != checkpoint_id
+            or record.get("scope") != active_scope
+            or record.get("observation")
+            != artifact_store.verify_observation(observation_id)
+        ):
+            raise FullModelTrainingError("plan082_formal_observation_invalid")
+        stored = artifact_store.read_observation(observation_id)
+        if (
+            stored.get("global_step") != step
+            or stored.get("scope") != record.get("scope")
+            or stored.get("comparison_value") != record.get("comparison_value")
+            or stored.get("comparisons") != record.get("comparisons")
+            or stored.get("validation", {}).get("identity_sha256")
+            != state.get("validation_identity_sha256")
+            or stored.get("evidence")
+            != {
+                "kind": "torch_real_direct_original_parameters",
+                "research_candidate_eligible": False,
+                "real_quality_claim": True,
+            }
+        ):
+            raise FullModelTrainingError("plan082_formal_observation_invalid")
+
+    _validate_formal_completed_history(state=state, frozen=frozen)
+    expected_selection = _selection_from_records(
+        base=base,
+        observations=observations,
+        policy=ComparisonPolicy.from_value(frozen["run_spec"]["comparison_policy"]),
+        profile=REAL_RUNTIME_PROFILE,
+    )
+    if state.get("selection") != expected_selection:
+        raise FullModelTrainingError("plan082_formal_selection_invalid")
+    checkpoint_observations = [
+        record
+        for record in observations
+        if isinstance(record.get("checkpoint_id"), str)
+    ]
+    if not checkpoint_observations:
+        raise FullModelTrainingError("plan082_formal_checkpoint_observation_missing")
+    training_best = max(observations, key=lambda record: record["comparison_value"])
+    checkpoint_backed_best = max(
+        checkpoint_observations, key=lambda record: record["comparison_value"]
+    )
+    latest_checkpoint = checkpoint_observations[-1]["checkpoint_id"]
+    if state.get("latest_checkpoint_id") != latest_checkpoint:
+        raise FullModelTrainingError("plan082_formal_latest_checkpoint_invalid")
+    expected_terminal_state = json.loads(json.dumps(state))
+    expected_terminal_state["status"] = "running"
+    try:
+        terminal_checkpoint_state = artifact_store.read_checkpoint_controller_state(
+            latest_checkpoint
+        )
+    except FullModelTrainingError as error:
+        raise FullModelTrainingError(
+            "plan082_formal_terminal_checkpoint_invalid"
+        ) from error
+    if terminal_checkpoint_state != expected_terminal_state:
+        raise FullModelTrainingError("plan082_formal_terminal_state_mismatch")
+
+    checkpoint_roles: dict[str, set[str]] = {}
+    snapshot_roles: dict[str, set[str]] = {}
+    observation_roles: dict[str, set[str]] = {
+        "base-step-000000": {"base_observation"}
+    }
+
+    def add_role(target: dict[str, set[str]], artifact_id: Any, role: str) -> None:
+        if isinstance(artifact_id, str):
+            target.setdefault(artifact_id, set()).add(role)
+
+    add_role(checkpoint_roles, latest_checkpoint, "latest_checkpoint")
+    add_role(snapshot_roles, observations[-1]["snapshot_id"], "latest_snapshot")
+    add_role(snapshot_roles, training_best["snapshot_id"], "training_best_snapshot")
+    add_role(
+        checkpoint_roles,
+        next(
+            (
+                record["checkpoint_id"]
+                for record in observations
+                if record["snapshot_id"] == training_best["snapshot_id"]
+            ),
+            None,
+        ),
+        "training_best_checkpoint",
+    )
+    add_role(
+        checkpoint_roles,
+        checkpoint_backed_best["checkpoint_id"],
+        "checkpoint_backed_best",
+    )
+    add_role(
+        snapshot_roles,
+        checkpoint_backed_best["snapshot_id"],
+        "checkpoint_backed_best",
+    )
+    for turning in state.get("turning_points", []):
+        if not isinstance(turning, Mapping):
+            raise FullModelTrainingError("plan082_formal_retention_invalid")
+        add_role(snapshot_roles, turning.get("snapshot_id"), "turning_point")
+        add_role(checkpoint_roles, turning.get("checkpoint_id"), "turning_point")
+    for checkpoint_id in state["plan082"]["recovery_proven_checkpoints"]:
+        add_role(checkpoint_roles, checkpoint_id, "recovery_proven")
+    for record in observations:
+        roles = {"validation_observation"}
+        if isinstance(record.get("checkpoint_id"), str):
+            roles.add("checkpoint_observation")
+        observation_roles[record["observation_id"]] = roles
+
+    if set(artifact_store.verified_checkpoint_ids()) != set(checkpoint_roles):
+        raise FullModelTrainingError("plan082_formal_retained_checkpoint_invalid")
+    if set(artifact_store.verified_snapshot_ids()) != set(snapshot_roles):
+        raise FullModelTrainingError("plan082_formal_retained_snapshot_invalid")
+    if set(artifact_store.verified_observation_ids()) != set(observation_roles):
+        raise FullModelTrainingError("plan082_formal_retained_observation_invalid")
+    checkpoint_receipts = {
+        artifact_id: artifact_store.verify_checkpoint(artifact_id)
+        for artifact_id in sorted(checkpoint_roles)
+    }
+    snapshot_receipts = {
+        artifact_id: artifact_store.verify_snapshot(artifact_id)
+        for artifact_id in sorted(snapshot_roles)
+    }
+    observation_receipts = {
+        artifact_id: artifact_store.verify_observation(artifact_id)
+        for artifact_id in sorted(observation_roles)
+    }
+    if (
+        checkpoint_receipts[recovery["checkpoint_id"]]["content_sha256"]
+        != recovery["checkpoint_sha256"]
+        or any(
+            checkpoint_id not in checkpoint_receipts
+            or checkpoint_receipts[checkpoint_id]["content_sha256"]
+            != content_sha256
+            for checkpoint_id, content_sha256 in state["plan082"][
+                "recovery_proven_checkpoints"
+            ].items()
+        )
+    ):
+        raise FullModelTrainingError("plan082_formal_recovery_artifact_invalid")
+    artifact_store.verify_retention_complete(latest_checkpoint)
+    retention = {
+        "observations": [
+            {
+                "artifact_id": artifact_id,
+                "sha256": observation_receipts[artifact_id]["sha256"],
+                "roles": sorted(observation_roles[artifact_id]),
+            }
+            for artifact_id in sorted(observation_roles)
+        ],
+        "checkpoints": [
+            {
+                "artifact_id": artifact_id,
+                "content_sha256": checkpoint_receipts[artifact_id]["content_sha256"],
+                "roles": sorted(checkpoint_roles[artifact_id]),
+            }
+            for artifact_id in sorted(checkpoint_roles)
+        ],
+        "snapshots": [
+            {
+                "artifact_id": artifact_id,
+                "content_sha256": snapshot_receipts[artifact_id]["content_sha256"],
+                "roles": sorted(snapshot_roles[artifact_id]),
+            }
+            for artifact_id in sorted(snapshot_roles)
+        ],
+    }
+    return {
+        "training_best": training_best,
+        "checkpoint_backed_best": checkpoint_backed_best,
+        "checkpoint_content_sha256": {
+            key: value["content_sha256"] for key, value in checkpoint_receipts.items()
+        },
+        "retention": retention,
+    }
+
+
+def _validate_formal_completed_history(
+    *, state: Mapping[str, Any], frozen: Mapping[str, Any]
+) -> None:
+    scopes = frozen_scope_history(frozen["run_spec"])
+    observations = state.get("observations")
+    if not isinstance(observations, list):
+        raise FullModelTrainingError("plan082_formal_history_invalid")
+    observations_by_step = {
+        record.get("global_step"): record
+        for record in observations
+        if isinstance(record, Mapping)
+    }
+    expected_decisions = []
+    for item in frozen["run_spec"]["scope_schedule"]:
+        step = item["after_observation_step"]
+        observation = observations_by_step.get(step)
+        if not isinstance(observation, Mapping):
+            raise FullModelTrainingError("plan082_formal_history_invalid")
+        expected_decisions.append(
+            {
+                "decided_after_observation_id": observation.get("observation_id"),
+                "before_update": step + 1,
+                "scope": item["scope"],
+            }
+        )
+    if (
+        state.get("scope_decisions") != expected_decisions
+        or state.get("current_scope") != scopes[-1]["scope"]
+    ):
+        raise FullModelTrainingError("plan082_formal_history_invalid")
+
+    updates = state.get("updates")
+    expected_update_fields = {
+        "global_step",
+        "training_split",
+        "validation_candidates_consumed",
+        "unseen_candidates_consumed",
+        "training_identity_sha256",
+        "training_candidate_count",
+        "training_pair_count",
+        "scope",
+        "data_cursor",
+        "parameter_change",
+    }
+    if not isinstance(updates, list):
+        raise FullModelTrainingError("plan082_formal_history_invalid")
+    for step, update in enumerate(updates, start=1):
+        scope = max(
+            (item for item in scopes if item["effective_before_update"] <= step),
+            key=lambda item: item["effective_before_update"],
+        )["scope"]
+        change = update.get("parameter_change") if isinstance(update, Mapping) else None
+        if (
+            not isinstance(update, Mapping)
+            or set(update) != expected_update_fields
+            or update.get("global_step") != step
+            or update.get("training_split") != "train"
+            or update.get("validation_candidates_consumed") != 0
+            or update.get("unseen_candidates_consumed") != 0
+            or update.get("training_identity_sha256")
+            != state.get("training_identity_sha256")
+            or update.get("training_candidate_count")
+            != frozen["data"]["train_candidate_count"]
+            or update.get("training_pair_count")
+            != frozen["data"]["train_pair_count"]
+            or update.get("scope") != scope
+            or not isinstance(update.get("data_cursor"), Mapping)
+            or not isinstance(change, Mapping)
+            or set(change)
+            != {
+                "method",
+                "parameter_name",
+                "parameter_elements",
+                "maximum_absolute_change",
+            }
+            or change.get("method")
+            != "torch.equal_selected_nonzero_gradient_parameter"
+            or change.get("parameter_name") not in scope["parameter_names"]
+            or not isinstance(change.get("parameter_elements"), int)
+            or isinstance(change["parameter_elements"], bool)
+            or change["parameter_elements"] <= 0
+            or not isinstance(change.get("maximum_absolute_change"), (int, float))
+            or isinstance(change["maximum_absolute_change"], bool)
+            or not math.isfinite(float(change["maximum_absolute_change"]))
+            or float(change["maximum_absolute_change"]) <= 0
+        ):
+            raise FullModelTrainingError("plan082_formal_history_invalid")
+
+    expected_turning = _turning_points_from_records(
+        observations,
+        expansion_steps={item["before_update"] for item in expected_decisions},
+        limit=frozen["run_spec"]["control_plan"]["turning_point_limit"],
+    )
+    if state.get("turning_points") != expected_turning:
+        raise FullModelTrainingError("plan082_formal_history_invalid")
 
 
 def _validate_formal_scope_bounds(

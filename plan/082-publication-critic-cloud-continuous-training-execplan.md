@@ -395,10 +395,16 @@ XXX用以下内容代替：
   6/2、unseen 0；目录总计 2,412,268 bytes，全部文件 `0600`。早期同规模 `stage-a-dry-run/` 保留为本任务临时验证资产。
 - 2026-08-25：Plan 082 focused + Plan 081/068 相邻回归、shell/compile/ruff/diff 门正在最终收口；未运行 Cargo、Docker、全 workspace、
   本地真实模型，未访问 RunPod/HF、未创建 Pod/卷、未上传/下载或产生费用，未读取 `.env.local`、unseen 或模型/checkpoint 正文。
+- 2026-08-26：阶段 A 首轮独立验收为 `PHASE_A_REVIEW_NOT_ACCEPTED`，确认 9 项 Medium correctness/functionality finding；付费门保持
+  关闭。整改已局部闭合数值 no-op、formal exact base/真实工件、训练前输出冲突、完整实际环境、真实 retention bootstrap、固定本地
+  S3 环境/入口、稳定 ready receipt、validation 参数/buffer/RNG 状态和 Plan 081 fixture profile 边界，并补直接负例。
+- 2026-08-26：主物理根新增 ignored `handoff-runtime-v1` 固定 boto3 环境和 `stage-a-remediation-dry-run` 非秘密 fixture；inventory/download
+  两个 preflight 均显示 exact worktree/Python prefix、`secret_access=false`、`network_access=false`。整改未访问 RunPod/HF/S3、凭据、真实模型，
+  未创建 Pod/卷、未训练或产生费用。
 
 ### 当前工作
 
-- 阶段 A 实现与本地非付费验证已完成，正在形成 task branch 提交并请求最终审查者付费前验收；阶段 B 未授权。
+- 阶段 A 首轮审查的 9 项 finding 已完成局部整改与非付费验证，正在形成新提交并请求复验；阶段 B 未授权。
 
 ### 本任务剩余步骤
 
@@ -424,7 +430,7 @@ XXX用以下内容代替：
 
 ### 当前验收状态
 
-- `PHASE_A_REVIEW_PENDING / PAID_GATE_PENDING`。
+- `PHASE_A_REVIEW_REMEDIATION_PENDING / PAID_GATE_PENDING`。
 
 ### 交接边界
 
@@ -463,3 +469,5 @@ XXX用以下内容代替：
 | 016 | 固定模型/数据/objective 身份，参数化 recipe、scope、控制点、路径、实时资源和 handoff；不增加签名链、registry 或通用云编排 | 保持后续 commissioning 可修且架构契合，同时把复杂度限制在正确性与功能所需范围 | maintainability | 已采纳 |
 | 017 | 正式候选从完整 checkpoint-backed observation 中选择并保留其 checkpoint/snapshot；全 observation training-best 只作诊断 | 避免最好观测没有可恢复权重，也不因非 checkpoint 观测更好而错误判整轮无效 | selection/retention | 已采纳 |
 | 018 | 进程 receipt 在训练 segment 前 write-once 发布，正式 freeze 显式选择末次非终 checkpoint 作为新进程恢复边界 | 中断后仍能消费已资格化 checkpoint，并保证正式轮实际走一次恢复后继续更新 | recovery | 已采纳 |
+| 019 | recipe 显式参数化模型参数 dtype；每个已接受 update 只克隆当前 scope 中最小的非零梯度参数并证明 optimizer 前后数值不同，不做全模型逐步哈希 | 以低额外显存闭合 BF16 no-op；策略可能保守拒绝但绝不把未证明变化记成进展，commissioning 可调整 dtype/LR/scope | training correctness | 已采纳 |
+| 020 | 用小型实际环境 receipt、真实 retention artifact producer 与固定项目局部 boto3 launcher 分别闭合 freeze、GPU 释放前清单和 0 Pod 回传入口 | 直接验证真实接缝且保持职责分离，不引入签名链、通用环境管理器或第二套工件平台 | environment/handoff | 已采纳 |
