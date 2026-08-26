@@ -383,26 +383,37 @@ XXX用以下内容代替：
   24,385,153,354 bytes（含完整 checkpoint），并确认当前 CLI 硬编码旧卷/region/root/manifest，Plan 082 只能窄复用底层严格能力后参数化。
 - 2026-08-25：按资源保留优先、三次主要队列验收、GPU 专项审查分工、10 USD 非阻断告警与无 Pod S3 交接修订 ExecPlan/两份 WBS；
   最新独立复核为 `ACCEPT`，无剩余 P1/P2 correctness/functionality finding，`git diff --check` 通过。
+- 2026-08-25：阶段 A 已落地 Plan 082 专用 Torch adapter、真实 controller/profile、typed run spec、source/data bundle、formal
+  freeze/finalize、提前发布的进程启动 receipt、新进程 checkpoint 恢复、checkpoint-backed 候选/保留和参数化 0 Pod S3 handoff；
+  Plan 081 与 Plan 068 只增加职责中性的窄 seam，历史固定 wrapper/fixture claim 保持不变。
+- 2026-08-25：云端入口/runbook 已闭合显式 venv/PYTHONPATH、可重入 source/data bootstrap、有限时长单 launcher、exact source
+  receipt、完整参数 inventory、冻结恢复点和 handoff bootstrap/binding 生产入口；运行位置、recipe、scope、控制点、卷/region/root 均为
+  typed 参数，未建设签名链、工件台账、通用编排器或第二套数据体系。
+- 2026-08-25：主物理根 `eval-data/publication-critic/plan082/stage-a-final/` 已从 canonical Plan 066 物理 train+validation bundle
+  完成 prepare→archive→extract：四个文件、archive 808,960 bytes / SHA-256
+  `af1d9ac744529a6366b8158549fd74a653d6596313cc9769c255fd2dcecb2fc6`，train 128/58、validation 55/26、commissioning
+  6/2、unseen 0；目录总计 2,412,268 bytes，全部文件 `0600`。早期同规模 `stage-a-dry-run/` 保留为本任务临时验证资产。
+- 2026-08-25：Plan 082 focused + Plan 081/068 相邻回归、shell/compile/ruff/diff 门正在最终收口；未运行 Cargo、Docker、全 workspace、
+  本地真实模型，未访问 RunPod/HF、未创建 Pod/卷、未上传/下载或产生费用，未读取 `.env.local`、unseen 或模型/checkpoint 正文。
 
 ### 当前工作
 
-- 无；ExecPlan 已就绪，Plan 082 实现尚未开始。
+- 阶段 A 实现与本地非付费验证已完成，正在形成 task branch 提交并请求最终审查者付费前验收；阶段 B 未授权。
 
 ### 本任务剩余步骤
 
-1. 阶段 A：落地真实 adapter、物理无 unseen bundle、云端入口/runbook、freeze/finalize 与聚焦测试；提交并保持 worktree clean。
-2. 最终审查者验收阶段 A；验收通过后等待用户本人明确人工批准付费，审查者通过指定队列传达已取得该批准后才进入下一步。
-3. 阶段 B：同时刷新 A40/L40S 与网络卷兼容性/费用事实，创建单 GPU 与最小实用网络卷，完成真实环境 commissioning；总累计费用首次
+1. 最终审查者验收阶段 A；验收通过后等待用户本人明确人工批准付费，审查者通过指定队列传达已取得该批准后才进入下一步。
+2. 阶段 B：同时刷新 A40/L40S 与网络卷兼容性/费用事实，创建单 GPU 与最小实用网络卷，完成真实环境 commissioning；总累计费用首次
    达到 10 USD 时发一次非阻断告警，远端任务继续。
-4. 在 commissioning 中有界开发训练参数，完整打通后提交并冻结结果相关 source/environment/recipe/比较规则。
-5. 从 exact base 和空 namespace 运行一轮干净 formal，形成 improvement 或 valid no-improvement；若外部边界始终阻断则形成 inconclusive。
-6. 只回传小型关键证据，保留正式 Pod/网络卷；更新 `GPU_REVIEW_PENDING / POD_RETAINED`、WBS 候选事实与执行日志，提交 clean task branch
+3. 在 commissioning 中有界开发训练参数，完整打通后提交并冻结结果相关 source/environment/recipe/比较规则。
+4. 从 exact base 和空 namespace 运行一轮干净 formal，形成 improvement 或 valid no-improvement；若外部边界始终阻断则形成 inconclusive。
+5. 只回传小型关键证据，保留正式 Pod/网络卷；更新 `GPU_REVIEW_PENDING / POD_RETAINED`、WBS 候选事实与执行日志，提交 clean task branch
    并按队列请求 GPU 阶段验收。
-7. 审查者只关闭所有合理可预见且仍需 GPU/Pod 的事项；执行者按审查结论修复/补跑。审查者明确确认无需再操作 GPU 后，执行者立即释放
+6. 审查者只关闭所有合理可预见且仍需 GPU/Pod 的事项；执行者按审查结论修复/补跑。审查者明确确认无需再操作 GPU 后，执行者立即释放
    Pod、核对 0 Pod/compute 费用归零并提交资源状态；无需 GPU 的事项留给最终验收。
-8. 等待 Plan 083 不占用共享磁盘且宿主容量安全窗口；不创建 transfer Pod，通过网络卷 S3-compatible API 完成 inventory、`.part`
+7. 等待 Plan 083 不占用共享磁盘且宿主容量安全窗口；不创建 transfer Pod，通过网络卷 S3-compatible API 完成 inventory、`.part`
    Range 续传、全部必要对象 bytes/SHA-256 校验，提交 `FINAL_REVIEW_PENDING / VOLUME_RETAINED_PENDING_USER_DELETE` 并按队列申请最终验收。
-9. 最终审查者只要求无需 GPU 的修复/复验并收口最终文档；验收后转请用户本人决定是否删除网络卷。执行者仅在收到用户人工批准后删除卷，
+8. 最终审查者只要求无需 GPU 的修复/复验并收口最终文档；验收后转请用户本人决定是否删除网络卷。执行者仅在收到用户人工批准后删除卷，
    记录终态并通知；所有人继续等待用户决定合并/推送。
 
 ### 阻塞项
@@ -413,7 +424,7 @@ XXX用以下内容代替：
 
 ### 当前验收状态
 
-- `PLAN_READY / PHASE_A_AUTHORIZED / IMPLEMENTATION_NOT_STARTED / PAID_GATE_PENDING`。
+- `PHASE_A_REVIEW_PENDING / PAID_GATE_PENDING`。
 
 ### 交接边界
 
@@ -449,3 +460,6 @@ XXX用以下内容代替：
 | 013 | 额外请示、阶段 A 付费申请、GPU 阶段小型证据验收和无 Pod 大型回传后最终验收只使用指定 Codex 队列，发送后停止且主动表明身份 | 满足用户指定的三次主要申请/验收、批示与自动唤醒方式 | coordination | 已采纳 |
 | 014 | RunPod 软性优先 MCP，CLI 补 MCP 不擅长的操作；手动抢不到时按计划模板复用既有单目标、唯一名称、有界超时抢 Pod 脚本 | 提高 Agent 操作可用性，同时避免重复计费 Pod 或为工具偏好锁死实现 | cloud control | 已采纳 |
 | 015 | 窄复用 Plan 068 无 Pod S3 严格下载 core，以 Plan 082 实时卷/endpoint/root/manifest 参数化，不原样调用旧 CLI | 复用 120/120、24.4GB 真实成功经验，同时避免旧资源身份污染新任务 | artifact handoff | 已采纳 |
+| 016 | 固定模型/数据/objective 身份，参数化 recipe、scope、控制点、路径、实时资源和 handoff；不增加签名链、registry 或通用云编排 | 保持后续 commissioning 可修且架构契合，同时把复杂度限制在正确性与功能所需范围 | maintainability | 已采纳 |
+| 017 | 正式候选从完整 checkpoint-backed observation 中选择并保留其 checkpoint/snapshot；全 observation training-best 只作诊断 | 避免最好观测没有可恢复权重，也不因非 checkpoint 观测更好而错误判整轮无效 | selection/retention | 已采纳 |
+| 018 | 进程 receipt 在训练 segment 前 write-once 发布，正式 freeze 显式选择末次非终 checkpoint 作为新进程恢复边界 | 中断后仍能消费已资格化 checkpoint，并保证正式轮实际走一次恢复后继续更新 | recovery | 已采纳 |
