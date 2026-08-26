@@ -93,18 +93,39 @@ impl GitWorktreeFixture {
 async fn baseline_and_binding_candidate_use_the_same_two_writer_actions() {
     let fixture = GitWorktreeFixture::new();
     let caller_config = fixture.authorized_config().await;
-    let action_a = action(&fixture.writer_a, "writer-a\n", "writer-output.txt");
-    let action_b = action(&fixture.writer_b, "writer-b\n", "writer-output.txt");
+    let task_a =
+        NaturalLanguageWriterTask::prepare(&fixture.writer_a, "writer-a\n", "writer-output.txt")
+            .expect("prepare writer A task text, Git facts, and fake action");
+    let task_b =
+        NaturalLanguageWriterTask::prepare(&fixture.writer_b, "writer-b\n", "writer-output.txt")
+            .expect("prepare writer B task text, Git facts, and fake action");
+    assert!(
+        task_a
+            .instruction
+            .contains(fixture.writer_a.as_path().to_str().expect("UTF-8 path"))
+    );
+    assert!(
+        task_b
+            .instruction
+            .contains(fixture.writer_b.as_path().to_str().expect("UTF-8 path"))
+    );
+    assert!(task_a.instruction.contains("git status/diff"));
+    assert_eq!(task_a.git_facts.branch, "writer-a");
+    assert_eq!(task_b.git_facts.branch, "writer-b");
+    assert_ne!(task_a.git_facts.head, task_b.git_facts.head);
+    assert!(task_a.git_facts.status.is_empty());
+    assert!(task_b.git_facts.diff.is_empty());
 
     // The existing flow works when each initiating turn already has the intended context. The
-    // comparison therefore preserves the cooperative baseline before introducing context drift.
+    // task text, Git facts, and fake action therefore remain a fair cooperative baseline before
+    // context drift. Deterministic execution does not claim a model-compliance frequency.
     let cooperative_a = caller_context_for(&caller_config, &fixture.writer_a);
     let cooperative_b = caller_context_for(&caller_config, &fixture.writer_b);
-    let baseline_cooperative_a = action_a
-        .execute(&cooperative_a)
+    let baseline_cooperative_a = task_a
+        .execute_baseline(&cooperative_a)
         .expect("cooperative baseline action A");
-    let baseline_cooperative_b = action_b
-        .execute(&cooperative_b)
+    let baseline_cooperative_b = task_b
+        .execute_baseline(&cooperative_b)
         .expect("cooperative baseline action B");
     assert_eq!(baseline_cooperative_a.effective_cwd, fixture.writer_a);
     assert_eq!(baseline_cooperative_b.effective_cwd, fixture.writer_b);
@@ -115,11 +136,11 @@ async fn baseline_and_binding_candidate_use_the_same_two_writer_actions() {
 
     // Current V2 spawn/resume builds each child from the initiating turn. Natural-language target
     // and Git facts remain available, but the execution context itself is still caller-relative.
-    let baseline_a = action_a
-        .execute(&caller_config)
+    let baseline_a = task_a
+        .execute_baseline(&caller_config)
         .expect("baseline fake action A");
-    let baseline_b = action_b
-        .execute(&caller_config)
+    let baseline_b = task_b
+        .execute_baseline(&caller_config)
         .expect("baseline fake action B");
     assert_eq!(baseline_a.effective_cwd, fixture.primary);
     assert_eq!(baseline_b.effective_cwd, fixture.primary);
@@ -132,8 +153,14 @@ async fn baseline_and_binding_candidate_use_the_same_two_writer_actions() {
 
     let writer_a = bind_slot(&caller_config, &fixture.writer_a);
     let writer_b = bind_slot(&caller_config, &fixture.writer_b);
-    let candidate_a = writer_a.runtime.run(&action_a).expect("candidate action A");
-    let candidate_b = writer_b.runtime.run(&action_b).expect("candidate action B");
+    let candidate_a = writer_a
+        .runtime
+        .run(&task_a.action)
+        .expect("candidate action A");
+    let candidate_b = writer_b
+        .runtime
+        .run(&task_b.action)
+        .expect("candidate action B");
 
     assert_eq!(candidate_a.effective_cwd, fixture.writer_a);
     assert_eq!(candidate_b.effective_cwd, fixture.writer_b);
@@ -158,6 +185,22 @@ async fn cold_reload_revalidates_binding_instead_of_using_caller_cwd() {
 
     let mut different_caller = caller_config;
     different_caller.cwd = fixture.primary.clone();
+    let parked = fixture
+        .writer_a
+        .parent()
+        .expect("fixture parent")
+        .join("writer-a-cold-missing");
+    fs::rename(&fixture.writer_a, &parked).expect("park writer A before cold reload");
+    let invalidated = BoundWriterRuntime::reload(
+        persisted_binding.clone(),
+        &different_caller,
+        LOCAL_EXECUTION_ENVIRONMENT,
+    )
+    .expect_err("cold reload must re-read and reject the missing worktree");
+    assert_eq!(invalidated.failure, BindingFailure::WorktreeMissing);
+    assert!(!parked.join("writer-output.txt").exists());
+
+    fs::rename(&parked, &fixture.writer_a).expect("restore writer A after failed cold reload");
     let reloaded = BoundWriterRuntime::reload(
         persisted_binding,
         &different_caller,
@@ -217,6 +260,7 @@ async fn repository_permission_and_execution_context_mismatches_fail_closed() {
     let fixture = GitWorktreeFixture::new();
     let caller_config = fixture.authorized_config().await;
     let runtime = bind_runtime(&caller_config, &fixture.writer_a);
+    let writer_b = bind_slot(&caller_config, &fixture.writer_b);
     let parked = fixture
         .writer_a
         .parent()
@@ -235,9 +279,88 @@ async fn repository_permission_and_execution_context_mismatches_fail_closed() {
         .expect_err("same path backed by another repository must fail");
     assert_eq!(repository_error.failure, BindingFailure::RepositoryMismatch);
     assert!(!fixture.writer_a.join("writer-output.txt").exists());
+    assert_writer_usable(
+        &writer_b,
+        &fixture.writer_b,
+        "after-repository-mismatch.txt",
+    );
 
     let fresh_fixture = GitWorktreeFixture::new();
     let authorized = fresh_fixture.authorized_config().await;
+    let runtime = bind_runtime(&authorized, &fresh_fixture.writer_a);
+    let writer_b = bind_slot(&authorized, &fresh_fixture.writer_b);
+
+    let unauthorized = fresh_fixture
+        .primary
+        .parent()
+        .expect("fixture parent")
+        .join("unauthorized-and-absent");
+    let admission_error =
+        BoundWriterRuntime::bind(&authorized, unauthorized, LOCAL_EXECUTION_ENVIRONMENT)
+            .expect_err("authorization must reject before inspecting the absent target");
+    assert_eq!(
+        admission_error.failure,
+        BindingFailure::WorkspaceRootsIncompatible
+    );
+    assert_writer_usable(
+        &writer_b,
+        &fresh_fixture.writer_b,
+        "after-admission-mismatch.txt",
+    );
+
+    let parent_escape = runtime
+        .run(&action(
+            &fresh_fixture.writer_a,
+            "must-not-run\n",
+            "../writer-b/marker.txt",
+        ))
+        .expect_err("parent traversal must not escape the bound root");
+    assert_eq!(
+        parent_escape.failure,
+        BindingFailure::ActionTargetOutsideBinding
+    );
+    let absolute_escape = runtime
+        .run(&action(
+            &fresh_fixture.writer_a,
+            "must-not-run\n",
+            fresh_fixture.writer_b.join("marker.txt"),
+        ))
+        .expect_err("absolute output must not escape the bound root");
+    assert_eq!(
+        absolute_escape.failure,
+        BindingFailure::ActionTargetOutsideBinding
+    );
+    assert_eq!(
+        fs::read_to_string(fresh_fixture.writer_b.join("marker.txt"))
+            .expect("read untouched writer B marker"),
+        "base\n"
+    );
+
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(
+            &fresh_fixture.writer_b,
+            fresh_fixture.writer_a.join("writer-b-link"),
+        )
+        .expect("create task-owned escape symlink");
+        let symlink_escape = runtime
+            .run(&action(
+                &fresh_fixture.writer_a,
+                "must-not-run\n",
+                "writer-b-link/marker.txt",
+            ))
+            .expect_err("symlink traversal must not escape the bound root");
+        assert_eq!(
+            symlink_escape.failure,
+            BindingFailure::ActionTargetOutsideBinding
+        );
+        assert_eq!(
+            fs::read_to_string(fresh_fixture.writer_b.join("marker.txt"))
+                .expect("read writer B marker after symlink rejection"),
+            "base\n"
+        );
+    }
+
     let binding = WriterWorkspaceBinding::capture(
         fresh_fixture.writer_a.clone(),
         LOCAL_EXECUTION_ENVIRONMENT,
@@ -255,12 +378,22 @@ async fn repository_permission_and_execution_context_mismatches_fail_closed() {
         permission_error.failure,
         BindingFailure::PermissionIncompatible
     );
+    assert_writer_usable(
+        &writer_b,
+        &fresh_fixture.writer_b,
+        "after-permission-mismatch.txt",
+    );
 
     let context_error = BoundWriterRuntime::reload(binding, &authorized, "remote-w0")
         .expect_err("incompatible execution environment must fail");
     assert_eq!(
         context_error.failure,
         BindingFailure::ExecutionContextMismatch
+    );
+    assert_writer_usable(
+        &writer_b,
+        &fresh_fixture.writer_b,
+        "after-execution-context-mismatch.txt",
     );
 
     let binding = WriterWorkspaceBinding::capture(
@@ -275,6 +408,11 @@ async fn repository_permission_and_execution_context_mismatches_fail_closed() {
     assert_eq!(
         roots_error.failure,
         BindingFailure::WorkspaceRootsIncompatible
+    );
+    assert_writer_usable(
+        &writer_b,
+        &fresh_fixture.writer_b,
+        "after-roots-mismatch.txt",
     );
 }
 
@@ -341,13 +479,26 @@ async fn replacement_is_transactional_and_natural_language_git_handoff_is_suffic
 fn action(
     intended_worktree: &AbsolutePathBuf,
     content: &'static str,
-    relative_path: &'static str,
+    relative_path: impl Into<PathBuf>,
 ) -> FakeWriterAction {
     FakeWriterAction {
         intended_worktree: intended_worktree.clone(),
-        relative_path,
+        relative_path: relative_path.into(),
         content,
     }
+}
+
+fn assert_writer_usable(
+    slot: &WriterSlot,
+    worktree: &AbsolutePathBuf,
+    relative_path: &'static str,
+) {
+    let observation = slot
+        .runtime
+        .run(&action(worktree, "writer remains usable\n", relative_path))
+        .expect("unaffected writer remains usable");
+    assert_eq!(observation.effective_cwd, *worktree);
+    assert_eq!(observation.output_path, worktree.join(relative_path));
 }
 
 fn bind_runtime(config: &Config, worktree: &AbsolutePathBuf) -> BoundWriterRuntime {

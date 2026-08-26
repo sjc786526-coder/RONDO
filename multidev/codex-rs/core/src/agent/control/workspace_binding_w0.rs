@@ -7,7 +7,9 @@
 use crate::config::Config;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use std::fs;
+use std::path::Component;
 use std::path::Path;
+use std::path::PathBuf;
 use std::process::Command;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -17,6 +19,7 @@ enum BindingFailure {
     WorkspaceRootsIncompatible,
     PermissionIncompatible,
     ExecutionContextMismatch,
+    ActionTargetOutsideBinding,
     ActionFailed,
 }
 
@@ -127,6 +130,9 @@ impl BoundWriterRuntime {
         worktree_root: AbsolutePathBuf,
         execution_environment_id: &str,
     ) -> Result<Self, BindingError> {
+        // Admission must not inspect an untrusted target before the caller has authorized the
+        // exact lexical root. Canonical Git identity is captured only after this pure policy check.
+        ensure_pre_authorized(caller_config, &worktree_root)?;
         let binding =
             WriterWorkspaceBinding::capture(worktree_root, execution_environment_id.to_string())?;
         Self::reload(binding, caller_config, execution_environment_id)
@@ -195,7 +201,12 @@ impl BoundWriterRuntime {
             ));
         }
         self.revalidate()?;
-        action.execute(&self.effective_config)
+        let output_path = resolve_bound_output_path(
+            &self.effective_config,
+            self.binding.worktree_root(),
+            &action.relative_path,
+        )?;
+        action.execute_at(&self.effective_config, output_path)
     }
 }
 
@@ -220,13 +231,21 @@ impl WriterSlot {
 #[derive(Clone, Debug)]
 struct FakeWriterAction {
     intended_worktree: AbsolutePathBuf,
-    relative_path: &'static str,
+    relative_path: PathBuf,
     content: &'static str,
 }
 
 impl FakeWriterAction {
     fn execute(&self, config: &Config) -> Result<WriterObservation, BindingError> {
-        let output_path = config.cwd.join(self.relative_path);
+        let output_path = config.cwd.join(&self.relative_path);
+        self.execute_at(config, output_path)
+    }
+
+    fn execute_at(
+        &self,
+        config: &Config,
+        output_path: AbsolutePathBuf,
+    ) -> Result<WriterObservation, BindingError> {
         fs::write(&output_path, self.content).map_err(|error| {
             BindingError::new(
                 BindingFailure::ActionFailed,
@@ -253,6 +272,45 @@ struct ObservedGitFacts {
     head: String,
     status: String,
     diff: String,
+}
+
+/// Fair baseline input: reasonable task text and the Git facts available before the same fake
+/// action. These inputs describe intent but deliberately do not alter the caller-relative config.
+struct NaturalLanguageWriterTask {
+    instruction: String,
+    git_facts: ObservedGitFacts,
+    action: FakeWriterAction,
+}
+
+impl NaturalLanguageWriterTask {
+    fn prepare(
+        intended_worktree: &AbsolutePathBuf,
+        content: &'static str,
+        relative_path: impl Into<PathBuf>,
+    ) -> Result<Self, BindingError> {
+        let action = FakeWriterAction {
+            intended_worktree: intended_worktree.clone(),
+            relative_path: relative_path.into(),
+            content,
+        };
+        let git_facts = ObservedGitFacts::inspect(intended_worktree)?;
+        let instruction = format!(
+            "Work in {} on branch {} at HEAD {}; write {} and inspect git status/diff before handoff.",
+            intended_worktree.display(),
+            git_facts.branch,
+            git_facts.head,
+            action.relative_path.display()
+        );
+        Ok(Self {
+            instruction,
+            git_facts,
+            action,
+        })
+    }
+
+    fn execute_baseline(&self, config: &Config) -> Result<WriterObservation, BindingError> {
+        self.action.execute(config)
+    }
 }
 
 impl ObservedGitFacts {
@@ -308,6 +366,79 @@ fn ensure_write_permission(
         ));
     }
     Ok(())
+}
+
+fn resolve_bound_output_path(
+    config: &Config,
+    worktree_root: &AbsolutePathBuf,
+    relative_path: &Path,
+) -> Result<AbsolutePathBuf, BindingError> {
+    let components = relative_path.components().collect::<Vec<_>>();
+    if components.is_empty()
+        || components
+            .iter()
+            .any(|component| !matches!(component, Component::Normal(_)))
+    {
+        return Err(BindingError::new(
+            BindingFailure::ActionTargetOutsideBinding,
+            format!(
+                "action path {} is not a confined relative path",
+                relative_path.display()
+            ),
+        ));
+    }
+
+    let output_path = worktree_root.join(relative_path);
+    if !config
+        .permissions
+        .file_system_sandbox_policy()
+        .can_write_path_with_cwd(output_path.as_path(), config.cwd.as_path())
+    {
+        return Err(BindingError::new(
+            BindingFailure::PermissionIncompatible,
+            format!(
+                "current permission profile cannot write {}",
+                output_path.display()
+            ),
+        ));
+    }
+
+    // Refuse every symlink component without following it. This keeps validation reads inside the
+    // already-authorized binding root; production-grade race-free anchoring remains a W1 concern.
+    let mut current = worktree_root.clone();
+    let final_index = components.len() - 1;
+    for (index, component) in components.into_iter().enumerate() {
+        let Component::Normal(segment) = component else {
+            unreachable!("components were validated above")
+        };
+        current = current.join(segment);
+        match fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Err(BindingError::new(
+                    BindingFailure::ActionTargetOutsideBinding,
+                    format!("action path crosses symlink {}", current.display()),
+                ));
+            }
+            Ok(metadata) if index < final_index && !metadata.is_dir() => {
+                return Err(BindingError::new(
+                    BindingFailure::ActionFailed,
+                    format!(
+                        "action path parent {} is not a directory",
+                        current.display()
+                    ),
+                ));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound && index == final_index => {}
+            Err(error) => {
+                return Err(BindingError::new(
+                    BindingFailure::ActionFailed,
+                    format!("inspect action path {}: {error}", current.display()),
+                ));
+            }
+        }
+    }
+    Ok(output_path)
 }
 
 fn canonical_git_path(

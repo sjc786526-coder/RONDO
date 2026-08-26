@@ -262,10 +262,18 @@ XXX用以下内容代替：
   其唯一 Git signing 可重复性建议已窄修并在正式轮复验。
 - 2026-08-26：证据支持唯一执行者候选 `BINDING_ONLY_GO`：结构性 binding 有明确价值，合理自然语言加 branch/HEAD/status/diff
   已足以定位换绑前后成果，未形成 structured handoff 独有且可重复的缺口；该结论仍待指定审查者接受。
+- 2026-08-26：指定审查者在 `17fb9d7...` 首次验收中拒绝候选并指出两个 P2：初次 bind 先于授权读取目标 Git、fake action 实际
+  路径未受 binding root 与 permission 约束；同时要求补强 cold reload 失效、各失败隔离与公平 baseline。执行者逐条核对，确认问题存在。
+- 2026-08-26：整改保持 test-only 原型边界：初次 bind 先做不读取目标内容的 roots/permission admission；实际 action 只接受普通相对
+  组件，按真实目标检查现有 filesystem policy，并逐组件拒绝 symlink 后才写入。测试补足未授权缺失目标的拒绝顺序、父目录/绝对路径/
+  symlink 越界无副作用、cold reload 缺失拒绝、repository/permission/roots/执行环境失败后的另一 writer 可用性，以及显式任务文本与 Git facts。
+- 2026-08-26：整改正式轮从全新 `TempDir` 运行原 5 项 W0 场景与 3 项相邻回归，Nextest
+  `de36d02e-b180-49a1-b271-0b0e9de3b80b` 为 8/8；scoped fix/fmt 通过且未产生额外代码修写。整改后唯一执行者候选仍为
+  `BINDING_ONLY_GO`，等待指定审查者复验。
 
 ### 当前工作
 
-- 执行者实现、聚焦验证、自审、必要独立只读复核与本地提交已经完成；当前只等待指定审查者验收，未实施正式 W1。
+- 首次验收 finding 的实现整改、聚焦复验、自审与追加本地提交已经完成；当前只等待指定审查者复验，未实施正式 W1。
 
 ### 本任务剩余步骤
 
@@ -280,7 +288,7 @@ XXX用以下内容代替：
 
 ### 当前验收状态
 
-- `IMPLEMENTED / AWAITING_REVIEW`；唯一执行者候选为 `BINDING_ONLY_GO`，不是最终已验收结论。
+- `REMEDIATED / AWAITING_REVIEW`；唯一执行者候选仍为 `BINDING_ONLY_GO`，不是最终已验收结论。
 
 ### 交接边界
 
@@ -308,3 +316,5 @@ XXX用以下内容代替：
 | 013 | binding admission/revalidation 同时核对精确 worktree top-level、Git common-dir/git-dir、调用者预授权 roots、写权限与执行环境；reload 只从不可变 binding 和当前授权重建 | 覆盖 live caller-relative 缺口且不扩大权限，不把旧内存结论或父 cwd 当作恢复依据 | binding/正确性 | 已采纳 |
 | 014 | replacement 先完整建立并验证候选 runtime 后才替换；旧/新成果只以现有路径说明与 branch/HEAD/status/diff 观察交接 | 失败保留旧 binding，且实证未出现 structured handoff 才能闭合的独有缺口 | replacement/handoff | 已采纳 |
 | 015 | 唯一执行者候选收敛为 `BINDING_ONLY_GO`，并保持“原型可行/产品价值”与生产 trust 保证分离 | 同口径 deterministic/真实 Git 证据支持 binding，未支持 handoff；最终接受仍属于指定审查者 | 价值门/验收 | 待验收 |
+| 016 | 初次 admission 在任何目标 path/Git 读取前先核对调用者精确 roots 与写策略；actual action 再以普通相对组件、真实目标 policy 和 no-symlink walk 约束 bound root | 闭合首次验收的授权顺序与跨 writer 写入 P2，同时不预建 W1 race-free 文件能力 | 权限/执行 | 已采纳 |
+| 017 | baseline 把合理任务文本、branch/HEAD/status/diff 与同一 fake action 组成显式对照；补足 cold invalidation 与各类失败的另一 writer 隔离后仍维持 `BINDING_ONLY_GO` | 整改增强证据公平性与直接性，但未产生 structured handoff 独有缺口 | 价值门/测试 | 待复验 |
