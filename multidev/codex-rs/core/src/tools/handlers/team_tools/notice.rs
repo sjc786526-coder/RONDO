@@ -68,9 +68,17 @@ async fn deliver(
     let resume_config =
         build_agent_resume_config(turn.as_ref(), step_context.environments.primary())
             .map_err(|err| err.to_string())?;
+    let mut bound_writer_authority = resume_config.clone();
+    session
+        .prepare_explicit_child_writer_spawn(&mut bound_writer_authority)
+        .await;
     // A member that was evicted from residency has to come back before anything can reach it.
     agent_control
-        .ensure_v2_agent_loaded(resume_config, dispatch.target)
+        .ensure_v2_agent_loaded_with_bound_writer_authority(
+            resume_config,
+            bound_writer_authority,
+            dispatch.target,
+        )
         .await
         .map_err(|err| err.to_string())?;
 

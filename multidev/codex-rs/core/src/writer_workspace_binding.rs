@@ -3,8 +3,10 @@ use codex_file_system::ExecutorFileSystem;
 use codex_git_utils::LinkedWorktreeIdentity;
 use codex_git_utils::resolve_linked_worktree_identity;
 use codex_git_utils::resolve_root_git_project_for_trust;
+use codex_protocol::models::AdditionalPermissionProfile;
 use codex_protocol::models::PermissionProfile;
 use codex_protocol::models::SandboxEnforcement;
+use codex_protocol::permissions::FileSystemPath;
 use codex_protocol::protocol::TurnEnvironmentSelection;
 use codex_protocol::protocol::TurnEnvironmentSelections;
 use codex_protocol::protocol::WriterWorkspaceBinding;
@@ -62,6 +64,70 @@ pub enum WriterWorkspaceBindingError {
     IdentityChanged,
     #[error("writer workspace binding execution environment changed")]
     ExecutionEnvironmentChanged,
+    #[error("writer external-write grants require existing canonical path targets")]
+    InvalidExternalWriteTarget,
+    #[error("writer external-write grant target changed after approval")]
+    ExternalWriteTargetChanged,
+}
+
+/// Resolve every W1 write target before it reaches the reviewer.
+///
+/// Ordinary permission requests intentionally preserve logical symlinks. A bound writer cannot:
+/// the sandbox resolves those links again when it starts, so a link retargeted while approval is
+/// pending would otherwise change the approved object. W1 therefore asks the reviewer to approve
+/// only existing physical targets. Callers that need to create a path can request its existing
+/// parent directory.
+pub(crate) async fn canonicalize_external_write_permissions(
+    mut permissions: AdditionalPermissionProfile,
+    fs: &dyn ExecutorFileSystem,
+) -> Result<AdditionalPermissionProfile, WriterWorkspaceBindingError> {
+    let Some(file_system) = permissions.file_system.as_mut() else {
+        return Ok(permissions);
+    };
+    for entry in &mut file_system.entries {
+        if !entry.access.can_write() {
+            continue;
+        }
+        let FileSystemPath::Path { path } = &mut entry.path else {
+            return Err(WriterWorkspaceBindingError::InvalidExternalWriteTarget);
+        };
+        let canonical = fs
+            .canonicalize(&PathUri::from_abs_path(path), /*sandbox*/ None)
+            .await
+            .ok()
+            .and_then(|path| path.to_abs_path().ok())
+            .ok_or(WriterWorkspaceBindingError::InvalidExternalWriteTarget)?;
+        *path = canonical;
+    }
+    Ok(permissions)
+}
+
+/// Revalidate the physical W1 targets immediately before a side effect.
+pub(crate) async fn revalidate_external_write_permissions(
+    permissions: &AdditionalPermissionProfile,
+    fs: &dyn ExecutorFileSystem,
+) -> Result<(), WriterWorkspaceBindingError> {
+    let Some(file_system) = permissions.file_system.as_ref() else {
+        return Ok(());
+    };
+    for entry in &file_system.entries {
+        if !entry.access.can_write() {
+            continue;
+        }
+        let FileSystemPath::Path { path } = &entry.path else {
+            return Err(WriterWorkspaceBindingError::ExternalWriteTargetChanged);
+        };
+        let canonical = fs
+            .canonicalize(&PathUri::from_abs_path(path), /*sandbox*/ None)
+            .await
+            .ok()
+            .and_then(|path| path.to_abs_path().ok())
+            .ok_or(WriterWorkspaceBindingError::ExternalWriteTargetChanged)?;
+        if canonical != *path {
+            return Err(WriterWorkspaceBindingError::ExternalWriteTargetChanged);
+        }
+    }
+    Ok(())
 }
 
 impl WriterWorkspaceBindingState {
@@ -355,6 +421,7 @@ mod tests {
     use crate::config::test_config;
     use codex_exec_server::LOCAL_ENVIRONMENT_ID;
     use codex_protocol::models::ActivePermissionProfile;
+    use codex_protocol::models::FileSystemPermissions;
     use std::path::Path;
     use std::process::Command;
     use tempfile::TempDir;
@@ -535,5 +602,65 @@ mod tests {
             result,
             Err(WriterWorkspaceBindingError::EphemeralThread)
         ));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn external_write_target_is_canonicalized_and_revalidated_before_use() {
+        use std::os::unix::fs::symlink;
+
+        let temp = TempDir::new().expect("tempdir");
+        let approved_target = temp.path().join("approved-target");
+        let replacement_target = temp.path().join("replacement-target");
+        let requested_alias = temp.path().join("requested-alias");
+        std::fs::create_dir(&approved_target).expect("create approved target");
+        std::fs::create_dir(&replacement_target).expect("create replacement target");
+        symlink(&approved_target, &requested_alias).expect("create requested alias");
+        let requested_alias = AbsolutePathBuf::from_absolute_path(requested_alias)
+            .expect("requested alias is absolute");
+        let approved_target = AbsolutePathBuf::from_absolute_path(
+            std::fs::canonicalize(&approved_target).expect("canonical approved target"),
+        )
+        .expect("approved target is absolute");
+        let manager = EnvironmentManager::default_for_tests();
+        let fs = manager
+            .get_environment(LOCAL_ENVIRONMENT_ID)
+            .expect("local environment")
+            .get_filesystem();
+
+        let permissions = canonicalize_external_write_permissions(
+            AdditionalPermissionProfile {
+                file_system: Some(FileSystemPermissions::from_read_write_roots(
+                    /*read*/ None,
+                    Some(vec![requested_alias]),
+                )),
+                ..Default::default()
+            },
+            fs.as_ref(),
+        )
+        .await
+        .expect("canonicalize reviewer target");
+        let stored_target = match &permissions
+            .file_system
+            .as_ref()
+            .expect("filesystem permissions")
+            .entries[0]
+            .path
+        {
+            FileSystemPath::Path { path } => path,
+            other => panic!("expected exact path, got {other:?}"),
+        };
+        assert_eq!(stored_target, &approved_target);
+
+        let displaced_target = temp.path().join("displaced-target");
+        std::fs::rename(approved_target.as_path(), &displaced_target)
+            .expect("displace approved target");
+        symlink(&replacement_target, approved_target.as_path())
+            .expect("retarget approved physical path");
+
+        assert_eq!(
+            revalidate_external_write_permissions(&permissions, fs.as_ref()).await,
+            Err(WriterWorkspaceBindingError::ExternalWriteTargetChanged)
+        );
     }
 }

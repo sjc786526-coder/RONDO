@@ -7,6 +7,8 @@
 use super::session::SessionConfiguration;
 use super::*;
 use crate::mcp::McpRuntimeProjection;
+use codex_config::McpServerTransportConfig;
+use codex_mcp::EffectiveMcpServer;
 use codex_mcp::ElicitationReviewerHandle;
 use codex_mcp::PreparedMcpCall;
 use codex_protocol::capabilities::SelectedCapabilityRoot;
@@ -19,6 +21,7 @@ pub(super) struct McpDesiredState {
     pub(super) session_source: SessionSource,
     pub(super) environments: TurnEnvironmentSnapshot,
     pub(super) windows_sandbox_level: WindowsSandboxLevel,
+    pub(super) writer_workspace_binding_active: bool,
 }
 
 impl McpDesiredState {
@@ -78,6 +81,9 @@ impl Session {
             session_source: session_configuration.session_source.clone(),
             environments,
             windows_sandbox_level: session_configuration.windows_sandbox_level,
+            writer_workspace_binding_active: session_configuration
+                .writer_workspace_binding
+                .is_some(),
         }
     }
 
@@ -100,6 +106,9 @@ impl Session {
             session_source: session_configuration.session_source.clone(),
             environments: resolved_environments.clone(),
             windows_sandbox_level: session_configuration.windows_sandbox_level,
+            writer_workspace_binding_active: session_configuration
+                .writer_workspace_binding
+                .is_some(),
         };
         self.publish_mcp_runtime(
             &desired,
@@ -163,7 +172,11 @@ impl Session {
             .entry(codex_config::DEFAULT_MCP_SERVER_ENVIRONMENT_ID.to_string())
             .or_insert_with(|| PathUri::from_abs_path(&desired.config.cwd));
         let mcp_config = Arc::new(config);
-        let mcp_servers = effective_mcp_servers(&mcp_config, auth.as_ref());
+        let mut mcp_servers = effective_mcp_servers(&mcp_config, auth.as_ref());
+        filter_stdio_servers_for_writer_binding(
+            &mut mcp_servers,
+            desired.writer_workspace_binding_active,
+        );
         let local_stdio_fallback_cwd = desired.local_stdio_fallback_cwd();
         let runtime_context = McpRuntimeContext::new(
             self.services.turn_environments.environment_manager(),
@@ -191,5 +204,123 @@ impl Session {
             elicitation_reviewer,
             elicitation_lifecycle: Some(self.mcp_elicitation_lifecycle()),
         }
+    }
+}
+
+/// Removes MCP transports that can start a filesystem-unconstrained process for a bound writer.
+///
+/// Local stdio servers are ordinary host child processes, while executor-owned stdio servers are
+/// currently launched without a filesystem sandbox. Filtering the effective server set here keeps
+/// either process from starting at all. Streamable HTTP servers do not start such a process and
+/// remain subject to the MCP handler's explicit `readOnlyHint` call gate.
+fn filter_stdio_servers_for_writer_binding(
+    mcp_servers: &mut HashMap<String, EffectiveMcpServer>,
+    writer_workspace_binding_active: bool,
+) {
+    if !writer_workspace_binding_active {
+        return;
+    }
+
+    mcp_servers.retain(|_, server| {
+        !matches!(
+            &server.config().transport,
+            McpServerTransportConfig::Stdio { .. }
+        )
+    });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::filter_stdio_servers_for_writer_binding;
+    use codex_config::DEFAULT_MCP_SERVER_ENVIRONMENT_ID;
+    use codex_config::McpServerConfig;
+    use codex_config::McpServerTransportConfig;
+    use codex_mcp::EffectiveMcpServer;
+    use std::collections::HashMap;
+
+    fn server(environment_id: &str, transport: McpServerTransportConfig) -> EffectiveMcpServer {
+        EffectiveMcpServer::configured(McpServerConfig {
+            transport,
+            auth: Default::default(),
+            environment_id: environment_id.to_string(),
+            enabled: true,
+            required: false,
+            supports_parallel_tool_calls: false,
+            omit_tools_from: None,
+            disabled_reason: None,
+            startup_timeout_sec: None,
+            tool_timeout_sec: None,
+            default_tools_approval_mode: None,
+            enabled_tools: None,
+            disabled_tools: None,
+            scopes: None,
+            oauth: None,
+            oauth_resource: None,
+            tools: HashMap::new(),
+        })
+    }
+
+    fn stdio_server(environment_id: &str) -> EffectiveMcpServer {
+        server(
+            environment_id,
+            McpServerTransportConfig::Stdio {
+                command: "test-mcp".to_string(),
+                args: Vec::new(),
+                env: None,
+                env_vars: Vec::new(),
+                cwd: None,
+            },
+        )
+    }
+
+    fn http_server() -> EffectiveMcpServer {
+        server(
+            DEFAULT_MCP_SERVER_ENVIRONMENT_ID,
+            McpServerTransportConfig::StreamableHttp {
+                url: "https://example.invalid/mcp".to_string(),
+                bearer_token_env_var: None,
+                http_headers: None,
+                env_http_headers: None,
+            },
+        )
+    }
+
+    fn mixed_servers() -> HashMap<String, EffectiveMcpServer> {
+        HashMap::from([
+            (
+                "local-stdio".to_string(),
+                stdio_server(DEFAULT_MCP_SERVER_ENVIRONMENT_ID),
+            ),
+            ("executor-stdio".to_string(), stdio_server("executor")),
+            ("http".to_string(), http_server()),
+        ])
+    }
+
+    #[test]
+    fn bound_writer_filters_local_and_executor_stdio_but_retains_http() {
+        let mut servers = mixed_servers();
+
+        filter_stdio_servers_for_writer_binding(
+            &mut servers,
+            /*writer_workspace_binding_active*/ true,
+        );
+
+        assert_eq!(servers.len(), 1);
+        assert!(servers.contains_key("http"));
+    }
+
+    #[test]
+    fn unbound_session_retains_all_mcp_transports() {
+        let mut servers = mixed_servers();
+
+        filter_stdio_servers_for_writer_binding(
+            &mut servers,
+            /*writer_workspace_binding_active*/ false,
+        );
+
+        assert_eq!(servers.len(), 3);
+        assert!(servers.contains_key("local-stdio"));
+        assert!(servers.contains_key("executor-stdio"));
+        assert!(servers.contains_key("http"));
     }
 }

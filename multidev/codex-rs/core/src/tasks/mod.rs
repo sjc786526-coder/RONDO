@@ -42,6 +42,8 @@ use codex_otel::TURN_NETWORK_PROXY_METRIC;
 use codex_otel::TURN_TOKEN_USAGE_METRIC;
 use codex_otel::TURN_TOOL_CALL_METRIC;
 use codex_protocol::models::ResponseItem;
+use codex_protocol::protocol::CodexErrorInfo;
+use codex_protocol::protocol::ErrorEvent;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::MultiAgentVersion;
 use codex_protocol::protocol::TokenUsage;
@@ -279,10 +281,31 @@ impl Session {
         input: Vec<TurnInput>,
         task: T,
     ) {
+        if let Err(err) = self
+            .spawn_task_checked(Arc::clone(&turn_context), input, task)
+            .await
+        {
+            self.send_event(
+                turn_context.as_ref(),
+                EventMsg::Error(err.to_error_event(/*message_prefix*/ None)),
+            )
+            .await;
+        }
+    }
+
+    pub(crate) async fn spawn_task_checked<T: SessionTask>(
+        self: &Arc<Self>,
+        turn_context: Arc<TurnContext>,
+        input: Vec<TurnInput>,
+        task: T,
+    ) -> CodexResult<()> {
         self.abort_all_tasks(TurnAbortReason::Replaced).await;
+        self.reserve_idle_turn_for_writer_context(turn_context.as_ref())
+            .await?;
         self.clear_connector_selection().await;
         self.start_task(turn_context, input, task, MailboxParentProvenance::Ignore)
             .await;
+        Ok(())
     }
 
     pub(crate) async fn start_task<T: SessionTask>(
@@ -456,12 +479,8 @@ impl Session {
             return;
         }
 
-        {
-            let mut active_turn = self.active_turn.lock().await;
-            if active_turn.is_some() {
-                return;
-            }
-            *active_turn = Some(ActiveTurn::default());
+        if self.reserve_idle_turn_for_writer_binding().await.is_err() {
+            return;
         }
 
         let turn_context = self.new_default_turn_with_sub_id(sub_id).await;
@@ -478,6 +497,7 @@ impl Session {
 
     pub async fn abort_all_tasks(self: &Arc<Self>, reason: TurnAbortReason) {
         let mut aborted_turn = false;
+        let mut writer_cleanup_succeeded = true;
         let mut active_turn_to_clear = None;
         let mut turn_context = None;
         if let Some(mut active_turn) = self.take_active_turn().await {
@@ -485,7 +505,7 @@ impl Session {
             aborted_turn = task.is_some();
             turn_context = task.as_ref().map(|task| Arc::clone(&task.turn_context));
             if let Some(task) = task {
-                self.handle_task_abort(task, reason.clone()).await;
+                writer_cleanup_succeeded = self.handle_task_abort(task, reason.clone()).await;
             }
             if aborted_turn {
                 active_turn_to_clear = Some(active_turn);
@@ -500,8 +520,14 @@ impl Session {
             // Let interrupted tasks observe cancellation before dropping pending approvals, or an
             // in-flight approval wait can surface as a model-visible rejection before TurnAborted.
             self.input_queue.clear_pending(&active_turn).await;
+            if !writer_cleanup_succeeded {
+                let mut active = self.active_turn.lock().await;
+                if active.is_none() {
+                    *active = Some(active_turn);
+                }
+            }
         }
-        if reason == TurnAbortReason::Interrupted && aborted_turn {
+        if reason == TurnAbortReason::Interrupted && aborted_turn && writer_cleanup_succeeded {
             self.maybe_start_turn_for_pending_work().await;
         }
     }
@@ -529,9 +555,10 @@ impl Session {
 
         let task = active_turn.task.take();
         let turn_context = task.as_ref().map(|task| Arc::clone(&task.turn_context));
-        if let Some(task) = task {
-            self.handle_task_abort(task, reason.clone()).await;
-        }
+        let writer_cleanup_succeeded = match task {
+            Some(task) => self.handle_task_abort(task, reason.clone()).await,
+            None => true,
+        };
         if let Some(turn_context) = turn_context.as_deref() {
             self.emit_turn_abort_lifecycle(reason.clone(), turn_context.extension_data.as_ref())
                 .await;
@@ -540,7 +567,14 @@ impl Session {
         // in-flight approval wait can surface as a model-visible rejection before TurnAborted.
         self.input_queue.clear_pending(&active_turn).await;
 
-        if reason == TurnAbortReason::Interrupted {
+        if !writer_cleanup_succeeded {
+            let mut active = self.active_turn.lock().await;
+            if active.is_none() {
+                *active = Some(active_turn);
+            }
+        }
+
+        if reason == TurnAbortReason::Interrupted && writer_cleanup_succeeded {
             self.maybe_start_turn_for_pending_work().await;
         }
 
@@ -588,6 +622,23 @@ impl Session {
         let Some(turn_state) = turn_state else {
             return;
         };
+        let writer_process_cleanup_error = self
+            .terminate_bound_writer_processes_confirmed()
+            .await
+            .err();
+        if let Some(err) = writer_process_cleanup_error.as_ref() {
+            let message =
+                format!("failed to revoke bound writer processes at turn completion: {err}");
+            self.mark_writer_workspace_binding_unavailable(message.clone())
+                .await;
+            let error = ErrorEvent {
+                message,
+                codex_error_info: Some(CodexErrorInfo::Other),
+            };
+            *turn_context.terminal_error.lock().await = Some(error.clone());
+            self.send_event(turn_context.as_ref(), EventMsg::Error(error))
+                .await;
+        }
         let pending_input = self
             .input_queue
             .take_pending_input_for_turn_state(turn_state.as_ref())
@@ -799,7 +850,7 @@ impl Session {
             .await
             .clear_turn(&turn_context.sub_id);
 
-        let cleared_active_turn = {
+        let cleared_active_turn = writer_process_cleanup_error.is_none() && {
             let mut active = self.active_turn.lock().await;
             if let Some(active_turn) = active.as_ref()
                 && active_turn.task.is_none()
@@ -830,10 +881,19 @@ impl Session {
     }
 
     pub(crate) async fn close_unified_exec_processes(&self) {
-        self.services
-            .unified_exec_manager
-            .terminate_all_processes()
-            .await;
+        if self.writer_workspace_binding_snapshot().await.is_some() {
+            if let Err(err) = self.terminate_bound_writer_processes_confirmed().await {
+                let message = format!("failed to revoke bound writer processes: {err}");
+                self.mark_writer_workspace_binding_unavailable(message.clone())
+                    .await;
+                warn!("{message}");
+            }
+        } else {
+            self.services
+                .unified_exec_manager
+                .terminate_all_processes()
+                .await;
+        }
     }
 
     pub(crate) async fn list_background_terminals(&self) -> Vec<BackgroundTerminalInfo> {
@@ -847,10 +907,32 @@ impl Session {
             .await
     }
 
-    async fn handle_task_abort(self: &Arc<Self>, task: RunningTask, reason: TurnAbortReason) {
+    async fn handle_task_abort(
+        self: &Arc<Self>,
+        task: RunningTask,
+        reason: TurnAbortReason,
+    ) -> bool {
         let sub_id = task.turn_context.sub_id.clone();
         if task.cancellation_token.is_cancelled() {
-            return;
+            return match self.terminate_bound_writer_processes_confirmed().await {
+                Ok(()) => true,
+                Err(err) => {
+                    let message = format!(
+                        "failed to revoke bound writer processes while finalizing an aborted turn: {err}"
+                    );
+                    self.mark_writer_workspace_binding_unavailable(message.clone())
+                        .await;
+                    self.send_event(
+                        task.turn_context.as_ref(),
+                        EventMsg::Error(ErrorEvent {
+                            message,
+                            codex_error_info: Some(CodexErrorInfo::Other),
+                        }),
+                    )
+                    .await;
+                    false
+                }
+            };
         }
 
         trace!(task_kind = ?task.kind, sub_id, "aborting running task");
@@ -873,6 +955,26 @@ impl Session {
         session_task
             .abort(Arc::clone(self), Arc::clone(&task.turn_context))
             .await;
+
+        let writer_cleanup_succeeded = match self.terminate_bound_writer_processes_confirmed().await
+        {
+            Ok(()) => true,
+            Err(err) => {
+                let message =
+                    format!("failed to revoke bound writer processes while aborting turn: {err}");
+                self.mark_writer_workspace_binding_unavailable(message.clone())
+                    .await;
+                self.send_event(
+                    task.turn_context.as_ref(),
+                    EventMsg::Error(ErrorEvent {
+                        message,
+                        codex_error_info: Some(CodexErrorInfo::Other),
+                    }),
+                )
+                .await;
+                false
+            }
+        };
 
         if reason == TurnAbortReason::Interrupted
             && let Some(marker) = interrupted_turn_history_marker(
@@ -928,6 +1030,19 @@ impl Session {
         if let Err(err) = self.flush_rollout().await {
             warn!("failed to flush rollout after emitting terminal turn event: {err}");
         }
+        writer_cleanup_succeeded
+    }
+
+    async fn terminate_bound_writer_processes_confirmed(
+        &self,
+    ) -> Result<(), crate::unified_exec::UnifiedExecError> {
+        if self.writer_workspace_binding_snapshot().await.is_none() {
+            return Ok(());
+        }
+        self.services
+            .unified_exec_manager
+            .terminate_all_processes_confirmed()
+            .await
     }
 }
 

@@ -320,15 +320,22 @@ XXX用以下内容代替：
 - 已完成 stable/experimental schema 生成和 changed-crate `1008/1008`、相邻回归、Critic process `7/7`、scoped clippy、fmt/diff 门禁。
   最终 fresh 真实 app-server 进程替换全链 `1/1` 通过；canonical full workspace `just test` 已按约尝试一次，但在测试前被
   rusty-v8 v150.4.0 默认 prebuilt archive URL 的 HTTP 404 阻断，未冒充通过。
-- 代码与正式配置已冻结，当前没有未关闭的 W1 correctness finding。实施证据与资源事件见 Plan 089 实施日志。
+- 首轮独立审查报告 `agent_log/2026-08-26-130318-plan089-m4-w1-independent-review.md` 提出的 F1–F7 已在同一工作树逐项整改：bound
+  writer 禁止无 sandbox 的 `/shell` 与 stdio MCP；turn terminal/replacement/invalidation 以保留失败句柄的 confirmed barrier 撤销
+  unified-exec；binding identity 使用 strict append/materialize/flush；turn admission 与 replacement 共用串行边界并核对 captured
+  generation；child lazy reload 以自身 persisted roots 与当前 authority 交集恢复；W1 target 在 review 前 canonicalize、review 后及
+  tool side effect 前重验；唯一 offline Critic 组合链断言一次实际调用及完整 packet。
+- 整改代码与正式配置已再次冻结。聚焦 core/protocol/thread-store 回归、bound `/shell` 真实入口、scoped core clippy、fmt/diff 均通过；
+  最终 fresh 真实 app-server OS 进程替换 + deterministic offline Critic 正式链 `1/1` 通过。当前没有执行者已知未关闭的 W1 高/中等级
+  correctness finding；完整证据与资源事件见 Plan 089 实施日志。
 
 ### 当前工作
 
-- 收口计划状态、实施日志与本地提交，然后按指定 queue 请求独立终审。
+- 完成整改提交，并按指定 queue 请求独立复验。
 
 ### 本任务剩余步骤
 
-- 完成本地提交并请求独立终审；范围内 finding 在同一 089 worktree 整改、相称复验并补充提交。
+- 请求独立复验；若仍有范围内 finding，在同一 089 worktree 整改、相称复验并补充提交。
 - 独立验收接受后保持 clean 089 worktree，记录 `ACCEPTED / PENDING_INTEGRATION`，并等待用户明确批准 merge/push。
 - 获批后按 G 完成最新主线整合、文档最终收口、推送和完成分支归档，形成唯一 `M4_W1_PASS / PHASE_4_COMPLETE`。
 
@@ -339,7 +346,7 @@ XXX用以下内容代替：
 
 ### 当前验收状态
 
-- `IMPLEMENTATION_COMPLETE / FORMAL_CHAIN_PASS / REVIEW_PENDING / INTEGRATION_NOT_AUTHORIZED / M4_W1_PASS_NOT_YET_ESTABLISHED`。
+- `REMEDIATION_COMPLETE / FORMAL_CHAIN_PASS / REVIEW_PENDING / INTEGRATION_NOT_AUTHORIZED / M4_W1_PASS_NOT_YET_ESTABLISHED`。
 
 ### 交接边界
 
@@ -360,3 +367,5 @@ XXX用以下内容代替：
 | 008 | 复用 hardened trust、permission/reviewer 与 Session/thread persistence，但新建单一窄 writer binding owner | 现有设施分别拥有 trust、权限与生命周期职责，强行让其中任一兼任 binding 会扭曲语义 | core、protocol、app-server | 已采纳 |
 | 009 | W1 绑定外授权只保留 active turn/environment/generation，底层普通 grant 即使为 Session scope 也不能替代 W1 双门 | 满足有界辅助写入并避免新增持久授权体系；resume/replacement 自动失效 | permission、turn state | 已采纳 |
 | 010 | durable binding 只持久化 identity 与当前重验所需 authority roots；冷读统一显示 unavailable，恢复后用当前 profile/trust/roots 重验 | 不持久化 concrete permission snapshot，不复制第三份 workspace authority | persistence、resume、query | 已采纳 |
+| 011 | bound writer 对无实际文件系统约束的 `/shell` 和 stdio MCP fail closed；HTTP MCP 保留现有只读声明门 | 两条宿主进程路径不能承载 binding sandbox，禁用比另建平行执行器更窄且不影响 W-off | shell、MCP runtime | 已采纳 |
+| 012 | bound writer 在 turn terminal、replacement、invalidation 与 shutdown 使用 confirmed unified-exec 撤销屏障，失败句柄保留以便重试 | turn-only W1 不能被长驻进程带过生命周期，部分失败也不能伪报清理完成 | turn/session lifecycle、unified-exec | 已采纳 |

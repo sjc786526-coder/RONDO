@@ -344,6 +344,32 @@ async fn bound_writers_execute_only_inside_their_exact_worktrees() -> Result<()>
     )
     .await?;
     assert!(!writer_b.join("patch-escape.txt").exists());
+
+    let user_shell_escape = writer_b.join("user-shell-escape.txt");
+    writer_a_thread
+        .codex
+        .submit(Op::RunUserShellCommand {
+            command: format!("printf escaped > '{}'", user_shell_escape.display()),
+        })
+        .await?;
+    let mut saw_bound_shell_rejection = false;
+    loop {
+        let event = timeout(STAGE_TIMEOUT, writer_a_thread.codex.next_event()).await??;
+        match event.msg {
+            EventMsg::Error(error) => {
+                saw_bound_shell_rejection |= error
+                    .message
+                    .contains("/shell is unavailable while a writer workspace binding is active");
+            }
+            EventMsg::TurnComplete(_) => break,
+            EventMsg::TurnAborted(error) => {
+                anyhow::bail!("bound /shell rejection turn aborted: {error:?}")
+            }
+            _ => {}
+        }
+    }
+    assert!(saw_bound_shell_rejection);
+    assert!(!user_shell_escape.exists());
     assert_eq!(received_responses_request_count(&server).await?, 12);
 
     writer_a_thread.codex.shutdown_and_wait().await?;

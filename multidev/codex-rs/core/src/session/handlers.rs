@@ -262,12 +262,12 @@ pub(super) async fn user_input_or_turn_inner(
                     client_id: client_user_message_id,
                 });
             }
-            sess.spawn_task(
+            sess.spawn_task_checked(
                 Arc::clone(&current_context),
                 task_input,
                 crate::tasks::RegularTask::new(),
             )
-            .await;
+            .await?;
             Ok(UserMessageAdmission::Started { turn_id: sub_id })
         }
         Err(err) => {
@@ -585,16 +585,24 @@ pub async fn set_thread_memory_mode(sess: &Arc<Session>, sub_id: String, mode: T
     }
 }
 
-async fn shutdown_session_runtime(sess: &Arc<Session>) {
+async fn shutdown_session_runtime(sess: &Arc<Session>) -> Result<(), String> {
     if let Some(startup_prewarm) = sess.take_session_startup_prewarm().await {
         startup_prewarm.abort().await;
     }
     let _ = sess.conversation.shutdown().await;
     sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
-    sess.services
-        .unified_exec_manager
-        .terminate_all_processes()
-        .await;
+    if sess.writer_workspace_binding_snapshot().await.is_some() {
+        sess.services
+            .unified_exec_manager
+            .terminate_all_processes_confirmed()
+            .await
+            .map_err(|err| format!("failed to revoke bound writer processes: {err}"))?;
+    } else {
+        sess.services
+            .unified_exec_manager
+            .terminate_all_processes()
+            .await;
+    }
     if let Err(err) = sess.services.code_mode_service.shutdown().await {
         warn!("failed to shutdown code mode session: {err}");
     }
@@ -607,6 +615,7 @@ async fn shutdown_session_runtime(sess: &Arc<Session>) {
     sess.guardian_review_session.shutdown().await;
 
     crate::hook_runtime::run_session_end_hooks(sess).await;
+    Ok(())
 }
 
 async fn emit_thread_stop_lifecycle(sess: &Session) {
@@ -700,7 +709,24 @@ pub async fn shutdown(sess: &Arc<Session>, sub_id: String) -> bool {
         return false;
     }
 
-    shutdown_session_runtime(sess).await;
+    if let Err(error) = shutdown_session_runtime(sess).await {
+        if let Some(team_close) = durable_team_close.take()
+            && let Err(abort_error) = team_close.abort().await
+        {
+            warn!("failed to abort durable Team close after runtime failure: {abort_error}");
+        }
+        if let Some(lifecycle_close) = durable_lifecycle_close.take() {
+            lifecycle_close.abort();
+        }
+        send_durable_close_error(sess, &sub_id, error.clone()).await;
+        if let Some(completion) = formal_shutdown_completion.take() {
+            let _ = completion.send(PreparedDurableSessionShutdownCompletion::RetainedError(
+                error,
+            ));
+        }
+        sess.finish_failed_experimental_session_control_shutdown();
+        return false;
+    }
     info!("Shutting down Codex instance");
     let history = sess.clone_history().await;
     let turn_count = history
@@ -973,7 +999,9 @@ pub(super) async fn submission_loop(
     // If the submission loop exits because the channel closed without an
     // explicit shutdown op, still run session teardown.
     if !shutdown_received {
-        shutdown_session_runtime(&sess).await;
+        if let Err(error) = shutdown_session_runtime(&sess).await {
+            warn!("submission channel closed with incomplete runtime cleanup: {error}");
+        }
         emit_thread_stop_lifecycle(sess.as_ref()).await;
         let durable_root = sess
             .services

@@ -1,5 +1,6 @@
 use super::*;
 use crate::WriterWorkspaceBindingReplaceOutcome;
+use crate::agent::control::SpawnAgentOptions;
 use crate::config::test_config;
 use crate::init_state_db;
 use crate::installation_id::INSTALLATION_ID_FILENAME;
@@ -11,7 +12,9 @@ use crate::session::tests::make_session_and_context;
 use crate::tasks::InterruptedTurnHistoryMarker;
 use crate::tasks::interrupted_turn_history_marker;
 use codex_extension_api::empty_extension_registry;
+use codex_features::Feature;
 use codex_models_manager::manager::RefreshStrategy;
+use codex_protocol::AgentPath;
 use codex_protocol::ResponseItemId;
 use codex_protocol::capabilities::CapabilityRootLocation;
 use codex_protocol::capabilities::SelectedCapabilityRoot;
@@ -191,6 +194,7 @@ async fn writer_binding_lifecycle_isolated_replaced_resumed_and_not_forked() {
         .thread
         .rollout_path()
         .expect("writer A binding must be durable before start returns");
+    let stale_writer_a_context = first.thread.session.new_default_turn().await;
     let replacement = first
         .thread
         .replace_writer_workspace_binding(
@@ -207,6 +211,20 @@ async fn writer_binding_lifecycle_isolated_replaced_resumed_and_not_forked() {
     };
     assert_eq!(replacement.binding.generation, 2);
     assert_eq!(replacement.binding.worktree_root, writer_b);
+    let stale_admission = first
+        .thread
+        .session
+        .reserve_idle_turn_for_writer_context(stale_writer_a_context.as_ref())
+        .await;
+    let stale_error = match stale_admission {
+        Ok(_) => panic!("writer A context must not be admitted after replacement"),
+        Err(error) => error,
+    };
+    assert!(
+        stale_error
+            .to_string()
+            .contains("changed before turn admission")
+    );
 
     let unrelated = tempfile::tempdir().expect("unrelated repository");
     run_writer_binding_git(unrelated.path(), &["init"]);
@@ -285,6 +303,305 @@ async fn writer_binding_lifecycle_isolated_replaced_resumed_and_not_forked() {
             .await
             .expect("shutdown test thread");
     }
+}
+
+#[tokio::test]
+async fn writer_binding_append_failure_is_strict_for_initial_and_replacement_identity() {
+    let temp = tempdir().expect("tempdir");
+    let (repository, writer_a, writer_b) = create_writer_binding_repository(&temp);
+    let codex_home = temp.path().join("codex-home").abs();
+    std::fs::create_dir_all(&codex_home).expect("create codex home");
+    let mut config = test_config().await;
+    config.codex_home = codex_home;
+    config.cwd = repository.clone();
+    config.workspace_roots = vec![repository.clone(), writer_a.clone(), writer_b.clone()];
+    config.workspace_roots_explicit = true;
+    config.ephemeral = false;
+    config.experimental_thread_store = ThreadStoreConfig::InMemory {
+        id: format!("writer-binding-append-{}", uuid::Uuid::new_v4()),
+    };
+    config
+        .permissions
+        .replace_permission_profile_from_session_snapshot(
+            crate::config::PermissionProfileSnapshot::active(
+                codex_protocol::models::PermissionProfile::workspace_write(),
+                codex_protocol::models::ActivePermissionProfile::new(":workspace"),
+            ),
+        )
+        .expect("install managed workspace profile");
+    let auth_manager =
+        AuthManager::from_auth_for_testing(CodexAuth::create_dummy_chatgpt_auth_for_testing());
+    let state_db = init_state_db(&config).await;
+    let thread_store = thread_store_from_config(&config, state_db.clone());
+    let in_memory_store = thread_store
+        .as_any()
+        .downcast_ref::<InMemoryThreadStore>()
+        .expect("configured in-memory store");
+    let manager = ThreadManager::new(
+        &config,
+        auth_manager.clone(),
+        build_models_manager(&config, auth_manager),
+        crate::CodexAppsToolsCache::default(),
+        SessionSource::Exec,
+        Arc::new(codex_exec_server::EnvironmentManager::default_for_tests()),
+        empty_extension_registry(),
+        Arc::new(crate::test_support::EmptyUserInstructionsProvider),
+        /*analytics_events_client*/ None,
+        thread_store.clone(),
+        local_agent_graph_store_from_state_db(state_db.as_ref()),
+        TEST_INSTALLATION_ID.to_string(),
+        /*attestation_provider*/ None,
+        /*external_time_provider*/ None,
+    );
+    let environment = writer_binding_environment(&repository, &writer_a, &writer_b);
+    let start_writer_a = || StartThreadOptions {
+        environments: Some(vec![environment.clone()]),
+        writer_workspace_binding: Some(WriterWorkspaceBindingRequest {
+            worktree_root: writer_a.clone(),
+            environment_id: Some(codex_exec_server::LOCAL_ENVIRONMENT_ID.to_string()),
+        }),
+        ..StartThreadOptions::new(config.clone())
+    };
+
+    in_memory_store.fail_next_append().await;
+    let initial_error = match manager.start_thread(start_writer_a()).await {
+        Ok(_) => panic!("initial binding append failure must reject the thread"),
+        Err(error) => error,
+    };
+    assert!(
+        initial_error
+            .to_string()
+            .contains("injected in-memory append failure")
+    );
+
+    let writer = manager
+        .start_thread(start_writer_a())
+        .await
+        .expect("start writer after one-shot failure");
+    let initial = writer
+        .thread
+        .writer_workspace_binding()
+        .await
+        .expect("initial binding");
+    assert_eq!(initial.binding.generation, 1);
+
+    in_memory_store.fail_next_append().await;
+    let replacement = writer
+        .thread
+        .replace_writer_workspace_binding(
+            WriterWorkspaceBindingRequest {
+                worktree_root: writer_b.clone(),
+                environment_id: None,
+            },
+            Some(1),
+        )
+        .await
+        .expect("replacement reaches a known live state");
+    let WriterWorkspaceBindingReplaceOutcome::Unknown { snapshot, message } = replacement else {
+        panic!("failed binding append must never report Applied");
+    };
+    assert_eq!(snapshot.binding.generation, 2);
+    assert_eq!(snapshot.binding.worktree_root, writer_b);
+    assert!(message.contains("injected in-memory append failure"));
+    assert_eq!(
+        writer
+            .thread
+            .writer_workspace_binding()
+            .await
+            .expect("live replacement remains queryable")
+            .binding
+            .generation,
+        2
+    );
+
+    let persisted = thread_store
+        .load_history(LoadThreadHistoryParams {
+            thread_id: writer.thread_id,
+            include_archived: false,
+        })
+        .await
+        .expect("load persisted binding identity");
+    let persisted_binding = InitialHistory::Resumed(ResumedHistory {
+        conversation_id: writer.thread_id,
+        history: Arc::new(persisted.items),
+        rollout_path: None,
+    })
+    .get_resumed_writer_workspace_binding()
+    .expect("initial binding remains the newest durable identity");
+    assert_eq!(persisted_binding.generation, 1);
+    assert_eq!(persisted_binding.worktree_root, writer_a);
+
+    writer
+        .thread
+        .shutdown_and_wait()
+        .await
+        .expect("shutdown writer");
+}
+
+#[tokio::test]
+async fn bound_child_lazy_reload_uses_current_authority_and_its_own_persisted_roots() {
+    let temp = tempdir().expect("tempdir");
+    let (repository, writer_a, writer_b) = create_writer_binding_repository(&temp);
+    let codex_home = temp.path().join("codex-home").abs();
+    std::fs::create_dir_all(&codex_home).expect("create codex home");
+    let mut config = test_config().await;
+    let _ = config.features.enable(Feature::MultiAgentV2);
+    let _ = config.features.enable(Feature::Sqlite);
+    config.codex_home = codex_home;
+    config.cwd = repository.clone();
+    config.workspace_roots = vec![repository.clone(), writer_a.clone(), writer_b.clone()];
+    config.workspace_roots_explicit = true;
+    config.ephemeral = false;
+    config
+        .permissions
+        .replace_permission_profile_from_session_snapshot(
+            crate::config::PermissionProfileSnapshot::active(
+                codex_protocol::models::PermissionProfile::workspace_write(),
+                codex_protocol::models::ActivePermissionProfile::new(":workspace"),
+            ),
+        )
+        .expect("install managed workspace profile");
+    let manager = ThreadManager::with_models_provider_and_home_for_tests(
+        CodexAuth::from_api_key("dummy"),
+        config.model_provider.clone(),
+        config.codex_home.to_path_buf(),
+        Arc::new(codex_exec_server::EnvironmentManager::default_for_tests()),
+    );
+    let environment = writer_binding_environment(&repository, &writer_a, &writer_b);
+    let root = manager
+        .start_thread(StartThreadOptions {
+            environments: Some(vec![environment]),
+            writer_workspace_binding: Some(WriterWorkspaceBindingRequest {
+                worktree_root: writer_a.clone(),
+                environment_id: Some(codex_exec_server::LOCAL_ENVIRONMENT_ID.to_string()),
+            }),
+            ..StartThreadOptions::new(config)
+        })
+        .await
+        .expect("start writer A root");
+    let control = root.thread.session.services.agent_control.clone();
+    let root_turn = root.thread.session.new_default_turn().await;
+    let resume_config = (*root_turn.config).clone();
+    assert!(
+        !resume_config
+            .permissions
+            .permission_profile()
+            .file_system_sandbox_policy()
+            .can_write_path_with_cwd(writer_b.as_path(), writer_a.as_path()),
+        "the ordinary parent resume config must remain projected to writer A"
+    );
+    let mut spawn_config = resume_config.clone();
+    let spawn_environments = root
+        .thread
+        .session
+        .prepare_explicit_child_writer_spawn(&mut spawn_config)
+        .await;
+    let child_path = AgentPath::root().join("writer_b").expect("child path");
+    let child = control
+        .spawn_agent_with_metadata(
+            spawn_config,
+            vec![codex_protocol::user_input::UserInput::Text {
+                text: "write in B".to_string(),
+                text_elements: Vec::new(),
+            }],
+            Some(SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
+                parent_thread_id: root.thread_id,
+                depth: 1,
+                agent_path: Some(child_path),
+                agent_nickname: None,
+                agent_role: Some("worker".to_string()),
+            })),
+            SpawnAgentOptions {
+                parent_thread_id: Some(root.thread_id),
+                environments: Some(spawn_environments),
+                writer_workspace_binding: Some(WriterWorkspaceBindingRequest {
+                    worktree_root: writer_b.clone(),
+                    environment_id: Some(codex_exec_server::LOCAL_ENVIRONMENT_ID.to_string()),
+                }),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("spawn writer B child");
+    let child_thread = manager
+        .get_thread(child.thread_id)
+        .await
+        .expect("writer B child should be loaded");
+    let initial_binding = child_thread
+        .writer_workspace_binding()
+        .await
+        .expect("writer B child binding");
+    assert_eq!(initial_binding.binding.worktree_root, writer_b);
+    child_thread
+        .flush_rollout()
+        .await
+        .expect("persist writer B child before unload");
+    child_thread
+        .shutdown_and_wait()
+        .await
+        .expect("shutdown writer B child");
+    assert!(manager.remove_thread(&child.thread_id).await.is_some());
+
+    let mut current_authority = resume_config.clone();
+    root.thread
+        .session
+        .prepare_explicit_child_writer_spawn(&mut current_authority)
+        .await;
+    control
+        .ensure_v2_agent_loaded_with_bound_writer_authority(
+            resume_config.clone(),
+            current_authority,
+            child.thread_id,
+        )
+        .await
+        .expect("lazy reload should recover writer B from its own roots");
+    let reloaded = manager
+        .get_thread(child.thread_id)
+        .await
+        .expect("writer B should be resident after lazy reload");
+    let reloaded_binding = reloaded
+        .writer_workspace_binding()
+        .await
+        .expect("reloaded writer B binding");
+    assert_eq!(reloaded_binding, initial_binding);
+
+    reloaded
+        .flush_rollout()
+        .await
+        .expect("persist reloaded writer B");
+    reloaded
+        .shutdown_and_wait()
+        .await
+        .expect("shutdown reloaded writer B");
+    assert!(manager.remove_thread(&child.thread_id).await.is_some());
+    let mut revoked_authority = resume_config.clone();
+    root.thread
+        .session
+        .prepare_explicit_child_writer_spawn(&mut revoked_authority)
+        .await;
+    revoked_authority.workspace_roots = vec![writer_a.clone()];
+    revoked_authority
+        .permissions
+        .set_workspace_roots(vec![writer_a]);
+    control
+        .ensure_v2_agent_loaded_with_bound_writer_authority(
+            resume_config,
+            revoked_authority,
+            child.thread_id,
+        )
+        .await
+        .expect("fail-closed reload remains queryable");
+    let unavailable = manager
+        .get_thread(child.thread_id)
+        .await
+        .expect("unavailable writer remains loaded")
+        .writer_workspace_binding()
+        .await
+        .expect("unavailable writer binding remains queryable");
+    assert!(matches!(
+        unavailable.availability,
+        codex_protocol::protocol::WriterWorkspaceBindingAvailability::Unavailable { .. }
+    ));
 }
 
 #[tokio::test]

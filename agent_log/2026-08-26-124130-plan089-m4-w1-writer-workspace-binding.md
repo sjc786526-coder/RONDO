@@ -3,7 +3,8 @@
 ## 结果
 
 - 在 `worktree-089-m4-w1-writer-workspace-binding@adbc33c` 上完成生产实现、生成物、分层验证和 final fresh 正式全链。
-- 当前状态为 `IMPLEMENTATION_COMPLETE / FORMAL_CHAIN_PASS / REVIEW_PENDING / INTEGRATION_NOT_AUTHORIZED`；尚未独立验收、合并或推送，
+- 首轮独立审查的七组 finding 已完成整改并通过相称聚焦门禁与新的 fresh 正式全链；当前状态为
+  `REMEDIATION_COMPLETE / FORMAL_CHAIN_PASS / REVIEW_PENDING / INTEGRATION_NOT_AUTHORIZED`。尚未独立复验接受、合并或推送，
   因此不宣告 `M4_W1_PASS / PHASE_4_COMPLETE`。
 
 ## 实现
@@ -41,6 +42,21 @@
   absolute-cwd 读门冲突；`resume_warning` 使用空 rollout 占位文件；2 个 realtime connect-failure 10 秒超时已在既有 P0 验收日志中记录；
   相同根因使一个 synthetic resume mock 无请求。它们单独归因，未修改无关基线测试或冒充通过。
 
+### 独立审查整改
+
+- F1：bound writer 直接拒绝运行于 unmanaged host 的 `/shell`；MCP runtime 在 binding active 时不启动 local/executor stdio server，
+  HTTP MCP 继续走既有 `readOnlyHint` 调用门。W-off 的原有入口保持不变。
+- F2：bound writer 的 turn complete/abort/replacement/binding invalidation/shutdown 均改用 confirmed unified-exec 撤销屏障；终止失败不再
+  删除 process handle，并保留 fail-closed active-turn 占位以阻止下一 turn，后续 admission 会重试撤销。
+- F3/F4：binding identity 改走可传播错误的 strict append/materialize/flush；initial append 失败拒绝 Session，replacement append 失败
+  返回 `Unknown`。replacement 与 turn admission 共用既有 binding mutation 串行边界，TurnContext 捕获 exact binding，安装和执行前拒绝
+  stale generation/root。
+- F5：bound child lazy reload 从同一最新 settings event 读取 child 自身 binding 与 authority roots，只保留它们和当前 caller authority
+  的交集再恢复；当前 authority 已撤销时仍 fail closed 为 unavailable。
+- F6/F7：W1 write target 在 reviewer 前转成 existing canonical physical target，review 返回后及 tool 副作用前再次验证；binding/Git
+  identity 也在 reviewer 后的公共 orchestrator 路径重验。唯一 deterministic offline Critic 记录 packet，并断言恰好一次真实调用、
+  actor/target/title/summary/handoff 均正确。
+
 ## 正式验证
 
 所有 Rust 重型命令均经 `multidev/justfile` → shared `scripts/with-build-lock.sh`，复用用户指定 069 target，项目门限保持
@@ -60,6 +76,18 @@
   `librusty_v8_ptrcomp_sandbox_release_x86_64-unknown-linux-gnu.a.gz` 得到 HTTP 404，故无 JUnit、`final_rc=101 / stop=none`；未改依赖、
   未启用 V8 source build，也未冒充 full workspace 通过。
 
+### 整改复验
+
+- strict append fault、turn/replacement stale admission、confirmed process termination、child lazy reload/current-authority revocation、W1
+  symlink target 与 bound/unbound MCP filter 聚焦测试全部通过；bound writer `/shell` 真实集成入口 `1/1` 通过
+  （`20260826-133737-1000-136193`）。
+- `codex-protocol` + `codex-thread-store` 为 `489/489`（`20260826-133902-1000-143260`）；四个受影响 crate 的 scoped `just fix`
+  完成。四 crate clippy 复核在 app-server check 后由 project proactive stop 中止，不冒充整批通过；清理后以最终写集运行的
+  `codex-core` scoped clippy 无 warning（`20260826-134827-1000-182429`）。`just fmt` 与 `git diff --check` 通过。
+- 最终冻结代码的唯一 Critic + fresh app-server OS process 正式链 `1/1` 通过（`20260826-135046-1000-190891`），JUnit SHA-256
+  `3c62f83387ccfd3c5eac668e15962d3c6527735d74240b21b224ead35a42b1a8`。该轮既断言 Critic 的一次实际调用，也完成真实 app-server
+  旧/新进程替换、binding/replacement 和 lifecycle；`stop=none / cleanup=none`。
+
 ## 资源与边界
 
 - 首次 app full-chain 编译在 `20260826-112652-1000-3557648` 达到项目主动停止线：`285,001,187,328 B`，Windows C: 实际余量从
@@ -70,10 +98,19 @@
   决策；文件不可直接恢复，后续必要构建已按需重建 incremental。未使用 35GB 临时门限。
 - canonical full attempt 后项目/target 为 `274,131,664,896 / 215,246,045,184 B`；Windows C: 实际余量
   `53,300,080,640 B`，仍高于默认 50GB 门。未执行其它清理。
+- 整改期四 crate clippy 复核在项目达到 `285,574,410,240 B` 时由 watchdog 以 `project_reached_proactive_stop` 停止；当时 target
+  `226,670,284,800 B`，Windows C: 实际余量 `50,805,633,024 B`。经指定 queue 取得审查者明确批准后，持有 canonical build lock
+  并确认无 cargo/rustc/rust-lld/nextest 或 active heavy scope，再次只删除同一精确
+  `069-target/debug/incremental/`：删除前 `61,233,204,668 B`，删除后 `0 B`；未触及整个 target、`debug/deps`、其它 cache、087、
+  训练或来源不明资产。
+- 清理后仍保持项目 270/285/290GB 和 Windows C: 50GB 门禁。最终 core clippy 的 Windows C: 前后为
+  `50,032,033,792 / 50,031,665,152 B`；fresh 正式链项目空间前后为 `228,748,869,632 / 234,027,278,336 B`、target
+  `175,123,042,304 B`，Windows C: 前后为 `50,031,038,464 / 50,030,030,848 B`。最终余量仍高于门禁但仅约 30MB，故不再启动
+  无必要重编；没有启用 35GB 例外，也没有扩大清理范围。
 
 ## 自审与交接
 
-- 执行者按 trust/admission、写前重验、双门、replacement、durable resume、nested writer、S/C lifecycle 与关闭态逐项静态自审；
-  当前没有已知未关闭的 W1 高/中等级 correctness finding。
+- 执行者在首轮独立审查后再次按无约束 host process、turn-only grant 撤销、strict durability、turn/replacement admission、child
+  authority、review/path TOCTOU 和 Critic invocation 逐项静态自审；当前没有已知未关闭的 W1 高/中等级 correctness finding。
 - 089 分支只提交、不合并、不推送、不关闭 worktree、不归档分支。独立验收接受后也只能记录 `ACCEPTED / PENDING_INTEGRATION`；
   用户另行批准且成果成功进入并推送 `main` 后，才允许形成 `M4_W1_PASS / PHASE_4_COMPLETE`。

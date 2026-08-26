@@ -51,10 +51,18 @@ impl Handler {
         if receiver_agent.is_some() {
             let resume_config =
                 build_agent_resume_config(turn.as_ref(), step_context.environments.primary())?;
+            let mut bound_writer_authority = resume_config.clone();
+            session
+                .prepare_explicit_child_writer_spawn(&mut bound_writer_authority)
+                .await;
             session
                 .services
                 .agent_control
-                .ensure_v2_agent_loaded(resume_config, receiver_thread_id)
+                .ensure_v2_agent_loaded_with_bound_writer_authority(
+                    resume_config,
+                    bound_writer_authority,
+                    receiver_thread_id,
+                )
                 .await
                 .map_err(|err| collab_agent_error(receiver_thread_id, err))?;
         }

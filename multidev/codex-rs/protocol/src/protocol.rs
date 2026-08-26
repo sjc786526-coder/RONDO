@@ -2613,18 +2613,38 @@ pub enum InitialHistory {
 }
 
 impl InitialHistory {
-    /// Return the newest persisted writer binding only for an exact resume.
-    /// Forked and cleared histories intentionally never inherit write authority.
-    pub fn get_resumed_writer_workspace_binding(&self) -> Option<WriterWorkspaceBinding> {
+    /// Return the newest persisted writer binding and the authority roots captured with it, only
+    /// for an exact resume. Reading both fields from the same settings event prevents a binding
+    /// replacement from being paired with stale authority material.
+    pub fn get_resumed_writer_workspace_binding_material(
+        &self,
+    ) -> Option<(WriterWorkspaceBinding, Option<Vec<AbsolutePathBuf>>)> {
         let InitialHistory::Resumed(resumed) = self else {
             return None;
         };
         resumed.history.iter().rev().find_map(|item| match item {
-            RolloutItem::EventMsg(EventMsg::ThreadSettingsApplied(event)) => {
-                event.thread_settings.writer_workspace_binding.clone()
-            }
+            RolloutItem::EventMsg(EventMsg::ThreadSettingsApplied(event)) => event
+                .thread_settings
+                .writer_workspace_binding
+                .clone()
+                .map(|binding| {
+                    (
+                        binding,
+                        event
+                            .thread_settings
+                            .writer_workspace_authority_roots
+                            .clone(),
+                    )
+                }),
             _ => None,
         })
+    }
+
+    /// Return the newest persisted writer binding only for an exact resume.
+    /// Forked and cleared histories intentionally never inherit write authority.
+    pub fn get_resumed_writer_workspace_binding(&self) -> Option<WriterWorkspaceBinding> {
+        self.get_resumed_writer_workspace_binding_material()
+            .map(|(binding, _)| binding)
     }
 
     pub fn scan_rollout_items(&self, mut predicate: impl FnMut(&RolloutItem) -> bool) -> bool {

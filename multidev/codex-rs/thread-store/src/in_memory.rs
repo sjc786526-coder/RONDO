@@ -530,6 +530,7 @@ pub struct InMemoryThreadStore {
 #[derive(Default)]
 struct InMemoryThreadStoreState {
     calls: InMemoryThreadStoreCalls,
+    fail_next_append: bool,
     created_threads: HashMap<ThreadId, CreateThreadParams>,
     histories: HashMap<ThreadId, Vec<RolloutItem>>,
     archived_threads: HashSet<ThreadId>,
@@ -560,6 +561,11 @@ impl InMemoryThreadStore {
     /// Returns the calls observed by this store.
     pub async fn calls(&self) -> InMemoryThreadStoreCalls {
         self.state.lock().await.calls.clone()
+    }
+
+    /// Inject one append failure for focused durability-boundary tests.
+    pub async fn fail_next_append(&self) {
+        self.state.lock().await.fail_next_append = true;
     }
 
     async fn create_thread(&self, params: CreateThreadParams) -> ThreadStoreResult<()> {
@@ -631,6 +637,11 @@ impl InMemoryThreadStore {
             return Ok(());
         }
         state.calls.append_items += 1;
+        if std::mem::take(&mut state.fail_next_append) {
+            return Err(ThreadStoreError::Internal {
+                message: "injected in-memory append failure".to_string(),
+            });
+        }
         state
             .histories
             .entry(params.thread_id)

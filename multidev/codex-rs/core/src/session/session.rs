@@ -1798,7 +1798,7 @@ impl Session {
             if needs_initial_writer_binding_flush {
                 // A fresh binding is part of the thread's durable identity. Do not return an
                 // executable Session until that exact generation is on stable storage.
-                sess.flush_rollout().await?;
+                sess.persist_writer_workspace_binding_event().await?;
             }
             if matches!(&sess.fork_persistence, ForkPersistence::Referenced { .. }) {
                 // Keep the source reserved until the child's history reference is durable.

@@ -73,6 +73,33 @@ impl ToolOrchestrator {
             Err(err) => return (Err(err), None),
         };
 
+        if let Err(err) = tool_ctx
+            .session
+            .validate_writer_workspace_execution_authority(tool_ctx.turn.as_ref())
+            .await
+        {
+            let rejection = ToolError::Rejected(err.to_string());
+            let Some(network_approval) = network_approval else {
+                return (Err(rejection), None);
+            };
+            let finalize_result = match network_approval.mode() {
+                NetworkApprovalMode::Immediate => {
+                    finish_immediate_network_approval(&tool_ctx.session, network_approval).await
+                }
+                NetworkApprovalMode::Deferred => {
+                    finish_deferred_network_approval(
+                        &tool_ctx.session,
+                        network_approval.into_deferred(),
+                    )
+                    .await
+                }
+            };
+            return match finalize_result {
+                Ok(()) => (Err(rejection), None),
+                Err(finalize_err) => (Err(finalize_err), None),
+            };
+        }
+
         let attempt_tool_ctx = ToolCtx {
             session: tool_ctx.session.clone(),
             turn: tool_ctx.turn.clone(),

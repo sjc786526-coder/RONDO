@@ -601,7 +601,7 @@ impl ToolRegistry {
 
         invocation
             .session
-            .validate_writer_workspace_binding()
+            .validate_writer_workspace_binding_for_turn(invocation.turn.as_ref())
             .await
             .map_err(|err| FunctionCallError::RespondToModel(err.to_string()))?;
 
@@ -655,7 +655,7 @@ impl ToolRegistry {
 
         invocation
             .session
-            .validate_writer_workspace_binding()
+            .validate_writer_workspace_binding_for_turn(invocation.turn.as_ref())
             .await
             .map_err(|err| FunctionCallError::RespondToModel(err.to_string()))?;
 

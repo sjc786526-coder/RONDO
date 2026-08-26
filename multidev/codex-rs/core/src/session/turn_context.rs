@@ -141,6 +141,9 @@ pub struct TurnContext {
     pub(crate) parent_thread_id: Option<ThreadId>,
     pub(crate) originator: String,
     pub(crate) environments: TurnEnvironmentSnapshot,
+    /// Exact writer binding captured with this turn's execution projection.
+    /// Replacement must never execute a context created for an older generation.
+    pub(crate) writer_workspace_binding: Option<codex_protocol::protocol::WriterWorkspaceBinding>,
     /// The session's absolute working directory. All relative paths provided
     /// by the model as well as sandbox policies are resolved against this path
     /// instead of `std::env::current_dir()`.
@@ -315,6 +318,7 @@ impl TurnContext {
             parent_thread_id: self.parent_thread_id,
             originator: self.originator.clone(),
             environments: self.environments.clone(),
+            writer_workspace_binding: self.writer_workspace_binding.clone(),
             #[allow(deprecated)]
             cwd: self.cwd.clone(),
             current_date: self.current_date.clone(),
@@ -583,6 +587,10 @@ impl Session {
             parent_thread_id: session_configuration.parent_thread_id,
             originator: session_configuration.originator.clone(),
             environments,
+            writer_workspace_binding: session_configuration
+                .writer_workspace_binding
+                .as_ref()
+                .map(|binding| binding.snapshot.binding.clone()),
             #[allow(deprecated)]
             cwd,
             current_date: Some(current_date),

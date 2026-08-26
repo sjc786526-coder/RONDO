@@ -1,5 +1,7 @@
 use std::path::Path;
 use std::process::Command;
+use std::sync::Arc;
+use std::sync::Mutex;
 use std::time::Duration;
 
 use anyhow::Result;
@@ -50,6 +52,7 @@ use codex_features::Feature;
 use codex_models_manager::model_info::model_info_from_slug;
 use codex_protocol::models::BUILT_IN_PERMISSION_PROFILE_WORKSPACE;
 use codex_protocol::protocol::MultiAgentVersion;
+use codex_publication_critic::ActorRole;
 use codex_publication_critic::ClientConfig as CriticClientConfig;
 use codex_publication_critic::PublicationCriticClient;
 use codex_publication_critic::PublicationPacket;
@@ -60,6 +63,7 @@ use codex_publication_critic::ScorerError;
 use codex_publication_critic::ScorerStatus;
 use codex_publication_critic::ServiceConfig as CriticServiceConfig;
 use codex_publication_critic::ServiceDescriptor;
+use codex_publication_critic::TargetKind;
 use codex_publication_critic::controlled_test_descriptor;
 use codex_publication_critic::serve as serve_critic;
 use codex_utils_absolute_path::AbsolutePathBuf;
@@ -151,6 +155,7 @@ fn fresh_writer_site(temp: &TempDir) -> WriterSite {
 #[derive(Clone)]
 struct PassingCritic {
     descriptor: ServiceDescriptor,
+    requests: Arc<Mutex<Vec<PublicationPacket>>>,
 }
 
 impl PublicationScorer for PassingCritic {
@@ -163,9 +168,13 @@ impl PublicationScorer for PassingCritic {
 
     async fn score(
         &self,
-        _packet: PublicationPacket,
+        packet: PublicationPacket,
         _cancellation: CancellationToken,
     ) -> Result<RawScorerOutput, ScorerError> {
+        self.requests
+            .lock()
+            .expect("offline Publication Critic request record lock")
+            .push(packet);
         Ok(RawScorerOutput {
             model: self.descriptor.identity.model.clone(),
             scoring: self.descriptor.identity.scoring.clone(),
@@ -177,6 +186,7 @@ impl PublicationScorer for PassingCritic {
 struct OfflineCritic {
     endpoint: std::net::SocketAddr,
     descriptor: ServiceDescriptor,
+    requests: Arc<Mutex<Vec<PublicationPacket>>>,
     task: JoinHandle<Result<(), codex_publication_critic::ServiceRunError>>,
 }
 
@@ -185,8 +195,10 @@ impl OfflineCritic {
         let descriptor = controlled_test_descriptor(RuntimeLimits::production());
         let listener = TcpListener::bind("127.0.0.1:0").await?;
         let endpoint = listener.local_addr()?;
+        let requests = Arc::new(Mutex::new(Vec::new()));
         let scorer = PassingCritic {
             descriptor: descriptor.clone(),
+            requests: Arc::clone(&requests),
         };
         let config = CriticServiceConfig::new(
             descriptor.clone(),
@@ -197,11 +209,12 @@ impl OfflineCritic {
         Ok(Self {
             endpoint,
             descriptor,
+            requests,
             task,
         })
     }
 
-    async fn shutdown(self) -> Result<()> {
+    async fn shutdown(self) -> Result<Vec<PublicationPacket>> {
         let client = PublicationCriticClient::new(CriticClientConfig::new(
             self.endpoint,
             self.descriptor,
@@ -210,7 +223,12 @@ impl OfflineCritic {
         )?)?;
         client.shutdown().await?;
         timeout(DEFAULT_TIMEOUT, self.task).await???;
-        Ok(())
+        let requests = self
+            .requests
+            .lock()
+            .expect("offline Publication Critic request record lock")
+            .clone();
+        Ok(requests)
     }
 }
 
@@ -229,6 +247,7 @@ async fn durable_team_survives_process_replacement_and_completes_public_lifecycl
     const CLOSE_CALL_ID: &str = "full-chain-close-worker";
     const EVENT_TITLE: &str = "durable child checkpoint";
     const EVENT_SUMMARY: &str = "the child committed through the canonical Team writer";
+    const EVENT_HANDOFF: &str = "resume the same Team after process replacement";
 
     let site_temp = TempDir::new()?;
     let site = fresh_writer_site(&site_temp);
@@ -245,7 +264,7 @@ async fn durable_team_survives_process_replacement_and_completes_public_lifecycl
     let publish_args = serde_json::to_string(&json!({
         "title": EVENT_TITLE,
         "summary": EVENT_SUMMARY,
-        "handoff": "resume the same Team after process replacement",
+        "handoff": EVENT_HANDOFF,
     }))?;
 
     responses::mount_sse_once_match(
@@ -879,7 +898,18 @@ async fn durable_team_survives_process_replacement_and_completes_public_lifecycl
         shutdown.success(),
         "replacement app-server shutdown failed: {shutdown}"
     );
-    critic.shutdown().await?;
+    let critic_requests = critic.shutdown().await?;
+    assert_eq!(
+        critic_requests.len(),
+        1,
+        "the single child publication must invoke Publication Critic exactly once"
+    );
+    let critic_request = &critic_requests[0];
+    assert_eq!(critic_request.actor_role, ActorRole::Member);
+    assert_eq!(critic_request.target_kind, TargetKind::NewEvent);
+    assert_eq!(critic_request.local_scope.title(), EVENT_TITLE);
+    assert_eq!(critic_request.candidate.summary(), EVENT_SUMMARY);
+    assert_eq!(critic_request.candidate.handoff(), Some(EVENT_HANDOFF));
     Ok(())
 }
 

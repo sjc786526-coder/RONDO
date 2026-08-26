@@ -3,7 +3,6 @@ use super::session::Session;
 use super::turn_context::TurnContext;
 use crate::codex_thread::TryStartTurnIfIdleError;
 use crate::codex_thread::TryStartTurnIfIdleRejectionReason;
-use crate::state::ActiveTurn;
 use crate::state::TurnState;
 use crate::tasks::MailboxParentProvenance;
 use crate::tasks::RegularTask;
@@ -67,16 +66,14 @@ impl Session {
             ));
         }
 
-        let turn_state = {
-            let mut active_turn = self.active_turn.lock().await;
-            if active_turn.is_some() {
+        let turn_state = match self.reserve_idle_turn_for_writer_binding().await {
+            Ok(turn_state) => turn_state,
+            Err(_) => {
                 return Err(TryStartTurnIfIdleError::new(
                     TryStartTurnIfIdleRejectionReason::Busy,
                     input,
                 ));
             }
-            let active_turn = active_turn.get_or_insert_with(ActiveTurn::default);
-            Arc::clone(&active_turn.turn_state)
         };
 
         if self.input_queue.has_trigger_turn_mailbox_items().await {

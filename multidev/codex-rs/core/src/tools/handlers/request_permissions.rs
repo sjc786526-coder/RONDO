@@ -98,6 +98,17 @@ impl RequestPermissionsHandler {
                     .to_string(),
             ));
         }
+        if binding_external_write {
+            let fs = turn_environment.environment.get_filesystem();
+            args.permissions =
+                crate::writer_workspace_binding::canonicalize_external_write_permissions(
+                    args.permissions.into(),
+                    fs.as_ref(),
+                )
+                .await
+                .map_err(|err| FunctionCallError::RespondToModel(err.to_string()))?
+                .into();
+        }
 
         let mut response = session
             .request_permissions_for_environment(
@@ -115,6 +126,17 @@ impl RequestPermissionsHandler {
             })?;
 
         if binding_external_write {
+            let writer_environment_fs = turn_environment.environment.get_filesystem();
+            session
+                .validate_writer_workspace_binding_for_turn(turn.as_ref())
+                .await
+                .map_err(|err| FunctionCallError::RespondToModel(err.to_string()))?;
+            crate::writer_workspace_binding::revalidate_external_write_permissions(
+                &response.permissions.clone().into(),
+                writer_environment_fs.as_ref(),
+            )
+            .await
+            .map_err(|err| FunctionCallError::RespondToModel(err.to_string()))?;
             session
                 .record_writer_binding_external_write_grant(
                     &turn,
