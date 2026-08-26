@@ -29,6 +29,7 @@ use codex_config::config_toml::RealtimeAudioConfig;
 use codex_config::config_toml::RealtimeConfig;
 use codex_config::config_toml::ThreadStoreToml;
 use codex_config::config_toml::validate_model_providers;
+use codex_config::loader::find_git_checkout_root;
 use codex_config::loader::load_config_layers_state;
 use codex_config::loader::project_trust_key;
 use codex_config::permissions_toml::PermissionsToml;
@@ -3576,10 +3577,14 @@ impl Config {
             .into_iter()
             .map(|path| AbsolutePathBuf::resolve_path_against_base(path, resolved_cwd.as_path()))
             .collect();
-        let repo_root = resolve_root_git_project_for_trust(fs, &resolved_cwd).await;
+        let (checkout_root, repo_root) = tokio::join!(
+            find_git_checkout_root(fs, &resolved_cwd),
+            resolve_root_git_project_for_trust(fs, &resolved_cwd),
+        );
         let active_project = cfg
             .get_active_project(
                 resolved_cwd.as_path(),
+                checkout_root.as_ref().map(AbsolutePathBuf::as_path),
                 repo_root.as_ref().map(AbsolutePathBuf::as_path),
             )
             .unwrap_or(ProjectConfig { trust_level: None });

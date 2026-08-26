@@ -1190,7 +1190,11 @@ async fn find_project_root(
     Ok(cwd.clone())
 }
 
-async fn find_git_checkout_root(
+/// Finds the nearest checkout root for direct per-checkout trust lookup.
+///
+/// This only locates a `.git` marker. It does not authorize linked-worktree
+/// inheritance; callers must use the hardened trust resolver for that root.
+pub async fn find_git_checkout_root(
     fs: &dyn ExecutorFileSystem,
     cwd: &AbsolutePathBuf,
 ) -> Option<AbsolutePathBuf> {

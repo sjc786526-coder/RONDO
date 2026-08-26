@@ -843,28 +843,23 @@ impl ConfigToml {
         }
     }
 
-    /// Resolves the cwd to an existing project, or returns None if ConfigToml
-    /// does not contain a project corresponding to cwd or the resolved git repo
-    /// root for cwd.
+    /// Resolves the cwd to an existing project, preferring an exact cwd entry,
+    /// then the checkout root, then the inherited repository trust root.
     pub fn get_active_project(
         &self,
         resolved_cwd: &Path,
+        checkout_root: Option<&Path>,
         repo_root: Option<&Path>,
     ) -> Option<ProjectConfig> {
         let projects = self.projects.as_ref()?;
 
-        for normalized_cwd in normalized_project_lookup_keys(resolved_cwd) {
-            if let Some(project_config) = project_config_for_lookup_key(projects, &normalized_cwd) {
-                return Some(project_config);
-            }
-        }
-
-        if let Some(repo_root) = repo_root {
-            for normalized_repo_root in normalized_project_lookup_keys(repo_root) {
-                if let Some(project_config_for_root) =
-                    project_config_for_lookup_key(projects, &normalized_repo_root)
-                {
-                    return Some(project_config_for_root);
+        for candidate in std::iter::once(resolved_cwd)
+            .chain(checkout_root)
+            .chain(repo_root)
+        {
+            for lookup_key in normalized_project_lookup_keys(candidate) {
+                if let Some(project_config) = project_config_for_lookup_key(projects, &lookup_key) {
+                    return Some(project_config);
                 }
             }
         }

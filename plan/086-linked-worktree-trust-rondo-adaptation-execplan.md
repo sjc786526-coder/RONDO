@@ -264,15 +264,17 @@ XXX用以下内容代替：
 - 2026-08-26：`just fmt` 与 scoped `just fix -p codex-utils-path-uri -p codex-git-utils -p codex-core -p codex-app-server` 通过。一次合并行为批次
   被 watchdog 以持续 memory full PSI 主动停止（exit 125，未作为测试结果），随后保留进度并拆窄通过；未清理 069 target，项目峰值未触及
   285GB 主动停止线。
+- 2026-08-26：独立审查确认 resolver 闭环正确，但发现 nested linked-worktree cwd 的 `active_project` 未读取 checkout root 显式 trust。执行者
+  复用 config loader 的 checkout-root 定位能力，将 active-project 优先级统一为 exact cwd、checkout root、已验证继承 root；nested cwd 的
+  trusted/untrusted 正反覆盖与 host MCP/config/permission 行为共 2/2 通过，受影响 `codex-config`/`codex-core` scoped fix 通过。
 
 ### 当前工作
 
-- 阶段 A-C 与执行者自审已经完成，正在形成 clean 候选提交并按指定队列请求独立验收；WBS 当前指针和完成历史尚未提前修改。
+- 独立审查 P2 已完成窄修和复验，正在形成 clean 整改提交并按指定队列请求复验；WBS 当前指针和完成历史尚未提前修改。
 
 ### 本任务剩余步骤
 
-- 完成阶段 D 的候选提交并通知指定审查者。
-- 按独立审查 finding 在本 worktree 内整改、复验和再次提交；审查通过后由审查者同步最终 Plan/WBS/COMPLETED。
+- 完成阶段 D 的整改提交并通知指定审查者复验；审查通过后由审查者同步最终 Plan/WBS/COMPLETED。
 - 等待用户另行批准整合；不得在本任务启动 `#39153`、M4-W1 或其他下游工作。
 
 ### 阻塞项
@@ -282,7 +284,7 @@ XXX用以下内容代替：
 
 ### 当前验收状态
 
-- `IMPLEMENTED / AWAITING_INDEPENDENT_REVIEW`；执行者门禁已通过，但 `M4_W_39616_ADAPTATION_PASS` 仍须独立审查接受，WBS 继续把
+- `REMEDIATED / AWAITING_INDEPENDENT_REREVIEW`；审查 P2 已修复且聚焦门禁通过，但 `M4_W_39616_ADAPTATION_PASS` 仍须独立审查接受，WBS 继续把
   `#39616` 作为当前任务、`#39153` 作为严格后继。
 
 ### 交接边界
@@ -314,3 +316,4 @@ XXX用以下内容代替：
 | 015 | 为 Git metadata 增加 `PathUri::join_native_bytes`，不把元数据先转成 lossy UTF-8/native host 路径 | 保留 remote executor、POSIX 非 UTF-8 与 Windows 拒绝边界，避免复制路径体系 | path/兼容 | 已采纳 |
 | 016 | 行为测试同时覆盖非法继承、合法注册与当前 checkout 独立显式 trust，直接观察 config/permission、MCP ready 与启动 marker | 证明 fail-closed 不会把显式用户授权或合法 worktree 一并降级 | 消费/测试 | 已采纳 |
 | 017 | 合并 core/app-server 行为批次被 memory PSI 停止后保留编译进度并拆成窄批次，不清理 target | 遵循调试保留进度和资源 fail-closed 约束，避免把设施停止冒充产品失败 | 构建/资源 | 已采纳 |
+| 018 | active project 复用 config loader 的 checkout-root 定位，按 exact cwd、checkout root、已验证继承 root 查询显式 trust | 与 config layer 的既有优先级一致；checkout root 仅用于当前 checkout 的直接决定，主仓继承仍只由 hardened resolver 授权 | config/trust | 已采纳 |

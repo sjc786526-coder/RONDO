@@ -5,6 +5,7 @@ use anyhow::Result;
 use codex_config::LoaderOverrides;
 use codex_core::config::ConfigBuilder;
 use codex_core::config::ConfigOverrides;
+use codex_protocol::config_types::TrustLevel;
 use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::SandboxPolicy;
@@ -25,6 +26,7 @@ async fn forged_worktree_project_config_cannot_start_host_mcp() -> Result<()> {
     let home = Arc::new(TempDir::new()?);
     let trusted = tmp.path().join("trusted");
     let real = tmp.path().join("real");
+    let blocked = tmp.path().join("blocked");
     let explicit = tmp.path().join("explicit");
     let admin = trusted.join(".git/worktrees/real");
     fs::create_dir_all(&admin)?;
@@ -35,6 +37,18 @@ async fn forged_worktree_project_config_cannot_start_host_mcp() -> Result<()> {
         format!("{}\n", real.join(".git").display()),
     )?;
     fs::write(admin.join("commondir"), "../..\n")?;
+    let blocked_admin = trusted.join(".git/worktrees/blocked");
+    fs::create_dir_all(&blocked_admin)?;
+    fs::create_dir_all(&blocked)?;
+    fs::write(
+        blocked.join(".git"),
+        format!("gitdir: {}\n", blocked_admin.display()),
+    )?;
+    fs::write(
+        blocked_admin.join("gitdir"),
+        format!("{}\n", blocked.join(".git").display()),
+    )?;
+    fs::write(blocked_admin.join("commondir"), "../..\n")?;
     fs::write(
         home.path().join("config.toml"),
         toml::to_string(&serde_json::json!({
@@ -42,7 +56,8 @@ async fn forged_worktree_project_config_cannot_start_host_mcp() -> Result<()> {
             "sandbox_mode": "read-only",
             "projects": {
                 trusted.to_string_lossy().as_ref(): {"trust_level": "trusted"},
-                explicit.to_string_lossy().as_ref(): {"trust_level": "trusted"}
+                explicit.to_string_lossy().as_ref(): {"trust_level": "trusted"},
+                blocked.to_string_lossy().as_ref(): {"trust_level": "untrusted"}
             }
         }))?,
     )?;
@@ -54,15 +69,18 @@ async fn forged_worktree_project_config_cannot_start_host_mcp() -> Result<()> {
         "other-checkout",
         "symlink",
         "registered",
+        "blocked",
         "explicit",
     ] {
-        let checkout = if scenario == "registered" {
-            real.clone()
-        } else {
-            tmp.path().join(scenario)
+        let checkout = match scenario {
+            "registered" => real.clone(),
+            "blocked" => blocked.clone(),
+            _ => tmp.path().join(scenario),
         };
         let marker = tmp.path().join(format!("{scenario}-mcp-started"));
         fs::create_dir_all(checkout.join(".codex"))?;
+        let nested = checkout.join("nested");
+        fs::create_dir_all(&nested)?;
         match scenario {
             "missing" | "explicit" => fs::write(
                 checkout.join(".git"),
@@ -80,7 +98,7 @@ async fn forged_worktree_project_config_cannot_start_host_mcp() -> Result<()> {
                 #[cfg(not(unix))]
                 continue;
             }
-            "registered" => {}
+            "registered" | "blocked" => {}
             _ => unreachable!(),
         }
         fs::write(
@@ -98,12 +116,18 @@ async fn forged_worktree_project_config_cannot_start_host_mcp() -> Result<()> {
             .codex_home(home.path().to_path_buf())
             .loader_overrides(LoaderOverrides::without_managed_config_for_tests())
             .harness_overrides(ConfigOverrides {
-                cwd: Some(checkout.clone()),
+                cwd: Some(nested.clone()),
                 ..Default::default()
             })
             .build()
             .await?;
         let trusted_checkout = matches!(scenario, "registered" | "explicit");
+        let expected_active_trust = match scenario {
+            "registered" | "explicit" => Some(TrustLevel::Trusted),
+            "blocked" => Some(TrustLevel::Untrusted),
+            _ => None,
+        };
+        assert_eq!(loaded.active_project.trust_level, expected_active_trust);
         assert_eq!(
             loaded.mcp_servers.get().contains_key("worktree_probe"),
             trusted_checkout
@@ -117,7 +141,7 @@ async fn forged_worktree_project_config_cannot_start_host_mcp() -> Result<()> {
             }
         );
         assert_eq!(
-            loaded.permissions.legacy_sandbox_policy(&checkout),
+            loaded.permissions.legacy_sandbox_policy(&nested),
             if trusted_checkout {
                 SandboxPolicy::DangerFullAccess
             } else {

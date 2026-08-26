@@ -9772,9 +9772,54 @@ async fn active_project_does_not_match_configured_alias_for_canonical_cwd() -> a
     };
 
     assert_eq!(
-        config.get_active_project(&project_root, /*repo_root*/ None),
+        config.get_active_project(
+            &project_root,
+            /*checkout_root*/ None,
+            /*repo_root*/ None,
+        ),
         None
     );
+
+    Ok(())
+}
+
+#[test]
+fn active_project_prefers_checkout_root_over_inherited_repo_trust() -> anyhow::Result<()> {
+    let tmp = tempdir()?;
+    let repo_root = tmp.path().join("repo");
+    let checkout_root = tmp.path().join("checkout");
+    let nested = checkout_root.join("nested");
+    std::fs::create_dir_all(&repo_root)?;
+    std::fs::create_dir_all(&nested)?;
+
+    for (checkout_trust, repo_trust) in [
+        (TrustLevel::Trusted, TrustLevel::Untrusted),
+        (TrustLevel::Untrusted, TrustLevel::Trusted),
+    ] {
+        let expected = ProjectConfig {
+            trust_level: Some(checkout_trust),
+        };
+        let config = ConfigToml {
+            projects: Some(HashMap::from([
+                (
+                    checkout_root.to_string_lossy().to_string(),
+                    expected.clone(),
+                ),
+                (
+                    repo_root.to_string_lossy().to_string(),
+                    ProjectConfig {
+                        trust_level: Some(repo_trust),
+                    },
+                ),
+            ])),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            config.get_active_project(&nested, Some(&checkout_root), Some(&repo_root)),
+            Some(expected)
+        );
+    }
 
     Ok(())
 }
