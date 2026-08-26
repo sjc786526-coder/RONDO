@@ -1,6 +1,6 @@
 # 方向 3 四期：RONDO Multi Durable Team Runtime
 
-最后更新：2026-08-26 ｜ 产品线：RONDO Multi（`multidev/`）｜ 状态：**M4-A、M4-C0、M4-S1、M4-C1、M4-S2、M4-C2 与 M4-Z(core) 已完成；M4-C1 / M4-S2 / M4-C2 / M4-Z(core) 分别为 `M4_C1_QUERY_PASS` / `M4_S2_PASS` / `M4_C2_CONTROL_PASS` / `M4_Z_CORE_PASS`；M4-W0 继续按条件推进**
+最后更新：2026-08-26 ｜ 产品线：RONDO Multi（`multidev/`）｜ 状态：**M4-A、M4-C0、M4-S1、M4-C1、M4-S2、M4-C2、M4-Z(core) 与 M4-W0 已完成；M4-C1 / M4-S2 / M4-C2 / M4-Z(core) / M4-W0 分别为 `M4_C1_QUERY_PASS` / `M4_S2_PASS` / `M4_C2_CONTROL_PASS` / `M4_Z_CORE_PASS` / `BINDING_ONLY_GO`；正式 M4-W1 尚未立项**
 
 ## 1. 阶段定位
 
@@ -115,8 +115,8 @@ dashboard 或 `/cd`，也不建设第二套 Team State、writer authority、Sess
 **结论：`M4_A_GO`。** 当前架构存在一条不重复建设权威体系的合理路线：直接复用 lineage 与 canonical Team State，架构内扩展
 Root active-writer、V2 reload、控制面和 gates，并为 canonical Team 增加窄的 durability/read 能力。M4-C0 已完成实验性纵向原型；
 M4-S1 已完成阶段 E 并取得 `M4_S1_PASS`；M4-C1 已完成正式只读查询并取得 `M4_C1_QUERY_PASS`；Plan 078 / M4-S2 已完成并取得
-`M4_S2_PASS`；
-M4-W0 继续按自身条件推进，正式 W1 仍等待 W0 binding GO，且可复用现已成立的 M4-S1 持久接缝。
+`M4_S2_PASS`；Plan 084 / M4-W0 已通过最终独立验收并取得 `BINDING_ONLY_GO`；正式 W1 仍未立项，且可复用现已成立的
+M4-S1 持久接缝。
 
 **上游候选决定**（均不在 M4-A 实施；除下表明确归入消费包独立前置阶段的 `#37847` 外，仍建立独立回移任务）：
 
@@ -138,10 +138,9 @@ cold unarchive、stale/result-unknown 与权威重读，结论为 `M4_C0_PROTOTY
 residency、operation availability、freshness/certainty 与 provenance 分轴；state-DB/prototype input 不冒充 S1 durable read model，
 experimental capability 也不替代默认关闭的产品 gate。
 
-**M4-W0 可直接建计划的交接**：只用调用者预置、授权的本地 worktree 和系统 Git，以 deterministic/fake 比较自然语言流程与
-binding/replacement/minimal handoff 的产品价值；不依赖生产 S1，也不借用 `#39616` 作权威 trust。W0 自主选择可丢弃原型形状，最终
-只能给出 `BINDING_ONLY_GO`、`BINDING_HANDOFF_GO`、`NO_GO` 或 `INCONCLUSIVE_DEFER`；它不实施 W1、不预选正式字段/API，
-任一结果都不阻塞 S/C。
+**M4-W0 当前交接**：Plan 084 已只用调用者预置、授权的本地 worktree 与系统 Git，以 deterministic/fake 比较自然语言流程和
+binding/replacement/handoff 价值，经首次验收整改与最终独立复验取得 `BINDING_ONLY_GO`；它不依赖生产 S1，也未借用 `#39616`
+作权威 trust。W0 不实施 W1、不预选正式字段/API，也不阻塞 S/C。
 
 ### 子线 S：Durable Team Session（必成主线）
 
@@ -269,9 +268,15 @@ non-durable 路径无回归，结论为 `M4_C2_CONTROL_PASS`。
 **边界**：只做最小接缝原型和 deterministic/fake 正确性验证，不建设 workspace store、registry、provisioning、cleanup、
 workspace snapshot、integration workspace 或正式公共 API，也不调用真实模型或 API。
 
+**最终结论：`BINDING_ONLY_GO`。** AgentControl 邻接的 test-only 原型与 task-owned 真实 Git
+two-linked-worktree fixture 证明，首次动作前 binding、cold reload 重验、失效隔离和事务式 replacement 能闭合 caller-relative
+执行上下文缺口；合理自然语言加 branch/HEAD/status/diff 已能定位换绑前后成果，未出现 structured handoff 独有且可重复的缺口。
+首次验收指出的先授权后读取、actual action bound-root/policy、cold invalidation、各失败隔离和公平 baseline 已完成整改，并以原
+8 项聚焦门禁通过最终独立复验；该证据不构成生产 trust/binding 保证，也未启动 M4-W1。
+
 **价值门输出**：
 
-- `BINDING_ONLY_GO`：不可绕过的首次动作前 binding、跨进程重验、fail-closed 与 replacement binding 具有产品价值；成果交接继续
+- `BINDING_ONLY_GO`：不可绕过的首次动作前 binding、reload/resume 重验、fail-closed 与 replacement binding 具有产品价值；成果交接继续
   使用现有 Git status/diff/ref 和自然语言，不新增结构化 handoff。
 - `BINDING_HANDOFF_GO`：除 binding 外，证据还证明 minimal structured handoff 具有独立价值；M4-W1 才包含该窄能力。
 - `NO_GO`：自然语言安排和现有 Git 工作流已经足够，W 线停止。
@@ -334,8 +339,8 @@ M4-S1（M4_S1_PASS）+ M4-C0（M4_C0_PROTOTYPE_PASS）
 
 M4-C1 + M4-S2 → M4-C2 / Plan 080（M4_C2_CONTROL_PASS）→ Plan 083 / M4-Z(core)（M4_Z_CORE_PASS）
 
-M4-A → M4-W0（原型/价值门）
-M4-W0 binding GO + M4-S1 → M4-W1 开始
+M4-A → M4-W0（BINDING_ONLY_GO）
+M4-W0 BINDING_ONLY_GO + M4-S1 → 按实际消费决定上游窄适配 → M4-W1 开始
 M4-W1 实现 + M4-S2 → M4-W1 PASS → 可选 Workspace 控制面扩展
 M4-W0 NO_GO/INCONCLUSIVE_DEFER ────────────────→ 不阻塞 M4-Z(core)
 
@@ -350,7 +355,8 @@ W-only delta ─/→ S/C
 - M4-A 已以 `M4_A_GO` 串行完成，S/C/W 共同采用第 2 节身份、生命周期、authority 与启用合同。
 - M4-C0 已完成并提供拆包输入；Plan 074 / `#37198`、M4-S1、M4-C1 与 M4-S2 已完成。Plan 080 已在合并树补跑 query×lifecycle
   基线、完成正式控制链和 fresh store/restart 场景，并收口两轮独立审查整改与最终复验；Plan 083 / M4-Z(core) 随后完成 S/C
-  全链、两轮独立审查整改与最终复验并取得 `M4_Z_CORE_PASS`。M4-W0 继续按自身条件推进。
+  全链、两轮独立审查整改与最终复验并取得 `M4_Z_CORE_PASS`。Plan 084 / M4-W0 已完成首次验收整改与最终独立复验并取得
+  `BINDING_ONLY_GO`；正式 W1 尚未立项。
 - M4-W1 只在 binding GO 后开始，并等待 M4-S1 以复用持久接缝；最终 PASS 必须消费已完成的 M4-S2 并把
   resume/replacement binding 收口纳入自身出口，不存在无编号的后置收口包。
 - M4-Z(core) 只依赖 S/C 主线。W 若已经进入主线，由后完成者拥有一次兼容验收；W 未进入主线时不制造空实现或占位平台。
