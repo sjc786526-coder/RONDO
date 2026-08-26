@@ -8,11 +8,11 @@
 
 1. **Durable Team Session**：必成主线，使 Team Session 可以跨进程持久化和恢复；
 2. **Session Control Surface**：必成主线，通过 app-server v2 与 TUI 查询、恢复和显式控制持久 Session；
-3. **Writer Workspace Binding（可选 Minimal Handoff）**：可选增强，把显式 writer 绑定到调用者已准备且授权的 Git worktree；只有价值门
-   证明既有 Git 事实和自然语言交接不足时，才附加 minimal Git-native handoff。
+3. **Writer Workspace Binding**：可选增强，把显式 writer 的 primary write binding 绑定到调用者已准备且授权的 Git worktree，
+   并允许通过显式、有界授权使用必要的绑定外辅助写入位置；binding 不建立读取隔离，W0 已判定不新增 structured handoff。
 
 worktree 是按需使用的执行隔离能力，不负责 Team 协调、任务拆分、正确性判断或成果整合。shared workspace 继续是默认行为；
-W 线先经过原型和价值门，若自然语言安排与既有 Git 工作流已经足够，可以延期或停止，不阻塞 Durable Team Session、
+W0 已证明 binding 的独立价值并排除新增 structured handoff，后续 W-only 适配与 W1 仍不阻塞 Durable Team Session、
 Session 控制面或第四期核心收口。
 
 第四期与 Publication Critic 三期没有产品依赖，可以有界并行。第四期的正确性开发和验收不调用真实 API 或模型，不进行
@@ -35,7 +35,7 @@ Root Thread active-writer、app-server v2/TUI 生命周期入口、feature/confi
 | Team State | **直接复用 canonical 语义并新建专用 durability/read 能力** | 新能力集成在同一权威域，只承载 Team State 的持久提交/恢复/读取，不复制第二套 Team State |
 | app-server v2 / TUI | **架构内扩展** | 只投影权威状态并调用领域能力；不成为状态源或通用 dashboard |
 | feature/config gate | **架构内扩展** | 增加连贯的 opt-in 组合和 fail-closed 依赖；具体配置形状由消费包决定 |
-| Git/worktree 观察 | **直接复用，正式 trust 按条件扩展** | W0 仅使用调用者预置 worktree 与系统 Git 做价值原型；W1 若获 GO，再补足正式 trust/binding 缺口 |
+| Git/worktree 与 permission 接缝 | **直接复用并窄扩展** | W0 仅使用调用者预置 worktree 与系统 Git 做价值原型；正式 W1 实现前先完成 linked-worktree trust 与 permission restore 的 RONDO 窄适配 |
 
 Codex 桌面端 managed worktree、Local/Worktree Handoff、快照和清理不属于冻结 CLI 可复用基线。第四期不移植 Project、queue、
 dashboard 或 `/cd`，也不建设第二套 Team State、writer authority、Session 生命周期或控制面状态源。
@@ -102,11 +102,11 @@ dashboard 或 `/cd`，也不建设第二套 Team State、writer authority、Sess
 | MultiAgentV2 + Team State + Durable 开启，且 durable backend 与 canonical Root authority 可用 | 可创建/恢复可写 Durable Team；任一必要能力缺失即 activation/start fail-closed，不静默降为内存 Team |
 | Control Surface 开启或关闭 | 可独立开启作历史 durable Session 的只读发现/展示；在线 mutation 仍要求 owner 与上述依赖。关闭时 Durable runtime 仍可经既有领域入口工作 |
 | W 关闭 | shared workspace 与既有权限行为不变；已有兼容 binding 只能按消费包明确的只读语义展示，不影响 S/C |
-| W0 原型开启 | 仅以预置 worktree 和 deterministic/fake 验证价值，不获得生产 trust/binding 保证；正式 W1 还需要 binding GO、S1 接缝和所选 W-only 增量 |
-| 正式 W1 开启 | 仅在 W0 binding GO、MultiAgentV2 + Team State + Durable 与 S1 接缝均成立时合法；否则 fail-closed，不保存孤立 binding、不回退父 cwd |
+| W0 原型开启 | 仅以预置 worktree 和 deterministic/fake 验证价值，不获得生产 trust/binding 保证；正式 W1 还需要 binding GO、S1 接缝和 W-only 上游窄适配 |
+| 正式 W1 开启 | 仅在 W0 binding GO、MultiAgentV2 + Team State + Durable、S1 接缝及两项 W-only 上游窄适配均成立时合法；否则 fail-closed，不保存孤立 binding、不回退父 cwd。绑定外写入还必须同时满足显式 W1 授权与现有 permission/sandbox |
 
 具体配置 key、解析顺序、backend/格式、crate/module、API/wire、锁/permit、read token、snapshot、一致性标识、调用/重试顺序、
-分页、通知、binding/handoff 字段和测试 fixture 均由唯一消费包决定，不属于共同合同。
+分页、通知、binding/authorization 字段和测试 fixture 均由唯一消费包决定，不属于共同合同。
 
 ## 3. 工作包
 
@@ -124,8 +124,8 @@ M4-S1 持久接缝。
 |---|---|---|
 | `#37847` reload environment | **采用窄回移**；修复 V2 member eviction/reload 丢失 inherited environment 的当前缺口，保留显式 override 优先，不承担 Team durability、W binding 或新环境管理体系 | Plan 078 独立前置已完成聚焦验收并进入本地 `main`，M4-S2 已消费并取得 `M4_S2_PASS`；不阻塞 S1/C0/C1/W0 |
 | `#37198` persisted cwd read consistency | **Plan 074 已完成窄回移，Plan 069 阶段 E 已完成消费与正式复验**；ThreadStore 按已持久事实投影 cwd，不替代 live binding 重验 | M4-S1 与 M4-C1 已消费该持久读取事实；W 后续只按自身边界消费 |
-| `#39616` linked-worktree trust | **条件延期并按 RONDO 边界适配**；W0 可用临时 Git 只证明产品价值，不得声称生产 trust | 仅当 W0 给出 binding GO 且 W1 消费 linked-worktree project trust 时采用；须在 M4-W1 开始前进入主线，永不阻塞 S/C |
-| `#39153` permission restore | **条件适配，不直接照搬 fallback**；保留显式 override 优先，但 durable binding 的权限缺失/不兼容必须 unavailable/replacement | 仅在 W0 binding GO 后立项；若 W1 采用，须在 M4-W1 PASS 前进入主线，永不阻塞 S/C |
+| `#39616` linked-worktree trust | **采用 RONDO 窄适配**；补足正式 linked-worktree project trust，不扩张为通用 workspace trust/registry | W0 已给出 binding GO；该适配须在正式 M4-W1 实现前进入主线，永不阻塞 S/C |
+| `#39153` permission restore | **采用 RONDO fail-closed 窄适配**；恢复既有 permission/reviewer 上下文时保留显式 override 优先，缺失或不兼容不得静默回退默认权限 | 该适配须在正式 M4-W1 实现前进入主线；它不预建 scoped write authorization 的字段、持久格式或恢复规则，永不阻塞 S/C |
 
 **M4-S1 当前交接**：Plan 069 以第 2 节的三类身份、Root authority、durable success、自洽读取、关闭/失败与在线/冷态责任为输入，
 已经实现 canonical Team durability/read 专用能力及 Root writer 的架构内扩展，并覆盖 Root/child 双进程竞争、authority 丢失、损坏
@@ -258,7 +258,7 @@ non-durable 路径无回归，结论为 `M4_C2_CONTROL_PASS`。
 **正式 C 线出口**：操作者可以通过公开 app-server v2/TUI 查看和控制允许的 Team Session 生命周期；断线、重启或结果未知后能从
 权威领域状态重建当前视图并安全继续，不绕过现有权限和审批，不自动启动 Agent、模型或真实 API。
 
-### 子线 W：Writer Workspace Binding（可选 Minimal Handoff）
+### 子线 W：Writer Workspace Binding
 
 #### M4-W0：Binding 原型与价值门
 
@@ -284,38 +284,47 @@ two-linked-worktree fixture 证明，首次动作前 binding、cold reload 重�
 
 后两种结果不阻塞 S/C 与 M4-Z(core)；M4-W1 的最终范围必须服从本门结论，不得从 binding-only GO 扩张出 handoff 子系统。
 
-#### M4-W1：Writer Workspace Binding（可选 Minimal Handoff）
+#### M4-W1：Primary Write Binding 与 Scoped Write Authorization
 
-**开始前置**：M4-W0 形成 `BINDING_ONLY_GO` 或 `BINDING_HANDOFF_GO`，且 M4-S1 已提供可复用的持久 Session/thread 接缝。
+**开始前置**：M4-W0 已形成 `BINDING_ONLY_GO`，M4-S1 已提供可复用的持久 Session/thread 接缝，且 `#39616` linked-worktree
+trust 与 `#39153` permission restore 均已按 RONDO 边界完成窄适配并进入主线。
 
-**目标**：将显式 writer 绑定到调用者已准备、授权且可验证的本地 Git worktree，在首次模型或工具动作及每次 reload/resume 前，
-通过原生 cwd、workspace roots、permission、sandbox 与 thread 生命周期强制并重新验证绑定；仅在 `BINDING_HANDOFF_GO` 时附加
-可检查的 minimal Git-native handoff。
+**目标**：为显式 writer 建立稳定的 primary write binding，使调用者已准备、授权且可验证的本地 Git worktree 决定默认 cwd 与
+默认写入范围；同时提供显式、有界且不改变 primary binding 的绑定外辅助写授权。首次模型或工具动作及每次 reload/resume 前均须
+通过原生 cwd、workspace roots、permission、sandbox 与 thread 生命周期建立或重新验证有效执行上下文。
 
-**PASS 前置**：M4-S2 已提供正式恢复行为，M4-W1 的 reload/resume、失效隔离和 replacement binding 已在该行为上完成收口；
-M4-W1 实际消费的上游窄增量也已进入主线。M4-W1 可以在开始前置成立后并行开发，但不得在满足本门前宣告 PASS。
+**PASS 前置**：M4-S2 已提供正式恢复行为，M4-W1 的 reload/resume、失效隔离、scoped authorization 生命周期和 replacement
+binding 已在该行为上完成收口。M4-W1 可以在开始前置成立后开发，但不得在满足本门前宣告 PASS。
 
 **边界**：
 
 - writer/integrator 是 binding 或能力，不新增 Team Role，不建立第二套 spawn、Agent registry、scheduler 或自动路由。
-- binding 不得扩大 Agent 原有宿主文件、Git、sandbox 或审批权限；Workspace Binding、cwd、workspace roots 与有效权限必须在
-  writer 第一次可观察动作前生效。
-- worktree 缺失、repository 失配、trust 或权限不兼容时，将对应 binding 标记为 unavailable/unknown，拒绝自动加载、执行或
-  重新绑定，绝不静默退回父 cwd。
-- 显式修复不承诺原 ThreadId 原地切换 workspace。用户、Root 或明确 integrator 先处理旧 binding 与未 handoff 成果，验证新的
-  worktree、roots 和权限后，再建立 replacement binding；不得静默覆盖旧 binding。
-- 若 W0 选择 minimal handoff，它只记录或引用可核对的时点 Git 事实与现成成果，不强行复用 Team State 的自由文本 `handoff`
-  字段，不成为 ChangeSet registry，不自动 merge、cherry-pick、判断正确性或解决冲突；binding-only 范围不新增该能力。
+- primary binding 必须在 writer 第一次模型或工具动作前生效，并决定默认 cwd 与默认写入范围。W1 不新增 read grant、读取审批或
+  保密隔离；可读范围仍由现有 permission、sandbox 与任务授权决定，相对路径和 Git 上下文仍从绑定 cwd 解析。
+- binding 本身不授予新权限。任何绑定外写入都必须同时具有显式、有界的 W1 scoped authorization 和现有底层
+  permission/sandbox；普通 sandbox escalation 不得被解释为取消 primary binding。既有任务/委托与 reviewer 接缝可承载同一有界
+  决策，但不建设第二套通用审批器或权限系统。
+- scoped authorization 只扩大明确目标与生命周期内的辅助写入范围，不改变 primary cwd/binding，不提供共享文件所有权、锁、冲突
+  解决或正确性判断。临时授权不得在 reload/resume 后静默恢复；明确保留的授权必须重新验证，且不得因 replacement 自动迁移。
+- worktree 缺失、repository 失配、trust、授权或权限不兼容时，对应 binding unavailable/unknown，拒绝 writer 自动激活、执行、
+  重新绑定或回退父 cwd；独立的 Team/root 权威只读模型仍可恢复和查看。
+- 写入发生时，目标仍须属于已验证的 primary binding 或 scoped authorization；路径、symlink、repository/worktree identity 或有效
+  权限在校验后变化时，不得形成越界写入或改写其它可写路径。
+- replacement binding 是独立显式动作。先验证新 worktree identity、roots、permission 与 sandbox，成功后才替换 primary binding；
+  失败保留旧 binding，旧 worktree 成果继续诚实可见，不自动 merge、cherry-pick、判断正确性或解决冲突。
+- W0 已选择 binding-only，成果交接继续使用现有 Git status/diff/ref 与合理自然语言，不新增 structured handoff。
 - RONDO binding 能力、Git 操作方和所选执行环境必须能共同直接访问并验证同一 repository/worktree；不能满足时返回 unsupported。
   远程 client 本身不构成拒绝理由，但远程 workspace controller、多机同步和跨文件系统 worktree 不属于本期。
-- RONDO 不 create/adopt/remove/prune worktree，不复制 ignored 文件或 `.env.local`，不清理、回收或恢复 Git 资产。
+- RONDO 不 create/adopt/remove/prune worktree，不复制、同步或恢复 ignored 文件与 `.env.local`，不清理、回收或恢复 Git 资产。
+  任务已明确授权的辅助输出位置及现有工具链确需的共享构建/缓存现场可以成为 scoped authorization 目标；密钥禁区和既有构建锁、
+  Docker/模型互斥及资源门禁保持不变。
 
-**可选控制面扩展**：M4-W1 PASS 后，可以另行建立窄的 binding、失效展示和 replacement binding 操作包；仅在 W1 包含 minimal
-handoff 时投影其状态。该扩展不扩张为通用 workspace dashboard，也不阻塞 Session 控制面或 M4-Z(core)。
+**可选控制面扩展**：M4-W1 PASS 后，可以另行建立窄的 binding 状态、失效展示和 replacement binding 操作包。该扩展不扩张为
+通用 workspace dashboard，也不阻塞 Session 控制面或 M4-Z(core)。
 
-**子线出口**：两个 writer 可以绑定两个预置 worktree，首次可观察动作和基于 M4-S2 的 reload/resume 均使用并重新验证正确执行
-上下文；失效只使对应 writer unavailable，关闭态保持现有 shared workspace 行为。若范围包含 minimal handoff，它还须可定位、
-可检查且不声称正确；binding-only PASS 不以新 handoff 能力为前置。
+**子线出口**：两个 writer 可以分别建立两个预置 worktree 的 primary binding，默认写入互不污染；显式批准的绑定外辅助写入只覆盖
+批准范围且不改变 primary binding。首次模型/工具动作和基于 M4-S2 的 reload/resume 均建立并重新验证正确执行上下文；失效只使对应
+bound writer unavailable，关闭态保持现有 shared workspace 行为，不新增 structured handoff。
 
 ### M4-Z(core)：Durable Team 全链收口
 
@@ -328,7 +337,7 @@ exact-retire；任一 teardown/owner/graph 失败仍保留 Root close barrier。
 形成独立可用的 Durable Team Runtime。
 
 **边界**：M4-Z(core) 不以 W 线 GO 或完成为前置，不加入性能 benchmark、模型质量横评或与阶段目标无关的平台建设。若 M4-W1 已进入
-主线，则增加一条相称的 Session resume + binding 兼容验收，并仅在 W1 范围包含时纳入 handoff；若 W 线延期，则第四期核心照常收口。
+主线，则增加一条相称的 Session resume + binding 兼容验收；若 W 线延期，则第四期核心照常收口。
 
 ## 4. 四期内部串并行关系
 
@@ -340,15 +349,15 @@ M4-S1（M4_S1_PASS）+ M4-C0（M4_C0_PROTOTYPE_PASS）
 M4-C1 + M4-S2 → M4-C2 / Plan 080（M4_C2_CONTROL_PASS）→ Plan 083 / M4-Z(core)（M4_Z_CORE_PASS）
 
 M4-A → M4-W0（BINDING_ONLY_GO）
-M4-W0 BINDING_ONLY_GO + M4-S1 → 按实际消费决定上游窄适配 → M4-W1 开始
+M4-W0 BINDING_ONLY_GO + M4-S1 → #39616 + #39153 RONDO 窄适配进入主线 → M4-W1 实现
 M4-W1 实现 + M4-S2 → M4-W1 PASS → 可选 Workspace 控制面扩展
 M4-W0 NO_GO/INCONCLUSIVE_DEFER ────────────────→ 不阻塞 M4-Z(core)
 
-条件增量边：
+上游增量边：
 #37198 RONDO 窄回移（Plan 074 已完成）→ M4-S1 阶段 E（已完成）→ M4_S1_PASS
 #37847 RONDO 窄回移（Plan 078 独立前置已进入 main）→ M4-S2（M4_S2_PASS）
-M4-W0 binding GO + W1 消费 linked-worktree trust → #39616 适配 → M4-W1 开始
-M4-W0 binding GO + W1 消费 permission continuity → #39153 fail-closed 适配 → M4-W1 PASS
+#39616 linked-worktree trust RONDO 窄适配 ─┐
+#39153 permission restore fail-closed 窄适配 ─┴→ M4-W1 实现
 W-only delta ─/→ S/C
 ```
 
@@ -357,8 +366,8 @@ W-only delta ─/→ S/C
   基线、完成正式控制链和 fresh store/restart 场景，并收口两轮独立审查整改与最终复验；Plan 083 / M4-Z(core) 随后完成 S/C
   全链、两轮独立审查整改与最终复验并取得 `M4_Z_CORE_PASS`。Plan 084 / M4-W0 已完成首次验收整改与最终独立复验并取得
   `BINDING_ONLY_GO`；正式 W1 尚未立项。
-- M4-W1 只在 binding GO 后开始，并等待 M4-S1 以复用持久接缝；最终 PASS 必须消费已完成的 M4-S2 并把
-  resume/replacement binding 收口纳入自身出口，不存在无编号的后置收口包。
+- M4-W1 只在 binding GO、M4-S1 接缝及 `#39616`/`#39153` 两项 RONDO 窄适配均进入主线后开始实现；最终 PASS 必须消费已完成的
+  M4-S2，并把 reload/resume、scoped authorization 与 replacement binding 收口纳入自身出口，不存在无编号的后置收口包。
 - M4-Z(core) 只依赖 S/C 主线。W 若已经进入主线，由后完成者拥有一次兼容验收；W 未进入主线时不制造空实现或占位平台。
 - 各工作包内部的模块、测试和审查并行度由对应 ExecPlan 根据当时源码决定。Plan 078 已完成 core/thread/session 的 reload、
   resume、close 与冷态生命周期并收敛 shared read/write 接缝；后续任务只消费其已验收领域能力，不复制第二套生命周期设施。
@@ -375,7 +384,7 @@ W-only delta ─/→ S/C
 - 每个工作包从开始时的最新主线建立任务合同。并行工作只共享已经进入主线的稳定事实，不以其他 worktree 中尚未合并的
   方案或结果作为前置。
 - 当三期或四期中第二项能力进入正式收口时，只要另一项已经进入主线，由后完成者拥有唯一一条 fake/offline 的 Critic +
-  durable Team resume 组合回归；writer binding 已进入主线时才纳入 binding 路径，并仅在 W1 范围包含时纳入 handoff。
+  durable Team resume 组合回归；writer binding 已进入主线时才纳入 binding 路径。
   该测试不调用真实模型或 API，不重复建设，也不把两个阶段改成互相前置。
 
 ### 5.2 资源使用与竞争
@@ -408,8 +417,8 @@ Rust target 的命令不得由执行者自行排队：执行者先报告准确�
   伪报完成、Root idle/close 与 mutation-capable live child 的 barrier，以及顶层 `thread/fork` 与 `spawn_agent fork_turns` 的不同
   Team 语义；具体 fixture、竞态 interleaving 和版本标识由任务方案根据真实接缝决定，不为验收建设审计、通用事务或第二套
   跨进程协调平台。
-- M4-W0/W1 使用临时 Git repository/worktree 和 deterministic/fake 测试；若 W1 落地，由其自身出口按价值门范围承担完整 binding
-  及可选 minimal handoff 验收。
+- M4-W0/W1 使用临时 Git repository/worktree 和 deterministic/fake 测试；若 W1 落地，由其自身出口承担 primary binding、
+  scoped authorization、reload/resume 与 replacement 的完整验收。
   第四期不新建或运行性能测评。
 
 ## 7. 宏观验收
@@ -436,22 +445,26 @@ Rust target 的命令不得由执行者自行排队：执行者先报告准确�
 
 ### 7.2 可选 W 线 PASS
 
-- 两个 writer 可以绑定两个调用者预置并授权的 worktree，首个可观察动作就在正确 workspace。
-- cwd、workspace roots 与权限正确生效且不扩大原授权；writer 修改互不污染，也不触碰用户当前 checkout。
-- reload/进程重启后重新验证原 binding；worktree 缺失、repository 失配或权限不兼容时，仅对应 writer unavailable，
-  绝不回退父 cwd，Team/root read model 仍可恢复和查看。
-- replacement binding 不静默覆盖旧 binding 或未交接成果；若 W0 选择 minimal handoff，它可检查、可定位，但不声称正确且
-  不自动 merge；binding-only PASS 不要求新增 handoff。
+- 两个 writer 可以绑定两个调用者预置并授权的 worktree，首个模型/工具动作从正确 primary cwd 开始，默认写入互不污染。
+- 未授权的 main、其它 worktree 与绑定外路径写入在目标副作用前被拒绝；显式批准的绑定外写入只覆盖批准范围，不改变 primary cwd
+  或 primary binding，并同时服从现有 permission/sandbox。普通 sandbox escalation 不会静默绕过 binding。
+- W1 不新增读取授权、读取禁令或保密边界；相对读取和 Git 上下文仍从绑定 cwd 解析，现有 permission、sandbox 与任务授权继续决定
+  实际可读范围。
+- reload/进程重启后重新验证 primary binding；临时 scoped authorization 不会静默继承，明确保留的授权重新验证后才可继续。
+- 写入目标在副作用发生时仍属于有效 primary binding 或 scoped authorization；worktree 缺失、repository 失配、路径/symlink/identity
+  变化、授权失效或权限不兼容时不越界写入、不回退其它可写路径，Team/root read model 仍可恢复和查看。
+- replacement binding 成功和失败都不静默覆盖旧 binding、迁移临时授权或隐藏旧成果；成果继续由现有 Git 事实与合理自然语言定位，
+  不新增 structured handoff 或自动 merge。
 - W 线关闭时保持现有 shared workspace 行为。
 
 ## 8. 非目标
 
-- RONDO-managed worktree provisioning、create/adopt/remove/prune、ignored 文件复制、managed workspace snapshot、自动 cleanup
+- RONDO-managed worktree provisioning、create/adopt/remove/prune、ignored 文件复制/同步/恢复、managed workspace snapshot、自动 cleanup
   或 Git 资产恢复；
 - canonical workspace index、Workspace ChangeSet registry、通用 workspace/session/task registry 或独立 workspace store；
 - 通用 Project API、queue dispatcher、agents dashboard、daemon 管理面或完整 `/cd` 移植；
 - 自动拆任务、自动 spawn、自动 Agent 路由、新 Agent-to-Agent 协议、自由群聊或大规模 swarm；
-- 自动 merge/cherry-pick、冲突修复、修改正确性判断、更新 `main`、fetch/push、PR、CI 或远端发布；
+- structured handoff、自动 merge/cherry-pick、冲突修复、修改正确性判断、更新 `main`、fetch/push、PR、CI 或远端发布；
 - 多机/远程 workspace controller、跨文件系统 worktree、分布式 Session、高可用、复制、共识或通用事务平台；
 - 第二套 Team State、thread history、Agent graph、trace 或事件总线；
 - Team 专属 `reset`、顶层 `thread/fork` 时的 Team State 继承、Team clone/branch、ID remint/rewrite 或 old-to-new mapping、历史
@@ -472,9 +485,9 @@ Rust target 的命令不得由执行者自行排队：执行者先报告准确�
 
 Plan 078 已消费 `#37847` 与 M4-C1 最新主线，完成 shared query/lifecycle 接缝收敛并取得 `M4_S2_PASS`。Plan 080 / M4-C2
 随后完成合并树 query×lifecycle 回归、正式 Session Control/TUI、两轮独立审查整改与最终复验，并取得 `M4_C2_CONTROL_PASS`。
-Plan 083 / M4-Z(core) 又完成公开 S/C 全链与最终独立验收并取得 `M4_Z_CORE_PASS`。其它上游窄回移仍各自建立独立任务合同，并按第 3 节
-条件消费边进入主线；M4-W1 只有在 M4-W0 形成 binding GO 且 M4-S1/M4-S2 接缝成立后才可立项；
-可选 Workspace 控制面扩展再等待 M4-W1 PASS，完整基线升级仍是独立方向。
+Plan 083 / M4-Z(core) 又完成公开 S/C 全链与最终独立验收并取得 `M4_Z_CORE_PASS`。`#39616` 与 `#39153` 仍各自建立独立窄适配任务合同，
+并在正式 M4-W1 实现前进入主线；M4-W1 只有在 M4-W0 形成 binding GO、两项适配完成且 M4-S1 接缝成立后才可实现，宣告 PASS 时再
+消费已完成的 M4-S2。可选 Workspace 控制面扩展再等待 M4-W1 PASS，完整基线升级仍是独立方向。
 
 普通第四期实现不需要外部或付费行为；如果具体任务扩展到真实 API、模型、训练、Docker、上传或其他外部状态，必须单独说明
 范围并重新授权。
