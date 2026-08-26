@@ -7708,6 +7708,193 @@ async fn durable_shutdown_team_completion_failure_terminates_after_persistence_b
     );
 }
 
+#[cfg(debug_assertions)]
+#[tokio::test]
+async fn durable_bound_writer_revoke_failure_retains_live_persistence() {
+    struct EmptyWritePermit;
+
+    impl codex_team_state::TeamWritePermit for EmptyWritePermit {
+        fn read_snapshot(
+            &mut self,
+        ) -> Result<Option<Vec<u8>>, codex_team_state::TeamDurabilityError> {
+            Ok(None)
+        }
+
+        fn compare_and_swap(
+            &mut self,
+            _expected_generation: u64,
+            _snapshot: Vec<u8>,
+        ) -> Result<(), codex_team_state::TeamDurabilityError> {
+            unreachable!("the revoke failure test does not commit Team state")
+        }
+    }
+
+    struct AbortableClosePermit;
+
+    impl codex_team_state::TeamClosePermit for AbortableClosePermit {
+        fn abort(self: Box<Self>) -> codex_team_state::TeamDurabilityFuture<'static, ()> {
+            Box::pin(async { Ok(()) })
+        }
+
+        fn complete(self: Box<Self>) -> codex_team_state::TeamDurabilityFuture<'static, ()> {
+            Box::pin(async { Ok(()) })
+        }
+    }
+
+    struct AbortableCloseAuthority {
+        identity: codex_team_state::DurableTeamIdentity,
+        owner_incarnation_id: Uuid,
+    }
+
+    impl codex_team_state::TeamWriteAuthority for AbortableCloseAuthority {
+        fn identity(&self) -> codex_team_state::DurableTeamIdentity {
+            self.identity
+        }
+
+        fn owner_incarnation_id(&self) -> Uuid {
+            self.owner_incarnation_id
+        }
+
+        fn begin_write(
+            &self,
+        ) -> Result<Box<dyn codex_team_state::TeamWritePermit>, codex_team_state::TeamDurabilityError>
+        {
+            Ok(Box::new(EmptyWritePermit))
+        }
+
+        fn begin_close(
+            &self,
+        ) -> codex_team_state::TeamDurabilityFuture<'_, Box<dyn codex_team_state::TeamClosePermit>>
+        {
+            Box::pin(async { Ok(Box::new(AbortableClosePermit) as Box<_>) })
+        }
+    }
+
+    let (mut session, _turn_context) = make_session_and_context().await;
+    let identity =
+        codex_team_state::DurableTeamIdentity::new(session.session_id(), session.thread_id);
+    let authority = Arc::new(AbortableCloseAuthority {
+        identity,
+        owner_incarnation_id: Uuid::new_v4(),
+    });
+    let durable_team =
+        codex_team_state::TeamStateHandle::create_durable(authority).expect("create durable Team");
+    session
+        .services
+        .agent_control
+        .install_team(durable_team)
+        .expect("install durable Team");
+
+    let store = Arc::new(codex_thread_store::InMemoryThreadStore::default());
+    let thread_store: Arc<dyn codex_thread_store::ThreadStore> = store.clone();
+    let config = session.get_config().await;
+    let live_thread = LiveThread::create(
+        Arc::clone(&thread_store),
+        CreateThreadParams {
+            session_id: session.session_id(),
+            thread_id: session.thread_id,
+            extra_config: None,
+            forked_from_id: None,
+            parent_thread_id: None,
+            source: SessionSource::Exec,
+            durable_team: Some(codex_protocol::protocol::DurableTeamSessionMeta::current(
+                session.session_id(),
+                session.thread_id,
+            )),
+            thread_source: None,
+            originator: "test_originator".to_string(),
+            base_instructions: BaseInstructions::default(),
+            dynamic_tools: Vec::new(),
+            selected_capability_roots: Vec::new(),
+            multi_agent_version: None,
+            history_mode: Default::default(),
+            subagent_history_start_ordinal: None,
+            history_base: None,
+            initial_window_id: Uuid::now_v7().to_string(),
+            metadata: ThreadPersistenceMetadata {
+                cwd: Some(config.cwd.to_path_buf()),
+                model_provider: config.model_provider_id.clone(),
+                memory_mode: if config.memories.generate_memories {
+                    ThreadMemoryMode::Enabled
+                } else {
+                    ThreadMemoryMode::Disabled
+                },
+            },
+        },
+    )
+    .await
+    .expect("create thread persistence");
+    session.services.thread_store = thread_store;
+    session.services.live_thread = Some(live_thread);
+    let binding_root = config.cwd.clone();
+    {
+        let mut state = session.state.lock().await;
+        state.session_configuration.writer_workspace_binding = Some(
+            crate::writer_workspace_binding::WriterWorkspaceBindingState::available(
+                codex_protocol::protocol::WriterWorkspaceBinding {
+                    generation: 1,
+                    worktree_root: binding_root.clone(),
+                    git_dir: binding_root.clone(),
+                    common_dir: binding_root.clone(),
+                    repository_root: binding_root,
+                    environment_id: codex_exec_server::LOCAL_ENVIRONMENT_ID.to_string(),
+                },
+            ),
+        );
+    }
+
+    let lifecycle_close = session
+        .services
+        .agent_control
+        .begin_durable_team_root_close(session.thread_id)
+        .expect("begin Root lifecycle close");
+    let (completion_tx, completion_rx) = oneshot::channel();
+    let session = Arc::new(session);
+    assert!(
+        session
+            .install_prepared_durable_session_shutdown(
+                "formal-close".to_string(),
+                PreparedDurableSessionShutdown {
+                    lifecycle_close,
+                    team_close: Box::new(AbortableClosePermit),
+                },
+                completion_tx,
+            )
+            .is_ok(),
+        "install formal shutdown handoff"
+    );
+    session
+        .services
+        .unified_exec_manager
+        .fail_next_confirmed_termination_for_tests("injected process revoke failure")
+        .await;
+    session
+        .experimental_session_control_shutdown_submissions
+        .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+
+    assert!(!handlers::shutdown(&session, "formal-close".to_string()).await);
+    assert!(matches!(
+        completion_rx.await.expect("formal completion"),
+        PreparedDurableSessionShutdownCompletion::RetainedError(message)
+            if message.contains("injected process revoke failure")
+    ));
+    assert_eq!(
+        store.calls().await.shutdown_thread,
+        0,
+        "process revoke failure must not close canonical persistence"
+    );
+    session
+        .persist_writer_workspace_binding_event()
+        .await
+        .expect("retained persistence remains writable");
+    let retry_close = session
+        .services
+        .agent_control
+        .begin_durable_team_root_close(session.thread_id)
+        .expect("aborted lifecycle close remains retryable");
+    retry_close.abort();
+}
+
 #[tokio::test]
 async fn accepted_formal_shutdown_completion_loss_is_terminal_unknown() {
     let (completion_tx, completion_rx) = oneshot::channel();

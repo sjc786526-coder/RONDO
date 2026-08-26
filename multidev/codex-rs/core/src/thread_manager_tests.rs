@@ -1,5 +1,6 @@
 use super::*;
 use crate::WriterWorkspaceBindingReplaceOutcome;
+use crate::agent::control::SpawnAgentForkMode;
 use crate::agent::control::SpawnAgentOptions;
 use crate::config::test_config;
 use crate::init_state_db;
@@ -18,6 +19,7 @@ use codex_protocol::AgentPath;
 use codex_protocol::ResponseItemId;
 use codex_protocol::capabilities::CapabilityRootLocation;
 use codex_protocol::capabilities::SelectedCapabilityRoot;
+use codex_protocol::config_types::ApprovalsReviewer;
 use codex_protocol::mcp::ClientMcpExtensions;
 use codex_protocol::mcp::MCP_APP_UI_EXTENSION_ID;
 use codex_protocol::mcp::OPENAI_FORM_EXTENSION_ID;
@@ -285,6 +287,38 @@ async fn writer_binding_lifecycle_isolated_replaced_resumed_and_not_forked() {
         .await
         .expect("fork writer history");
     assert_eq!(forked.thread.writer_workspace_binding().await, None);
+    forked
+        .thread
+        .flush_rollout()
+        .await
+        .expect("persist fork tombstone before cold resume");
+    let forked_rollout = forked
+        .thread
+        .rollout_path()
+        .expect("fork rollout should be durable");
+    forked
+        .thread
+        .shutdown_and_wait()
+        .await
+        .expect("shutdown fork before cold resume");
+    assert!(manager.remove_thread(&forked.thread_id).await.is_some());
+    let auth_manager =
+        AuthManager::from_auth_for_testing(CodexAuth::create_dummy_chatgpt_auth_for_testing());
+    let resumed_fork = manager
+        .resume_thread_from_rollout(
+            config.clone(),
+            forked_rollout,
+            auth_manager,
+            /*parent_trace*/ None,
+            ClientMcpExtensions::default(),
+        )
+        .await
+        .expect("cold resume fork");
+    assert_eq!(
+        resumed_fork.thread.writer_workspace_binding().await,
+        None,
+        "the newest fork settings tombstone must prevent parent binding recovery"
+    );
 
     std::fs::remove_file(writer_b.join(".git")).expect("invalidate resumed binding identity");
     let unavailable = resumed
@@ -297,7 +331,7 @@ async fn writer_binding_lifecycle_isolated_replaced_resumed_and_not_forked() {
         codex_protocol::protocol::WriterWorkspaceBindingAvailability::Unavailable { .. }
     ));
 
-    for thread in [second.thread, resumed.thread, forked.thread] {
+    for thread in [second.thread, resumed.thread, resumed_fork.thread] {
         thread
             .shutdown_and_wait()
             .await
@@ -312,6 +346,7 @@ async fn writer_binding_append_failure_is_strict_for_initial_and_replacement_ide
     let codex_home = temp.path().join("codex-home").abs();
     std::fs::create_dir_all(&codex_home).expect("create codex home");
     let mut config = test_config().await;
+    let _ = config.features.enable(Feature::MultiAgentV2);
     config.codex_home = codex_home;
     config.cwd = repository.clone();
     config.workspace_roots = vec![repository.clone(), writer_a.clone(), writer_b.clone()];
@@ -385,6 +420,49 @@ async fn writer_binding_append_failure_is_strict_for_initial_and_replacement_ide
         .expect("initial binding");
     assert_eq!(initial.binding.generation, 1);
 
+    let control = writer.thread.session.services.agent_control.clone();
+    let root_turn = writer.thread.session.new_default_turn().await;
+    let mut spawn_config = (*root_turn.config).clone();
+    let spawn_environments = writer
+        .thread
+        .session
+        .prepare_explicit_child_writer_spawn(&mut spawn_config)
+        .await;
+    in_memory_store.fail_next_append().await;
+    let fork_error = control
+        .spawn_agent_with_metadata(
+            spawn_config,
+            vec![codex_protocol::user_input::UserInput::Text {
+                text: "fork to writer B".to_string(),
+                text_elements: Vec::new(),
+            }],
+            Some(SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
+                parent_thread_id: writer.thread_id,
+                depth: 1,
+                agent_path: Some(AgentPath::root().join("writer_b").expect("child path")),
+                agent_nickname: None,
+                agent_role: Some("worker".to_string()),
+            })),
+            SpawnAgentOptions {
+                fork_parent_spawn_call_id: Some("writer-b-fork".to_string()),
+                fork_mode: Some(SpawnAgentForkMode::FullHistory),
+                parent_thread_id: Some(writer.thread_id),
+                environments: Some(spawn_environments),
+                writer_workspace_binding: Some(WriterWorkspaceBindingRequest {
+                    worktree_root: writer_b.clone(),
+                    environment_id: Some(codex_exec_server::LOCAL_ENVIRONMENT_ID.to_string()),
+                }),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect_err("forked binding append failure must reject the child");
+    assert!(
+        fork_error
+            .to_string()
+            .contains("injected in-memory append failure")
+    );
+
     in_memory_store.fail_next_append().await;
     let replacement = writer
         .thread
@@ -430,6 +508,117 @@ async fn writer_binding_append_failure_is_strict_for_initial_and_replacement_ide
     .expect("initial binding remains the newest durable identity");
     assert_eq!(persisted_binding.generation, 1);
     assert_eq!(persisted_binding.worktree_root, writer_a);
+
+    writer
+        .thread
+        .shutdown_and_wait()
+        .await
+        .expect("shutdown writer");
+}
+
+#[tokio::test]
+async fn bound_active_turn_rejects_authority_change_and_stales_pre_update_context() {
+    let temp = tempdir().expect("tempdir");
+    let (repository, writer_a, writer_b) = create_writer_binding_repository(&temp);
+    let codex_home = temp.path().join("codex-home").abs();
+    std::fs::create_dir_all(&codex_home).expect("create codex home");
+    let mut config = test_config().await;
+    config.codex_home = codex_home;
+    config.cwd = repository.clone();
+    config.workspace_roots = vec![repository.clone(), writer_a.clone(), writer_b.clone()];
+    config.workspace_roots_explicit = true;
+    config.ephemeral = false;
+    config
+        .permissions
+        .replace_permission_profile_from_session_snapshot(
+            crate::config::PermissionProfileSnapshot::active(
+                codex_protocol::models::PermissionProfile::workspace_write(),
+                codex_protocol::models::ActivePermissionProfile::new(":workspace"),
+            ),
+        )
+        .expect("install workspace profile");
+    let manager = ThreadManager::with_models_provider_and_home_for_tests(
+        CodexAuth::from_api_key("dummy"),
+        config.model_provider.clone(),
+        config.codex_home.to_path_buf(),
+        Arc::new(codex_exec_server::EnvironmentManager::default_for_tests()),
+    );
+    let environment = writer_binding_environment(&repository, &writer_a, &writer_b);
+    let writer = manager
+        .start_thread(StartThreadOptions {
+            environments: Some(vec![environment]),
+            writer_workspace_binding: Some(WriterWorkspaceBindingRequest {
+                worktree_root: writer_a,
+                environment_id: Some(codex_exec_server::LOCAL_ENVIRONMENT_ID.to_string()),
+            }),
+            ..StartThreadOptions::new(config)
+        })
+        .await
+        .expect("start bound writer");
+    let stale_context = writer.thread.session.new_default_turn().await;
+    assert_eq!(
+        stale_context.config.approvals_reviewer,
+        ApprovalsReviewer::User
+    );
+    writer
+        .thread
+        .session
+        .reserve_idle_turn_for_writer_context(stale_context.as_ref())
+        .await
+        .expect("reserve active bound turn");
+
+    let narrowed = SessionSettingsUpdate {
+        approvals_reviewer: Some(ApprovalsReviewer::AutoReview),
+        ..Default::default()
+    };
+    let active_error = writer
+        .thread
+        .session
+        .update_settings(narrowed.clone())
+        .await
+        .expect_err("active bound turn must reject an authority change");
+    assert!(
+        active_error
+            .to_string()
+            .contains("authority-relevant update during a bound writer turn"),
+        "unexpected authority update error: {active_error}"
+    );
+    assert_eq!(
+        stale_context.config.approvals_reviewer,
+        ApprovalsReviewer::User,
+        "rejected update must not mutate the captured context"
+    );
+
+    writer
+        .thread
+        .session
+        .abort_all_tasks(codex_protocol::protocol::TurnAbortReason::Replaced)
+        .await;
+    writer
+        .thread
+        .session
+        .update_settings(narrowed)
+        .await
+        .expect("idle bound writer may narrow authority");
+    let stale_admission = writer
+        .thread
+        .session
+        .reserve_idle_turn_for_writer_context(stale_context.as_ref())
+        .await;
+    let stale_error = match stale_admission {
+        Ok(_) => panic!("pre-update context must be stale after an idle authority change"),
+        Err(error) => error,
+    };
+    assert!(
+        stale_error
+            .to_string()
+            .contains("execution authority changed")
+    );
+    let current_context = writer.thread.session.new_default_turn().await;
+    assert_eq!(
+        current_context.config.approvals_reviewer,
+        ApprovalsReviewer::AutoReview
+    );
 
     writer
         .thread

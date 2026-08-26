@@ -122,6 +122,26 @@ fn decode_body_bytes(body: &[u8], content_encoding: Option<&str>) -> Vec<u8> {
     }
 }
 
+/// Search a recorded wiremock request after applying the same request-body decompression used by
+/// [`ResponsesRequest`]. Matchers that inspect the raw body fail spuriously once the client elects
+/// to use zstd request compression.
+pub fn wiremock_request_body_contains_text(request: &wiremock::Request, text: &str) -> bool {
+    wiremock_request_body_json(request).is_some_and(|body| body.to_string().contains(text))
+}
+
+/// Decode a wiremock Responses request with the same transport handling as
+/// [`ResponsesRequest::body_json`].
+pub fn wiremock_request_body_json(request: &wiremock::Request) -> Option<Value> {
+    let body = decode_body_bytes(
+        &request.body,
+        request
+            .headers
+            .get("content-encoding")
+            .and_then(|value| value.to_str().ok()),
+    );
+    serde_json::from_slice(&body).ok()
+}
+
 /// Returns a response item without internal transport metadata for semantic assertions.
 pub fn strip_metadata(mut item: ResponseItem) -> ResponseItem {
     item.clear_internal_chat_message_metadata_passthrough();

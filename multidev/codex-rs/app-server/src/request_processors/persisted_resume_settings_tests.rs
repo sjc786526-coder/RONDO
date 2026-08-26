@@ -299,3 +299,37 @@ fn writer_authority_roots_resume_but_explicit_runtime_roots_win() {
     merge_persisted_thread_settings(persisted, None, &mut overridden);
     assert_eq!(overridden.workspace_roots, Some(vec![explicit]));
 }
+
+#[test]
+fn newer_unbound_settings_tombstone_older_writer_authority_roots() {
+    let root = cwd();
+    let mut bound = settings_item(
+        AskForApproval::OnRequest,
+        ApprovalsReviewer::User,
+        Some(":workspace"),
+    );
+    let RolloutItem::EventMsg(EventMsg::ThreadSettingsApplied(event)) = &mut bound else {
+        panic!("settings helper must return a settings event");
+    };
+    event.thread_settings.writer_workspace_binding = Some(WriterWorkspaceBinding {
+        generation: 1,
+        worktree_root: root.clone(),
+        git_dir: root.join(".git/worktrees/writer"),
+        common_dir: root.join(".git"),
+        repository_root: root.clone(),
+        environment_id: "local".to_string(),
+    });
+    event.thread_settings.writer_workspace_authority_roots = Some(vec![root]);
+    let unbound = settings_item(
+        AskForApproval::OnRequest,
+        ApprovalsReviewer::User,
+        Some(":workspace"),
+    );
+
+    assert_eq!(
+        latest_persisted_resume_settings(&[bound, unbound])
+            .expect("persisted settings")
+            .writer_workspace_authority_roots,
+        None
+    );
+}

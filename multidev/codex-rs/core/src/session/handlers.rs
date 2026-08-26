@@ -585,23 +585,57 @@ pub async fn set_thread_memory_mode(sess: &Arc<Session>, sub_id: String, mode: T
     }
 }
 
-async fn shutdown_session_runtime(sess: &Arc<Session>) -> Result<(), String> {
+#[derive(Clone, Copy)]
+enum RuntimeShutdownMode {
+    Standard,
+    BoundWriterAlreadyQuiesced,
+}
+
+async fn quiesce_bound_writer_before_durable_persistence(
+    sess: &Arc<Session>,
+) -> Result<RuntimeShutdownMode, String> {
+    if sess.writer_workspace_binding_snapshot().await.is_none() {
+        return Ok(RuntimeShutdownMode::Standard);
+    }
+    sess.services
+        .unified_exec_manager
+        .terminate_all_processes_confirmed()
+        .await
+        .map_err(|err| format!("failed to revoke bound writer processes: {err}"))?;
+    sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
+    // A tool may have crossed its final authority check before the first snapshot and inserted a
+    // process while its task was being cancelled. Close that window before persistence becomes
+    // irreversible.
+    sess.services
+        .unified_exec_manager
+        .terminate_all_processes_confirmed()
+        .await
+        .map_err(|err| format!("failed to revoke late bound writer processes: {err}"))?;
+    Ok(RuntimeShutdownMode::BoundWriterAlreadyQuiesced)
+}
+
+async fn shutdown_session_runtime(
+    sess: &Arc<Session>,
+    mode: RuntimeShutdownMode,
+) -> Result<(), String> {
     if let Some(startup_prewarm) = sess.take_session_startup_prewarm().await {
         startup_prewarm.abort().await;
     }
     let _ = sess.conversation.shutdown().await;
-    sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
-    if sess.writer_workspace_binding_snapshot().await.is_some() {
-        sess.services
-            .unified_exec_manager
-            .terminate_all_processes_confirmed()
-            .await
-            .map_err(|err| format!("failed to revoke bound writer processes: {err}"))?;
-    } else {
-        sess.services
-            .unified_exec_manager
-            .terminate_all_processes()
-            .await;
+    if matches!(mode, RuntimeShutdownMode::Standard) {
+        sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
+        if sess.writer_workspace_binding_snapshot().await.is_some() {
+            sess.services
+                .unified_exec_manager
+                .terminate_all_processes_confirmed()
+                .await
+                .map_err(|err| format!("failed to revoke bound writer processes: {err}"))?;
+        } else {
+            sess.services
+                .unified_exec_manager
+                .terminate_all_processes()
+                .await;
+        }
     }
     if let Err(err) = sess.services.code_mode_service.shutdown().await {
         warn!("failed to shutdown code mode session: {err}");
@@ -678,6 +712,34 @@ pub async fn shutdown(sess: &Arc<Session>, sub_id: String) -> bool {
         }
     }
 
+    let runtime_shutdown_mode = if durable_root {
+        match quiesce_bound_writer_before_durable_persistence(sess).await {
+            Ok(mode) => mode,
+            Err(error) => {
+                if let Some(team_close) = durable_team_close.take()
+                    && let Err(abort_error) = team_close.abort().await
+                {
+                    warn!(
+                        "failed to abort durable Team close after writer quiescence failure: {abort_error}"
+                    );
+                }
+                if let Some(lifecycle_close) = durable_lifecycle_close.take() {
+                    lifecycle_close.abort();
+                }
+                send_durable_close_error(sess, &sub_id, error.clone()).await;
+                if let Some(completion) = formal_shutdown_completion.take() {
+                    let _ = completion.send(
+                        PreparedDurableSessionShutdownCompletion::RetainedError(error),
+                    );
+                }
+                sess.finish_failed_experimental_session_control_shutdown();
+                return false;
+            }
+        }
+    } else {
+        RuntimeShutdownMode::Standard
+    };
+
     // A durable Root must retain its fully usable runtime when persistence cannot cross the close
     // boundary. Close its canonical writer first while the Team/lifecycle permits block new
     // mutation; only a successful persistence shutdown commits us to runtime teardown.
@@ -709,7 +771,7 @@ pub async fn shutdown(sess: &Arc<Session>, sub_id: String) -> bool {
         return false;
     }
 
-    if let Err(error) = shutdown_session_runtime(sess).await {
+    if let Err(error) = shutdown_session_runtime(sess, runtime_shutdown_mode).await {
         if let Some(team_close) = durable_team_close.take()
             && let Err(abort_error) = team_close.abort().await
         {
@@ -999,7 +1061,7 @@ pub(super) async fn submission_loop(
     // If the submission loop exits because the channel closed without an
     // explicit shutdown op, still run session teardown.
     if !shutdown_received {
-        if let Err(error) = shutdown_session_runtime(&sess).await {
+        if let Err(error) = shutdown_session_runtime(&sess, RuntimeShutdownMode::Standard).await {
             warn!("submission channel closed with incomplete runtime cleanup: {error}");
         }
         emit_thread_stop_lifecycle(sess.as_ref()).await;

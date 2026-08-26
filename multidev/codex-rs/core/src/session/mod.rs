@@ -1455,7 +1455,10 @@ impl Session {
         state.clear_connector_selection();
     }
 
-    async fn record_initial_history(&self, conversation_history: InitialHistory) {
+    async fn try_record_initial_history(
+        &self,
+        conversation_history: InitialHistory,
+    ) -> std::io::Result<()> {
         let (is_subagent, is_paginated_subagent) = {
             let state = self.state.lock().await;
             let session_configuration = &state.session_configuration;
@@ -1559,17 +1562,21 @@ impl Session {
                         rollout_items.push(thread_settings_applied);
                     }
                 }
-                self.persist_rollout_items(&rollout_items).await;
-
-                // Forked threads should remain file-backed immediately after startup.
-                self.ensure_rollout_materialized().await;
-
-                // Flush after seeding history and any persisted rollout copy.
-                if !is_subagent {
-                    let _ = self.flush_rollout().await;
-                }
+                // A fork's current settings are the authority tombstone for its inherited
+                // prefix. Commit the assembled prefix/settings batch strictly so neither an
+                // explicit child binding nor an unbound tombstone can be lost while returning an
+                // executable child. Ephemeral unbound forks retain their legacy no-op behavior.
+                self.persist_rollout_items_strict(&rollout_items).await?;
             }
         }
+        Ok(())
+    }
+
+    #[cfg(test)]
+    async fn record_initial_history(&self, conversation_history: InitialHistory) {
+        self.try_record_initial_history(conversation_history)
+            .await
+            .expect("record initial test history");
     }
 
     #[instrument(
@@ -1676,10 +1683,16 @@ impl Session {
         state.set_previous_turn_settings(previous_turn_settings);
     }
 
+    #[expect(
+        clippy::await_holding_invalid_type,
+        reason = "bound writer settings updates share the serialized binding/admission boundary"
+    )]
     pub(crate) async fn update_settings(
         &self,
         updates: SessionSettingsUpdate,
     ) -> ConstraintResult<()> {
+        let _mutation = self.writer_workspace_binding_mutation.lock().await;
+        let active_turn = self.active_turn.lock().await.is_some();
         let notify_config_contributors = !self.services.extensions.config_contributors().is_empty();
         let (previous_config, new_config, permission_profile_changed, mcp_inputs_changed) = {
             let mut state = self.state.lock().await;
@@ -1690,6 +1703,9 @@ impl Session {
                     return Err(err);
                 }
             };
+            state
+                .session_configuration
+                .ensure_writer_workspace_authority_update_allowed(&updated, active_turn)?;
 
             let previous_config = notify_config_contributors
                 .then(|| Self::build_effective_session_config(&state.session_configuration));
@@ -1872,17 +1888,23 @@ impl Session {
     ) -> CodexResult<()> {
         let _mutation = self.writer_workspace_binding_mutation.lock().await;
         self.validate_writer_workspace_binding_locked().await?;
-        let current = {
+        let (current, authority_revision) = {
             let state = self.state.lock().await;
-            state
-                .session_configuration
-                .writer_workspace_binding
-                .as_ref()
-                .map(|binding| binding.snapshot.binding.clone())
+            let configuration = &state.session_configuration;
+            (
+                configuration
+                    .writer_workspace_binding
+                    .as_ref()
+                    .map(|binding| binding.snapshot.binding.clone()),
+                configuration.writer_workspace_authority_revision(),
+            )
         };
-        if current != turn_context.writer_workspace_binding {
+        if current != turn_context.writer_workspace_binding
+            || authority_revision != turn_context.writer_workspace_authority_revision
+        {
             return Err(CodexErr::InvalidRequest(
-                "writer workspace binding changed after this turn context was created".to_string(),
+                "writer workspace binding or execution authority changed after this turn context was created"
+                    .to_string(),
             ));
         }
         Ok(())
@@ -1929,21 +1951,28 @@ impl Session {
     )]
     async fn reserve_idle_turn_for_writer_binding_inner(
         &self,
-        expected_binding: Option<&Option<codex_protocol::protocol::WriterWorkspaceBinding>>,
+        expected_turn_context: Option<&TurnContext>,
     ) -> CodexResult<Arc<Mutex<crate::state::TurnState>>> {
         let _mutation = self.writer_workspace_binding_mutation.lock().await;
         self.validate_writer_workspace_binding_locked().await?;
-        let current = {
+        let (current, authority_revision) = {
             let state = self.state.lock().await;
-            state
-                .session_configuration
-                .writer_workspace_binding
-                .as_ref()
-                .map(|binding| binding.snapshot.binding.clone())
+            let configuration = &state.session_configuration;
+            (
+                configuration
+                    .writer_workspace_binding
+                    .as_ref()
+                    .map(|binding| binding.snapshot.binding.clone()),
+                configuration.writer_workspace_authority_revision(),
+            )
         };
-        if expected_binding.is_some_and(|expected| expected != &current) {
+        if expected_turn_context.is_some_and(|expected| {
+            expected.writer_workspace_binding != current
+                || expected.writer_workspace_authority_revision != authority_revision
+        }) {
             return Err(CodexErr::InvalidRequest(
-                "writer workspace binding changed before turn admission".to_string(),
+                "writer workspace binding or execution authority changed before turn admission"
+                    .to_string(),
             ));
         }
         let turn_state = {
@@ -1991,10 +2020,8 @@ impl Session {
         &self,
         turn_context: &TurnContext,
     ) -> CodexResult<Arc<Mutex<crate::state::TurnState>>> {
-        self.reserve_idle_turn_for_writer_binding_inner(Some(
-            &turn_context.writer_workspace_binding,
-        ))
-        .await
+        self.reserve_idle_turn_for_writer_binding_inner(Some(turn_context))
+            .await
     }
 
     async fn validate_writer_workspace_binding_locked(&self) -> CodexResult<()> {
@@ -4212,6 +4239,18 @@ impl Session {
         {
             error!("failed to record rollout items: {e:#}");
         }
+    }
+
+    async fn persist_rollout_items_strict(&self, items: &[RolloutItem]) -> std::io::Result<()> {
+        let Some(live_thread) = self.live_thread() else {
+            return Ok(());
+        };
+        live_thread
+            .append_items(items)
+            .await
+            .map_err(std::io::Error::other)?;
+        live_thread.persist().await.map_err(std::io::Error::other)?;
+        live_thread.flush().await.map_err(std::io::Error::other)
     }
 
     /// Persist the binding identity through a strict append/materialize/flush barrier.

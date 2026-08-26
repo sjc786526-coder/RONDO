@@ -3,8 +3,8 @@
 ## 结果
 
 - 在 `worktree-089-m4-w1-writer-workspace-binding@adbc33c` 上完成生产实现、生成物、分层验证和 final fresh 正式全链。
-- 首轮独立审查的七组 finding 已完成整改并通过相称聚焦门禁与新的 fresh 正式全链；当前状态为
-  `REMEDIATION_COMPLETE / FORMAL_CHAIN_PASS / REVIEW_PENDING / INTEGRATION_NOT_AUTHORIZED`。尚未独立复验接受、合并或推送，
+- 首轮独立审查和第二轮窄复验的 finding 均已完成整改，并通过相称聚焦门禁与最终 fresh 正式全链；当前状态为
+  `SECOND_REMEDIATION_COMPLETE / FORMAL_CHAIN_PASS / REVIEW_PENDING / INTEGRATION_NOT_AUTHORIZED`。尚未独立复验接受、合并或推送，
   因此不宣告 `M4_W1_PASS / PHASE_4_COMPLETE`。
 
 ## 实现
@@ -57,6 +57,18 @@
   identity 也在 reviewer 后的公共 orchestrator 路径重验。唯一 deterministic offline Critic 记录 packet，并断言恰好一次真实调用、
   actor/target/title/summary/handoff 均正确。
 
+### 第二轮窄整改
+
+- R2-F1：local PTY 增加可传播错误的 confirmed terminate；kill 失败时保留 killer、helper tasks 和 unified-exec manager handle，成功重试
+  后才移除。普通 unbound best-effort terminate 维持原语义。
+- R2-F2：Forked assembled prefix + current settings 改用 strict append/materialize/flush，失败不再返回 executable child；cold resume 以最新
+  `ThreadSettingsApplied` 为唯一边界，最新 `binding=None` 明确 tombstone parent prefix 中的旧 binding 与 authority roots。
+- R2-F3：binding mutation、settings update 与 turn admission 共用串行边界；bound active turn 拒绝 permission/profile/environment 等
+  authority-relevant 变化，idle 变化推进 runtime-only authority revision，旧 TurnContext 在安装或执行前 fail closed。纯 model/personality
+  更新不受影响。
+- R2-F4：durable Root 在关闭 canonical rollout persistence 前先 confirmed revoke bound process、abort tasks，再次 revoke 关闭 late insert
+  窗口；任一 revoke 失败均 abort Team/lifecycle close，保留 canonical persistence、Root authority 和 retryable process handle。
+
 ## 正式验证
 
 所有 Rust 重型命令均经 `multidev/justfile` → shared `scripts/with-build-lock.sh`，复用用户指定 069 target，项目门限保持
@@ -88,6 +100,23 @@
   `3c62f83387ccfd3c5eac668e15962d3c6527735d74240b21b224ead35a42b1a8`。该轮既断言 Critic 的一次实际调用，也完成真实 app-server
   旧/新进程替换、binding/replacement 和 lifecycle；`stop=none / cleanup=none`。
 
+### 第二轮窄整改复验
+
+- local PTY retryable termination `1/1`（`20260826-143010-1000-262234`）；Forked strict append fault `1/1`
+  （`20260826-143312-1000-280747`）；unbound fork cold-resume tombstone `1/1`（`20260826-143423-1000-284731`）。
+- bound active authority update/idle stale-context `1/1`（`20260826-143732-1000-291121`）；durable revoke failure retains persistence/Root and
+  permits retry `1/1`（`20260826-143845-1000-293709`）；app-server newest-unbound roots tombstone `1/1`
+  （`20260826-143914-1000-295290`）。
+- `codex-core + codex-protocol` scoped clippy 无 warning（`20260826-144334-1000-318676`）；exact app-server binary build 通过
+  （`20260826-144830-1000-328853`）；最终 `just fmt`、`git diff --check` 通过。
+- 最终 fresh app-server OS + unique offline Critic 正式链 `1/1`（`20260826-150914-1000-383202`），JUnit SHA-256
+  `38afc34651ff961cedd1d27c917b1668ad2c107fd3820682fd65f4dc58b5497a`。该轮从 fresh repository/two linked worktrees/session/store 启动，
+  完成两 writer 隔离写、scoped 外写、真实进程替换、cold resume、binding invalidation/replacement、Query/Control/lifecycle，并断言 Critic
+  恰好一次实际调用；`stop=none / cleanup=none`。
+- 正式链调试确认宿主代理的 `127.*` no-proxy 写法未被 child HTTP client 可靠识别，导致本地 fake 前置 502 且 wiremock 收包为零；最终
+  仅在完全离线验证命令中移除代理变量，使 127.0.0.1 直连。测试桩同时按 `generate=false` 区分启动 prewarm，并只统计真实模型生成回合，
+  避免 websocket continuation 省略原 prompt 造成脆弱匹配；未改变生产配置或访问真实网络。
+
 ## 资源与边界
 
 - 首次 app full-chain 编译在 `20260826-112652-1000-3557648` 达到项目主动停止线：`285,001,187,328 B`，Windows C: 实际余量从
@@ -107,10 +136,14 @@
   `50,032,033,792 / 50,031,665,152 B`；fresh 正式链项目空间前后为 `228,748,869,632 / 234,027,278,336 B`、target
   `175,123,042,304 B`，Windows C: 前后为 `50,031,038,464 / 50,030,030,848 B`。最终余量仍高于门禁但仅约 30MB，故不再启动
   无必要重编；没有启用 35GB 例外，也没有扩大清理范围。
+- 第二轮窄整改未再清理任何文件。最终正式链项目空间为 `253,251,665,920 -> 253,255,639,040 B`，target
+  `194,349,666,304 B`，Windows C: 实际余量为 `50,020,118,528 -> 50,019,590,144 B`，仍高于 50GB 门；未触发 project stop、
+  Windows stop 或 35GB 临时例外。
 
 ## 自审与交接
 
-- 执行者在首轮独立审查后再次按无约束 host process、turn-only grant 撤销、strict durability、turn/replacement admission、child
-  authority、review/path TOCTOU 和 Critic invocation 逐项静态自审；当前没有已知未关闭的 W1 高/中等级 correctness finding。
+- 执行者在两轮独立复验后再次按 local/remote process revoke、Forked strict durability/tombstone、turn 内 authority revocation、durable
+  close ordering、child authority、review/path TOCTOU 和 Critic invocation 逐项静态自审；当前没有已知未关闭的 W1 高/中等级
+  correctness finding。
 - 089 分支只提交、不合并、不推送、不关闭 worktree、不归档分支。独立验收接受后也只能记录 `ACCEPTED / PENDING_INTEGRATION`；
   用户另行批准且成果成功进入并推送 `main` 后，才允许形成 `M4_W1_PASS / PHASE_4_COMPLETE`。

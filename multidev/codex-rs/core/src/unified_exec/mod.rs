@@ -146,6 +146,8 @@ impl ProcessStore {
 pub(crate) struct UnifiedExecProcessManager {
     process_store: Mutex<ProcessStore>,
     max_write_stdin_yield_time_ms: u64,
+    #[cfg(test)]
+    fail_next_confirmed_termination: Mutex<Option<String>>,
 }
 
 impl UnifiedExecProcessManager {
@@ -154,7 +156,14 @@ impl UnifiedExecProcessManager {
             process_store: Mutex::new(ProcessStore::default()),
             max_write_stdin_yield_time_ms: max_write_stdin_yield_time_ms
                 .max(MIN_EMPTY_YIELD_TIME_MS),
+            #[cfg(test)]
+            fail_next_confirmed_termination: Mutex::new(None),
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn fail_next_confirmed_termination_for_tests(&self, message: &str) {
+        *self.fail_next_confirmed_termination.lock().await = Some(message.to_string());
     }
 }
 

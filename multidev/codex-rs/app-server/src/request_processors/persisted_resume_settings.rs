@@ -148,14 +148,17 @@ pub(super) fn latest_persisted_resume_settings(
         .iter()
         .rev()
         .find_map(|item| match item {
-            RolloutItem::EventMsg(EventMsg::ThreadSettingsApplied(event))
-                if event.thread_settings.writer_workspace_binding.is_some() =>
-            {
+            RolloutItem::EventMsg(EventMsg::ThreadSettingsApplied(event)) => {
                 Some(&event.thread_settings)
             }
             _ => None,
         })
-        .and_then(|settings| settings.writer_workspace_authority_roots.clone());
+        .and_then(|settings| {
+            settings
+                .writer_workspace_binding
+                .as_ref()
+                .and(settings.writer_workspace_authority_roots.clone())
+        });
 
     Some(PersistedResumeSettings {
         approval_policy,

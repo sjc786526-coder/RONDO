@@ -259,6 +259,40 @@ impl SessionConfiguration {
             || self.permission_profile() != next.permission_profile()
     }
 
+    pub(super) fn writer_workspace_authority_differs(&self, next: &Self) -> bool {
+        self.environments != next.environments
+            || self.permission_profile_state != next.permission_profile_state
+            || self.approval_policy.value() != next.approval_policy.value()
+            || self.approvals_reviewer != next.approvals_reviewer
+            || self.windows_sandbox_level != next.windows_sandbox_level
+    }
+
+    pub(super) fn writer_workspace_authority_revision(&self) -> Option<u64> {
+        self.writer_workspace_binding
+            .as_ref()
+            .map(WriterWorkspaceBindingState::authority_revision)
+    }
+
+    pub(super) fn ensure_writer_workspace_authority_update_allowed(
+        &self,
+        next: &Self,
+        active_turn: bool,
+    ) -> ConstraintResult<()> {
+        if self.writer_workspace_binding.is_some()
+            && active_turn
+            && self.writer_workspace_authority_differs(next)
+        {
+            return Err(ConstraintError::InvalidValue {
+                field_name: "thread_settings",
+                candidate: "authority-relevant update during a bound writer turn".to_string(),
+                allowed: "model-only settings, or authority updates while the bound writer is idle"
+                    .to_string(),
+                requirement_source: codex_config::RequirementSource::Unknown,
+            });
+        }
+        Ok(())
+    }
+
     fn materialized_permission_profile(&self) -> PermissionProfile {
         let profile = self.materialized_authority_permission_profile();
         match &self.writer_workspace_binding {
@@ -591,6 +625,12 @@ impl SessionConfiguration {
                     requirement_source: codex_config::RequirementSource::Unknown,
                 });
             }
+        }
+        if self.writer_workspace_binding.is_some()
+            && self.writer_workspace_authority_differs(&next_configuration)
+            && let Some(binding) = next_configuration.writer_workspace_binding.as_mut()
+        {
+            binding.advance_authority_revision();
         }
         Ok(next_configuration)
     }
@@ -1794,7 +1834,7 @@ impl Session {
             ) && session_configuration.writer_workspace_binding.is_some();
 
             // record_initial_history can emit events. We record only after the SessionConfiguredEvent is emitted.
-            Box::pin(sess.record_initial_history(initial_history)).await;
+            Box::pin(sess.try_record_initial_history(initial_history)).await?;
             if needs_initial_writer_binding_flush {
                 // A fresh binding is part of the thread's durable identity. Do not return an
                 // executable Session until that exact generation is on stable storage.

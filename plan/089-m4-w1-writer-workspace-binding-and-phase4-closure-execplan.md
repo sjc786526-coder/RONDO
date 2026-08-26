@@ -328,10 +328,17 @@ XXX用以下内容代替：
 - 整改代码与正式配置已再次冻结。聚焦 core/protocol/thread-store 回归、bound `/shell` 真实入口、scoped core clippy、fmt/diff 均通过；
   最终 fresh 真实 app-server OS 进程替换 + deterministic offline Critic 正式链 `1/1` 通过。当前没有执行者已知未关闭的 W1 高/中等级
   correctness finding；完整证据与资源事件见 Plan 089 实施日志。
+- 第二轮独立复验报告 `agent_log/2026-08-26-140509-plan089-m4-w1-remediation-review.md` 的四项窄 finding 已关闭：local PTY confirmed
+  terminate 会传播 kill 错误并保留可重试 handle；Forked current settings 使用 strict append/materialize/flush 且 `binding=None` 是冷恢复
+  tombstone；bound active turn 拒绝 authority/profile 变化，idle 变化推进 runtime authority revision 使旧 context 失效；durable close 在关闭
+  canonical persistence 前完成 bound process confirmed quiescence，失败时保留 persistence 与 Root authority。
+- 上述四组聚焦回归及 app-server tombstone 邻接测试均通过，`codex-core + codex-protocol` scoped clippy 无 warning，fmt/diff 通过。最终
+  fresh app-server OS 正式链 `1/1` 通过并断言 offline Critic 恰好一次调用；watchdog 为 `stop=none / cleanup=none`。验证全程未触发
+  Windows 50GB 门、项目主动停止或 35GB 临时例外，也未进行额外清理。
 
 ### 当前工作
 
-- 完成整改提交，并按指定 queue 请求独立复验。
+- 完成第二轮窄整改提交，并按指定 queue 请求独立复验。
 
 ### 本任务剩余步骤
 
@@ -346,7 +353,7 @@ XXX用以下内容代替：
 
 ### 当前验收状态
 
-- `REMEDIATION_COMPLETE / FORMAL_CHAIN_PASS / REVIEW_PENDING / INTEGRATION_NOT_AUTHORIZED / M4_W1_PASS_NOT_YET_ESTABLISHED`。
+- `SECOND_REMEDIATION_COMPLETE / FORMAL_CHAIN_PASS / REVIEW_PENDING / INTEGRATION_NOT_AUTHORIZED / M4_W1_PASS_NOT_YET_ESTABLISHED`。
 
 ### 交接边界
 
@@ -369,3 +376,5 @@ XXX用以下内容代替：
 | 010 | durable binding 只持久化 identity 与当前重验所需 authority roots；冷读统一显示 unavailable，恢复后用当前 profile/trust/roots 重验 | 不持久化 concrete permission snapshot，不复制第三份 workspace authority | persistence、resume、query | 已采纳 |
 | 011 | bound writer 对无实际文件系统约束的 `/shell` 和 stdio MCP fail closed；HTTP MCP 保留现有只读声明门 | 两条宿主进程路径不能承载 binding sandbox，禁用比另建平行执行器更窄且不影响 W-off | shell、MCP runtime | 已采纳 |
 | 012 | bound writer 在 turn terminal、replacement、invalidation 与 shutdown 使用 confirmed unified-exec 撤销屏障，失败句柄保留以便重试 | turn-only W1 不能被长驻进程带过生命周期，部分失败也不能伪报清理完成 | turn/session lifecycle、unified-exec | 已采纳 |
+| 013 | bound active turn 拒绝 authority-relevant settings 变化；idle 变化推进 runtime-only authority revision | 旧 OS sandbox 与 TurnContext 不能在权限收窄后继续代表当前 writer，同时无需持久化或建设第二套 authority | settings、turn admission | 已采纳 |
+| 014 | durable close 在 canonical persistence shutdown 前 confirmed quiesce bound process，并在 abort 后复验 late insertion | revoke 失败必须保留可持久 mutation 的 Root runtime，成功后才跨不可逆关闭边界 | Session Control、durable close | 已采纳 |

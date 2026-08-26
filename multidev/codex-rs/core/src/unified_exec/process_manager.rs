@@ -1449,6 +1449,10 @@ impl UnifiedExecProcessManager {
     /// Bound writers use this as an authority-revocation barrier. The ordinary unbound cleanup
     /// path intentionally retains its legacy fire-and-forget behavior.
     pub(crate) async fn terminate_all_processes_confirmed(&self) -> Result<(), UnifiedExecError> {
+        #[cfg(test)]
+        if let Some(message) = self.fail_next_confirmed_termination.lock().await.take() {
+            return Err(UnifiedExecError::process_failed(message));
+        }
         let processes = {
             let store = self.process_store.lock().await;
             store

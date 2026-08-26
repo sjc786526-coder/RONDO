@@ -144,6 +144,8 @@ pub struct TurnContext {
     /// Exact writer binding captured with this turn's execution projection.
     /// Replacement must never execute a context created for an older generation.
     pub(crate) writer_workspace_binding: Option<codex_protocol::protocol::WriterWorkspaceBinding>,
+    /// Runtime revision of permission/profile/environment authority captured with this turn.
+    pub(crate) writer_workspace_authority_revision: Option<u64>,
     /// The session's absolute working directory. All relative paths provided
     /// by the model as well as sandbox policies are resolved against this path
     /// instead of `std::env::current_dir()`.
@@ -319,6 +321,7 @@ impl TurnContext {
             originator: self.originator.clone(),
             environments: self.environments.clone(),
             writer_workspace_binding: self.writer_workspace_binding.clone(),
+            writer_workspace_authority_revision: self.writer_workspace_authority_revision,
             #[allow(deprecated)]
             cwd: self.cwd.clone(),
             current_date: self.current_date.clone(),
@@ -591,6 +594,8 @@ impl Session {
                 .writer_workspace_binding
                 .as_ref()
                 .map(|binding| binding.snapshot.binding.clone()),
+            writer_workspace_authority_revision: session_configuration
+                .writer_workspace_authority_revision(),
             #[allow(deprecated)]
             cwd,
             current_date: Some(current_date),
@@ -619,49 +624,65 @@ impl Session {
         }
     }
 
+    #[expect(
+        clippy::await_holding_invalid_type,
+        reason = "turn settings and context capture share the serialized binding/admission boundary"
+    )]
     pub(crate) async fn new_turn_with_sub_id(
         &self,
         sub_id: String,
         updates: SessionSettingsUpdate,
     ) -> CodexResult<Arc<TurnContext>> {
+        let _mutation = self.writer_workspace_binding_mutation.lock().await;
+        let active_turn = self.active_turn.lock().await.is_some();
         let notify_config_contributors = !self.services.extensions.config_contributors().is_empty();
         let update_result: CodexResult<_> = {
             let mut state = self.state.lock().await;
             match state.session_configuration.clone().apply(&updates) {
                 Ok(next) => {
-                    let mcp_inputs_changed = state.session_configuration.mcp_inputs_differ(&next);
-                    let previous_permission_profile =
-                        state.session_configuration.permission_profile();
-                    let next_permission_profile = next.permission_profile();
-                    let permission_profile_changed =
-                        previous_permission_profile != next_permission_profile;
-                    let previous_config = notify_config_contributors.then(|| {
-                        Self::build_effective_session_config(&state.session_configuration)
-                    });
-                    let new_config = notify_config_contributors
-                        .then(|| Self::build_effective_session_config(&next));
-                    let environment_config = next.environment_config();
-                    if updates.environments.is_some() {
-                        self.services
-                            .turn_environments
-                            .update_selections(next.environment_selections(), &environment_config);
-                    } else if state.session_configuration.environment_config() != environment_config
+                    if let Err(err) = state
+                        .session_configuration
+                        .ensure_writer_workspace_authority_update_allowed(&next, active_turn)
                     {
-                        self.services
-                            .turn_environments
-                            .update_environment_configs(&environment_config);
+                        Err(CodexErr::InvalidRequest(err.to_string()))
+                    } else {
+                        let mcp_inputs_changed =
+                            state.session_configuration.mcp_inputs_differ(&next);
+                        let previous_permission_profile =
+                            state.session_configuration.permission_profile();
+                        let next_permission_profile = next.permission_profile();
+                        let permission_profile_changed =
+                            previous_permission_profile != next_permission_profile;
+                        let previous_config = notify_config_contributors.then(|| {
+                            Self::build_effective_session_config(&state.session_configuration)
+                        });
+                        let new_config = notify_config_contributors
+                            .then(|| Self::build_effective_session_config(&next));
+                        let environment_config = next.environment_config();
+                        if updates.environments.is_some() {
+                            self.services.turn_environments.update_selections(
+                                next.environment_selections(),
+                                &environment_config,
+                            );
+                        } else if state.session_configuration.environment_config()
+                            != environment_config
+                        {
+                            self.services
+                                .turn_environments
+                                .update_environment_configs(&environment_config);
+                        }
+                        if mcp_inputs_changed {
+                            self.mark_mcp_runtime_dirty();
+                        }
+                        state.session_configuration = next.clone();
+                        Ok((
+                            next,
+                            mcp_inputs_changed,
+                            permission_profile_changed,
+                            previous_config,
+                            new_config,
+                        ))
                     }
-                    if mcp_inputs_changed {
-                        self.mark_mcp_runtime_dirty();
-                    }
-                    state.session_configuration = next.clone();
-                    Ok((
-                        next,
-                        mcp_inputs_changed,
-                        permission_profile_changed,
-                        previous_config,
-                        new_config,
-                    ))
                 }
                 Err(err) => Err(CodexErr::InvalidRequest(err.to_string())),
             }

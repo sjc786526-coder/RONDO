@@ -267,9 +267,26 @@ async fn durable_team_survives_process_replacement_and_completes_public_lifecycl
         "handoff": EVENT_HANDOFF,
     }))?;
 
+    // Root start, child start, and cold root resume each establish an independent prewarmed
+    // Responses session. Their first real turns continue from these response IDs and therefore
+    // intentionally omit the original prompt from the follow-up request.
+    for prewarm_id in [
+        "full-chain-root-prewarm",
+        "full-chain-child-prewarm",
+        "full-chain-resume-prewarm",
+    ] {
+        responses::mount_sse_once_match(
+            &model_server,
+            is_responses_prewarm_request,
+            responses::sse_completed(prewarm_id),
+        )
+        .await;
+    }
     responses::mount_sse_once_match(
         &model_server,
-        |request: &wiremock::Request| String::from_utf8_lossy(&request.body).contains(ROOT_PROMPT),
+        |request: &wiremock::Request| {
+            is_model_generation_request(request) && !has_subagent_identity(request)
+        },
         responses::sse(vec![
             responses::ev_response_created("full-chain-root-write"),
             responses::ev_function_call(
@@ -289,7 +306,7 @@ async fn durable_team_survives_process_replacement_and_completes_public_lifecycl
     responses::mount_sse_once_match(
         &model_server,
         |request: &wiremock::Request| {
-            String::from_utf8_lossy(&request.body).contains(ROOT_WRITE_CALL_ID)
+            responses::wiremock_request_body_contains_text(request, ROOT_WRITE_CALL_ID)
         },
         responses::sse(vec![
             responses::ev_response_created("full-chain-root-permissions"),
@@ -315,7 +332,7 @@ async fn durable_team_survives_process_replacement_and_completes_public_lifecycl
     responses::mount_sse_once_match(
         &model_server,
         |request: &wiremock::Request| {
-            String::from_utf8_lossy(&request.body).contains(PERMISSIONS_CALL_ID)
+            responses::wiremock_request_body_contains_text(request, PERMISSIONS_CALL_ID)
         },
         responses::sse(vec![
             responses::ev_response_created("full-chain-root-auxiliary-write"),
@@ -336,7 +353,7 @@ async fn durable_team_survives_process_replacement_and_completes_public_lifecycl
     responses::mount_sse_once_match(
         &model_server,
         |request: &wiremock::Request| {
-            String::from_utf8_lossy(&request.body).contains(AUXILIARY_WRITE_CALL_ID)
+            responses::wiremock_request_body_contains_text(request, AUXILIARY_WRITE_CALL_ID)
         },
         responses::sse(vec![
             responses::ev_response_created("full-chain-root-spawn"),
@@ -353,10 +370,10 @@ async fn durable_team_survives_process_replacement_and_completes_public_lifecycl
     responses::mount_sse_once_match(
         &model_server,
         |request: &wiremock::Request| {
-            let body = String::from_utf8_lossy(&request.body);
-            body.contains(CHILD_PROMPT)
-                && !body.contains(SPAWN_CALL_ID)
-                && !body.contains(PUBLISH_CALL_ID)
+            is_model_generation_request(request)
+                && has_subagent_identity(request)
+                && !responses::wiremock_request_body_contains_text(request, CHILD_WRITE_CALL_ID)
+                && !responses::wiremock_request_body_contains_text(request, PUBLISH_CALL_ID)
         },
         responses::sse(vec![
             responses::ev_response_created("full-chain-child-write"),
@@ -377,7 +394,7 @@ async fn durable_team_survives_process_replacement_and_completes_public_lifecycl
     responses::mount_sse_once_match(
         &model_server,
         |request: &wiremock::Request| {
-            String::from_utf8_lossy(&request.body).contains(CHILD_WRITE_CALL_ID)
+            responses::wiremock_request_body_contains_text(request, CHILD_WRITE_CALL_ID)
         },
         responses::sse(vec![
             responses::ev_response_created("full-chain-child-publish"),
@@ -394,7 +411,7 @@ async fn durable_team_survives_process_replacement_and_completes_public_lifecycl
     responses::mount_sse_once_match(
         &model_server,
         |request: &wiremock::Request| {
-            String::from_utf8_lossy(&request.body).contains(PUBLISH_CALL_ID)
+            responses::wiremock_request_body_contains_text(request, PUBLISH_CALL_ID)
         },
         responses::sse(vec![
             responses::ev_response_created("full-chain-child-complete"),
@@ -409,8 +426,8 @@ async fn durable_team_survives_process_replacement_and_completes_public_lifecycl
     responses::mount_sse_once_match(
         &model_server,
         |request: &wiremock::Request| {
-            let body = String::from_utf8_lossy(&request.body);
-            body.contains(SPAWN_CALL_ID) && !body.contains(WAIT_CALL_ID)
+            responses::wiremock_request_body_contains_text(request, SPAWN_CALL_ID)
+                && !responses::wiremock_request_body_contains_text(request, WAIT_CALL_ID)
         },
         responses::sse(vec![
             responses::ev_response_created("full-chain-root-wait"),
@@ -421,7 +438,9 @@ async fn durable_team_survives_process_replacement_and_completes_public_lifecycl
     .await;
     responses::mount_sse_once_match(
         &model_server,
-        |request: &wiremock::Request| String::from_utf8_lossy(&request.body).contains(WAIT_CALL_ID),
+        |request: &wiremock::Request| {
+            responses::wiremock_request_body_contains_text(request, WAIT_CALL_ID)
+        },
         responses::sse(vec![
             responses::ev_response_created("full-chain-root-complete"),
             responses::ev_assistant_message(
@@ -588,7 +607,7 @@ async fn durable_team_survives_process_replacement_and_completes_public_lifecycl
     let initial_fingerprint = initial_team.commit_fingerprint.clone();
     let version_id = initial_version.version_id.clone();
     let initial_root_state = initial_version.root_state;
-    let requests_before_restart = response_request_count(&model_server).await;
+    let requests_before_restart = model_generation_request_count(&model_server).await;
     assert_eq!(requests_before_restart, 9);
 
     // Dropping the client closes stdio and the harness waits for the real OS child to exit,
@@ -631,7 +650,7 @@ async fn durable_team_survives_process_replacement_and_completes_public_lifecycl
     );
     assert!(loaded_thread_ids(&mut replacement).await?.is_empty());
     assert_eq!(
-        response_request_count(&model_server).await,
+        model_generation_request_count(&model_server).await,
         requests_before_restart
     );
 
@@ -661,7 +680,7 @@ async fn durable_team_survives_process_replacement_and_completes_public_lifecycl
         vec![root_thread_id.clone()]
     );
     assert_eq!(
-        response_request_count(&model_server).await,
+        model_generation_request_count(&model_server).await,
         requests_before_restart
     );
     let invalid_resumed_binding = binding_read(&mut replacement, &root_thread_id)
@@ -728,7 +747,7 @@ async fn durable_team_survives_process_replacement_and_completes_public_lifecycl
     // by the canonical writer rather than replayed through the model.
     assert!(after_mutation_team.events.is_empty());
     assert_eq!(
-        response_request_count(&model_server).await,
+        model_generation_request_count(&model_server).await,
         requests_before_restart
     );
 
@@ -752,7 +771,7 @@ async fn durable_team_survives_process_replacement_and_completes_public_lifecycl
     responses::mount_sse_once_match(
         &model_server,
         |request: &wiremock::Request| {
-            String::from_utf8_lossy(&request.body).contains(CLOSE_CHILD_PROMPT)
+            is_model_generation_request(request) && !has_subagent_identity(request)
         },
         responses::sse(vec![
             responses::ev_response_created("full-chain-close-child"),
@@ -770,7 +789,7 @@ async fn durable_team_survives_process_replacement_and_completes_public_lifecycl
     responses::mount_sse_once_match(
         &model_server,
         |request: &wiremock::Request| {
-            String::from_utf8_lossy(&request.body).contains(CLOSE_CALL_ID)
+            responses::wiremock_request_body_contains_text(request, CLOSE_CALL_ID)
         },
         responses::sse(vec![
             responses::ev_response_created("full-chain-root-after-close"),
@@ -794,7 +813,7 @@ async fn durable_team_survives_process_replacement_and_completes_public_lifecycl
         }),
     )
     .await??;
-    let requests_after_explicit_close = response_request_count(&model_server).await;
+    let requests_after_explicit_close = model_generation_request_count(&model_server).await;
     assert_eq!(requests_after_explicit_close, requests_before_restart + 2);
 
     let close_view = session_read(&mut replacement, &root_thread_id, &root_thread_id)
@@ -889,7 +908,7 @@ async fn durable_team_survives_process_replacement_and_completes_public_lifecycl
         }
     );
     assert_eq!(
-        response_request_count(&model_server).await,
+        model_generation_request_count(&model_server).await,
         requests_after_explicit_close
     );
 
@@ -1021,12 +1040,28 @@ async fn loaded_thread_ids(app_server: &mut TestAppServer) -> Result<Vec<String>
     Ok(data)
 }
 
-async fn response_request_count(model_server: &wiremock::MockServer) -> usize {
+fn is_responses_prewarm_request(request: &wiremock::Request) -> bool {
+    responses::wiremock_request_body_json(request)
+        .is_some_and(|body| body["generate"].as_bool() == Some(false))
+}
+
+fn is_model_generation_request(request: &wiremock::Request) -> bool {
+    responses::wiremock_request_body_json(request)
+        .is_some_and(|body| body["generate"].as_bool() != Some(false))
+}
+
+fn has_subagent_identity(request: &wiremock::Request) -> bool {
+    request.headers.get("x-openai-subagent").is_some()
+}
+
+async fn model_generation_request_count(model_server: &wiremock::MockServer) -> usize {
     model_server
         .received_requests()
         .await
         .unwrap_or_default()
         .into_iter()
-        .filter(|request| request.url.path().ends_with("/responses"))
+        .filter(|request| {
+            request.url.path().ends_with("/responses") && is_model_generation_request(request)
+        })
         .count()
 }

@@ -2622,22 +2622,22 @@ impl InitialHistory {
         let InitialHistory::Resumed(resumed) = self else {
             return None;
         };
-        resumed.history.iter().rev().find_map(|item| match item {
-            RolloutItem::EventMsg(EventMsg::ThreadSettingsApplied(event)) => event
-                .thread_settings
-                .writer_workspace_binding
-                .clone()
-                .map(|binding| {
-                    (
-                        binding,
-                        event
-                            .thread_settings
-                            .writer_workspace_authority_roots
-                            .clone(),
-                    )
-                }),
-            _ => None,
-        })
+        resumed
+            .history
+            .iter()
+            .rev()
+            .find_map(|item| match item {
+                RolloutItem::EventMsg(EventMsg::ThreadSettingsApplied(event)) => {
+                    Some(&event.thread_settings)
+                }
+                _ => None,
+            })
+            .and_then(|settings| {
+                settings
+                    .writer_workspace_binding
+                    .clone()
+                    .map(|binding| (binding, settings.writer_workspace_authority_roots.clone()))
+            })
     }
 
     /// Return the newest persisted writer binding only for an exact resume.

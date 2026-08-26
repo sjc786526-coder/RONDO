@@ -38,6 +38,7 @@ pub enum WriterWorkspaceBindingReplaceOutcome {
 pub(crate) struct WriterWorkspaceBindingState {
     pub(crate) snapshot: WriterWorkspaceBindingSnapshot,
     execution_environments: TurnEnvironmentSelections,
+    authority_revision: u64,
 }
 
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
@@ -139,6 +140,7 @@ impl WriterWorkspaceBindingState {
                 availability: WriterWorkspaceBindingAvailability::Available,
             },
             execution_environments,
+            authority_revision: 0,
         }
     }
 
@@ -152,6 +154,14 @@ impl WriterWorkspaceBindingState {
 
     pub(crate) fn execution_environments(&self) -> &TurnEnvironmentSelections {
         &self.execution_environments
+    }
+
+    pub(crate) fn authority_revision(&self) -> u64 {
+        self.authority_revision
+    }
+
+    pub(crate) fn advance_authority_revision(&mut self) {
+        self.authority_revision = self.authority_revision.saturating_add(1);
     }
 
     pub(crate) fn mark_available(&mut self) {

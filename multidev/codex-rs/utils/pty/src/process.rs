@@ -216,14 +216,23 @@ impl ProcessHandle {
         }
     }
 
+    fn try_request_terminate(&self) -> io::Result<()> {
+        let mut killer_opt = self
+            .killer
+            .lock()
+            .map_err(|_| io::Error::other("failed to lock PTY process killer"))?;
+        let Some(killer) = killer_opt.as_mut() else {
+            return Ok(());
+        };
+        killer.kill()?;
+        killer_opt.take();
+        Ok(())
+    }
+
     /// Attempts to kill the child while leaving the reader/writer tasks alive
     /// so callers can still drain output until EOF.
     pub fn request_terminate(&self) {
-        if let Ok(mut killer_opt) = self.killer.lock()
-            && let Some(mut killer) = killer_opt.take()
-        {
-            let _ = killer.kill();
-        }
+        let _ = self.try_request_terminate();
     }
 
     pub fn signal(&self, signal: ProcessSignal) -> io::Result<()> {
@@ -242,10 +251,7 @@ impl ProcessHandle {
         result
     }
 
-    /// Attempts to kill the child and abort helper tasks.
-    pub fn terminate(&self) {
-        self.request_terminate();
-
+    fn abort_helper_tasks(&self) {
         if let Ok(mut h) = self.reader_handle.lock()
             && let Some(handle) = h.take()
         {
@@ -266,6 +272,20 @@ impl ProcessHandle {
         {
             handle.abort();
         }
+    }
+
+    /// Attempts to kill the child and abort helper tasks.
+    pub fn terminate(&self) {
+        self.request_terminate();
+        self.abort_helper_tasks();
+    }
+
+    /// Requests termination without discarding the killer or helper tasks when the kill fails.
+    /// Callers can therefore retain the process handle and retry authority revocation.
+    pub fn terminate_confirmed(&self) -> io::Result<()> {
+        self.try_request_terminate()?;
+        self.abort_helper_tasks();
+        Ok(())
     }
 }
 
