@@ -1097,7 +1097,7 @@ impl ThreadManager {
         {
             agent_control
                 .restore_v2_agent_metadata(&config, resumed.conversation_id)
-                .await;
+                .await?;
         }
         let options = StartThreadOptions {
             initial_history,

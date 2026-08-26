@@ -1,6 +1,6 @@
 # 方向 3 四期：RONDO Multi Durable Team Runtime
 
-最后更新：2026-08-25 ｜ 产品线：RONDO Multi（`multidev/`）｜ 状态：**M4-A、M4-C0、M4-S1、M4-C1、M4-S2 与 M4-C2 已完成；M4-C1 / M4-S2 / M4-C2 分别为 `M4_C1_QUERY_PASS` / `M4_S2_PASS` / `M4_C2_CONTROL_PASS`；Plan 083 / M4-Z(core) 已立项授权、当前 `NOT_RUN`，M4-W0 继续按条件推进**
+最后更新：2026-08-26 ｜ 产品线：RONDO Multi（`multidev/`）｜ 状态：**M4-A、M4-C0、M4-S1、M4-C1、M4-S2 与 M4-C2 已完成；M4-C1 / M4-S2 / M4-C2 分别为 `M4_C1_QUERY_PASS` / `M4_S2_PASS` / `M4_C2_CONTROL_PASS`；Plan 083 / M4-Z(core) 执行者候选为 `AWAITING_REVIEW`，M4-W0 继续按条件推进**
 
 ## 1. 阶段定位
 
@@ -314,7 +314,10 @@ handoff 时投影其状态。该扩展不扩张为通用 workspace dashboard，�
 
 ### M4-Z(core)：Durable Team 全链收口
 
-**当前状态**：Plan 083 已建立独立 ExecPlan 并获得合同范围内的一次性执行授权，尚未进入产品执行或形成正式全链证据。
+**当前状态：`AWAITING_REVIEW`。** Plan 083 执行者候选已通过公开 app-server v2 fresh Session/store 全链、真实旧/新 OS 进程替换、
+恢复后 Team mutation、persisted descendant close barrier、V2 显式 child close、owner close 与 cold archive/unarchive/delete；相称的
+core/app-server/protocol/client/TUI/schema 回归与 scoped clippy 已通过。该状态仅表示候选等待指定审查者验收，不提前形成
+`M4_Z_CORE_PASS` 或完成历史。
 
 **目标**：完整打通 Team Session 创建、Team/Agent 状态推进、进程或连接中断、恢复、继续控制和显式生命周期操作，确认 S/C 主线
 形成独立可用的 Durable Team Runtime。
@@ -329,7 +332,7 @@ M4-S1（M4_S1_PASS）+ M4-C0（M4_C0_PROTOTYPE_PASS）
 ├─ M4-C1（M4_C1_QUERY_PASS）
 └─ M4-S2（M4_S2_PASS）
 
-M4-C1 + M4-S2 → M4-C2 / Plan 080（M4_C2_CONTROL_PASS）→ Plan 083 / M4-Z(core)（已立项授权，NOT_RUN）
+M4-C1 + M4-S2 → M4-C2 / Plan 080（M4_C2_CONTROL_PASS）→ Plan 083 / M4-Z(core)（AWAITING_REVIEW）
 
 M4-A → M4-W0（原型/价值门）
 M4-W0 binding GO + M4-S1 → M4-W1 开始
@@ -346,8 +349,8 @@ W-only delta ─/→ S/C
 
 - M4-A 已以 `M4_A_GO` 串行完成，S/C/W 共同采用第 2 节身份、生命周期、authority 与启用合同。
 - M4-C0 已完成并提供拆包输入；Plan 074 / `#37198`、M4-S1、M4-C1 与 M4-S2 已完成。Plan 080 已在合并树补跑 query×lifecycle
-  基线、完成正式控制链和 fresh store/restart 场景，并收口两轮独立审查整改与最终复验；S/C 必成子线现进入已立项授权、尚未执行的
-  Plan 083 / M4-Z(core)。M4-W0 继续按自身条件推进。
+  基线、完成正式控制链和 fresh store/restart 场景，并收口两轮独立审查整改与最终复验；Plan 083 / M4-Z(core) 执行者候选现为
+  `AWAITING_REVIEW`。M4-W0 继续按自身条件推进。
 - M4-W1 只在 binding GO 后开始，并等待 M4-S1 以复用持久接缝；最终 PASS 必须消费已完成的 M4-S2 并把
   resume/replacement binding 收口纳入自身出口，不存在无编号的后置收口包。
 - M4-Z(core) 只依赖 S/C 主线。W 若已经进入主线，由后完成者拥有一次兼容验收；W 未进入主线时不制造空实现或占位平台。

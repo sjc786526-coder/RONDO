@@ -133,18 +133,30 @@ impl AgentControl {
         // map lease prevents replacement during the write; a failed write drops the lease without
         // retiring anything, preserving the terminated owners for inspection and retry.
         let retirement = self.lock_shutdown_agent_runtimes(&shutdown_order).await?;
-        if persist_closed_edge && let Some(agent_graph_store) = state.agent_graph_store() {
-            agent_graph_store
-                .set_thread_spawn_edge_status(
-                    agent_id,
-                    codex_agent_graph_store::ThreadSpawnEdgeStatus::Closed,
-                )
-                .await
-                .map_err(|err| {
-                    CodexErr::Fatal(format!(
-                        "failed to persist thread-spawn edge status for {agent_id}: {err}"
-                    ))
-                })?;
+        if persist_closed_edge {
+            let agent_graph_store = match state.agent_graph_store() {
+                Some(agent_graph_store) => Some(agent_graph_store),
+                None if self.team().durable_identity().is_some() => {
+                    return Err(CodexErr::Fatal(
+                        "durable Team child close requires an available agent graph store"
+                            .to_string(),
+                    ));
+                }
+                None => None,
+            };
+            if let Some(agent_graph_store) = agent_graph_store {
+                agent_graph_store
+                    .set_thread_spawn_edge_status(
+                        agent_id,
+                        codex_agent_graph_store::ThreadSpawnEdgeStatus::Closed,
+                    )
+                    .await
+                    .map_err(|err| {
+                        CodexErr::Fatal(format!(
+                            "failed to persist thread-spawn edge status for {agent_id}: {err}"
+                        ))
+                    })?;
+            }
         }
         self.retire_shutdown_agents(retirement);
         Ok(result)

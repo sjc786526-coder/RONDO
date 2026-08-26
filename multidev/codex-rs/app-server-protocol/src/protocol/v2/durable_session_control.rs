@@ -33,22 +33,32 @@ pub struct DurableSessionControlParams {
 #[ts(export_to = "v2/")]
 pub enum DurableSessionControlPrecondition {
     CommittedTeam {
+        #[schemars(rename = "expectedStorageStatus")]
         expected_storage_status: DurableSessionStorageStatus,
+        #[schemars(rename = "expectedResidency")]
         expected_residency: DurableSessionResidency,
         /// Opaque identity of the observed loaded owner incarnation. Cold proofs carry `None`.
+        #[schemars(rename = "ownerIncarnation")]
         owner_incarnation: Option<String>,
+        #[schemars(rename = "teamInstanceId")]
         team_instance_id: String,
+        #[schemars(rename = "teamRevision")]
         #[ts(type = "number")]
         team_revision: u64,
+        #[schemars(rename = "commitGeneration")]
         #[ts(type = "number")]
         commit_generation: u64,
+        #[schemars(rename = "commitFingerprint")]
         commit_fingerprint: String,
     },
     /// Proof of a canonical cold Root marker whose committed Team snapshot is already absent.
     /// Only an explicit `Delete` attempt may consume this proof.
     DeleteRetryAnchor {
+        #[schemars(rename = "expectedStorageStatus")]
         expected_storage_status: DurableSessionStorageStatus,
+        #[schemars(rename = "expectedResidency")]
         expected_residency: DurableSessionResidency,
+        #[schemars(rename = "rootMarkerFingerprint")]
         root_marker_fingerprint: String,
     },
 }
@@ -64,9 +74,13 @@ pub enum DurableSessionControlPrecondition {
 #[ts(export_to = "v2/")]
 pub enum DurableSessionControlOperation {
     SetRootState {
+        #[schemars(rename = "versionId")]
         version_id: String,
+        #[schemars(rename = "expectedProducerState")]
         expected_producer_state: DurableSessionTeamProducerState,
+        #[schemars(rename = "expectedRootState")]
         expected_root_state: DurableSessionTeamRootState,
+        #[schemars(rename = "nextRootState")]
         next_root_state: DurableSessionTeamRootState,
     },
     Close,
@@ -128,6 +142,7 @@ pub enum DurableSessionControlOutcome {
     },
     Partial {
         operation: DurableSessionControlOperationKind,
+        #[schemars(rename = "completedThreadIds")]
         completed_thread_ids: Vec<String>,
         message: String,
     },
@@ -149,6 +164,7 @@ pub enum DurableSessionControlOutcome {
 pub enum DurableSessionControlEffect {
     RootStateUpdated {
         changed: bool,
+        #[schemars(rename = "mutationRevision")]
         #[ts(type = "number")]
         mutation_revision: u64,
     },
@@ -156,10 +172,12 @@ pub enum DurableSessionControlEffect {
     /// This does not invent a whole-Session lifecycle fact.
     OwnerClosed,
     Archived {
+        #[schemars(rename = "affectedThreadIds")]
         affected_thread_ids: Vec<String>,
     },
     Unarchived,
     Deleted {
+        #[schemars(rename = "affectedThreadIds")]
         affected_thread_ids: Vec<String>,
     },
 }

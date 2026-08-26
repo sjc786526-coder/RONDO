@@ -2300,11 +2300,11 @@ async fn multi_agent_feature_selects_one_agent_tool_family() {
         "followup_task",
         "wait_agent",
         "interrupt_agent",
+        "close_agent",
         "list_agents",
         "send_input",
         "resume_agent",
         "assign_task",
-        "close_agent",
     ]);
     for tool_name in [
         "spawn_agent",
@@ -2312,6 +2312,7 @@ async fn multi_agent_feature_selects_one_agent_tool_family() {
         "followup_task",
         "wait_agent",
         "interrupt_agent",
+        "close_agent",
         "list_agents",
     ] {
         assert!(
@@ -2484,6 +2485,7 @@ async fn multi_agent_v2_can_disable_wait_agent() {
     assert_eq!(
         plan.namespace_function_names(MULTI_AGENT_V2_NAMESPACE),
         &[
+            "close_agent".to_string(),
             "followup_task".to_string(),
             "interrupt_agent".to_string(),
             "list_agents".to_string(),

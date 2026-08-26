@@ -19,6 +19,7 @@ mod connection_handling_websocket_unix;
 mod curated_mcp_sync;
 mod current_time;
 mod durable_session_query;
+mod durable_team_full_chain;
 mod dynamic_tools;
 mod environment_add;
 mod environment_info;

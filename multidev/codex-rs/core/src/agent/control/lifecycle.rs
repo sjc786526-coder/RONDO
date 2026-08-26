@@ -253,8 +253,10 @@ pub(crate) struct DurableTeamRootCloseGuard {
 }
 
 impl DurableTeamRootCloseGuard {
-    /// Fail closed if a loaded, running descendant can still mutate this Team.
-    pub(crate) async fn ensure_no_live_descendants(&self) -> CodexResult<()> {
+    /// Return every open persisted descendant or loaded running descendant that can still mutate
+    /// this Team. Formal control needs the structured result so the public API can distinguish a
+    /// busy Team from an internal barrier failure.
+    pub(crate) async fn live_descendants(&self) -> CodexResult<Vec<ThreadId>> {
         if self
             .registry
             .agent_id_for_path(&AgentPath::root())
@@ -271,7 +273,23 @@ impl DurableTeamRootCloseGuard {
                 "thread manager dropped while checking durable team descendants".to_string(),
             )
         })?;
-        let mut live_descendants = Vec::new();
+        let agent_graph_store = manager.agent_graph_store().ok_or_else(|| {
+            CodexErr::Fatal(
+                "durable Team root close requires an available agent graph store".to_string(),
+            )
+        })?;
+        let mut live_descendants = agent_graph_store
+            .list_thread_spawn_descendants(
+                self.root_thread_id,
+                Some(codex_agent_graph_store::ThreadSpawnEdgeStatus::Open),
+            )
+            .await
+            .map_err(|err| {
+                CodexErr::Fatal(format!(
+                    "failed to load open durable Team descendants for {}: {err}",
+                    self.root_thread_id
+                ))
+            })?;
         for metadata in self.registry.live_agents() {
             let Some(thread_id) = metadata.agent_id else {
                 continue;
@@ -281,21 +299,29 @@ impl DurableTeamRootCloseGuard {
             }
             if let Ok(thread) = manager.get_thread(thread_id).await
                 && thread.is_running()
+                && !live_descendants.contains(&thread_id)
             {
                 live_descendants.push(thread_id);
             }
         }
+        live_descendants.sort_by_key(ToString::to_string);
+        Ok(live_descendants)
+    }
+
+    /// Fail closed if an open persisted descendant or a loaded running descendant can still
+    /// mutate this Team.
+    pub(crate) async fn ensure_no_live_descendants(&self) -> CodexResult<()> {
+        let live_descendants = self.live_descendants().await?;
         if live_descendants.is_empty() {
             return Ok(());
         }
-        live_descendants.sort_by_key(ToString::to_string);
         let thread_ids = live_descendants
             .iter()
             .map(ToString::to_string)
             .collect::<Vec<_>>()
             .join(", ");
         Err(CodexErr::UnsupportedOperation(format!(
-            "durable team root {} cannot close while live descendants remain: {thread_ids}",
+            "durable team root {} cannot close while open descendants remain: {thread_ids}",
             self.root_thread_id
         )))
     }

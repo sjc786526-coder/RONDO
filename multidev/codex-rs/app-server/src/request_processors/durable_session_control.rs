@@ -579,6 +579,11 @@ fn core_control_outcome(
             DurableSessionControlRejectionReason::NotCurrentOwner,
             error.to_string(),
         ),
+        CoreControlError::ActiveWriters { .. } => rejected_outcome(
+            operation,
+            DurableSessionControlRejectionReason::ActiveWriter,
+            error.to_string(),
+        ),
         CoreControlError::InvalidVersionId { .. }
         | CoreControlError::UnknownReference { .. }
         | CoreControlError::MalformedReference { .. }
@@ -658,6 +663,25 @@ mod tests {
                 operation: DurableSessionControlOperationKind::Close,
                 message,
             } if message.contains("without a known final result")
+        ));
+    }
+
+    #[test]
+    fn active_descendant_close_barrier_maps_to_active_writer() {
+        let outcome = core_control_outcome(
+            DurableSessionControlOperationKind::Close,
+            CoreControlError::ActiveWriters {
+                thread_ids: vec![ThreadId::new()],
+            },
+        );
+
+        assert!(matches!(
+            outcome,
+            DurableSessionControlOutcome::Rejected {
+                operation: DurableSessionControlOperationKind::Close,
+                reason: DurableSessionControlRejectionReason::ActiveWriter,
+                ..
+            }
         ));
     }
 }

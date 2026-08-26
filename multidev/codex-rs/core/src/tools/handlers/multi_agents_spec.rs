@@ -337,6 +337,30 @@ pub fn create_close_agent_tool_v1() -> ToolSpec {
     })
 }
 
+pub fn create_close_agent_tool_v2() -> ToolSpec {
+    let properties = BTreeMap::from([(
+        "target".to_string(),
+        JsonSchema::string(Some(
+            "Agent id or canonical task name to close (from spawn_agent).".to_string(),
+        )),
+    )]);
+
+    ToolSpec::Function(ResponsesApiTool {
+        name: "close_agent".to_string(),
+        description: "Close an agent and its open descendants when they are no longer needed, persist the terminal spawn-tree state, and return the target agent's previous status. This is different from interrupt_agent: a closed agent is no longer available for messages or follow-up tasks.".to_string(),
+        strict: false,
+        defer_loading: None,
+        parameters: JsonSchema::object(
+            properties,
+            Some(vec!["target".to_string()]),
+            Some(false.into()),
+        ),
+        output_schema: Some(agent_previous_status_output_schema(
+            "The agent status observed before shutdown was requested.",
+        )),
+    })
+}
+
 pub fn create_interrupt_agent_tool_v2() -> ToolSpec {
     let properties = BTreeMap::from([(
         "target".to_string(),

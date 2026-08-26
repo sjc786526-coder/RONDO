@@ -274,12 +274,158 @@ fn spawn_agent_call(call_id: &str) -> ResponseItem {
     }
 }
 
+struct FailingAgentGraphStore;
+
+impl codex_agent_graph_store::AgentGraphStore for FailingAgentGraphStore {
+    fn upsert_thread_spawn_edge(
+        &self,
+        _parent_thread_id: ThreadId,
+        _child_thread_id: ThreadId,
+        _status: codex_agent_graph_store::ThreadSpawnEdgeStatus,
+    ) -> codex_agent_graph_store::AgentGraphStoreFuture<'_, ()> {
+        Box::pin(async {
+            Err(codex_agent_graph_store::AgentGraphStoreError::Internal {
+                message: "injected graph write failure".to_string(),
+            })
+        })
+    }
+
+    fn set_thread_spawn_edge_status(
+        &self,
+        _child_thread_id: ThreadId,
+        _status: codex_agent_graph_store::ThreadSpawnEdgeStatus,
+    ) -> codex_agent_graph_store::AgentGraphStoreFuture<'_, ()> {
+        Box::pin(async {
+            Err(codex_agent_graph_store::AgentGraphStoreError::Internal {
+                message: "injected graph status failure".to_string(),
+            })
+        })
+    }
+
+    fn list_thread_spawn_children(
+        &self,
+        _parent_thread_id: ThreadId,
+        _status_filter: Option<codex_agent_graph_store::ThreadSpawnEdgeStatus>,
+    ) -> codex_agent_graph_store::AgentGraphStoreFuture<'_, Vec<ThreadId>> {
+        Box::pin(async {
+            Err(codex_agent_graph_store::AgentGraphStoreError::Internal {
+                message: "injected graph read failure".to_string(),
+            })
+        })
+    }
+
+    fn list_thread_spawn_descendants(
+        &self,
+        _root_thread_id: ThreadId,
+        _status_filter: Option<codex_agent_graph_store::ThreadSpawnEdgeStatus>,
+    ) -> codex_agent_graph_store::AgentGraphStoreFuture<'_, Vec<ThreadId>> {
+        Box::pin(async {
+            Err(codex_agent_graph_store::AgentGraphStoreError::Internal {
+                message: "injected graph read failure".to_string(),
+            })
+        })
+    }
+}
+
 struct AgentControlHarness {
     _home: TempDir,
     config: Config,
     state_db: Option<StateDbHandle>,
     manager: ThreadManager,
     control: AgentControl,
+}
+
+#[tokio::test]
+async fn durable_child_spawn_requires_graph_store_and_discards_unpublished_runtime() {
+    let harness =
+        AgentControlHarness::new_durable_with_graph_store(/*agent_graph_store*/ None).await;
+    let (root_thread_id, root_thread) = harness.start_thread().await;
+    let root_control = root_thread.session.services.agent_control.clone();
+
+    let err = root_control
+        .spawn_agent_with_metadata(
+            harness.config.clone(),
+            text_input("must not become visible"),
+            Some(SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
+                parent_thread_id: root_thread_id,
+                depth: 1,
+                agent_path: None,
+                agent_nickname: None,
+                agent_role: None,
+            })),
+            SpawnAgentOptions::default(),
+        )
+        .await
+        .expect_err("durable child spawn must fail without graph persistence");
+    assert!(
+        err.to_string()
+            .contains("requires an available agent graph store")
+    );
+    assert_eq!(
+        harness.manager.list_thread_ids().await,
+        vec![root_thread_id],
+        "failed durable spawn must remove its exact unpublished runtime"
+    );
+    assert!(
+        root_control.state.live_agents().is_empty(),
+        "failed durable spawn must not publish child registry metadata"
+    );
+
+    let removed = harness.manager.remove_thread(&root_thread_id).await;
+    assert!(
+        removed.is_some(),
+        "test cleanup should remove the Root owner"
+    );
+}
+
+#[tokio::test]
+async fn durable_graph_write_and_restore_fail_closed() {
+    let harness =
+        AgentControlHarness::new_durable_with_graph_store(Some(Arc::new(FailingAgentGraphStore)))
+            .await;
+    let (root_thread_id, root_thread) = harness.start_thread().await;
+    let root_control = root_thread.session.services.agent_control.clone();
+
+    let spawn_err = root_control
+        .spawn_agent_with_metadata(
+            harness.config.clone(),
+            text_input("must not outlive failed persistence"),
+            Some(SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
+                parent_thread_id: root_thread_id,
+                depth: 1,
+                agent_path: None,
+                agent_nickname: None,
+                agent_role: None,
+            })),
+            SpawnAgentOptions::default(),
+        )
+        .await
+        .expect_err("durable graph write failure must reject child spawn");
+    assert!(
+        spawn_err
+            .to_string()
+            .contains("injected graph write failure")
+    );
+    assert_eq!(
+        harness.manager.list_thread_ids().await,
+        vec![root_thread_id]
+    );
+
+    let restore_err = root_control
+        .restore_v2_agent_metadata(&harness.config, root_thread_id)
+        .await
+        .expect_err("durable metadata restore must fail on graph read failure");
+    assert!(
+        restore_err
+            .to_string()
+            .contains("injected graph read failure")
+    );
+
+    let removed = harness.manager.remove_thread(&root_thread_id).await;
+    assert!(
+        removed.is_some(),
+        "test cleanup should remove the Root owner"
+    );
 }
 
 impl AgentControlHarness {
@@ -313,6 +459,18 @@ impl AgentControlHarness {
         extensions: Arc<codex_extension_api::ExtensionRegistry<Config>>,
     ) -> Self {
         let state_db = init_state_db(&config).await;
+        let agent_graph_store =
+            crate::thread_manager::local_agent_graph_store_from_state_db(state_db.as_ref());
+        Self::from_parts(home, config, state_db, extensions, agent_graph_store)
+    }
+
+    fn from_parts(
+        home: TempDir,
+        config: Config,
+        state_db: Option<StateDbHandle>,
+        extensions: Arc<codex_extension_api::ExtensionRegistry<Config>>,
+        agent_graph_store: Option<Arc<dyn codex_agent_graph_store::AgentGraphStore>>,
+    ) -> Self {
         crate::test_support::set_thread_manager_test_mode(true);
         let auth_manager = AuthManager::from_auth_for_testing(CodexAuth::from_api_key("dummy"));
         let manager = ThreadManager::new(
@@ -326,7 +484,7 @@ impl AgentControlHarness {
             Arc::new(crate::test_support::EmptyUserInstructionsProvider),
             /*analytics_events_client*/ None,
             crate::thread_manager::thread_store_from_config(&config, state_db.clone()),
-            crate::thread_manager::local_agent_graph_store_from_state_db(state_db.as_ref()),
+            agent_graph_store,
             uuid::Uuid::new_v4().to_string(),
             /*attestation_provider*/ None,
             /*external_time_provider*/ None,
@@ -348,6 +506,11 @@ impl AgentControlHarness {
     async fn new_durable_with_extensions(
         extensions: Arc<codex_extension_api::ExtensionRegistry<Config>>,
     ) -> Self {
+        let (home, config) = Self::durable_config().await;
+        Self::new_with_config_and_extensions(home, config, extensions).await
+    }
+
+    async fn durable_config() -> (TempDir, Config) {
         let (home, mut config) = test_config().await;
         config
             .features
@@ -360,7 +523,21 @@ impl AgentControlHarness {
         config.multi_agent_v2.team_state_enabled = true;
         config.multi_agent_v2.durable_team_enabled = true;
         config.multi_agent_v2.max_concurrent_threads_per_session = 3;
-        Self::new_with_config_and_extensions(home, config, extensions).await
+        (home, config)
+    }
+
+    async fn new_durable_with_graph_store(
+        agent_graph_store: Option<Arc<dyn codex_agent_graph_store::AgentGraphStore>>,
+    ) -> Self {
+        let (home, config) = Self::durable_config().await;
+        let state_db = init_state_db(&config).await;
+        Self::from_parts(
+            home,
+            config,
+            state_db,
+            empty_extension_registry(),
+            agent_graph_store,
+        )
     }
 
     async fn start_thread(&self) -> (ThreadId, Arc<CodexThread>) {
@@ -505,11 +682,38 @@ async fn durable_session_failed_close_emits_no_completion_and_remains_retryable(
     root_control
         .shutdown_live_agent(child_thread_id)
         .await
-        .expect("shutdown child before retry");
+        .expect("simulate an unloaded but still-open durable child");
+
+    let second_close_id = root_thread
+        .submit(Op::Shutdown {})
+        .await
+        .expect("retry Root close with unloaded open child");
+    let second_close_error = loop {
+        let event = root_thread.next_event().await.expect("Root retry event");
+        if event.id == second_close_id
+            && let EventMsg::Error(error) = event.msg
+        {
+            break error;
+        }
+    };
+    assert!(
+        second_close_error
+            .message
+            .contains(&child_thread_id.to_string())
+    );
+
+    root_control
+        .restore_v2_agent_metadata(&harness.config, root_thread_id)
+        .await
+        .expect("restore the unloaded open child metadata");
+    root_control
+        .close_agent(child_thread_id)
+        .await
+        .expect("explicit child close should persist the Closed edge");
     root_thread
         .shutdown_and_wait()
         .await
-        .expect("Root close succeeds after child exits");
+        .expect("Root close succeeds only after the child edge is Closed");
 }
 
 async fn persisted_originator(thread: &CodexThread) -> String {
@@ -1350,7 +1554,8 @@ async fn resume_agent_from_rollout_does_not_reopen_non_durable_v2_descendants() 
     assert_thread_not_loaded(&resumed_manager, sibling_thread_id).await;
     resumed_control
         .restore_v2_agent_metadata(&harness.config, parent_thread_id)
-        .await;
+        .await
+        .expect("restore durable child metadata");
     for thread_id in [worker_thread_id, sibling_thread_id] {
         assert!(resumed_control.ensure_agent_known(thread_id).is_ok());
     }
@@ -1427,9 +1632,9 @@ async fn durable_spawn_fork_turn_modes_keep_the_parent_session_and_team() {
             team_instance
         );
         root_control
-            .shutdown_live_agent(child_thread_id)
+            .close_agent(child_thread_id)
             .await
-            .expect("child shutdown should succeed");
+            .expect("child close should succeed");
     }
 
     root_thread
@@ -1536,25 +1741,59 @@ async fn durable_v2_root_resume_restores_metadata_and_lazily_reloads_members() {
             )
         })
         .collect::<std::collections::HashMap<_, _>>();
+    let prior_thread_store = Arc::downgrade(&parent_thread.session.services.thread_store);
 
-    let report = harness
-        .manager
-        .shutdown_all_threads_bounded(Duration::from_secs(5))
-        .await;
-    assert_eq!(report.submit_failed, Vec::<ThreadId>::new());
-    assert_eq!(report.timed_out, Vec::<ThreadId>::new());
+    // Model process replacement without formally closing the durable Team: evict every exact
+    // runtime owner and drop its last external sender while retaining the persisted Open graph.
+    for thread_id in [
+        reviewer_thread_id,
+        worker_thread_id,
+        sibling_thread_id,
+        parent_thread_id,
+    ] {
+        assert!(
+            harness.manager.remove_thread(&thread_id).await.is_some(),
+            "process replacement should evict runtime owner {thread_id}"
+        );
+    }
+    drop(reviewer_thread);
+    drop(worker_thread);
+    drop(sibling_thread);
+    drop(root_control);
+    drop(parent_thread);
+
+    let resumed_config = harness.config.clone();
+    let model_provider = harness.config.model_provider.clone();
+    let codex_home = harness.config.codex_home.to_path_buf();
+    let state_db = harness.state_db.clone();
+    let AgentControlHarness {
+        _home: _home_guard,
+        config: _,
+        state_db: _,
+        manager,
+        control,
+    } = harness;
+    drop(control);
+    drop(manager);
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while prior_thread_store.upgrade().is_some() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("process replacement should release the prior writer store");
 
     let resumed_manager = ThreadManager::with_models_provider_home_and_state_for_tests(
         CodexAuth::from_api_key("dummy"),
-        harness.config.model_provider.clone(),
-        harness.config.codex_home.to_path_buf(),
+        model_provider,
+        codex_home,
         std::sync::Arc::new(codex_exec_server::EnvironmentManager::default_for_tests()),
-        harness.state_db.clone(),
+        state_db,
     );
     let resumed_control = resumed_manager.agent_control();
     let resumed_parent_thread_id = resumed_control
         .resume_agent_from_rollout(
-            harness.config.clone(),
+            resumed_config.clone(),
             parent_thread_id,
             SessionSource::Exec,
         )
@@ -1576,8 +1815,9 @@ async fn durable_v2_root_resume_restores_metadata_and_lazily_reloads_members() {
     assert_thread_not_loaded(&resumed_manager, reviewer_thread_id).await;
     assert_thread_not_loaded(&resumed_manager, sibling_thread_id).await;
     resumed_root_control
-        .restore_v2_agent_metadata(&harness.config, parent_thread_id)
-        .await;
+        .restore_v2_agent_metadata(&resumed_config, parent_thread_id)
+        .await
+        .expect("restore durable child metadata");
     for thread_id in [worker_thread_id, reviewer_thread_id, sibling_thread_id] {
         assert!(resumed_root_control.ensure_agent_known(thread_id).is_ok());
         let expected = expected_metadata
@@ -1595,7 +1835,7 @@ async fn durable_v2_root_resume_restores_metadata_and_lazily_reloads_members() {
 
     let ops_before_reload = resumed_manager.captured_ops();
     resumed_root_control
-        .ensure_v2_agent_loaded(harness.config.clone(), worker_thread_id)
+        .ensure_v2_agent_loaded(resumed_config.clone(), worker_thread_id)
         .await
         .expect("a real consumer may lazily reload the durable member");
     assert_eq!(

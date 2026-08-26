@@ -235,23 +235,24 @@ UUID替换为 `01a03c53-7cf4-78e0-bea3-c1eb7c4015da`，安全处理消息正文�
 
 ### 已完成
 
-- 已确认主工作区 clean，`main == origin/main == 90e905168039effbea796753d0f29148830a243f`。
-- 已从该提交创建 `.claude/worktrees/083-m4-z-core-durable-team-closure` / `worktree-083-m4-z-core-durable-team-closure`。
-- 已阅读根/`multidev/` 规则、README、当前 WBS、模板、Plan 067/069/077/078/080、相关完成记录和 live S/C 源码/测试接缝。
-- 计划编制起点由用户确认：没有 Cargo/rustc/nextest 或共享重型任务；项目约 221G；069 target 约 164G，其中 `debug/deps` 约 124G、
-  `debug/incremental` 约 36G。以上是易漂移起点，执行者在首批重型命令前须重新实测。
-- 已确认本计划不需要直接写主工作区；执行期唯一已知跨 worktree ignored 写是复用 069 target，必要时按授权精确清理其 incremental。
-- 已完成一次未参与起草的只读独立复核；真实新进程要求、候选提交到终审收口顺序和 WBS 一次性授权冲突已修正，最终无 High/Medium finding。
-- 计划编制未运行 Cargo、测试、生成器或缓存清理，也未修改产品代码。
+- 已在指定 083 worktree 完成 live S/C 全链映射、实现和职责层回归；主工作区、其它 worktree、Plan 082 与 W 线未进入写集。
+- 全链暴露并关闭持久 child graph 失败被吞、unloaded Open descendant 绕过 Root close、公开 close 错误类型不准确、V2 缺少终态
+  `close_agent`、JSON schema enum payload 键名偏离 serde wire 等 correctness 缺口。
+- 新增公开 app-server v2 全链回归，从任务私有 fresh store 创建 Root/child 并提交 Team 事件，真实终止旧 OS 进程后由新进程恢复同一
+  Session/Root/TeamInstance，继续 mutation，完成 descendant barrier、显式 child close、owner close、archive/unarchive/delete。
+- stable/experimental JSON schema 与 precomputed exports 已用既有生成测试同步；30 项宽聚焦回归、实际修改 crate 的 scoped clippy、
+  `just fmt` 和 diff 自审均通过，无 `*.snap.new` 或临时 fixture。
+- 冻结候选从新的 TempDir、Session/store 完成正式全链：Nextest run `b0d0eadc-5c49-46d8-9e97-310cf35691ea`，`1/1` 通过；
+  watchdog `20260825-235546-1000-2079406` 为 `stop=none / cleanup=none`。
 
 ### 当前工作
 
-- ExecPlan、WBS 当前状态同步和独立复核已完成；无 High/Medium 计划 finding，等待执行者从阶段 A 开始。
+- `AWAITING_REVIEW`：执行者候选实现、正式证据、自审、候选状态和执行日志已收口，等待指定审查者独立验收。
 
 ### 本任务剩余步骤
 
-- 执行者从阶段 A 开始，完成候选实现、门禁、正式轮、候选状态/日志与 clean 本地提交，再按队列通知审查者。
-- 审查者负责独立验收；发现问题交回执行者整改，通过后由审查者同步最终 Plan/WBS/COMPLETED、验收日志与收口提交。
+- 审查者独立验收候选；若有 finding，执行者在同一 worktree 窄修、复验并重新提交后再次通知。
+- 只有审查通过后，才由审查者同步最终 Plan/WBS/COMPLETED、验收日志与收口提交。
 
 ### 阻塞项
 
@@ -260,7 +261,7 @@ UUID替换为 `01a03c53-7cf4-78e0-bea3-c1eb7c4015da`，安全处理消息正文�
 
 ### 当前验收状态
 
-- `NOT_RUN`：Plan 083 尚未进入产品执行；历史 S1/S2/C1/C2 PASS 是起点，不是 M4-Z(core) 正式全链证据。
+- `AWAITING_REVIEW`：执行者正式轮和相称门禁已通过，但 `M4_Z_CORE_PASS` 尚未成立；最终结论只由指定审查者给出。
 
 ### 交接边界
 
@@ -283,3 +284,7 @@ UUID替换为 `01a03c53-7cf4-78e0-bea3-c1eb7c4015da`，安全处理消息正文�
 | 007 | 一次性重型授权覆盖范围内聚焦命令及修复后重跑；共享 069 target 与临时 270/285/290GB 门限继续适用 | 避免反复请示，同时保持全局构建和宿主资源安全 | build/resources | 已采纳 |
 | 008 | 独立终审关闭高/中 correctness finding，不建设额外审计、可信或机器验收体系 | 关注功能正确性与遗漏回归，符合个人开发边界 | review | 已采纳 |
 | 009 | 额外授权、计划外变数、不确定决策和最终验收都使用指定 Codex 队列；每次主动表明身份，发送后停止 | 保证跨会话协调可靠且不重复投递 | coordination | 已采纳 |
+| 010 | Durable child spawn/resume 先持久化 Open graph edge，再发布 registry/residency；graph 缺失或失败时 fail-closed 并精确清理未发布 runtime | child 已可运行但拓扑不可恢复会破坏 durable success 与 close 证明 | core/graph | 已采纳 |
+| 011 | Root close barrier 合并 persisted Open descendants 与 loaded running descendants；公开 Control 映射为 typed `ActiveWriter` | 卸载不等于关闭，Root 终态必须覆盖 cold 可恢复 writer | lifecycle/control | 已采纳 |
+| 012 | V2 `close_agent` 复用既有 AgentControl subtree close 与 graph Closed edge，不新增第二套生命周期设施 | 恢复后的 unloaded member 必须有公开、正式、descendant-first 的终态入口 | tools/lifecycle | 已采纳 |
+| 013 | 公开 schema 对 enum payload 字段显式使用 serde wire 的 camelCase，并同步 stable/experimental 生成物 | 既有 TypeScript/JSON wire 已是 camelCase，schema 不得给出错误调用合同 | protocol/schema | 已采纳 |

@@ -740,7 +740,7 @@ async fn durable_session_control_revalidates_proof_and_reuses_cold_lifecycle() -
     assert!(matches!(
         rejected.outcome,
         DurableSessionControlOutcome::Rejected {
-            reason: DurableSessionControlRejectionReason::NotCurrentOwner,
+            reason: DurableSessionControlRejectionReason::StalePrecondition,
             ..
         }
     ));
