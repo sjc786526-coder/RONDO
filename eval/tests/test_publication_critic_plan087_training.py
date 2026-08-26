@@ -52,6 +52,7 @@ from rondo_eval.publication_critic.full_model_training.plan087_controller import
 from rondo_eval.publication_critic.full_model_training.plan087_finalize import (  # noqa: E402
     finalize_route,
     finalize_search,
+    summarize_route_result,
     validate_route_result,
 )
 from rondo_eval.publication_critic.full_model_training.plan087_run import (  # noqa: E402
@@ -79,8 +80,7 @@ from eval.tests.test_publication_critic_plan082_training import (  # noqa: E402
 
 ROUTE = REPO_ROOT / "training/publication-critic-plan081/route-contract-v1.json"
 CANDIDATE_A = (
-    REPO_ROOT
-    / "training/publication-critic-plan087/route-a-terminal-pair-v1.json"
+    REPO_ROOT / "training/publication-critic-plan087/route-a-terminal-pair-v1.json"
 )
 CANDIDATE_B = (
     REPO_ROOT / "training/publication-critic-plan087/route-b-wider-decay-v1.json"
@@ -174,9 +174,7 @@ def _run_spec() -> dict:
             "scope_schedule": [
                 {
                     "after_observation_step": 1,
-                    "scope": _scope(
-                        "tail-expanded", ["tail.weight", "tail.bias"], 3
-                    ),
+                    "scope": _scope("tail-expanded", ["tail.weight", "tail.bias"], 3),
                 }
             ],
             "control_plan": {
@@ -330,6 +328,105 @@ class Plan087TrainingTests(unittest.TestCase):
         self.assertEqual(spec["initial_scope"], one)
         self.assertEqual(spec["scope_schedule"][0]["scope"], two)
 
+    def test_new_route_scope_can_reselect_narrower_wider_or_different_modules(
+        self,
+    ) -> None:
+        rows = [
+            {"name": "model.embed_tokens.weight", "elements": 100},
+            *[
+                {
+                    "name": f"model.layers.{index}.self_attn.q_proj.weight",
+                    "elements": 10 + index,
+                }
+                for index in range(6)
+            ],
+            {"name": "model.norm.weight", "elements": 8},
+            {"name": "score.weight", "elements": 9},
+        ]
+        inventory = {"parameters": rows}
+        score_only = resolve_scope(
+            inventory,
+            {
+                "schema": SCOPE_STRATEGY_SCHEMA,
+                "backbone_blocks": 0,
+                "include_score_head": True,
+                "include_final_norm": False,
+            },
+        )
+        wider_than_old_cap = resolve_scope(
+            inventory,
+            {
+                "schema": SCOPE_STRATEGY_SCHEMA,
+                "backbone_blocks": 5,
+                "include_score_head": True,
+                "include_final_norm": True,
+            },
+        )
+        middle_module = resolve_scope(
+            inventory,
+            {
+                "schema": SCOPE_STRATEGY_SCHEMA,
+                "parameter_prefixes": ["model.layers.2"],
+            },
+        )
+        all_parameters = resolve_scope(
+            inventory,
+            {"schema": SCOPE_STRATEGY_SCHEMA, "all_parameters": True},
+        )
+        self.assertEqual(score_only["parameter_names"], ["score.weight"])
+        self.assertEqual(len(wider_than_old_cap["parameter_names"]), 7)
+        self.assertEqual(
+            middle_module["parameter_names"],
+            ["model.layers.2.self_attn.q_proj.weight"],
+        )
+        self.assertEqual(
+            all_parameters["parameter_names"], [row["name"] for row in rows]
+        )
+
+        candidate = read_json(CANDIDATE_A)
+        candidate["scope_phases"] = [
+            {
+                "after_observation_step": None,
+                "strategy": {
+                    "schema": SCOPE_STRATEGY_SCHEMA,
+                    "parameter_prefixes": ["model.layers.2"],
+                },
+            }
+        ]
+        spec = materialize_run_spec(
+            candidate, route_context=_context(), parameter_inventory=inventory
+        )
+        self.assertEqual(spec["initial_scope"], middle_module)
+
+    def test_same_route_scope_phase_must_expand_actual_parameter_set(self) -> None:
+        inventory = {
+            "parameters": [
+                {"name": "model.layers.1.weight", "elements": 2},
+                {"name": "model.layers.2.weight", "elements": 3},
+            ]
+        }
+        candidate = read_json(CANDIDATE_A)
+        candidate["scope_phases"] = [
+            {
+                "after_observation_step": None,
+                "strategy": {
+                    "schema": SCOPE_STRATEGY_SCHEMA,
+                    "parameter_prefixes": ["model.layers.1"],
+                },
+            },
+            {
+                "after_observation_step": 1,
+                "strategy": {
+                    "schema": SCOPE_STRATEGY_SCHEMA,
+                    "parameter_prefixes": ["model.layers.2"],
+                },
+            },
+        ]
+        with self.assertRaises(FullModelTrainingError):
+            materialize_run_spec(
+                candidate, route_context=_context(), parameter_inventory=inventory
+            )
+
     def test_budget_is_cumulative_conservative_and_idempotent(self) -> None:
         value = _cost(current=8.7, projected=8.6)
         value["provider_task_billing_usd"] = 0.3
@@ -440,9 +537,7 @@ class Plan087TrainingTests(unittest.TestCase):
             "cost_snapshot_content_sha256": previous_cost["content_sha256"],
             "baseline_balance_usd": previous_cost["baseline_balance_usd"],
             "current_balance_usd": previous_cost["current_balance_usd"],
-            "conservative_task_cost_usd": previous_cost[
-                "conservative_task_cost_usd"
-            ],
+            "conservative_task_cost_usd": previous_cost["conservative_task_cost_usd"],
         }
         context = {
             "schema": ROUTE_CONTEXT_SCHEMA,
@@ -456,9 +551,7 @@ class Plan087TrainingTests(unittest.TestCase):
                 "changes": ["wider terminal scope"],
             },
             "prior_route_summaries": [summary],
-            "cost_snapshot": _next_cost(
-                previous_cost, current=8.8, projected=0.5
-            ),
+            "cost_snapshot": _next_cost(previous_cost, current=8.8, projected=0.5),
         }
         self.assertEqual(validate_route_context(context)["route_generation"], 2)
         for mutation in ("search", "evidence", "baseline"):
@@ -538,6 +631,7 @@ class Plan087TrainingTests(unittest.TestCase):
                 selected_observation_id=selected["observation_id"],
                 selected_checkpoint_id=checkpoint_id,
                 operator_disposition="promising",
+                recovery_role="promising_candidate",
                 operator_reason=(
                     "pair margins improve and companion metrics remain usable"
                 ),
@@ -566,9 +660,7 @@ class Plan087TrainingTests(unittest.TestCase):
                 reason="bounded candidate retained",
                 selected_route_id="route-a-terminal-pair",
                 terminal_cost_snapshots=[
-                    _next_cost(
-                        route["cost_snapshot"], current=8.9, projected=0.0
-                    )
+                    _next_cost(route["cost_snapshot"], current=8.9, projected=0.0)
                 ],
                 resource_state={
                     "captured_at": "2026-08-26T13:00:00Z",
@@ -587,6 +679,140 @@ class Plan087TrainingTests(unittest.TestCase):
                 },
             )
             self.assertFalse(terminal["claims"]["model_route_failed"])
+
+    def test_not_promising_route_can_close_at_complete_early_observation(
+        self,
+    ) -> None:
+        spec = _run_spec()
+        logits = {0: _logits(0.0), 1: _logits(0.1), 2: _logits(0.1)}
+        with tempfile.TemporaryDirectory() as directory:
+            store = Plan081ArtifactStore(Path(directory))
+            adapter = _Plan087FakeAdapter(logits)
+            controller = Plan087AdaptiveTrainingController(
+                route_context=spec["route_context"],
+                run_spec=spec,
+                route_contract=read_json(ROUTE),
+                control_plan=ControlPlan.from_value(spec["control_plan"]),
+                initial_scope=TrainableScope.from_value(spec["initial_scope"]),
+                comparison_policy=ComparisonPolicy.from_value(
+                    spec["comparison_policy"]
+                ),
+                training_dataset=_training(),
+                validation_dataset=_validation(),
+                artifact_store=store,
+            )
+            controller.begin_process(
+                {"instance_id": "4" * 32, "hostname": "fixture", "pid": 104}
+            )
+            controller.initialize(adapter)
+            run_scheduled(controller, adapter, spec, stop_after=1)
+            selected = controller.state["observations"][-1]
+            route = finalize_route(
+                controller_state=controller.state,
+                artifact_root=Path(directory),
+                selected_observation_id=selected["observation_id"],
+                selected_checkpoint_id=selected["checkpoint_id"],
+                operator_disposition="not_promising",
+                recovery_role="none",
+                operator_reason="complete first observation does not justify another update",
+                operator_assessment={
+                    "clear_ranking_or_pair_improvement": False,
+                    "key_metrics_not_materially_collapsed": True,
+                    "not_noise_offset_or_threshold_only": True,
+                    "reviewed_complete_metrics": True,
+                },
+                cost_snapshots=[
+                    _next_cost(spec["route_context"]["cost_snapshot"], projected=0.0)
+                ],
+                process_receipt=None,
+                recovery_receipt=None,
+            )
+            self.assertEqual(validate_route_result(route), route)
+            self.assertEqual(route["route_completion"]["global_step"], 1)
+            self.assertEqual(
+                route["route_completion"]["kind"], "early_complete_observation"
+            )
+            self.assertFalse(route["selected_checkpoint"]["fresh_process_recovery"])
+            self.assertTrue(route["selected_checkpoint"]["qualified_restore_probe"])
+
+            summary = summarize_route_result(route)
+            next_context = {
+                "schema": ROUTE_CONTEXT_SCHEMA,
+                "search_id": spec["route_context"]["search_id"],
+                "route_id": "route-b-wider-decay",
+                "route_generation": 2,
+                "start_state": "exact_base",
+                "decision": {
+                    "reason": "change responsibility after complete weak observation",
+                    "evidence_observation_id": summary["terminal_observation_id"],
+                    "changes": ["reselect a different exact-base module scope"],
+                },
+                "prior_route_summaries": [summary],
+                "cost_snapshot": _next_cost(
+                    route["cost_snapshot"], current=9.0, projected=0.1
+                ),
+            }
+            self.assertEqual(
+                validate_route_context(next_context)["route_generation"], 2
+            )
+
+            hidden_recovery = copy.deepcopy(controller.state)
+            hidden_recovery["plan087"]["recovery_proven_checkpoints"][
+                selected["checkpoint_id"]
+            ] = store.verify_checkpoint(selected["checkpoint_id"])["content_sha256"]
+            with self.assertRaisesRegex(
+                FullModelTrainingError, "plan087_route_recovery_role_invalid"
+            ):
+                finalize_route(
+                    controller_state=hidden_recovery,
+                    artifact_root=Path(directory),
+                    selected_observation_id=selected["observation_id"],
+                    selected_checkpoint_id=selected["checkpoint_id"],
+                    operator_disposition="not_promising",
+                    recovery_role="none",
+                    operator_reason="must not hide recorded fresh recovery",
+                    operator_assessment={
+                        "clear_ranking_or_pair_improvement": False,
+                        "key_metrics_not_materially_collapsed": True,
+                        "not_noise_offset_or_threshold_only": True,
+                        "reviewed_complete_metrics": True,
+                    },
+                    cost_snapshots=[
+                        _next_cost(
+                            spec["route_context"]["cost_snapshot"], projected=0.0
+                        )
+                    ],
+                    process_receipt=None,
+                    recovery_receipt=None,
+                )
+
+            incomplete = copy.deepcopy(controller.state)
+            incomplete["current_step"] = 0
+            with self.assertRaisesRegex(
+                FullModelTrainingError, "plan087_route_completion_point_invalid"
+            ):
+                finalize_route(
+                    controller_state=incomplete,
+                    artifact_root=Path(directory),
+                    selected_observation_id=selected["observation_id"],
+                    selected_checkpoint_id=selected["checkpoint_id"],
+                    operator_disposition="not_promising",
+                    recovery_role="none",
+                    operator_reason="invalid incomplete point",
+                    operator_assessment={
+                        "clear_ranking_or_pair_improvement": False,
+                        "key_metrics_not_materially_collapsed": True,
+                        "not_noise_offset_or_threshold_only": True,
+                        "reviewed_complete_metrics": True,
+                    },
+                    cost_snapshots=[
+                        _next_cost(
+                            spec["route_context"]["cost_snapshot"], projected=0.0
+                        )
+                    ],
+                    process_receipt=None,
+                    recovery_receipt=None,
+                )
 
     def test_promising_disposition_rejects_unrecovered_checkpoint(self) -> None:
         spec = _run_spec()
@@ -629,6 +855,7 @@ class Plan087TrainingTests(unittest.TestCase):
                     selected_observation_id=selected["observation_id"],
                     selected_checkpoint_id=selected["checkpoint_id"],
                     operator_disposition="promising",
+                    recovery_role="promising_candidate",
                     operator_reason="fixture",
                     operator_assessment={
                         "clear_ranking_or_pair_improvement": True,

@@ -7,7 +7,7 @@ import re
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from .contract import FullModelTrainingError
+from .contract import FullModelTrainingError, canonical_json_bytes, sha256_bytes
 from .plan081_contract import ComparisonPolicy, ControlPlan, TrainableScope
 from .plan087_adapter import validate_adaptive_recipe
 from .plan087_contract import validate_route_context
@@ -21,49 +21,68 @@ _LAYER = re.compile(r"(?:^|\.)layers\.(\d+)\.")
 def resolve_scope(
     parameter_inventory: Mapping[str, Any], strategy: Any
 ) -> dict[str, Any]:
-    """Resolve score head, final norm and trailing blocks without fixed names."""
+    """Resolve one bounded strategy against the exact parameter inventory."""
 
-    _validate_scope_strategy(strategy)
-    blocks = int(strategy["backbone_blocks"])
+    kind = _validate_scope_strategy(strategy)
     rows = _inventory_rows(parameter_inventory)
-    layer_numbers = sorted(
-        {
-            int(match.group(1))
-            for row in rows
-            if (match := _LAYER.search(row["name"])) is not None
-        },
-        reverse=True,
-    )
-    if len(layer_numbers) < blocks:
-        raise FullModelTrainingError("plan087_scope_backbone_layers_missing")
-    score = [row for row in rows if _is_score_head(row["name"])]
-    if not score:
-        raise FullModelTrainingError("plan087_scope_score_head_missing")
-    final_norm = [row for row in rows if _is_final_norm(row["name"])]
-    if strategy["include_final_norm"] and not final_norm:
-        raise FullModelTrainingError("plan087_scope_final_norm_missing")
     selected: list[dict[str, Any]] = []
-    selected.extend(score)
-    if strategy["include_final_norm"]:
-        selected.extend(final_norm)
-    for layer in layer_numbers[:blocks]:
-        selected.extend(
-            row
-            for row in rows
-            if (match := _LAYER.search(row["name"])) is not None
-            and int(match.group(1)) == layer
+    if kind == "all_parameters":
+        selected.extend(rows)
+        reason = "inventory-resolved all-original-parameter scope"
+    elif kind == "terminal_backbone":
+        blocks = int(strategy["backbone_blocks"])
+        layer_numbers = sorted(
+            {
+                int(match.group(1))
+                for row in rows
+                if (match := _LAYER.search(row["name"])) is not None
+            },
+            reverse=True,
         )
+        if len(layer_numbers) < blocks:
+            raise FullModelTrainingError("plan087_scope_backbone_layers_missing")
+        score = [row for row in rows if _is_score_head(row["name"])]
+        if strategy["include_score_head"] and not score:
+            raise FullModelTrainingError("plan087_scope_score_head_missing")
+        final_norm = [row for row in rows if _is_final_norm(row["name"])]
+        if strategy["include_final_norm"] and not final_norm:
+            raise FullModelTrainingError("plan087_scope_final_norm_missing")
+        if strategy["include_score_head"]:
+            selected.extend(score)
+        if strategy["include_final_norm"]:
+            selected.extend(final_norm)
+        for layer in layer_numbers[:blocks]:
+            selected.extend(
+                row
+                for row in rows
+                if (match := _LAYER.search(row["name"])) is not None
+                and int(match.group(1)) == layer
+            )
+        reason = (
+            "inventory-resolved terminal original-parameter scope with "
+            f"{blocks} trailing backbone block(s)"
+        )
+    else:
+        prefixes = tuple(strategy["parameter_prefixes"])
+        for prefix in prefixes:
+            matched = [
+                row
+                for row in rows
+                if row["name"] == prefix or row["name"].startswith(prefix + ".")
+            ]
+            if not matched:
+                raise FullModelTrainingError("plan087_scope_parameter_prefix_missing")
+            selected.extend(matched)
+        reason = "inventory-resolved explicit module-prefix original-parameter scope"
     names = tuple(row["name"] for row in selected)
-    if len(names) != len(set(names)):
+    if not names or len(names) != len(set(names)):
         raise FullModelTrainingError("plan087_scope_parameter_duplicate")
+    strategy_sha256 = sha256_bytes(canonical_json_bytes(strategy))
     return TrainableScope(
-        scope_id=f"score-head-terminal-{blocks}-blocks",
+        scope_id=f"plan087-{kind}-{strategy_sha256[:12]}",
         parameter_names=names,
         trainable_parameter_elements=sum(int(row["elements"]) for row in selected),
-        reason=(
-            "adaptive terminal original-parameter scope with score head, "
-            f"{blocks} trailing backbone block(s)"
-        ),
+        reason=reason,
     ).as_dict()
 
 
@@ -80,7 +99,25 @@ def materialize_run_spec(
     if value["route_id"] != context["route_id"]:
         raise FullModelTrainingError("plan087_route_candidate_context_mismatch")
     phases = value["scope_phases"]
-    scopes = [resolve_scope(parameter_inventory, row["strategy"]) for row in phases]
+    raw_scopes = [resolve_scope(parameter_inventory, row["strategy"]) for row in phases]
+    scopes = [raw_scopes[0]]
+    for raw_scope in raw_scopes[1:]:
+        previous = TrainableScope.from_value(scopes[-1])
+        current = TrainableScope.from_value(raw_scope)
+        current.require_expansion_of(previous)
+        ordered_names = previous.parameter_names + tuple(
+            name
+            for name in current.parameter_names
+            if name not in previous.parameter_names
+        )
+        scopes.append(
+            TrainableScope(
+                scope_id=current.scope_id,
+                parameter_names=ordered_names,
+                trainable_parameter_elements=current.trainable_parameter_elements,
+                reason=current.reason,
+            ).as_dict()
+        )
     initial = scopes[0]
     schedule = [
         {
@@ -143,8 +180,6 @@ def validate_route_candidate(value: Any) -> dict[str, Any]:
         or not 0.0 <= float(threshold) <= 1.0
     ):
         raise FullModelTrainingError("plan087_route_candidate_invalid")
-    previous_blocks = 0
-    previous_final_norm: bool | None = None
     for index, phase in enumerate(phases):
         if (
             not isinstance(phase, Mapping)
@@ -165,21 +200,7 @@ def validate_route_candidate(value: Any) -> dict[str, Any]:
         strategy = phase.get("strategy")
         if not isinstance(strategy, Mapping):
             raise FullModelTrainingError("plan087_scope_strategy_invalid")
-        blocks = strategy.get("backbone_blocks")
-        if (
-            not isinstance(blocks, int)
-            or isinstance(blocks, bool)
-            or blocks <= previous_blocks
-        ):
-            raise FullModelTrainingError("plan087_scope_strategy_not_expanding")
         _validate_scope_strategy(strategy)
-        if (
-            previous_final_norm is not None
-            and strategy["include_final_norm"] != previous_final_norm
-        ):
-            raise FullModelTrainingError("plan087_scope_strategy_not_expanding")
-        previous_blocks = blocks
-        previous_final_norm = bool(strategy["include_final_norm"])
         normalized_phases.append(json.loads(json.dumps(phase)))
     if [row["after_observation_step"] for row in normalized_phases[1:]] != sorted(
         row["after_observation_step"] for row in normalized_phases[1:]
@@ -188,24 +209,53 @@ def validate_route_candidate(value: Any) -> dict[str, Any]:
     return {**json.loads(json.dumps(value)), "scope_phases": normalized_phases}
 
 
-def _validate_scope_strategy(strategy: Any) -> None:
-    if not isinstance(strategy, Mapping) or set(strategy) != {
+def _validate_scope_strategy(strategy: Any) -> str:
+    if (
+        not isinstance(strategy, Mapping)
+        or strategy.get("schema") != SCOPE_STRATEGY_SCHEMA
+    ):
+        raise FullModelTrainingError("plan087_scope_strategy_invalid")
+    if set(strategy) == {"schema", "all_parameters"}:
+        if strategy.get("all_parameters") is not True:
+            raise FullModelTrainingError("plan087_scope_strategy_invalid")
+        return "all_parameters"
+    if set(strategy) == {
         "schema",
         "backbone_blocks",
         "include_score_head",
         "include_final_norm",
     }:
+        blocks = strategy.get("backbone_blocks")
+        if (
+            not isinstance(blocks, int)
+            or isinstance(blocks, bool)
+            or blocks < 0
+            or type(strategy.get("include_score_head")) is not bool
+            or type(strategy.get("include_final_norm")) is not bool
+            or not (
+                blocks
+                or strategy["include_score_head"]
+                or strategy["include_final_norm"]
+            )
+        ):
+            raise FullModelTrainingError("plan087_scope_strategy_invalid")
+        return "terminal_backbone"
+    if set(strategy) != {"schema", "parameter_prefixes"}:
         raise FullModelTrainingError("plan087_scope_strategy_invalid")
-    blocks = strategy.get("backbone_blocks")
+    prefixes = strategy.get("parameter_prefixes")
     if (
-        strategy.get("schema") != SCOPE_STRATEGY_SCHEMA
-        or not isinstance(blocks, int)
-        or isinstance(blocks, bool)
-        or not 1 <= blocks <= 4
-        or strategy.get("include_score_head") is not True
-        or type(strategy.get("include_final_norm")) is not bool
+        not isinstance(prefixes, Sequence)
+        or isinstance(prefixes, (str, bytes, bytearray))
+        or not prefixes
+        or len(set(prefixes)) != len(prefixes)
+        or any(
+            not isinstance(prefix, str)
+            or re.fullmatch(r"[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)*", prefix) is None
+            for prefix in prefixes
+        )
     ):
         raise FullModelTrainingError("plan087_scope_strategy_invalid")
+    return "module_prefixes"
 
 
 def _inventory_rows(value: Any) -> list[dict[str, Any]]:

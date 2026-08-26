@@ -152,12 +152,15 @@ task lifecycle helper.
 
 Create one Pod with the live, recorded image, price-relevant GPU ID, exact data
 center and selected volume. Set finite automatic stop and terminate times that
-fit the current budget snapshot. Use the task helper, which first requires the
-account Pod list to be empty. It sends create only when no Pod exists, then
-reconciles by the unique Plan 087 name. A client timeout never causes a blind
-second create: rerun the same helper only after its fresh account list still
-shows zero matches. One exact match is reused; multiple matches or any
-unrelated Pod fail closed.
+fit the current budget snapshot; both values are absolute RFC3339 instants and
+stop must precede terminate. Use the task helper, which first requires the
+account Pod list to be empty and sends exactly one create. It may reconcile an
+uncertain create response only inside that invocation, from the empty baseline
+and unique Plan 087 identity, without a second create. A later invocation never
+adopts a pre-existing same-name Pod: the frozen client cannot prove its network
+volume and stop/terminate binding, so the helper fails closed. Inspect and
+terminalize the exact task Pod, confirm account-level zero, then create again;
+multiple matches or any unrelated Pod also fail closed.
 
 ```bash
 python3 training/publication-critic-plan087/runpod-create.py \
@@ -171,9 +174,11 @@ python3 training/publication-critic-plan087/runpod-create.py \
 ```
 
 Bind the returned exact ID and name in the task log. Use `runpodctl ssh info
-<pod-id>` after every start/restart to refresh the SSH endpoint. Upload only the
-two verified archives with `scp`; do not upload the worktree, ignored history,
-secrets, unseen data or a local model.
+<pod-id>` after every start/restart to refresh the SSH endpoint. Before upload,
+create the fresh `/workspace/rondo-plan087-<run>/incoming` tree through that
+endpoint with the task root and incoming directory both mode `0700`. Upload only
+the two verified archives into `incoming/` with `scp`; do not upload the
+worktree, ignored history, secrets, unseen data or a local model.
 
 ## 4. Bootstrap the exact source, data, environment and model
 
@@ -260,6 +265,14 @@ records the exact-base start, prior route-result hashes, cost snapshot, changes
 and the reason those changes are being tried. A later route must include one
 hash-bound prior summary for every earlier route.
 
+Resolve every scope from the live parameter inventory. A new exact-base route
+may be narrower, wider or select a different responsibility using score/final
+modules, any available terminal depth, explicit dotted module prefixes or all
+parameters. Only later scope phases inside the same route are monotonic: their
+actual resolved parameter set must strictly contain the prior phase. Thus a
+checkpoint never changes the meaning of already-created optimizer state, while
+the next exact-base route is not forced into a four-block terminal sweep.
+
 Do not classify a candidate from floating noise, a uniform logit offset, a
 threshold-only change or one isolated aggregate. The operator assessment has
 four booleans: clear ranking/pair improvement, no material companion collapse,
@@ -295,7 +308,8 @@ env PYTHONPATH="$PLAN087_SOURCE_ROOT/eval" "$PLAN087_TASK_ROOT/venv/bin/python" 
   --artifact-root "$PLAN087_ARTIFACT_ROOT" \
   --selected-observation-id "$PLAN087_OBSERVATION" \
   --selected-checkpoint-id "$PLAN087_CHECKPOINT" \
-  --operator-disposition "$PLAN087_DISPOSITION" --operator-reason "$PLAN087_REASON" \
+  --operator-disposition promising \
+  --recovery-role promising_candidate --operator-reason "$PLAN087_REASON" \
   --operator-assessment "$PLAN087_ASSESSMENT" --cost-snapshot "$PLAN087_ROUTE_COST" \
   --process-receipt "$PLAN087_RECOVERY_PROCESS" \
   --recovery-receipt "$PLAN087_RECOVERY_RECEIPT" --output "$PLAN087_ROUTE_RESULT"
@@ -312,12 +326,17 @@ when those are snapshots 1 and 2. A later route starts from the cost snapshot
 bound by its route context and follows the same rule for every subsequent
 snapshot.
 
-If it is not promising and a full next closure still fits the live budget,
-resume the same checkpoint in a new process and continue. `resume` must complete
-at least one subsequent update. If the route completes without a candidate,
-finalize it as `not_promising`, use `plan087_cli summarize-route` to derive the
-hash-bound compact lineage row for the next route context, and choose the next
-meaningful change from the actual observation history.
+If it is not promising and another useful observation closure still fits the
+live budget, continue the route; a new-process `resume`, when needed, must
+complete at least one subsequent update. The route does not have to consume
+`maximum_updates`: at any saved step that has both the complete validation
+observation and checkpoint, the executor may honestly close it as
+`not_promising` with `--recovery-role none` and omit both recovery receipt
+arguments. Set `reviewed_complete_metrics=true` and record the evidence-based
+reason. Use `necessary_recovery_point` plus both exact recovery receipts only
+when that non-candidate checkpoint itself has a concrete reuse need. Then use
+`plan087_cli summarize-route` to derive the hash-bound compact lineage row for
+the next exact-base route and choose its scope and dynamics from actual history.
 There is no mechanical route-count target. Stop when a candidate is retained or
 the next useful closure is unauthorized.
 

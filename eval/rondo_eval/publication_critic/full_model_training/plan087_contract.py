@@ -19,6 +19,7 @@ ROUTE_CONTEXT_SCHEMA = "rondo-publication-critic-plan087-route-context-v1"
 COST_SNAPSHOT_SCHEMA = "rondo-publication-critic-plan087-cost-snapshot-v1"
 PROCESS_RECEIPT_SCHEMA = "rondo-publication-critic-plan087-process-receipt-v1"
 RECOVERY_RECEIPT_SCHEMA = "rondo-publication-critic-plan087-recovery-receipt-v1"
+RECOVERY_ROLES = frozenset({"none", "necessary_recovery_point", "promising_candidate"})
 TERMINAL_OUTCOMES = frozenset(
     {
         "PROMISING_CANDIDATE_RETAINED",
@@ -134,8 +135,7 @@ def validate_route_context(value: Any) -> dict[str, Any]:
     else:
         previous = normalized_summaries[-1]
         if (
-            decision["evidence_observation_id"]
-            != previous["terminal_observation_id"]
+            decision["evidence_observation_id"] != previous["terminal_observation_id"]
             or cost["snapshot_index"] != previous["cost_snapshot_index"] + 1
             or cost["previous_snapshot_content_sha256"]
             != previous["cost_snapshot_content_sha256"]
@@ -303,9 +303,11 @@ def validate_cost_progression(previous: Any, current: Any) -> dict[str, Any]:
 
 
 def validate_cost_sequence(previous: Any, values: Any) -> list[dict[str, Any]]:
-    if not isinstance(values, Sequence) or isinstance(
-        values, (str, bytes, bytearray)
-    ) or not values:
+    if (
+        not isinstance(values, Sequence)
+        or isinstance(values, (str, bytes, bytearray))
+        or not values
+    ):
         raise FullModelTrainingError("plan087_cost_progression_invalid")
     cursor = validate_cost_snapshot(previous)
     normalized: list[dict[str, Any]] = []
@@ -344,9 +346,7 @@ def validate_process_receipt(value: Any) -> dict[str, Any]:
     if source_process_id is not None and (
         not isinstance(source_process_id, str)
         or len(source_process_id) != 32
-        or any(
-            character not in "0123456789abcdef" for character in source_process_id
-        )
+        or any(character not in "0123456789abcdef" for character in source_process_id)
         or source_process_id == identity["instance_id"]
     ):
         raise FullModelTrainingError("plan087_process_receipt_invalid")
@@ -430,9 +430,7 @@ def candidate_evidence(
         )
         if deltas[key] != 0.0
     ]
-    improving_pair_signals = [
-        key for key in changed_pair_signals if deltas[key] > 0.0
-    ]
+    improving_pair_signals = [key for key in changed_pair_signals if deltas[key] > 0.0]
     ranking_improvement_signals = list(improving_pair_signals)
     if deltas["roc_auc"] > 0.0:
         ranking_improvement_signals.append("roc_auc")
@@ -473,17 +471,13 @@ def _observation_metrics(value: Mapping[str, Any]) -> dict[str, Any]:
                 row["signed_raw_margin"] > 0 for row in boundary
             )
             / len(boundary),
-            "boundary_mean_margin": sum(
-                row["signed_raw_margin"] for row in boundary
-            )
+            "boundary_mean_margin": sum(row["signed_raw_margin"] for row in boundary)
             / len(boundary),
             "within_pass_strict_win_rate": sum(
                 row["signed_raw_margin"] > 0 for row in within
             )
             / len(within),
-            "within_pass_mean_margin": sum(
-                row["signed_raw_margin"] for row in within
-            )
+            "within_pass_mean_margin": sum(row["signed_raw_margin"] for row in within)
             / len(within),
         }
     except (KeyError, TypeError, ZeroDivisionError) as exc:

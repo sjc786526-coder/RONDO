@@ -156,11 +156,16 @@ def _parser() -> argparse.ArgumentParser:
     route.add_argument(
         "--operator-disposition", choices=("promising", "not_promising"), required=True
     )
+    route.add_argument(
+        "--recovery-role",
+        choices=("none", "necessary_recovery_point", "promising_candidate"),
+        required=True,
+    )
     route.add_argument("--operator-reason", required=True)
     route.add_argument("--operator-assessment", type=Path, required=True)
     route.add_argument("--cost-snapshot", type=Path, action="append", required=True)
-    route.add_argument("--process-receipt", type=Path, required=True)
-    route.add_argument("--recovery-receipt", type=Path, required=True)
+    route.add_argument("--process-receipt", type=Path)
+    route.add_argument("--recovery-receipt", type=Path)
     route.add_argument("--output", type=Path, required=True)
 
     summarize = commands.add_parser("summarize-route")
@@ -343,11 +348,20 @@ def _dispatch(args: argparse.Namespace) -> Any:
             selected_observation_id=args.selected_observation_id,
             selected_checkpoint_id=args.selected_checkpoint_id,
             operator_disposition=args.operator_disposition,
+            recovery_role=args.recovery_role,
             operator_reason=args.operator_reason,
             operator_assessment=read_json(args.operator_assessment),
             cost_snapshots=[read_json(path) for path in args.cost_snapshot],
-            process_receipt=read_json(args.process_receipt),
-            recovery_receipt=read_json(args.recovery_receipt),
+            process_receipt=(
+                read_json(args.process_receipt)
+                if args.process_receipt is not None
+                else None
+            ),
+            recovery_receipt=(
+                read_json(args.recovery_receipt)
+                if args.recovery_receipt is not None
+                else None
+            ),
         )
         write_exclusive(args.output, pretty_json_bytes(result))
         return result

@@ -9,6 +9,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable, Mapping, Sequence
+from datetime import datetime, timezone
 from typing import Any
 
 CREATE_SCHEMA = "rondo-publication-critic-plan087-runpod-create-v1"
@@ -46,6 +47,7 @@ def create_or_reconcile_exact_pod(
         or args.timeout_seconds <= 0
     ):
         raise CreateError("creation_arguments_invalid")
+    requested = _requested_configuration(args)
     deadline = monotonic() + args.timeout_seconds
 
     def remaining() -> float:
@@ -56,32 +58,55 @@ def create_or_reconcile_exact_pod(
 
     before = _pod_rows(query(("pod", "list", "--all"), remaining()))
     existing = _exact_single_or_fail(before, args)
-    outcome = "reconciled_existing"
+    if existing is not None:
+        # runpodctl 2.9.0 omits networkVolumeId, stopAfter and terminateAfter
+        # from pod get.  A prior process therefore cannot prove the full create
+        # contract and must never silently adopt a same-name billed resource.
+        raise CreateError("existing_pod_contract_unverifiable")
+    outcome = "created"
     mutation_uncertain = False
-    if existing is None:
-        outcome = "created"
-        try:
-            mutate(_create_command(args), remaining())
-        except MutationUncertain:
-            mutation_uncertain = True
-        while True:
-            rows = _pod_rows(query(("pod", "list", "--all"), remaining()))
-            existing = _exact_single_or_fail(rows, args)
-            if existing is not None:
-                break
-            sleeper(min(args.poll_seconds, remaining()))
+    try:
+        mutate(_create_command(args), remaining())
+    except MutationUncertain:
+        mutation_uncertain = True
+        outcome = "reconciled_after_uncertain_create"
+    while True:
+        rows = _pod_rows(query(("pod", "list", "--all"), remaining()))
+        existing = _exact_single_or_fail(rows, args)
+        if existing is not None:
+            break
+        sleeper(min(args.poll_seconds, remaining()))
     assert existing is not None
+    detail = query(
+        (
+            "pod",
+            "get",
+            existing["id"],
+            "--include-machine",
+            "--include-network-volume",
+        ),
+        remaining(),
+    )
+    observed = _validate_created_pod_observation(
+        detail, list_row=existing, requested=requested
+    )
     return {
         "schema": CREATE_SCHEMA,
         "captured_at": args.captured_at,
         "outcome": outcome,
         "mutation_response_uncertain": mutation_uncertain,
         "pod": {
-            "id": existing["id"],
-            "name": existing["name"],
-            "gpu_count": existing["gpuCount"],
-            "desired_status": existing.get("desiredStatus"),
-            "runtime_status": existing.get("runtimeStatus"),
+            "id": observed["id"],
+            "name": observed["name"],
+            "gpu_count": observed["gpu_count"],
+            "desired_status": observed["desired_status"],
+            "runtime_status": observed["runtime_status"],
+        },
+        "creation_contract_binding": {
+            "basis": "single_exact_create_request_after_empty_account",
+            "requested": requested,
+            "provider_observed": observed,
+            "cross_process_reuse_allowed": False,
         },
         "account_pod_count": 1,
     }
@@ -101,8 +126,7 @@ def _exact_single_or_fail(
         or not pod["id"]
         or pod.get("gpuCount") != 1
         or pod.get("desiredStatus") != "RUNNING"
-        or pod.get("runtimeStatus")
-        not in {"initializing", "running", "unknown"}
+        or pod.get("runtimeStatus") not in {"initializing", "running", "unknown"}
     ):
         raise CreateError("created_pod_identity_or_state_invalid")
     return pod
@@ -140,6 +164,116 @@ def _create_command(args: argparse.Namespace) -> tuple[str, ...]:
         "--wait-timeout",
         args.wait_timeout,
     )
+
+
+def _requested_configuration(args: argparse.Namespace) -> dict[str, Any]:
+    strings = {
+        "image": getattr(args, "image", None),
+        "gpu_id": getattr(args, "gpu_id", None),
+        "data_center_id": getattr(args, "data_center_id", None),
+        "network_volume_id": getattr(args, "network_volume_id", None),
+    }
+    if any(not isinstance(value, str) or not value for value in strings.values()):
+        raise CreateError("creation_arguments_invalid")
+    stop = _rfc3339_instant(args.stop_after)
+    terminate = _rfc3339_instant(args.terminate_after)
+    if stop >= terminate:
+        raise CreateError("creation_stop_terminate_order_invalid")
+    return {
+        **strings,
+        "gpu_count": 1,
+        "cloud_type": "SECURE",
+        "container_disk_gb": args.container_disk_gb,
+        "volume_mount_path": "/workspace",
+        "stop_after": stop.isoformat().replace("+00:00", "Z"),
+        "terminate_after": terminate.isoformat().replace("+00:00", "Z"),
+    }
+
+
+def _validate_created_pod_observation(
+    value: Any,
+    *,
+    list_row: Mapping[str, Any],
+    requested: Mapping[str, Any],
+) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise CreateError("created_pod_detail_invalid")
+    machine = value.get("machine")
+    if not isinstance(machine, Mapping):
+        raise CreateError("created_pod_detail_invalid")
+    gpu_id = _one_observed(value, machine, "gpuTypeId", "gpuId")
+    data_center_id = _one_observed(value, machine, "dataCenterId")
+    required_equal = {
+        "imageName": requested["image"],
+        "containerDiskInGb": requested["container_disk_gb"],
+        "volumeMountPath": requested["volume_mount_path"],
+    }
+    if (
+        value.get("id") != list_row.get("id")
+        or value.get("name") != list_row.get("name")
+        or value.get("gpuCount") != 1
+        or gpu_id != requested["gpu_id"]
+        or data_center_id != requested["data_center_id"]
+        or any(value.get(key) != expected for key, expected in required_equal.items())
+        or value.get("desiredStatus") != "RUNNING"
+        or value.get("runtimeStatus") not in {"initializing", "running", "unknown"}
+    ):
+        raise CreateError("created_pod_configuration_drifted")
+    optional = {
+        "cloudType": requested["cloud_type"],
+        "networkVolumeId": requested["network_volume_id"],
+        "stopAfter": requested["stop_after"],
+        "terminateAfter": requested["terminate_after"],
+    }
+    for key, expected in optional.items():
+        if key in value and value[key] is not None:
+            observed = value[key]
+            if key in {"stopAfter", "terminateAfter"}:
+                observed = _rfc3339_instant(observed).isoformat().replace("+00:00", "Z")
+            if observed != expected:
+                raise CreateError("created_pod_configuration_drifted")
+    network_volume = value.get("networkVolume")
+    if network_volume is not None and (
+        not isinstance(network_volume, Mapping)
+        or network_volume.get("id") != requested["network_volume_id"]
+    ):
+        raise CreateError("created_pod_configuration_drifted")
+    return {
+        "id": value["id"],
+        "name": value["name"],
+        "image": value["imageName"],
+        "gpu_id": gpu_id,
+        "gpu_count": value["gpuCount"],
+        "data_center_id": data_center_id,
+        "container_disk_gb": value["containerDiskInGb"],
+        "volume_mount_path": value["volumeMountPath"],
+        "desired_status": value["desiredStatus"],
+        "runtime_status": value["runtimeStatus"],
+    }
+
+
+def _one_observed(top: Mapping[str, Any], nested: Mapping[str, Any], *keys: str) -> Any:
+    values = [
+        mapping[key]
+        for mapping in (top, nested)
+        for key in keys
+        if key in mapping and mapping[key] is not None
+    ]
+    if not values or any(value != values[0] for value in values[1:]):
+        raise CreateError("created_pod_configuration_ambiguous")
+    return values[0]
+
+
+def _rfc3339_instant(value: Any) -> datetime:
+    if not isinstance(value, str) or not value:
+        raise CreateError("creation_datetime_invalid")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise CreateError("creation_datetime_invalid") from exc
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise CreateError("creation_datetime_invalid")
+    return parsed.astimezone(timezone.utc)
 
 
 def _pod_rows(value: Any) -> list[Mapping[str, Any]]:

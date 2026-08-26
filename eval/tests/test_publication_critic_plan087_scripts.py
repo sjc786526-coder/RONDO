@@ -25,6 +25,50 @@ create = importlib.util.module_from_spec(CREATE_SPEC)
 CREATE_SPEC.loader.exec_module(create)
 
 
+def _create_args(**overrides) -> argparse.Namespace:
+    values = {
+        "pod_name": "rondo-plan087-search-a",
+        "task_pod_name_prefix": "rondo-plan087-",
+        "image": "image@sha256:" + "a" * 64,
+        "gpu_id": "NVIDIA A40",
+        "data_center_id": "US-TX-3",
+        "network_volume_id": "mwemzrn33y",
+        "container_disk_gb": 20,
+        "stop_after": "2026-08-26T12:30:00Z",
+        "terminate_after": "2026-08-26T12:45:00Z",
+        "wait_timeout": "10m",
+        "captured_at": "2026-08-26T12:00:00Z",
+        "poll_seconds": 0.01,
+        "timeout_seconds": 30.0,
+    }
+    values.update(overrides)
+    return argparse.Namespace(**values)
+
+
+def _created_pod(args: argparse.Namespace, **overrides) -> dict:
+    value = {
+        "id": "pod-087",
+        "name": args.pod_name,
+        "imageName": args.image,
+        "gpuCount": 1,
+        "gpuTypeId": args.gpu_id,
+        "containerDiskInGb": args.container_disk_gb,
+        "volumeMountPath": "/workspace",
+        "desiredStatus": "RUNNING",
+        "runtimeStatus": "initializing",
+        "cloudType": "SECURE",
+        "networkVolume": {"id": args.network_volume_id},
+        "stopAfter": args.stop_after,
+        "terminateAfter": args.terminate_after,
+        "machine": {
+            "gpuId": args.gpu_id,
+            "dataCenterId": args.data_center_id,
+        },
+    }
+    value.update(overrides)
+    return value
+
+
 class Plan087ScriptTests(unittest.TestCase):
     def test_shell_entries_parse_and_reject_non_task_namespace(self) -> None:
         for script in (BOOTSTRAP, LAUNCHER, WORKER):
@@ -180,37 +224,20 @@ class Plan087ScriptTests(unittest.TestCase):
         self.assertEqual(result["compute_rate_usd_per_hour"], 0.0)
 
     def test_create_timeout_reconciles_one_exact_pod_without_retry(self) -> None:
-        args = argparse.Namespace(
-            pod_name="rondo-plan087-search-a",
-            task_pod_name_prefix="rondo-plan087-",
-            image="image@sha256:" + "a" * 64,
-            gpu_id="NVIDIA A40",
-            data_center_id="US-TX-3",
-            network_volume_id="mwemzrn33y",
-            container_disk_gb=20,
-            stop_after="30m",
-            terminate_after="45m",
-            wait_timeout="10m",
-            captured_at="2026-08-26T12:00:00Z",
-            poll_seconds=0.01,
-            timeout_seconds=30.0,
-        )
+        args = _create_args()
         state = {"pod": None}
         mutations = []
 
         def query(command, _timeout):
-            self.assertEqual(command[:2], ("pod", "list"))
-            return [] if state["pod"] is None else [state["pod"]]
+            if command[:2] == ("pod", "list"):
+                return [] if state["pod"] is None else [state["pod"]]
+            if command[:2] == ("pod", "get"):
+                return state["pod"]
+            raise AssertionError(command)
 
         def mutate(command, _timeout):
             mutations.append(command)
-            state["pod"] = {
-                "id": "pod-087",
-                "name": args.pod_name,
-                "gpuCount": 1,
-                "desiredStatus": "RUNNING",
-                "runtimeStatus": "initializing",
-            }
+            state["pod"] = _created_pod(args)
             raise create.MutationUncertain("fixture_timeout")
 
         result = create.create_or_reconcile_exact_pod(
@@ -223,25 +250,100 @@ class Plan087ScriptTests(unittest.TestCase):
         self.assertTrue(result["mutation_response_uncertain"])
         self.assertEqual(result["pod"]["id"], "pod-087")
         self.assertEqual(len(mutations), 1)
-        reused = create.create_or_reconcile_exact_pod(
-            args,
-            query=query,
-            mutate=lambda *_args: self.fail("exact existing Pod must be reused"),
-            monotonic=lambda: 0.0,
-            sleeper=lambda _seconds: None,
+        self.assertEqual(
+            result["creation_contract_binding"]["basis"],
+            "single_exact_create_request_after_empty_account",
         )
-        self.assertEqual(reused["outcome"], "reconciled_existing")
+        self.assertFalse(
+            result["creation_contract_binding"]["cross_process_reuse_allowed"]
+        )
+        with self.assertRaisesRegex(
+            create.CreateError, "existing_pod_contract_unverifiable"
+        ):
+            create.create_or_reconcile_exact_pod(
+                args,
+                query=query,
+                mutate=lambda *_args: self.fail("existing Pod must not be adopted"),
+                monotonic=lambda: 0.0,
+                sleeper=lambda _seconds: None,
+            )
+
+    def test_create_rejects_configuration_drift_after_single_mutation(self) -> None:
+        drift_cases = {
+            "image": {"imageName": "other@sha256:" + "b" * 64},
+            "gpu": {"gpuTypeId": "NVIDIA L40S"},
+            "data_center": {
+                "machine": {"gpuId": "NVIDIA A40", "dataCenterId": "US-KS-2"}
+            },
+            "container_disk": {"containerDiskInGb": 21},
+            "mount": {"volumeMountPath": "/other"},
+            "network_volume": {"networkVolume": {"id": "other-volume"}},
+            "stop_after": {"stopAfter": "2026-08-26T12:31:00Z"},
+            "terminate_after": {"terminateAfter": "2026-08-26T12:46:00Z"},
+        }
+        for label, drift in drift_cases.items():
+            with self.subTest(label=label):
+                args = _create_args()
+                state = {"pod": None}
+                mutations = []
+
+                def query(command, _timeout):
+                    if command[:2] == ("pod", "list"):
+                        return [] if state["pod"] is None else [state["pod"]]
+                    if command[:2] == ("pod", "get"):
+                        return state["pod"]
+                    raise AssertionError(command)
+
+                def mutate(command, _timeout):
+                    mutations.append(command)
+                    state["pod"] = _created_pod(args, **drift)
+
+                with self.assertRaisesRegex(
+                    create.CreateError, "created_pod_configuration"
+                ):
+                    create.create_or_reconcile_exact_pod(
+                        args,
+                        query=query,
+                        mutate=mutate,
+                        monotonic=lambda: 0.0,
+                        sleeper=lambda _seconds: None,
+                    )
+                self.assertEqual(len(mutations), 1)
+
+    def test_create_rejects_preexisting_same_name_before_mutation(self) -> None:
+        args = _create_args()
+        pod = _created_pod(args, imageName="wrong-image")
+        with self.assertRaisesRegex(
+            create.CreateError, "existing_pod_contract_unverifiable"
+        ):
+            create.create_or_reconcile_exact_pod(
+                args,
+                query=lambda _command, _timeout: [pod],
+                mutate=lambda *_args: self.fail("preexisting Pod must not mutate"),
+                monotonic=lambda: 0.0,
+            )
+
+    def test_create_requires_absolute_ordered_stop_times(self) -> None:
+        for args, code in (
+            (_create_args(stop_after="30m"), "creation_datetime_invalid"),
+            (
+                _create_args(stop_after="2026-08-26T12:45:00Z"),
+                "creation_stop_terminate_order_invalid",
+            ),
+        ):
+            with (
+                self.subTest(code=code),
+                self.assertRaisesRegex(create.CreateError, code),
+            ):
+                create.create_or_reconcile_exact_pod(
+                    args,
+                    query=lambda *_args: self.fail("invalid time must fail first"),
+                    mutate=lambda *_args: self.fail("invalid time must not mutate"),
+                    monotonic=lambda: 0.0,
+                )
 
     def test_create_rejects_unrelated_or_multiple_pods_before_mutation(self) -> None:
-        args = argparse.Namespace(
-            pod_name="rondo-plan087-search-a",
-            task_pod_name_prefix="rondo-plan087-",
-            container_disk_gb=20,
-            stop_after="30m",
-            terminate_after="45m",
-            poll_seconds=0.01,
-            timeout_seconds=30.0,
-        )
+        args = _create_args()
         with self.assertRaisesRegex(
             create.CreateError, "account_pods_not_exactly_one_task_pod"
         ):

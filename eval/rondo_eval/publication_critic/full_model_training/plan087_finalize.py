@@ -16,6 +16,7 @@ from .contract import (
 from .plan081_artifacts import Plan081ArtifactStore
 from .plan082_controller import validate_process_identity
 from .plan087_contract import (
+    RECOVERY_ROLES,
     TERMINAL_OUTCOMES,
     candidate_evidence,
     validate_cost_progression,
@@ -45,11 +46,12 @@ def finalize_route(
     selected_observation_id: str,
     selected_checkpoint_id: str,
     operator_disposition: str,
+    recovery_role: str,
     operator_reason: str,
     operator_assessment: Mapping[str, Any],
     cost_snapshots: Sequence[Mapping[str, Any]],
-    process_receipt: Mapping[str, Any],
-    recovery_receipt: Mapping[str, Any],
+    process_receipt: Mapping[str, Any] | None,
+    recovery_receipt: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
     """Verify one completed route and record the operator's bounded judgment."""
 
@@ -58,6 +60,15 @@ def finalize_route(
         or controller_state.get("schema") != CONTROLLER_SCHEMA
         or controller_state.get("status") not in {"paused", "completed"}
         or operator_disposition not in {"promising", "not_promising"}
+        or recovery_role not in RECOVERY_ROLES
+        or (
+            operator_disposition == "promising"
+            and recovery_role != "promising_candidate"
+        )
+        or (
+            operator_disposition == "not_promising"
+            and recovery_role == "promising_candidate"
+        )
         or not isinstance(operator_reason, str)
         or not operator_reason.strip()
     ):
@@ -66,8 +77,14 @@ def finalize_route(
     if not isinstance(plan087, Mapping):
         raise FullModelTrainingError("plan087_route_result_invalid")
     route_context = validate_route_context(plan087.get("route_context"))
-    process = validate_process_receipt(process_receipt)
-    recovery = validate_recovery_receipt(recovery_receipt)
+    if recovery_role == "none":
+        if process_receipt is not None or recovery_receipt is not None:
+            raise FullModelTrainingError("plan087_route_recovery_role_invalid")
+        process = None
+        recovery = None
+    else:
+        process = validate_process_receipt(process_receipt)
+        recovery = validate_recovery_receipt(recovery_receipt)
     store = Plan081ArtifactStore(Path(artifact_root))
     base = store.read_observation("base-step-000000")
     selected = next(
@@ -92,26 +109,57 @@ def finalize_route(
         if isinstance(control_plan, Mapping)
         else None
     )
-    if operator_disposition == "not_promising" and current_step != maximum_updates:
-        raise FullModelTrainingError("plan087_not_promising_route_incomplete")
+    observation_steps = (
+        control_plan.get("observation_steps")
+        if isinstance(control_plan, Mapping)
+        else None
+    )
+    checkpoint_steps = (
+        control_plan.get("checkpoint_steps")
+        if isinstance(control_plan, Mapping)
+        else None
+    )
+    if (
+        not isinstance(current_step, int)
+        or isinstance(current_step, bool)
+        or current_step < 1
+        or not isinstance(maximum_updates, int)
+        or current_step > maximum_updates
+        or not isinstance(observation_steps, Sequence)
+        or current_step not in observation_steps
+        or not isinstance(checkpoint_steps, Sequence)
+        or current_step not in checkpoint_steps
+        or selected_checkpoint_id != controller_state.get("latest_checkpoint_id")
+        or observation.get("global_step") != current_step
+    ):
+        raise FullModelTrainingError("plan087_route_completion_point_invalid")
+    if (
+        operator_disposition == "not_promising"
+        and not assessment["reviewed_complete_metrics"]
+    ):
+        raise FullModelTrainingError("plan087_not_promising_assessment_incomplete")
     if operator_disposition == "promising" and (
-        not all(assessment.values())
-        or not evidence["ranking_improvement_signals"]
+        not all(assessment.values()) or not evidence["ranking_improvement_signals"]
     ):
         raise FullModelTrainingError("plan087_promising_candidate_evidence_invalid")
     recovered = plan087.get("recovery_proven_checkpoints")
+    recovery_recorded = (
+        isinstance(recovered, Mapping) and selected_checkpoint_id in recovered
+    )
     fresh_process_recovery = (
-        isinstance(recovered, Mapping)
+        recovery_recorded
         and recovered.get(selected_checkpoint_id) == checkpoint["content_sha256"]
     )
+    if recovery_role == "none" and recovery_recorded:
+        raise FullModelTrainingError("plan087_route_recovery_role_invalid")
     runtime_identity = plan087.get("runtime_identity")
     process_identity = validate_process_identity(plan087.get("process_identity"))
     route_context_sha256 = sha256_bytes(canonical_json_bytes(route_context))
     runtime_identity_sha256 = sha256_bytes(canonical_json_bytes(runtime_identity))
-    if (
+    if recovery_role != "none" and (
         not fresh_process_recovery
-        or selected_checkpoint_id != controller_state.get("latest_checkpoint_id")
-        or observation.get("global_step") != current_step
+        or process is None
+        or recovery is None
         or process["global_step"] != current_step
         or process["process_identity"] != process_identity
         or process_identity["instance_id"] != recovery["recovery_process_id"]
@@ -135,13 +183,12 @@ def finalize_route(
     result = {
         "schema": ROUTE_RESULT_SCHEMA,
         "route_context": route_context,
-        "controller_state_sha256": sha256_bytes(
-            canonical_json_bytes(controller_state)
-        ),
+        "controller_state_sha256": sha256_bytes(canonical_json_bytes(controller_state)),
         "selected_observation": {
             "observation_id": selected_observation_id,
             "sha256": observation_sha256,
             "global_step": observation["global_step"],
+            "checkpoint_id": selected_checkpoint_id,
         },
         "selected_checkpoint": {
             "checkpoint_id": selected_checkpoint_id,
@@ -149,7 +196,18 @@ def finalize_route(
             "bytes": checkpoint["bytes"],
             "qualified_restore_probe": True,
             "fresh_process_recovery": fresh_process_recovery,
+            "recovery_role": recovery_role,
             "remote_only": True,
+        },
+        "route_completion": {
+            "kind": (
+                "maximum_updates"
+                if current_step == maximum_updates
+                else "early_complete_observation"
+            ),
+            "global_step": current_step,
+            "maximum_updates": maximum_updates,
+            "complete_observation_checkpoint": True,
         },
         "base_validation_observation": base,
         "selected_validation_observation": observation,
@@ -157,6 +215,7 @@ def finalize_route(
         "run_spec_content_sha256": run_spec_sha256,
         "candidate_evidence": evidence,
         "operator_disposition": operator_disposition,
+        "recovery_role": recovery_role,
         "operator_reason": operator_reason,
         "operator_assessment": assessment,
         "process_receipt": process,
@@ -169,7 +228,10 @@ def finalize_route(
             "operator_assessment": assessment,
             "controller_current_step": current_step,
             "controller_latest_checkpoint_id": selected_checkpoint_id,
-            "recovery_process_id": recovery["recovery_process_id"],
+            "recovery_process_id": (
+                recovery["recovery_process_id"] if recovery is not None else None
+            ),
+            "recovery_role": recovery_role,
             "runtime_identity_sha256": runtime_identity_sha256,
             "route_context_sha256": route_context_sha256,
         },
@@ -233,8 +295,7 @@ def finalize_search(
     if outcome == "PROMISING_CANDIDATE_RETAINED":
         if (
             len(promising) != 1
-            or selected_route_id
-            != promising[0]["route_context"]["route_id"]
+            or selected_route_id != promising[0]["route_context"]["route_id"]
         ):
             raise FullModelTrainingError("plan087_terminal_candidate_invalid")
     elif selected_route_id is not None or promising:
@@ -262,9 +323,7 @@ def finalize_search(
             prior_cost, terminal_cost_snapshots
         )
     cost = terminal_progression[-1]
-    if outcome == "BUDGET_EXHAUSTED_NO_CANDIDATE" and cost[
-        "next_action_authorized"
-    ]:
+    if outcome == "BUDGET_EXHAUSTED_NO_CANDIDATE" and cost["next_action_authorized"]:
         raise FullModelTrainingError("plan087_budget_terminal_has_next_closure")
     resources = _validate_resource_state(resource_state)
     result = {
@@ -282,11 +341,9 @@ def finalize_search(
                 "PROMISING_CANDIDATE_RETAINED",
                 "BUDGET_EXHAUSTED_NO_CANDIDATE",
             },
-            "budget_search_no_candidate": outcome
-            == "BUDGET_EXHAUSTED_NO_CANDIDATE",
+            "budget_search_no_candidate": outcome == "BUDGET_EXHAUSTED_NO_CANDIDATE",
             "model_route_failed": False,
-            "infrastructure_inconclusive": outcome
-            == "INCONCLUSIVE_INFRASTRUCTURE",
+            "infrastructure_inconclusive": outcome == "INCONCLUSIVE_INFRASTRUCTURE",
             "clean_formal_reproduction": False,
             "product_go": False,
             "m3_c2_evidence": False,
@@ -303,12 +360,14 @@ def validate_route_result(value: Any) -> dict[str, Any]:
         "controller_state_sha256",
         "selected_observation",
         "selected_checkpoint",
+        "route_completion",
         "base_validation_observation",
         "selected_validation_observation",
         "run_spec",
         "run_spec_content_sha256",
         "candidate_evidence",
         "operator_disposition",
+        "recovery_role",
         "operator_reason",
         "operator_assessment",
         "process_receipt",
@@ -321,10 +380,15 @@ def validate_route_result(value: Any) -> dict[str, Any]:
     }:
         raise FullModelTrainingError("plan087_route_result_invalid")
     core = {key: item for key, item in value.items() if key != "content_sha256"}
+    disposition = value.get("operator_disposition")
+    recovery_role = value.get("recovery_role")
     if (
         value.get("schema") != ROUTE_RESULT_SCHEMA
         or value.get("content_sha256") != sha256_bytes(canonical_json_bytes(core))
-        or value.get("operator_disposition") not in {"promising", "not_promising"}
+        or disposition not in {"promising", "not_promising"}
+        or recovery_role not in RECOVERY_ROLES
+        or (disposition == "promising" and recovery_role != "promising_candidate")
+        or (disposition == "not_promising" and recovery_role == "promising_candidate")
         or not isinstance(value.get("operator_reason"), str)
         or not value["operator_reason"].strip()
     ):
@@ -335,36 +399,108 @@ def validate_route_result(value: Any) -> dict[str, Any]:
     )
     cost = cost_progression[-1]
     assessment = _validate_operator_assessment(value.get("operator_assessment"))
-    process = validate_process_receipt(value.get("process_receipt"))
-    recovery = validate_recovery_receipt(value.get("recovery_receipt"))
+    if recovery_role == "none":
+        if (
+            value.get("process_receipt") is not None
+            or value.get("recovery_receipt") is not None
+        ):
+            raise FullModelTrainingError("plan087_route_result_invalid")
+        process = None
+        recovery = None
+    else:
+        process = validate_process_receipt(value.get("process_receipt"))
+        recovery = validate_recovery_receipt(value.get("recovery_receipt"))
     run_spec = value.get("run_spec")
     selected_observation = value.get("selected_observation")
     selected_checkpoint = value.get("selected_checkpoint")
+    route_completion = value.get("route_completion")
     selected_payload = value.get("selected_validation_observation")
     base_payload = value.get("base_validation_observation")
     binding = value.get("selection_binding")
     evidence = (
         candidate_evidence(base_payload, selected_payload)
-        if isinstance(base_payload, Mapping)
-        and isinstance(selected_payload, Mapping)
+        if isinstance(base_payload, Mapping) and isinstance(selected_payload, Mapping)
         else None
     )
     expected_claims = {
-        "research_candidate": value.get("operator_disposition") == "promising",
+        "research_candidate": disposition == "promising",
         "clean_formal_reproduction": False,
         "product_go": False,
         "m3_c2_evidence": False,
         "unseen_evidence": False,
     }
+    validated_run_spec = (
+        validate_run_spec(run_spec) if isinstance(run_spec, Mapping) else None
+    )
+    control = (
+        validated_run_spec["control_plan"] if validated_run_spec is not None else None
+    )
+    selected_step = (
+        selected_observation.get("global_step")
+        if isinstance(selected_observation, Mapping)
+        else None
+    )
+    maximum_updates = (
+        control.get("maximum_updates") if isinstance(control, Mapping) else None
+    )
+    expected_completion = {
+        "kind": (
+            "maximum_updates"
+            if selected_step == maximum_updates
+            else "early_complete_observation"
+        ),
+        "global_step": selected_step,
+        "maximum_updates": maximum_updates,
+        "complete_observation_checkpoint": True,
+    }
+    expected_recovery_process_id = (
+        recovery["recovery_process_id"] if recovery is not None else None
+    )
     if (
         not isinstance(run_spec, Mapping)
-        or validate_run_spec(run_spec)["route_context"] != context
+        or validated_run_spec is None
+        or validated_run_spec["route_context"] != context
         or value.get("run_spec_content_sha256")
         != sha256_bytes(canonical_json_bytes(run_spec))
         or not isinstance(selected_observation, Mapping)
         or not isinstance(selected_checkpoint, Mapping)
+        or set(selected_observation)
+        != {"observation_id", "sha256", "global_step", "checkpoint_id"}
+        or not isinstance(selected_observation.get("observation_id"), str)
+        or not selected_observation["observation_id"]
+        or not _sha256(selected_observation.get("sha256"))
+        or selected_observation.get("checkpoint_id")
+        != selected_checkpoint.get("checkpoint_id")
         or not isinstance(base_payload, Mapping)
         or not isinstance(selected_payload, Mapping)
+        or not isinstance(route_completion, Mapping)
+        or route_completion != expected_completion
+        or not isinstance(selected_step, int)
+        or isinstance(selected_step, bool)
+        or selected_step < 1
+        or selected_step not in control["observation_steps"]
+        or selected_step not in control["checkpoint_steps"]
+        or set(selected_checkpoint)
+        != {
+            "checkpoint_id",
+            "content_sha256",
+            "bytes",
+            "qualified_restore_probe",
+            "fresh_process_recovery",
+            "recovery_role",
+            "remote_only",
+        }
+        or not isinstance(selected_checkpoint.get("checkpoint_id"), str)
+        or not selected_checkpoint["checkpoint_id"]
+        or not _sha256(selected_checkpoint.get("content_sha256"))
+        or not isinstance(selected_checkpoint.get("bytes"), int)
+        or isinstance(selected_checkpoint["bytes"], bool)
+        or selected_checkpoint["bytes"] <= 0
+        or selected_checkpoint.get("qualified_restore_probe") is not True
+        or selected_checkpoint.get("fresh_process_recovery")
+        != (recovery_role != "none")
+        or selected_checkpoint.get("recovery_role") != recovery_role
+        or selected_checkpoint.get("remote_only") is not True
         or selected_observation.get("sha256")
         != sha256_bytes(pretty_json_bytes(selected_payload))
         or selected_observation.get("global_step")
@@ -382,38 +518,46 @@ def validate_route_result(value: Any) -> dict[str, Any]:
             "operator_disposition": value.get("operator_disposition"),
             "operator_assessment": assessment,
             "controller_current_step": selected_observation.get("global_step"),
-            "controller_latest_checkpoint_id": selected_checkpoint.get(
-                "checkpoint_id"
-            ),
-            "recovery_process_id": recovery["recovery_process_id"],
-            "runtime_identity_sha256": recovery["runtime_identity_sha256"],
-            "route_context_sha256": recovery["route_context_sha256"],
+            "controller_latest_checkpoint_id": selected_checkpoint.get("checkpoint_id"),
+            "recovery_process_id": expected_recovery_process_id,
+            "recovery_role": recovery_role,
+            "runtime_identity_sha256": binding.get("runtime_identity_sha256"),
+            "route_context_sha256": binding.get("route_context_sha256"),
         }
-        or process["process_identity"]["instance_id"]
-        != recovery["recovery_process_id"]
-        or process["source_process_id"] != recovery["source_process_id"]
-        or process["global_step"] != selected_observation.get("global_step")
-        or process["runtime_identity_sha256"]
-        != recovery["runtime_identity_sha256"]
-        or process["route_context_sha256"]
-        != recovery["route_context_sha256"]
-        or recovery["route_context_sha256"]
+        or not _sha256(binding.get("runtime_identity_sha256"))
+        or binding.get("route_context_sha256")
         != sha256_bytes(canonical_json_bytes(context))
-        or recovery["checkpoint_id"] != selected_checkpoint.get("checkpoint_id")
-        or recovery["checkpoint_sha256"]
-        != selected_checkpoint.get("content_sha256")
-        or selected_checkpoint.get("fresh_process_recovery") is not True
         or (
-            value.get("operator_disposition") == "not_promising"
-            and selected_observation.get("global_step")
-            != run_spec.get("control_plan", {}).get("maximum_updates")
+            recovery_role != "none"
+            and (
+                process is None
+                or recovery is None
+                or process["process_identity"]["instance_id"]
+                != recovery["recovery_process_id"]
+                or process["source_process_id"] != recovery["source_process_id"]
+                or process["global_step"] != selected_step
+                or process["runtime_identity_sha256"]
+                != recovery["runtime_identity_sha256"]
+                or process["runtime_identity_sha256"]
+                != binding.get("runtime_identity_sha256")
+                or process["route_context_sha256"] != recovery["route_context_sha256"]
+                or recovery["route_context_sha256"]
+                != binding.get("route_context_sha256")
+                or recovery["checkpoint_id"] != selected_checkpoint.get("checkpoint_id")
+                or recovery["checkpoint_sha256"]
+                != selected_checkpoint.get("content_sha256")
+            )
         )
         or (
-            value.get("operator_disposition") == "promising"
+            disposition == "promising"
             and (
                 not all(assessment.values())
                 or not evidence["ranking_improvement_signals"]
             )
+        )
+        or (
+            disposition == "not_promising"
+            and not assessment["reviewed_complete_metrics"]
         )
     ):
         raise FullModelTrainingError("plan087_route_result_invalid")
@@ -458,6 +602,14 @@ def _validate_operator_assessment(value: Any) -> dict[str, bool]:
     ):
         raise FullModelTrainingError("plan087_operator_assessment_invalid")
     return {key: bool(value[key]) for key in sorted(_ASSESSMENT_KEYS)}
+
+
+def _sha256(value: Any) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )
 
 
 def _validate_resource_state(value: Any) -> dict[str, Any]:

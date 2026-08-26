@@ -281,10 +281,15 @@ XXX用以下内容代替：
   train+validation，物理 unseen rows/body 为 0；未查询或修改 RunPod/HF、未运行本地真实模型/Cargo/Docker、未产生费用。
 - 2026-08-26：两路独立只读实现审查提出的容量口径/实际余量、费用快照链、恢复 receipt 绑定、路线 evidence lineage、远端任务根写入、
   Pod API 歧义回查与小型 handoff 边界已窄修；focused tests 与 runbook 操作序列随整改同步，两路最终复验均无剩余 High/Medium finding。
+- 2026-08-26：阶段 A 首轮验收报告指出两个 Medium：同名 Pod 复用未绑定完整创建配置，以及路线收口/末端 scope 把自适应搜索机械冻结。
+  执行者确认问题存在并窄修：冻结 provider client 无法证明完整字段时禁止跨调用领养 Pod；弱路线可在完整观测/checkpoint 提前收口且不伪称恢复，
+  候选或明确必要的恢复点才要求 fresh-process receipt；新 exact-base 路线可按 inventory 选择任意末端深度、显式模块或全参数，同一路线内仍严格扩展。
+- 2026-08-26：整改后 Plan 081/082/087 相邻聚焦回归 90 项通过（另有 44 个 subtests），定向 Ruff/format、15 文件 AST、shell syntax
+  与 diff check 通过。云端生命周期与训练/搜索两路只读复验均无剩余 High/Medium correctness/functionality finding；未访问任何 live 外部状态。
 
 ### 当前工作
 
-- 阶段 A 已实现并完成本地门禁，正在形成 clean task-branch 提交与审查队列交接；付费门仍关闭。
+- 阶段 A 首轮审查整改与本地复验已完成，正在形成 clean task-branch 提交与复审交接；付费门仍关闭。
 
 ### 本任务剩余步骤
 
@@ -326,7 +331,9 @@ XXX用以下内容代替：
 | 010 | 阶段 A、额外请示和最终验收只走用户指定 Codex queue，每条消息主动声明执行者身份 | 满足跨会话审批和自动唤醒边界 | coordination | 已采纳 |
 | 011 | worktree 只提交，合并、推送、分支归档和 worktree 清理等待用户批准 | 遵循本次明确交付边界 | delivery | 已采纳 |
 | 012 | 候选判断保留完整指标与执行者四项整体判断，不冻结细粒度数值门；promising 必须绑定同一个由新 OS 进程精确恢复的 checkpoint | 既排除仅噪声/offset/threshold 的伪改善，又不把启发式研究候选误写成产品资格公式 | selection/recovery | 已采纳 |
-| 013 | 真实 parameter inventory 动态解析 score head、final norm 与末端 block；继续路线只追加更早 block，不把上游参数名猜测写死 | 保持配置可复现和 scope 单调，同时兼容 exact 模型实际命名 | training scope | 已采纳 |
+| 013 | 真实 parameter inventory 动态解析 score/final、任意末端深度、显式模块前缀或全参数；新 exact-base 路线可重选，同一路线后续 phase 只允许实际参数集严格扩展 | 兼容 exact 模型命名和自适应职责切换，同时保持单条 checkpoint/optimizer scope 历史可复现 | training scope | 已采纳 |
 | 014 | 费用采用不可改写的 hash-linked 累计快照链；路线与终态必须按序绑定全部新增快照 | 同时覆盖延迟账单、Pod 替换和多段训练，避免只交末张快照丢失累计费用 | cost lineage | 已采纳 |
 | 015 | 候选 checkpoint 必须由不同 OS 进程的 verify-only 恢复 receipt 绑定 source/recovery process、route context、runtime 与 payload identity | 让“可恢复”成为实际执行证据，并阻止用其它 checkpoint 或同进程状态替代 | recovery | 已采纳 |
 | 016 | 所有云端写路径约束在显式 Plan 087 task root；Pod create/stop/delete 对不确定 API 响应先按唯一身份重查；本地回传只接受显式小文件 allowlist | 避免污染 Plan 082 roots、盲目重复计费实例或回传大权重树 | cloud lifecycle | 已采纳 |
+| 017 | 冻结 `runpodctl` 无法回读完整网络卷和止费字段时，禁止跨调用复用同名 Pod；只允许空账户基线后单次精确 create 在同一调用内消解不确定响应 | 配置漂移无法完整证明，fail closed 比按名字领养计费资源更安全；仍避免 create 超时后的盲目重试 | cloud lifecycle | 已采纳 |
+| 018 | 路线收口与 checkpoint 恢复分责：完整观测/checkpoint 可提前 `not_promising`，无恢复时明确记录 `none`；只有 promising 或明确必要恢复点承担 fresh-process 恢复 | 避免弱路线机械跑满和重复候选级恢复，同时保留候选可复用证据 | search/recovery | 已采纳 |
