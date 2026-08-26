@@ -296,10 +296,14 @@ XXX用以下内容代替：
   执行者保留 pending/final 设计，只把 final 接缝窄修为严格消费 v2 `disk/status/cloud/dataCenterId/mounts.network`；不再依赖只对 v1 生效的 include flags。
 - 2026-08-26：v2 接缝窄修后 Plan 081/082/087 相邻聚焦回归 93 项通过（另有 57 个 subtests），其中 create/terminal 定向 12 项（23 个
   subtests）覆盖真实 v2 成功 shape、mount 各缺失/漂移形态及完整 provider 配置；定向 Ruff/format、15 文件 AST、shell/CLI syntax、diff check 与 WBS untouched 门禁通过。
+- 2026-08-26：v2 接缝复审保留一个默认字段 Medium：官方 `gpu.count` 可省略且默认 1。执行者在同一窄投影内只把缺失值归一化为 1，并严格拒绝
+  非整数、JSON boolean 和其它数值；不增加 v1 兼容或通用 provider 层。
+- 2026-08-26：默认 count 窄修后 Plan 081/082/087 相邻聚焦回归 93 项通过（另有 59 个 subtests），其中 create/terminal 定向 12 项（25 个
+  subtests）；定向 Ruff/format、15 文件 AST、shell/CLI syntax、diff check 与 WBS untouched 门禁通过。
 
 ### 当前工作
 
-- 阶段 A MCP v2 provider 字段接缝窄整改已实现，正在完成回归、clean task-branch 提交与复审交接；付费门仍关闭。
+- 阶段 A MCP v2 默认 GPU count 窄整改已实现，正在完成回归、clean task-branch 提交与复审交接；付费门仍关闭。
 
 ### 本任务剩余步骤
 

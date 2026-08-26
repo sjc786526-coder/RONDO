@@ -405,9 +405,11 @@ class Plan087ScriptTests(unittest.TestCase):
                     wall_clock=lambda: CONFIRMATION_START + timedelta(seconds=10),
                 )
 
+        exact_without_default = _provider_observation(args, pending)
+        exact_without_default["pod"]["gpu"].pop("count")
         final = create.confirm_exact_pod_attachment(
             pending,
-            _provider_observation(args, pending),
+            exact_without_default,
             wall_clock=lambda: CONFIRMATION_START + timedelta(seconds=10),
         )
         self.assertEqual(
@@ -419,6 +421,10 @@ class Plan087ScriptTests(unittest.TestCase):
         self.assertEqual(
             final["creation_contract_binding"]["provider_observed"]["status"],
             "STARTING",
+        )
+        self.assertEqual(
+            final["creation_contract_binding"]["provider_observed"]["gpu_count"],
+            1,
         )
         with self.assertRaisesRegex(
             create.CreateError, "attachment_confirmation_timeout"
@@ -459,6 +465,12 @@ class Plan087ScriptTests(unittest.TestCase):
         def wrong_gpu_count(pod):
             pod["gpu"]["count"] = 2
 
+        def boolean_gpu_count(pod):
+            pod["gpu"]["count"] = True
+
+        def float_gpu_count(pod):
+            pod["gpu"]["count"] = 1.0
+
         def wrong_region(pod):
             pod["dataCenterId"] = "US-KS-2"
 
@@ -478,6 +490,8 @@ class Plan087ScriptTests(unittest.TestCase):
             "image": wrong_image,
             "gpu": wrong_gpu,
             "gpu_count": wrong_gpu_count,
+            "boolean_gpu_count": boolean_gpu_count,
+            "float_gpu_count": float_gpu_count,
             "region": wrong_region,
             "cloud": wrong_cloud,
             "disk": wrong_disk,

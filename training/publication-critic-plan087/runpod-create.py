@@ -192,6 +192,7 @@ def _project_runpod_mcp_v2_pod(
     """Validate one unmodified REST v2 Pod and return its narrow projection."""
 
     gpu = pod.get("gpu")
+    gpu_count = gpu.get("count", 1) if isinstance(gpu, Mapping) else None
     mounts = pod.get("mounts")
     network = mounts.get("network") if isinstance(mounts, Mapping) else None
     persistent = mounts.get("persistent") if isinstance(mounts, Mapping) else None
@@ -205,7 +206,8 @@ def _project_runpod_mcp_v2_pod(
         or pod.get("dataCenterId") != requested["data_center_id"]
         or not isinstance(gpu, Mapping)
         or gpu.get("id") != requested["gpu_id"]
-        or gpu.get("count") != requested["gpu_count"]
+        or type(gpu_count) is not int
+        or gpu_count != requested["gpu_count"]
         or persistent is not None
         or not isinstance(network, Sequence)
         or isinstance(network, (str, bytes, bytearray))
@@ -220,7 +222,7 @@ def _project_runpod_mcp_v2_pod(
         "name": pod["name"],
         "image": pod["image"],
         "gpu_id": gpu["id"],
-        "gpu_count": gpu["count"],
+        "gpu_count": gpu_count,
         "cloud_type": pod["cloud"],
         "data_center_id": pod["dataCenterId"],
         "network_volume_id": network[0]["volumeId"],

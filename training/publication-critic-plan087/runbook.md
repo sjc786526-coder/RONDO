@@ -207,6 +207,8 @@ python3 training/publication-critic-plan087/runpod-create.py confirm-attachment 
 Confirmation requires exactly one `mounts.network` entry whose `volumeId` is
 the requested task volume and whose `path` is `/workspace`, with no persistent
 mount. It also rechecks v2 image, GPU, cloud, data center, disk and live status.
+An omitted v2 `gpu.count` is normalized only to its documented default of one;
+an explicit non-integer or any count other than one fails.
 Missing/empty/null/wrong attachment data fail; confirmation after the pending
 deadline also fails. On failure, do not rerun create: terminalize the exact task
 Pod and confirm zero first. Do not connect, upload or bootstrap until
