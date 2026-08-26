@@ -1,14 +1,7 @@
 # RONDO 长程规划（WBS）
 
-最后更新：2026-08-26（Plan 079 已完成 Skywork 4B BF16 base 正式质量测评并取得 `4B_BASE_QUALITY_NO_GO`；
-Plan 081 已完成 exact 1.7B 非 LoRA 训练路线本地收敛与云端就绪并取得 `LOCAL_TRAINING_READINESS_PASS`，
-Plan 082 已完成一轮有效干净正式训练并取得 `VALID_NO_IMPROVEMENT`，GPU 专项验收、大型资产逐对象交接和最终验收均已通过且 Pod 已释放；
-用户本人已明确决定继续保留网络卷，当前仍未删除，M3-D 保持锁定；Plan 077 / M4-C1、Plan 078 / M4-S2 已分别取得
-`M4_C1_QUERY_PASS`、`M4_S2_PASS`；Plan 080 / M4-C2 已通过最终独立验收并取得 `M4_C2_CONTROL_PASS`；
-Plan 083 / M4-Z(core) 已通过最终独立验收并取得 `M4_Z_CORE_PASS`；Plan 084 / M4-W0 已通过最终独立验收并取得
-`BINDING_ONLY_GO`；Plan 086 / `#39616` 已通过最终独立验收、进入本地 `main` 并取得 `M4_W_39616_ADAPTATION_PASS`；
-Plan 088 / `#39153` 已通过独立验收、进入本地 `main` 并取得 `M4_W_39153_ADAPTATION_PASS`；Plan 089 / M4-W1
-已通过最终独立验收、进入并推送 `main`，取得 `M4_W1_PASS`，第四期完成）
+最后更新：2026-08-26（方向 3 当前继续推进 Publication Critic 三期；Plan 082 已完成有效正式训练并取得
+`VALID_NO_IMPROVEMENT`，M3-D 保持锁定）
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段指针、跨方向关系、
 稳定工程边界和授权门；已完成成果与验收见 `doc/WBS-COMPLETED.md`，单次任务合同见 `plan/`，执行细节见
@@ -28,7 +21,7 @@ Plan 088 / `#39153` 已通过独立验收、进入本地 `main` 并取得 `M4_W_
 | 0：量化测评基准 | 既有设施与首次 schema v7 正式 canary 已完成，当前无 active campaign | 保留设施；历史结果见 COMPLETED，新 campaign 须重新立项与授权 |
 | 1：Harness 优化 | **正式收口；当前无 active 工作包** | 当前不继续新增观测或内核/热路径优化；既有实现、设施与历史结果保留。未来可由用户另行决定是否重新立项，本次收口不作永久禁止 |
 | 2：本地审批模型 | **已收口，今后不再开启** | 最终结论为“保留为实验”；不改生产默认，不再规划后续工作包 |
-| 3：RONDO Multi | 第一、二期及其收口案例、**三期 M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、M3-C2、Plan 064、Plan 071、Plan 073、Plan 075、Plan 079、Plan 081、Plan 082 与四期 M4-A、M4-C0、M4-S1、M4-C1、M4-S2、M4-C2、M4-Z(core)、Plan 074、Plan 083、Plan 084、Plan 086、Plan 088、Plan 089 已完成**；W 线结论依次为 `BINDING_ONLY_GO`、`M4_W_39616_ADAPTATION_PASS`、`M4_W_39153_ADAPTATION_PASS`、`M4_W1_PASS`，第四期终态为 `PHASE_4_COMPLETE` | Plan 082 已完成 exact 1.7B、冻结 v8/pair/input、非 LoRA 的有效干净正式轮，终态 `VALID_NO_IMPROVEMENT`；GPU 专项验收与 39 对象大型交接通过，训练/transfer Pod 均已删除并确认 0 Pod。用户本人决定继续保留 40GB 网络卷 `mwemzrn33y`，该卷当前仍未删除。该研究结论不提供产品 GO；Critic 保持 default-off，M3-D 保持锁定。第四期 S/C 核心与最终 W1 均已闭合；Plan 089 交付 production primary binding、turn-only scoped authorization、durable revalidation、事务式 replacement 及 S2/S/C 全生命周期兼容。binding 状态/失效展示和 replacement TUI 仅为未排期可选增强，不是第四期遗留必需包 |
+| 3：RONDO Multi | 第一、二期与第四期已完成，第四期终态为 `M4_W1_PASS / PHASE_4_COMPLETE`；**三期 Publication Critic 仍在推进** | 只维护三期当前路线与授权边界；第四期历史统一见 COMPLETED，不再保留后续必需工作包 |
 
 ### 方向命名口径
 
@@ -37,12 +30,6 @@ Plan 088 / `#39153` 已通过独立验收、进入本地 `main` 并取得 `M4_W_
 - `RONDO Local` / `rondo-local` 仅在必须区分现有产品或运行身份时使用，不代表方向 2。方向 2 专指已经收口的
   本地审批模型研究。
 
-最近一次真正进入测试执行的 `v0.147.0` RONDO 全 workspace 记录来自 Plan 069：14,373 项中 14,363 通过、
-10 失败，Nextest 另列 24 项 skipped；8 项属于当时未修改的 Plan 068 Publication Critic fixture/断言，2 项属于未修改的 realtime
-连接失败超时路径，069 durable cold-resume 主链在该轮通过。此后 correctness 整改只重跑直接受影响的聚焦门禁，因此这仍只是
-历史测试快照，不代表当前全绿，也不代表旧失败已在当前合并提交复现。Stage E 因 shared core 改动又通过 canonical wrapper 尝试了一次
-标准 `just test`，但在测试前被 rusty-v8 v150.4.0 默认 archive URL 的 HTTP 404 阻断；该轮无 JUnit，未冒充完整通过。
-
 ## 2. 下一工作包与顺序
 
 方向 3 是当前唯一仍在推进的产品线。Plan 081 已取得 `LOCAL_TRAINING_READINESS_PASS`；三期 Plan 082 已获用户付费批准并完成
@@ -50,12 +37,6 @@ Plan 088 / `#39153` 已通过独立验收、进入本地 `main` 并取得 `M4_W_
 唯一训练 Pod 已释放并确认持续 compute 费率为 0；保留卷所在 `US-TX-3` 不提供 S3 API，故按用户一次性授权使用单个 transfer Pod
 只读回传冻结 39 对象。全部对象完成本地 bytes/SHA-256 校验后 transfer Pod 已删除；最终验收通过。用户本人随后明确决定继续保留
 网络卷 `mwemzrn33y`，该卷当前仍未删除，状态为 `FINAL_REVIEW_ACCEPTED / ZERO_POD / VOLUME_RETAINED_BY_USER_DECISION`。
-四期 Plan 080 / M4-C2 已取得 `M4_C2_CONTROL_PASS`；Plan 083 / M4-Z(core) 已完成 fresh 正式全链、两轮独立审查整改与最终验收并取得
-`M4_Z_CORE_PASS`。Plan 084 / M4-W0 已通过最终独立验收并取得 `BINDING_ONLY_GO`；Plan 086 / `#39616` linked-worktree trust
-RONDO 窄适配已通过最终独立验收、进入本地 `main` 并取得 `M4_W_39616_ADAPTATION_PASS`。Plan 088 / `#39153` permission restore
-fail-closed 窄适配也已通过独立验收、进入本地 `main` 并取得 `M4_W_39153_ADAPTATION_PASS`。`#39616 → #39153` 前置已经闭合；
-Plan 089 / M4-W1 已完成生产实现、M4-S2/S/C 兼容、fresh 正式全链、四轮独立审查整改与最终验收，并已进入且推送 `main`；结论为
-`M4_W1_PASS / PHASE_4_COMPLETE`。第四期没有遗留必需工作包；binding 状态/失效展示和 replacement TUI 只保留为未排期可选增强。
 方向 1 已正式收口，不作为方向 3 的前置或旁支。
 
 ### 方向 3：Publication Critic 三期
@@ -108,40 +89,6 @@ Plan 089 / M4-W1 已完成生产实现、M4-S2/S/C 兼容、fresh 正式全链�
   Plan 082 训练活动受 12 小时/15 USD 上限约束，训练与后续资源保留/无 Pod 回传费用分账报告，总累计达到 10 USD 时非阻断告警；
   详细结果与后续边界见三期子 WBS。
 
-### 方向 3：Durable Team Runtime 四期
-
-- 四期必成主线是 Team Session 跨进程持久化/恢复及其 app-server v2 / TUI 控制面。Writer Workspace Binding 原先经过价值门保持
-  条件可选；M4-W0 形成 `BINDING_ONLY_GO` 后，用户将正式 W1 指定为第四期最后一个必需工作包。W1 以调用者已准备且授权的 worktree
-  作为 stable primary write binding，并提供不改变 primary cwd/binding 的显式有界
-  绑定外辅助写授权；它不新增读取授权或保密隔离，不新增 structured handoff，也不建设 workspace registry、ChangeSet 生命周期或
-  Git 资产平台。
-- 四期详细 WBS 见 [`doc/WBS/durable-team-runtime.md`](WBS/durable-team-runtime.md)。Plan 067 已完成共同合同并经独立验收接受
-  `M4_A_GO`；Plan 070 / M4-C0 已完成默认关闭的 experimental app-server v2→client→TUI 纵向原型并取得
-  `M4_C0_PROTOTYPE_PASS`。Plan 069 已完成默认关闭的 canonical Team durability/read、Root 单一写 authority、跨进程 cold resume
-  与最小 close barrier；在精确吸收 Plan 074 / `#37198` persisted cwd read consistency 后，从全新 Session/store 完成阶段 E 正式链和
-  独立终审，结论为 `M4_S1_PASS`。Plan 077 / M4-C1 已基于该 read model 完成正式只读 Session Query，结论为
-  `M4_C1_QUERY_PASS`。Plan 078 / M4-S2 已闭合恢复、分叉、detach、close barrier、异常退出与冷态生命周期，外部终审结论为
-  `M4_S2_PASS`；作为后整合者保留 M4-C1 query read seam 与 M4-S2 lifecycle write seam，并完成 shared 文件静态/格式收敛。
-  Plan 080 / M4-C2 已完成默认关闭的稳定 v2 `session/control`、client/TUI confirmation/no-replay/resync、fresh store/restart 正式轮，
-  并完成独立审查发现的 owner incarnation、最终 lifecycle revalidation、Delete retry、parent/TUI/gate 缺口、teardown 后
-  Team completion 失败，以及复验追加的 residency availability、accepted handoff terminal unknown、direct race/exact cleanup 与错误分类整改；
-  最终独立验收无剩余 correctness finding，结论为 `M4_C2_CONTROL_PASS`。Plan 083 / M4-Z(core) 已闭合公开 S/C 全链、
-  fresh store/真实进程替换正式轮与相称门禁，并完成两轮独立审查整改；participant activation cleanup 以 exact owner lease 保证
-  任一 teardown/owner/graph 失败仍保留 Root close barrier，最终独立验收无未关闭的高/中等级 correctness finding，结论为
-  `M4_Z_CORE_PASS`。Plan 084 / M4-W0 的 test-only 原型经首次验收整改与最终独立复验取得 `BINDING_ONLY_GO`：binding 具有
-  产品价值，现有 Git branch/HEAD/status/diff 与合理自然语言足以交接，不新增 structured handoff。Plan 086 已完成 `#39616`
-  linked-worktree trust 窄适配、进入本地 `main` 并取得 `M4_W_39616_ADAPTATION_PASS`；Plan 088 / `#39153` permission restore
-  fail-closed 窄适配已进入本地 `main` 并取得 `M4_W_39153_ADAPTATION_PASS`。Plan 089 随后完成 production primary binding、
-  scoped out-of-binding write authorization、reload/resume 重验、事务式 replacement、M4-S2/S/C 兼容和 fresh 正式组合链；最终
-  独立验收无未关闭的高/中等级 finding，结论为 `M4_W1_PASS / PHASE_4_COMPLETE`。
-- 四期不依赖 Publication Critic 训练、真实模型、真实 API 或性能测评，可以与三期模型链并行；它保持 shared workspace
-  为默认，不建设通用 scheduler、自动路由、自动 merge/push、第二套 Team State/trace 或审计/可信平台。
-- Plan 081 已在不运行 Cargo、Docker、真实模型或云计算的边界内完成；未写 Plan 069 target，也未复制本地模型资产。
-  Plan 082 的 GPU 专项验收、大型资产交接和最终验收已完成，训练 Pod 和一次性 transfer Pod 均已释放；用户决定继续保留任务网络卷，
-  `mwemzrn33y` 当前仍未删除。Plan 082 当前不再主动占用本地网络、磁盘写入或 Cargo build lock。Plan 083 的一次性重型批次已经结束且
-  不向后续任务转移。第四期没有后续必需工作包；未来若另行启动可选增强，仍须按新任务授权边界执行，所有重型任务继续按根
-  `AGENTS.md` 与三期本地模型、Docker 等重型任务互斥。详细资源关系见四期子 WBS。
-
 如果未来重新启动方向 1，它仍与方向 3 保持产品源码和任务合同独立；本地重型 Cargo、Docker、真实本地模型
 加载/推理继续全局串行，并由实际进入实施的工作包协调共享资源。
 
@@ -188,7 +135,7 @@ RONDO/
 - 重型 Cargo 构建与测试必须经仓库根共享 `scripts/with-build-lock.sh` 或已接入它的 `just` 配方；
   `CARGO_TARGET_DIR` 必须位于项目根内并受看门狗监督。
 - 两套产品的重型构建、Docker、真实本地模型加载/推理全局串行；同一时刻只保留一个产品的热 target。除具体 ExecPlan 已获得
-  一次性授权外，后续重型批次不自动排队，须由用户逐批明确批准并人工决定运行时机；Plan 083 的历史授权不向后续任务转移。
+  一次性授权外，后续重型批次不自动排队，须由用户逐批明确批准并人工决定运行时机；历史授权不向后续任务转移。
 - 具体磁盘、Windows `C:`、内存、swap、Docker 增量和 fail-closed 阈值以根 `AGENTS.md` 为准，不使用 WSL
   虚拟容量代替宿主容量。
 
@@ -234,4 +181,4 @@ RONDO/
 - `doc/WBS/teacher-harness-study.md` —— 方向 1：正式收口状态与历史归档入口
 - `doc/WBS/local-approval-model.md` —— 方向 2：已永久收口
 - `doc/WBS/multi-agent-trusted-evidence.md` —— 方向 3：现行产品语义与三期 Publication Critic 长程路线
-- `doc/WBS/durable-team-runtime.md` —— 方向 3 四期：Durable Team Session、Session 控制面与可选 Writer Workspace Binding
+- `doc/WBS/durable-team-runtime.md` —— 方向 3 四期：正式收口状态与历史归档入口

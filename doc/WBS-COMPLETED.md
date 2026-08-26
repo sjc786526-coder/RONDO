@@ -2315,3 +2315,22 @@ formal retry 整改为 `d29e857`，最终独立验收提交为 `43cf0eeb3e1b4826
   规划基线的 cwd/空 rollout/Realtime 宽邻接问题独立归因。任务未运行 Docker、真实 API/模型、训练或云资源；资源不足时只按授权两次
   精确清理 069 `target/debug/incremental/`，没有扩大到 deps、其它 cache 或来源不明资产。
 - binding 状态/失效展示和 replacement TUI 仅保留为未来未排期可选增强；没有 M4-W2、兼容补丁包或无编号必需收口任务。
+
+## 方向 3 四期整体收口：RONDO Multi Durable Team Runtime（2026-08-26）
+
+**状态**：第四期全部必需工作包均已完成、独立验收、整合并推送，最终终态为
+`COMPLETED / ACCEPTED / INTEGRATED / PUSHED / M4_W1_PASS / PHASE_4_COMPLETE`。最终主线整合提交为
+`b98af4740b9a01e81aa44b23432a3dd8bfd80158`。
+
+- 第四期完成 Durable Team Session、正式 Session Query/Control 与 app-server v2/TUI 控制面，以及最后纳入必需出口的
+  Writer Workspace Binding；S、C、W 均在同一 Session/Team 生命周期和既有 permission/sandbox 体系内闭合。
+- 阶段按 M4-A 共同合同，M4-S1/S2 持久化与恢复，M4-C0/C1/C2 控制面，M4-Z(core) S/C 全链，M4-W0 价值门，
+  `#39616 → #39153 → M4-W1` 顺序完成；W1 自身承担与 M4-S2/S/C 的最终兼容验收，没有遗留集成、恢复、适配或无编号收口包。
+- 宏观验收确认跨进程持久 Session、权威 Query/Control、完整生命周期、默认关闭兼容、两个 writer 的独立 primary binding、
+  有界绑定外写授权、恢复重验和事务式 replacement；fresh app-server OS process 与唯一 offline Critic 组合链有效。
+- 第四期没有扩张为 scheduler、自动路由、workspace registry/manager、structured handoff、自动 Git 集成、第二套权限/审批或
+  审计可信平台；shared workspace 与普通单 Agent 行为保持默认兼容。
+- canonical full workspace 最后一轮在测试前被 rusty-v8 v150.4.0 archive HTTP 404 阻断，未计通过；该事实及各聚焦测试、
+  资源门、独立审查和整改证据见本文件对应 M4 条目、冻结 ExecPlan 与 `agent_log/`。
+- binding 状态/失效展示与 replacement TUI 只保留为未来未排期可选增强，不属于第四期遗留任务。第四期不再阻塞或依赖仍在推进的
+  Publication Critic 三期，历史任务授权不向未来工作继承。

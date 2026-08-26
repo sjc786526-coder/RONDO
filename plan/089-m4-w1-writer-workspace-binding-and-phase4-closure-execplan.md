@@ -24,50 +24,50 @@ fresh 四期正式全链、独立终审、文档收口，以及在用户另行�
 
 ### 完成/验收标准
 
-- [ ] **生产入口**：显式 writer 可通过真实产品入口建立 primary binding；scoped authorization 的 request/grant/use 走真实现有
+- [x] **生产入口**：显式 writer 可通过真实产品入口建立 primary binding；scoped authorization 的 request/grant/use 走真实现有
       permission/reviewer 产品链；replacement 也有独立、显式、可调用的生产动作。不要求本包增加 binding dashboard 或 TUI，
       但不得用内部构造、test-only permit 或“未来可选控制面”掩盖核心操作入口缺失。
-- [ ] **首次动作与双 writer 隔离**：在 task-owned 临时 repository 中创建两个真实 linked worktree，两个 writer 分别绑定后，首次模型或
+- [x] **首次动作与双 writer 隔离**：在 task-owned 临时 repository 中创建两个真实 linked worktree，两个 writer 分别绑定后，首次模型或
       工具动作及后续默认写入均从各自 primary cwd 执行，默认写入互不污染。
-- [ ] **副作用前 fail-closed**：worktree 缺失、Git/repository/worktree identity 或 trust 失配、workspace roots、permission、sandbox、
+- [x] **副作用前 fail-closed**：worktree 缺失、Git/repository/worktree identity 或 trust 失配、workspace roots、permission、sandbox、
       execution environment 不兼容时，在 writer 激活、模型/工具动作或文件副作用前拒绝；不得回退父 cwd、repository root、`main`
       或其它可写目录。一个 binding 失效不得污染另一个 writer。
-- [ ] **写入时仍受约束**：所有代表 bound writer 的文件写入路径收敛到一致的 binding 约束。目标路径、symlink、Git/worktree identity、
+- [x] **写入时仍受约束**：所有代表 bound writer 的文件写入路径收敛到一致的 binding 约束。目标路径、symlink、Git/worktree identity、
       permission 或授权在验证后、写入前发生变化时，不得越界写入；主工作区、另一 worktree 与其它绑定外路径在未授权时保持无副作用。
-- [ ] **读取语义不扩张**：相对读取和 Git 上下文从 primary cwd 解析；W1 不新增读取授权、读取禁令、保密隔离或 read grant，实际可读
+- [x] **读取语义不扩张**：相对读取和 Git 上下文从 primary cwd 解析；W1 不新增读取授权、读取禁令、保密隔离或 read grant，实际可读
       范围继续由任务授权和现有 permission/sandbox 决定。
-- [ ] **Scoped authorization**：绑定外辅助写入只有同时获得显式、有界的 W1 授权和现有 permission/sandbox 允许时才成功；目标与
+- [x] **Scoped authorization**：绑定外辅助写入只有同时获得显式、有界的 W1 授权和现有 permission/sandbox 允许时才成功；目标与
       生命周期不能外溢，不改变 primary cwd/binding。批准成功、拒绝、超时、失效、权限不足、目标变化及普通 sandbox escalation
       均有直接证据；失败场景不得产生绑定外副作用。
-- [ ] **Scoped 生命周期**：实现可以采用最小的不跨恢复临时授权；若选择支持跨恢复授权，必须持久化其必要事实并在恢复时按当前
+- [x] **Scoped 生命周期**：实现可以采用最小的不跨恢复临时授权；若选择支持跨恢复授权，必须持久化其必要事实并在恢复时按当前
       permission/trust/sandbox 重新验证。无论采用哪种策略，临时授权都不得静默恢复，也不得随 replacement 自动迁移。
-- [ ] **事务式 replacement**：新 worktree 的 Git identity/trust、roots、permission 与 sandbox 全部验证成功后才替换旧 binding；
+- [x] **事务式 replacement**：新 worktree 的 Git identity/trust、roots、permission 与 sandbox 全部验证成功后才替换旧 binding；
       失败保留旧 binding，成功后 cold resume 重验新 binding。旧 worktree 的路径和既有 Git 事实继续诚实可见，不自动 merge、
       cherry-pick、判断正确性或解决冲突。
-- [ ] **Durable identity 兼容**：resume/member reload 保持原 Session、canonical Root、TeamInstance 和 writer 身份，同时重验 binding；
+- [x] **Durable identity 兼容**：resume/member reload 保持原 Session、canonical Root、TeamInstance 和 writer 身份，同时重验 binding；
       顶层 fork、`/new`、slash `/clear` 创建的新 Session/Team 不误用来源 binding；`spawn_agent fork_turns=none/all/N` 保持既有同 Team
       child 语义，不形成第二套身份关系。
-- [ ] **Query/Control 与 lifecycle 兼容**：binding 失效不阻止权威 Session Query、只读恢复或诚实展示 unavailable；Session Control、
+- [x] **Query/Control 与 lifecycle 兼容**：binding 失效不阻止权威 Session Query、只读恢复或诚实展示 unavailable；Session Control、
       close、archive、unarchive、delete、owner replacement 不能绕过 binding，也不能因 binding 失败提前释放 Root authority。
       terminal lifecycle 不遗留可继续写入的孤立 binding；partial/unknown 不伪报清理完成，query/control 不维护第三份 workspace 状态。
-- [ ] **关闭态兼容**：W 关闭时，shared workspace、普通单 Agent、既有非 durable/V1/V2 和已完成 S/C 行为不变；已有不可写 binding
+- [x] **关闭态兼容**：W 关闭时，shared workspace、普通单 Agent、既有非 durable/V1/V2 和已完成 S/C 行为不变；已有不可写 binding
       事实如可见，只能按消费入口的诚实 unavailable/read-only 语义展示。
-- [ ] **Publication Critic 组合回归**：维护唯一一条 deterministic fake/offline Publication Critic + Durable Team resume 组合回归，
+- [x] **Publication Critic 组合回归**：维护唯一一条 deterministic fake/offline Publication Critic + Durable Team resume 组合回归，
       并纳入 binding 路径；不复制第二条组合链，不调用真实模型/API 或训练。
-- [ ] **fresh 四期正式全链**：从全新临时 Session/store/repository/two-linked-worktree 现场开始，使用真实旧/新 app-server OS 进程
+- [x] **fresh 四期正式全链**：从全新临时 Session/store/repository/two-linked-worktree 现场开始，使用真实旧/新 app-server OS 进程
       替换，完整证明：创建 Durable Team → 两 writer 分别绑定 → 默认隔离写入 → 有界绑定外辅助写入 → 进程退出与 cold resume →
       binding/permission/trust 重验 → 一个 binding 失效及 replacement → 继续 Team mutation → Session query/control → 正常 lifecycle
       收口。正式轮必须对应最终冻结代码与配置；影响链路的后续修复须相称重跑。
-- [ ] **工程门禁**：按实际写集完成必要生成物、格式化、scoped fix/clippy、受影响 crate 聚焦测试、相称邻接回归和 fresh 正式链。
+- [x] **工程门禁**：按实际写集完成必要生成物、格式化、scoped fix/clippy、受影响 crate 聚焦测试、相称邻接回归和 fresh 正式链。
       在资源门允许且代码已冻结后尝试一次 canonical full workspace `just test`；历史无关失败或基础设施阻断单独归因，不冒充通过，
       W1 相关新失败必须关闭。不得机械重跑稳定且未受影响的所有历史矩阵。
-- [ ] **独立终审**：执行者先形成 clean 的本地提交并通过指定队列请求本会话审查；范围内 finding 可自主整改、复验、提交并再次通知，
+- [x] **独立终审**：执行者先形成 clean 的本地提交并通过指定队列请求本会话审查；范围内 finding 可自主整改、复验、提交并再次通知，
       直至没有未关闭的高/中等级 correctness/security finding，或审查者明确判定任务失败。审查者以代码、功能与保存证据为主，
       不无限扩建审计/可信设施，也不机械重跑重型测试。
-- [ ] **文档与四期收口**：独立验收后精炼更新本计划、实施/审查日志、`doc/WBS.md`、`doc/WBS/durable-team-runtime.md`、
+- [x] **文档与四期收口**：独立验收后精炼更新本计划、实施/审查日志、`doc/WBS.md`、`doc/WBS/durable-team-runtime.md`、
       `doc/WBS/multi-agent-trusted-evidence.md` 与 `doc/WBS-COMPLETED.md`。历史 M4-Z(core) 不依赖 W 的形成时事实不反向改写；
       binding 状态展示和 replacement TUI 只可保留为未排期可选增强，不得遗留必需集成、恢复或兼容工作。
-- [ ] **本地交付与最终整合**：未经用户另行批准，执行者只提交并保持 089 worktree clean，不合并、不推送、不关闭 worktree、不归档
+- [x] **本地交付与最终整合**：未经用户另行批准，执行者只提交并保持 089 worktree clean，不合并、不推送、不关闭 worktree、不归档
       分支。用户批准后，整合者以届时最新 `main` 加法式保留 087 或其它已进入主线的权威状态，完成必要合并树检查、最终文档提交、
       推送 `origin/main`，再将完成分支改名为 `zz-done/...`。只有此后可记录
       `COMPLETED / ACCEPTED / INTEGRATED / PUSHED / M4_W1_PASS / PHASE_4_COMPLETE`。
@@ -350,30 +350,34 @@ XXX用以下内容代替：
   worktree、managed authority 和 production binding revalidation，并断言 active task 确实安装。按审查决定沿用已接受的 fresh 正式链，
   不重复运行。默认 Windows 50GB 门实际触发并在 Cargo 前停止后，仅对剩余聚焦命令启用已授权的 35GB 临时门；最终余量约
   `49.97GB`，未清理任何文件、未触发项目 stop 或快速趋近 35GB。
+- 最终独立验收接受实现提交 `eb4a3bb8530f25632affe7d0bae2f2fec3f6323a`，文档与验收提交为
+  `b762342b1f1504a3cfffa835c9c826be6da64188`；最终验收报告为
+  `agent_log/2026-08-26-160307-plan089-m4-w1-final-acceptance.md`。
+- 用户批准后，Plan 089 通过合并提交 `b98af4740b9a01e81aa44b23432a3dd8bfd80158` 进入并推送 `main`；本地
+  `main`、`origin/main` 与 live remote 已核对一致。完成分支归档为
+  `zz-done/worktree-089-m4-w1-writer-workspace-binding`，089、087、069 与主工作区均 clean，087 未被合并或改动。
+- 权威 WBS 与 COMPLETED 已完成第四期归档，终态为
+  `COMPLETED / ACCEPTED / INTEGRATED / PUSHED / M4_W1_PASS / PHASE_4_COMPLETE`。
 
 ### 当前工作
 
-- 完成失败回滚窄整改提交，并按指定 queue 请求独立复验。
+- 无；任务已完成并冻结。
 
 ### 本任务剩余步骤
 
-- 请求独立复验；若仍有范围内 finding，在同一 089 worktree 整改、相称复验并补充提交。
-- 独立验收接受后保持 clean 089 worktree，记录 `ACCEPTED / PENDING_INTEGRATION`，并等待用户明确批准 merge/push。
-- 获批后按 G 完成最新主线整合、文档最终收口、推送和完成分支归档，形成唯一 `M4_W1_PASS / PHASE_4_COMPLETE`。
+- 无。曾列为可选的 binding 状态/失效展示与 replacement TUI 已归入完成历史，当前未排期；未来若重启须独立立项。
 
 ### 阻塞项
 
-- 当前无产品实现阻塞；canonical full workspace 的 V8 404 是已保存的基础设施阻断，不影响已通过的 W1 分层与正式全链证据。
-- 最终 merge/push 尚未授权；这不阻塞工作树实现与独立审查，但阻止提前宣告最终 PASS。
+- 无。canonical full workspace 的 V8 404 作为历史基础设施阻断如实保留，不改变已经成立的 W1 分层、正式全链和最终结论。
 
 ### 当前验收状态
 
-- `FAILURE_ROLLBACK_REMEDIATION_COMPLETE / FOCUSED_REGRESSION_PASS / REVIEW_PENDING / INTEGRATION_NOT_AUTHORIZED /
-  M4_W1_PASS_NOT_YET_ESTABLISHED`。
+- `COMPLETED / ACCEPTED / INTEGRATED / PUSHED / M4_W1_PASS / PHASE_4_COMPLETE`。
 
 ### 交接边界
 
-- 本任务完成后冻结本计划；PASS 后只可由 WBS 保留 binding 状态展示、replacement TUI 等非必需可选增强，不在本计划维护后续路线。
+- 本任务完成后冻结本计划；当前 WBS 只保留第四期已收口指针，历史与曾列可选项统一归入 COMPLETED，不在本计划维护后续路线。
 - 若任务不能达到唯一成功结论，必须明确记录具体未完成项和实际状态，不制造 M4-W2 或无编号补丁包掩盖缺口。
 
 ## 6. 关键决策记录
