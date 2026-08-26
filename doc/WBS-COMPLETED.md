@@ -2198,3 +2198,22 @@ formal retry 整改为 `d29e857`，最终独立验收提交为 `43cf0eeb3e1b4826
   `20260826-012504-1000-2261794` 为 `stop=none / cleanup=none`。
 - 未运行 full workspace、Docker、真实 API/模型、训练、benchmark、CI/PR 或远端写操作。执行与整改见对应 Plan 083 `agent_log`；
   最终独立验收见 `agent_log/2026-08-26-013416-plan083-final-independent-acceptance.md`，无未关闭的高/中等级 correctness finding。
+
+## M4-W0 Writer Workspace Binding 原型与价值门（Plan 084，2026-08-26）
+
+**状态**：test-only 价值原型、首次独立验收整改与最终复验均已完成；验收通过、任务目标完成，唯一终态为
+`BINDING_ONLY_GO`。最终实现提交为 `c1870836cb3cc829d5055ffe77b042a500df18b0`。
+
+- task-owned 临时 Git repository/two-linked-worktree fixture 以同一 fake action 形成 cooperative 与 caller-relative baseline，证明
+  binding 能在两个 writer 首次动作前固定各自 cwd、workspace roots、permission 与 Git identity；cold reload 重新核对当前授权、
+  worktree 和执行环境，缺失、同路径换库、权限/roots/执行环境失配只使对应 writer 不可用。
+- 初次 admission 在读取目标路径/Git 前先核对调用者精确 roots 与写策略；actual action 只接受普通相对组件，对真实目标应用现有
+  filesystem policy 并逐组件拒绝 symlink。父目录、绝对路径和 symlink 跨 writer 反例均在副作用前 fail-closed；replacement 先完整
+  admission 后替换，失败保留旧 binding 与未交接成果。
+- 合理自然语言说明加 branch/HEAD/status/diff 已能分别定位 replacement 前后 tracked 未提交成果，没有出现 minimal structured
+  handoff 独有且可重复的失败，因此不新增 handoff 能力。该结论只证明 binding 的原型可行性和产品价值，不冒充 W1 生产 trust、
+  持久化或 race-free 文件保证。
+- 整改正式轮 Nextest `de36d02e-b180-49a1-b271-0b0e9de3b80b` 为 8/8，包含 5 项 W0 场景和 3 项
+  spawn/resume/reload 相邻回归；scoped fix/fmt 与 diff 门禁通过。最终独立复验复用该保存证据，未扩大重跑范围。
+- 未实施 M4-W1、上游增量或 Workspace 控制面，未运行 full workspace、Docker、真实模型/API、训练、性能测评、CI/PR 或远端操作。
+  正式 W1 尚未立项，后续先按实际消费决定上游窄适配；当前路线只由 WBS 维护。

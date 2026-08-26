@@ -270,15 +270,16 @@ XXX用以下内容代替：
 - 2026-08-26：整改正式轮从全新 `TempDir` 运行原 5 项 W0 场景与 3 项相邻回归，Nextest
   `de36d02e-b180-49a1-b271-0b0e9de3b80b` 为 8/8；scoped fix/fmt 通过且未产生额外代码修写。整改后唯一执行者候选仍为
   `BINDING_ONLY_GO`，等待指定审查者复验。
+- 2026-08-26：指定审查者复验 `17fb9d7...c187083...` 整改增量、实际实现与保存的 JUnit/watchdog，确认两个 P2 和直接证据缺口均已
+  闭合，无剩余 correctness/functionality finding；最终接受唯一终态 `BINDING_ONLY_GO`。本任务验收通过、目标完成，未重跑重型 Cargo。
 
 ### 当前工作
 
-- 首次验收 finding 的实现整改、聚焦复验、自审与追加本地提交已经完成；当前只等待指定审查者复验，未实施正式 W1。
+- W0 原型、整改、聚焦正式轮与最终独立验收全部完成，计划冻结；未实施正式 W1。
 
 ### 本任务剩余步骤
 
-- 执行者通过指定队列请求本会话审查者验收；若收到 finding，则在同一 worktree 自主整改、复验和追加本地提交。
-- 审查者接受唯一终态、同步最终权威文档/历史/计划并提交；之后等待用户另行批准合并与推送。
+- 本任务内无剩余步骤。工作树保持 clean 本地提交，等待用户另行批准合并与推送。
 
 ### 阻塞项
 
@@ -288,7 +289,7 @@ XXX用以下内容代替：
 
 ### 当前验收状态
 
-- `REMEDIATED / AWAITING_REVIEW`；唯一执行者候选仍为 `BINDING_ONLY_GO`，不是最终已验收结论。
+- `COMPLETED / ACCEPTED`；最终唯一终态为 `BINDING_ONLY_GO`，验收通过、任务目标完成。
 
 ### 交接边界
 
@@ -315,6 +316,6 @@ XXX用以下内容代替：
 | 012 | W0 原型放在 AgentControl 邻接的 `cfg(test)` 专用模块，不增加产品 API、配置、schema、持久状态或 feature gate | 该位置能消费真实 `Config`/permission 接缝并保持价值原型边界，不为 W1 预冻正式设计 | 原型/架构 | 已采纳 |
 | 013 | binding admission/revalidation 同时核对精确 worktree top-level、Git common-dir/git-dir、调用者预授权 roots、写权限与执行环境；reload 只从不可变 binding 和当前授权重建 | 覆盖 live caller-relative 缺口且不扩大权限，不把旧内存结论或父 cwd 当作恢复依据 | binding/正确性 | 已采纳 |
 | 014 | replacement 先完整建立并验证候选 runtime 后才替换；旧/新成果只以现有路径说明与 branch/HEAD/status/diff 观察交接 | 失败保留旧 binding，且实证未出现 structured handoff 才能闭合的独有缺口 | replacement/handoff | 已采纳 |
-| 015 | 唯一执行者候选收敛为 `BINDING_ONLY_GO`，并保持“原型可行/产品价值”与生产 trust 保证分离 | 同口径 deterministic/真实 Git 证据支持 binding，未支持 handoff；最终接受仍属于指定审查者 | 价值门/验收 | 待验收 |
+| 015 | 唯一终态收敛为 `BINDING_ONLY_GO`，并保持“原型可行/产品价值”与生产 trust 保证分离 | 同口径 deterministic/真实 Git 证据支持 binding，未支持 handoff；指定审查者已最终接受 | 价值门/验收 | 已采纳 |
 | 016 | 初次 admission 在任何目标 path/Git 读取前先核对调用者精确 roots 与写策略；actual action 再以普通相对组件、真实目标 policy 和 no-symlink walk 约束 bound root | 闭合首次验收的授权顺序与跨 writer 写入 P2，同时不预建 W1 race-free 文件能力 | 权限/执行 | 已采纳 |
-| 017 | baseline 把合理任务文本、branch/HEAD/status/diff 与同一 fake action 组成显式对照；补足 cold invalidation 与各类失败的另一 writer 隔离后仍维持 `BINDING_ONLY_GO` | 整改增强证据公平性与直接性，但未产生 structured handoff 独有缺口 | 价值门/测试 | 待复验 |
+| 017 | baseline 把合理任务文本、branch/HEAD/status/diff 与同一 fake action 组成显式对照；补足 cold invalidation 与各类失败的另一 writer 隔离后维持 `BINDING_ONLY_GO` | 整改增强证据公平性与直接性，最终复验确认未产生 structured handoff 独有缺口 | 价值门/测试 | 已采纳 |
