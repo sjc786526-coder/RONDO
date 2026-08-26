@@ -53,6 +53,10 @@ use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::Weak;
+#[cfg(test)]
+use std::sync::atomic::AtomicU8;
+#[cfg(test)]
+use std::sync::atomic::Ordering;
 use tokio::sync::watch;
 use tracing::warn;
 
@@ -125,6 +129,15 @@ pub(crate) struct AgentControl {
     team: Arc<TeamStateHandle>,
     /// Root-scoped child admission and close ordering.
     team_lifecycle: Arc<DurableTeamLifecycleGate>,
+    #[cfg(test)]
+    unpublished_cleanup_fault: Arc<AtomicU8>,
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy)]
+pub(crate) enum UnpublishedCleanupFault {
+    Shutdown = 1,
+    ExactOwnerMissing = 2,
 }
 
 impl AgentControl {
@@ -151,6 +164,28 @@ impl AgentControl {
 
     pub(crate) fn session_id(&self) -> SessionId {
         self.session_id
+    }
+
+    #[cfg(test)]
+    pub(crate) fn inject_unpublished_cleanup_fault(&self, fault: UnpublishedCleanupFault) {
+        self.unpublished_cleanup_fault
+            .store(fault as u8, Ordering::Release);
+    }
+
+    #[cfg(test)]
+    fn take_unpublished_cleanup_fault(&self) -> Option<UnpublishedCleanupFault> {
+        match self
+            .unpublished_cleanup_fault
+            .swap(/* no fault */ 0, Ordering::AcqRel)
+        {
+            value if value == UnpublishedCleanupFault::Shutdown as u8 => {
+                Some(UnpublishedCleanupFault::Shutdown)
+            }
+            value if value == UnpublishedCleanupFault::ExactOwnerMissing as u8 => {
+                Some(UnpublishedCleanupFault::ExactOwnerMissing)
+            }
+            _ => None,
+        }
     }
 
     pub(crate) fn rollout_budget(&self) -> &RolloutBudget {
@@ -902,41 +937,64 @@ impl AgentControl {
         thread: &Arc<crate::CodexThread>,
         session_source: Option<&SessionSource>,
     ) -> CodexResult<()> {
-        let graph_cleanup = if session_source
+        #[cfg(test)]
+        let cleanup_fault = self.take_unpublished_cleanup_fault();
+        #[cfg(test)]
+        if matches!(cleanup_fault, Some(UnpublishedCleanupFault::Shutdown)) {
+            return Err(CodexErr::Fatal(format!(
+                "failed to shut down unpublished durable child {thread_id}: injected teardown failure"
+            )));
+        }
+
+        thread.shutdown_and_wait().await.map_err(|err| {
+            CodexErr::Fatal(format!(
+                "failed to shut down unpublished durable child {thread_id}: {err}"
+            ))
+        })?;
+
+        #[cfg(test)]
+        if matches!(
+            cleanup_fault,
+            Some(UnpublishedCleanupFault::ExactOwnerMissing)
+        ) {
+            let _ = state.remove_thread_if_same(&thread_id, thread).await;
+        }
+
+        // Match explicit close ordering: a failed teardown leaves the Open edge untouched, and an
+        // exact-owner lease spans the Closed write through retirement. Missing/replaced owners or
+        // a failed graph write therefore retain at least one authoritative Root-close barrier.
+        let retirement = state
+            .lock_threads_if_not_replaced(vec![(thread_id, Some(Arc::clone(thread)))])
+            .await
+            .map_err(|_| {
+                CodexErr::Fatal(format!(
+                    "unpublished durable child {thread_id} lost its exact runtime owner during cleanup"
+                ))
+            })?;
+        if session_source
             .and_then(SessionSource::parent_thread_id)
             .is_some()
         {
-            match state.agent_graph_store() {
-                Some(agent_graph_store) => agent_graph_store
-                    .set_thread_spawn_edge_status(
-                        thread_id,
-                        codex_agent_graph_store::ThreadSpawnEdgeStatus::Closed,
-                    )
-                    .await
-                    .map_err(|err| {
-                        CodexErr::Fatal(format!(
-                            "failed to retire unpublished durable thread-spawn edge for {thread_id}: {err}"
-                        ))
-                    }),
-                None => Err(CodexErr::Fatal(
+            let agent_graph_store = state.agent_graph_store().ok_or_else(|| {
+                CodexErr::Fatal(
                     "durable Team child cleanup requires an available agent graph store"
                         .to_string(),
-                )),
-            }
-        } else {
-            Ok(())
-        };
-        let runtime_cleanup = self
-            .discard_unpublished_thread(state, thread_id, thread)
-            .await;
-        match (graph_cleanup, runtime_cleanup) {
-            (Ok(()), Ok(())) => Ok(()),
-            (Err(graph_err), Ok(())) => Err(graph_err),
-            (Ok(()), Err(runtime_err)) => Err(runtime_err),
-            (Err(graph_err), Err(runtime_err)) => Err(CodexErr::Fatal(format!(
-                "{graph_err}; runtime cleanup also failed: {runtime_err}"
-            ))),
+                )
+            })?;
+            agent_graph_store
+                .set_thread_spawn_edge_status(
+                    thread_id,
+                    codex_agent_graph_store::ThreadSpawnEdgeStatus::Closed,
+                )
+                .await
+                .map_err(|err| {
+                    CodexErr::Fatal(format!(
+                        "failed to retire unpublished durable thread-spawn edge for {thread_id}: {err}"
+                    ))
+                })?;
         }
+        retirement.retire_with(|_, _| {});
+        Ok(())
     }
 
     async fn activate_persisted_thread_spawn_participant(

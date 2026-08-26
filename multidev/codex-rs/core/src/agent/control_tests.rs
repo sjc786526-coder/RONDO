@@ -55,6 +55,7 @@ use codex_thread_store::InMemoryThreadStore;
 use codex_thread_store::LocalThreadStore;
 use codex_thread_store::LocalThreadStoreConfig;
 use codex_thread_store::ThreadStore;
+use codex_thread_store::durable_team_snapshot_path;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_path_uri::PathUri;
 use core_test_support::responses::strip_response_item_ids;
@@ -461,6 +462,170 @@ async fn durable_graph_write_and_restore_fail_closed() {
     let removed = harness.manager.remove_thread(&root_thread_id).await;
     assert!(
         removed.is_some(),
+        "test cleanup should remove the Root owner"
+    );
+}
+
+#[tokio::test]
+async fn participant_activation_cleanup_keeps_open_edge_on_teardown_failure_then_retires() {
+    let harness = AgentControlHarness::new_durable().await;
+    let (root_thread_id, root_thread) = harness.start_thread().await;
+    let root_control = root_thread.session.services.agent_control.clone();
+    let (session_source, child_thread_id, child_thread) = stage_persisted_unpublished_child(
+        &harness,
+        &root_control,
+        root_thread_id,
+        "teardown_failure",
+    )
+    .await;
+    let state = root_control
+        .upgrade()
+        .expect("thread manager should remain available");
+    let snapshot_path = durable_team_snapshot_path(&harness.config.codex_home, root_thread_id);
+    let snapshot_backup = snapshot_path.with_extension("round2-backup");
+    std::fs::rename(&snapshot_path, &snapshot_backup)
+        .expect("temporarily hide Team snapshot to fail participant activation");
+
+    root_control.inject_unpublished_cleanup_fault(UnpublishedCleanupFault::Shutdown);
+    let error = root_control
+        .activate_persisted_thread_spawn_participant(
+            &state,
+            child_thread_id,
+            &child_thread,
+            Some(&session_source),
+        )
+        .await
+        .expect_err("participant activation plus injected teardown must fail");
+    std::fs::rename(&snapshot_backup, &snapshot_path)
+        .expect("restore Team snapshot after injected activation failure");
+    root_control
+        .team()
+        .ensure_readable_or_reconcile()
+        .expect("restored Team snapshot should reconcile");
+    assert!(error.to_string().contains("injected teardown failure"));
+    assert!(Arc::ptr_eq(
+        &harness
+            .manager
+            .get_thread(child_thread_id)
+            .await
+            .expect("failed teardown must retain the exact runtime owner"),
+        &child_thread
+    ));
+    assert_open_edge_blocks_root_close(&root_control, root_thread_id, child_thread_id).await;
+
+    root_control
+        .discard_persisted_unpublished_thread(
+            &state,
+            child_thread_id,
+            &child_thread,
+            Some(&session_source),
+        )
+        .await
+        .expect("retry should close the edge and retire the exact stopped owner");
+    assert_thread_not_loaded(&harness.manager, child_thread_id).await;
+    let graph_store = state
+        .agent_graph_store()
+        .expect("durable test should have a graph store");
+    assert_eq!(
+        graph_store
+            .list_thread_spawn_children(
+                root_thread_id,
+                Some(codex_agent_graph_store::ThreadSpawnEdgeStatus::Open),
+            )
+            .await
+            .expect("Open edges should load"),
+        Vec::<ThreadId>::new()
+    );
+    assert_eq!(
+        graph_store
+            .list_thread_spawn_children(
+                root_thread_id,
+                Some(codex_agent_graph_store::ThreadSpawnEdgeStatus::Closed),
+            )
+            .await
+            .expect("Closed edges should load"),
+        vec![child_thread_id]
+    );
+    let close = root_control
+        .begin_durable_team_root_close(root_thread_id)
+        .expect("Root close barrier should remain retryable");
+    close
+        .ensure_no_live_descendants()
+        .await
+        .expect("successful cleanup must clear both Root close barriers");
+    close.abort();
+
+    assert!(
+        harness
+            .manager
+            .remove_thread(&root_thread_id)
+            .await
+            .is_some(),
+        "test cleanup should remove the Root owner"
+    );
+}
+
+#[tokio::test]
+async fn participant_activation_cleanup_keeps_open_edge_when_exact_owner_is_missing() {
+    let harness = AgentControlHarness::new_durable().await;
+    let (root_thread_id, root_thread) = harness.start_thread().await;
+    let root_control = root_thread.session.services.agent_control.clone();
+    let (session_source, child_thread_id, child_thread) =
+        stage_persisted_unpublished_child(&harness, &root_control, root_thread_id, "owner_gap")
+            .await;
+    let state = root_control
+        .upgrade()
+        .expect("thread manager should remain available");
+    let snapshot_path = durable_team_snapshot_path(&harness.config.codex_home, root_thread_id);
+    let snapshot_backup = snapshot_path.with_extension("round2-backup");
+    std::fs::rename(&snapshot_path, &snapshot_backup)
+        .expect("temporarily hide Team snapshot to fail participant activation");
+
+    root_control.inject_unpublished_cleanup_fault(UnpublishedCleanupFault::ExactOwnerMissing);
+    let error = root_control
+        .activate_persisted_thread_spawn_participant(
+            &state,
+            child_thread_id,
+            &child_thread,
+            Some(&session_source),
+        )
+        .await
+        .expect_err("participant activation plus exact-owner gap must fail");
+    std::fs::rename(&snapshot_backup, &snapshot_path)
+        .expect("restore Team snapshot after injected activation failure");
+    root_control
+        .team()
+        .ensure_readable_or_reconcile()
+        .expect("restored Team snapshot should reconcile");
+    assert!(error.to_string().contains("lost its exact runtime owner"));
+    assert_thread_not_loaded(&harness.manager, child_thread_id).await;
+    assert_open_edge_blocks_root_close(&root_control, root_thread_id, child_thread_id).await;
+
+    let graph_store = state
+        .agent_graph_store()
+        .expect("durable test should have a graph store");
+    graph_store
+        .set_thread_spawn_edge_status(
+            child_thread_id,
+            codex_agent_graph_store::ThreadSpawnEdgeStatus::Closed,
+        )
+        .await
+        .expect("test cleanup should explicitly close the retained edge");
+    let close = root_control
+        .begin_durable_team_root_close(root_thread_id)
+        .expect("Root close barrier should remain retryable");
+    close
+        .ensure_no_live_descendants()
+        .await
+        .expect("only an explicit Closed edge may clear the exact-owner failure barrier");
+    close.abort();
+
+    assert!(
+        harness
+            .manager
+            .remove_thread(&root_thread_id)
+            .await
+            .is_some(),
         "test cleanup should remove the Root owner"
     );
 }
@@ -907,6 +1072,85 @@ async fn assert_thread_not_loaded(manager: &ThreadManager, thread_id: ThreadId) 
         },
         Ok(_) => panic!("expected thread not to be loaded"),
     }
+}
+
+async fn stage_persisted_unpublished_child(
+    harness: &AgentControlHarness,
+    control: &AgentControl,
+    root_thread_id: ThreadId,
+    name: &str,
+) -> (SessionSource, ThreadId, Arc<CodexThread>) {
+    let state = control
+        .upgrade()
+        .expect("thread manager should remain available");
+    let session_source = SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
+        parent_thread_id: root_thread_id,
+        depth: 1,
+        agent_path: Some(
+            AgentPath::root()
+                .join(name)
+                .expect("staged child path should be valid"),
+        ),
+        agent_nickname: None,
+        agent_role: None,
+    });
+    let child = state
+        .spawn_new_thread_with_source(
+            harness.config.clone(),
+            control.clone(),
+            session_source.clone(),
+            /*history_mode*/ None,
+            Some(root_thread_id),
+            /*forked_from_thread_id*/ None,
+            Some(ThreadSource::Subagent),
+            /*metrics_service_name*/ None,
+            /*inherited_environments*/ None,
+            /*inherited_exec_policy*/ None,
+            /*environments*/ None,
+            /*defer_durable_team_participant_registration*/ true,
+        )
+        .await
+        .expect("stage deferred durable child runtime");
+    control
+        .persist_thread_spawn_edge_for_source(
+            &state,
+            child.thread.as_ref(),
+            child.thread_id,
+            Some(&session_source),
+        )
+        .await
+        .expect("stage Open durable child edge");
+    assert!(
+        control.team().participant(child.thread_id).is_none(),
+        "staged child must not commit its participant before activation"
+    );
+    assert!(
+        control
+            .state
+            .agent_metadata_for_thread(child.thread_id)
+            .is_none(),
+        "staged child must not publish registry metadata before activation"
+    );
+    (session_source, child.thread_id, child.thread)
+}
+
+async fn assert_open_edge_blocks_root_close(
+    control: &AgentControl,
+    root_thread_id: ThreadId,
+    child_thread_id: ThreadId,
+) {
+    let close = control
+        .begin_durable_team_root_close(root_thread_id)
+        .expect("Root close barrier should begin");
+    let error = close
+        .ensure_no_live_descendants()
+        .await
+        .expect_err("Open unpublished child edge must block Root close");
+    assert!(
+        error.to_string().contains(&child_thread_id.to_string()),
+        "Root close error should identify the unpublished child: {error}"
+    );
+    close.abort();
 }
 
 #[tokio::test]

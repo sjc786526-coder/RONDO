@@ -314,9 +314,9 @@ handoff 时投影其状态。该扩展不扩张为通用 workspace dashboard，�
 
 ### M4-Z(core)：Durable Team 全链收口
 
-**当前状态：`REVIEW_CHANGES_REQUESTED`。** Plan 083 首轮两项 finding 的主体与相称复验已经关闭；复审确认 participant activation
-失败 cleanup 先关闭 graph edge、后 teardown runtime，teardown/exact-owner 失败时可能把仍被跟踪或已替换的 owner 隐藏于 Root close
-barrier。该失败时序整改与复验完成前不形成 `M4_Z_CORE_PASS` 或完成历史。
+**当前状态：`AWAITING_REVIEW`。** Plan 083 已完成两轮独立审查整改；participant activation cleanup 现在先 teardown captured owner，
+再取得 exact map lease，持 lease 写 Closed edge并 exact-retire，任一 teardown/owner/graph 失败仍保留 Root close barrier。相称聚焦、
+邻接、scoped lint/format 与 fresh 正式全链已通过；`M4_Z_CORE_PASS` 和完成历史仍由指定审查者终审后决定。
 
 **目标**：完整打通 Team Session 创建、Team/Agent 状态推进、进程或连接中断、恢复、继续控制和显式生命周期操作，确认 S/C 主线
 形成独立可用的 Durable Team Runtime。
