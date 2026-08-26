@@ -71,6 +71,8 @@ mod legacy;
 mod lifecycle;
 mod residency;
 mod spawn;
+#[cfg(test)]
+mod workspace_binding_w0;
 
 pub(crate) use self::lifecycle::DurableTeamRootCloseGuard;
 use self::lifecycle::DurableTeamSubtreeCloseGuard;

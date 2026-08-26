@@ -253,15 +253,23 @@ XXX用以下内容代替：
   spawn/reload/cwd/workspace/permission/Git 测试接缝；未读取 Plan 082 内容、`.env.local` 或 ignored 私有资产。
 - 2026-08-26：完成本 ExecPlan，冻结 W0 的公平比较、四选一价值门、轻量原型、资源、重跑、审查和本地交付边界；规划期间未运行
   Cargo、Docker、真实模型/API、训练或测评，未修改主工作区和其他 worktree。
+- 2026-08-26：执行者在指定 `ef16e8c...` worktree 完成 live 接缝核对与两个只读调查，确认现有 V2 spawn/resume/reload 继续从
+  当前发起 turn 取得 cwd、workspace roots 与 permission，尚无 repository/worktree identity binding。
+- 2026-08-26：新增 `cfg(test)` 的 AgentControl 邻接原型与 task-owned 真实 Git repository/two-linked-worktree fixture；同一 fake
+  action 已覆盖公平 baseline、首次动作、cold reload 重验、缺失/同路径换库/权限/roots/执行环境失配、失效隔离和事务式 replacement。
+- 2026-08-26：正式聚焦轮从全新 `TempDir` fixture 运行 5 项 W0 场景与 3 项 spawn/resume/reload 相邻回归，Nextest
+  `9b80362c-1181-4a45-8fe9-2ed2a43cedda` 为 8/8；`just fix -p codex-core` 与 `just fmt` 通过。独立只读复核无阻断 finding，
+  其唯一 Git signing 可重复性建议已窄修并在正式轮复验。
+- 2026-08-26：证据支持唯一执行者候选 `BINDING_ONLY_GO`：结构性 binding 有明确价值，合理自然语言加 branch/HEAD/status/diff
+  已足以定位换绑前后成果，未形成 structured handoff 独有且可重复的缺口；该结论仍待指定审查者接受。
 
 ### 当前工作
 
-- 计划编制完成，等待执行者在 084 专用 worktree 按本合同实施；W0 产品原型、测试和价值终态尚未开始。
+- 执行者实现、聚焦验证、自审、必要独立只读复核与本地提交已经完成；当前只等待指定审查者验收，未实施正式 W1。
 
 ### 本任务剩余步骤
 
-- 执行者建立同口径 baseline/candidate、完成 binding 与 handoff 分离比较、聚焦验证和精炼记录，形成唯一候选终态并提交。
-- 执行者通过指定队列请求本会话审查者验收；按 finding 在同一 worktree 自主整改、复验和追加本地提交。
+- 执行者通过指定队列请求本会话审查者验收；若收到 finding，则在同一 worktree 自主整改、复验和追加本地提交。
 - 审查者接受唯一终态、同步最终权威文档/历史/计划并提交；之后等待用户另行批准合并与推送。
 
 ### 阻塞项
@@ -272,7 +280,7 @@ XXX用以下内容代替：
 
 ### 当前验收状态
 
-- `PLANNED / IMPLEMENTATION_NOT_STARTED`；四种 W0 终态均未预设，须由执行证据决定。
+- `IMPLEMENTED / AWAITING_REVIEW`；唯一执行者候选为 `BINDING_ONLY_GO`，不是最终已验收结论。
 
 ### 交接边界
 
@@ -296,3 +304,7 @@ XXX用以下内容代替：
 | 009 | 跨会话请示与验收使用用户指定队列；执行者每次主动表明身份、发送后停止且不重复投递 | 保证执行者与本会话审查者可靠协调 | 协作 | 已采纳 |
 | 010 | 执行者先提交待验收实现，审查者接受终态后再同步 COMPLETED；全程不合并、不推送 | 区分候选结论与独立验收结论，遵守用户 Git 停止边界 | 审查/文档 | 已采纳 |
 | 011 | 当前无须直接写主工作区 ignored 业务资产；仅 canonical 锁/看门狗与 069 ignored target 是预期共享写入 | 明确 gitignore 例外，不把共享构建状态误作产品修改 | ignored/现场 | 已采纳 |
+| 012 | W0 原型放在 AgentControl 邻接的 `cfg(test)` 专用模块，不增加产品 API、配置、schema、持久状态或 feature gate | 该位置能消费真实 `Config`/permission 接缝并保持价值原型边界，不为 W1 预冻正式设计 | 原型/架构 | 已采纳 |
+| 013 | binding admission/revalidation 同时核对精确 worktree top-level、Git common-dir/git-dir、调用者预授权 roots、写权限与执行环境；reload 只从不可变 binding 和当前授权重建 | 覆盖 live caller-relative 缺口且不扩大权限，不把旧内存结论或父 cwd 当作恢复依据 | binding/正确性 | 已采纳 |
+| 014 | replacement 先完整建立并验证候选 runtime 后才替换；旧/新成果只以现有路径说明与 branch/HEAD/status/diff 观察交接 | 失败保留旧 binding，且实证未出现 structured handoff 才能闭合的独有缺口 | replacement/handoff | 已采纳 |
+| 015 | 唯一执行者候选收敛为 `BINDING_ONLY_GO`，并保持“原型可行/产品价值”与生产 trust 保证分离 | 同口径 deterministic/真实 Git 证据支持 binding，未支持 handoff；最终接受仍属于指定审查者 | 价值门/验收 | 待验收 |
