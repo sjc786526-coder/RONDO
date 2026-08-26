@@ -2179,7 +2179,8 @@ formal retry 整改为 `d29e857`，最终独立验收提交为 `43cf0eeb3e1b4826
 ## M4-Z(core) Durable Team 全链收口（Plan 083，2026-08-26）
 
 **状态**：公开 S/C 全链、fresh store/真实进程替换正式轮、两轮独立审查整改与最终复验均已完成；验收通过、任务目标完成，结论为
-`M4_Z_CORE_PASS`。最终产品候选为 `0a68f37667188bb7886ce51d4f79436b54bb9faa`。
+`M4_Z_CORE_PASS`。最终产品候选为 `0a68f37667188bb7886ce51d4f79436b54bb9faa`，主线整合提交为
+`c71bac2040c11fb8a46830f7f420dcec921a41b9`。
 
 - Durable child graph 持久化、participant commit 与 registry/residency 发布按 fail-closed 顺序收口；persisted Open descendant 与 loaded
   running descendant 共同阻塞 Root close。V2 `close_agent` 在当前 Team membership 边界内复用 subtree close，拒绝 foreign Root/child、
