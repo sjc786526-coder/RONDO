@@ -269,14 +269,16 @@ XXX用以下内容代替：
   trusted/untrusted 正反覆盖与 host MCP/config/permission 行为共 2/2 通过，受影响 `codex-config`/`codex-core` scoped fix 通过。
 - 2026-08-26：最终独立复验确认第一轮 P2 已关闭，无剩余高、中等级 correctness/security finding；接受
   `M4_W_39616_ADAPTATION_PASS`，并按合同同步 Plan/WBS/COMPLETED。未重复运行已通过的重型安全矩阵。
+- 2026-08-26：用户批准本地整合；验收头 `36633dcec146a457e2be148b77b9849ab55f28f9` 已 fast-forward 进入本地 `main`，
+  无冲突、未覆盖并行工作、未推送远端。原 086 分支已按仓库规范归档到 `zz-done/`。
 
 ### 当前工作
 
-- 本任务实现、整改、独立复验与权威文档收口均已完成；计划冻结，等待用户批准本地整合。
+- 本任务实现、整改、独立复验、权威文档收口与本地整合均已完成；计划冻结。
 
 ### 本任务剩余步骤
 
-- 无任务内剩余步骤。等待用户另行批准整合；086 进入本地 `main` 后，`#39153` 才获得启动资格，M4-W1 继续锁定。
+- 无任务内剩余步骤。`#39153` 已获得下一任务启动资格但尚未启动；M4-W1 继续等待 `#39153` 完成并进入主线。
 
 ### 阻塞项
 
@@ -285,8 +287,8 @@ XXX用以下内容代替：
 
 ### 当前验收状态
 
-- `COMPLETED / ACCEPTED / AWAITING_USER_INTEGRATION`；验收通过、任务目标完成，结论为
-  `M4_W_39616_ADAPTATION_PASS`。下一工作包为 `#39153`，但尚未启动，也不得在 086 进入本地 `main` 前启动。
+- `COMPLETED / ACCEPTED / INTEGRATED`；验收通过、任务目标完成，结论为 `M4_W_39616_ADAPTATION_PASS`。
+  Plan 086 已进入本地 `main`，下一工作包为 `#39153`，但尚未启动。
 
 ### 交接边界
 
@@ -319,3 +321,4 @@ XXX用以下内容代替：
 | 017 | 合并 core/app-server 行为批次被 memory PSI 停止后保留编译进度并拆成窄批次，不清理 target | 遵循调试保留进度和资源 fail-closed 约束，避免把设施停止冒充产品失败 | 构建/资源 | 已采纳 |
 | 018 | active project 复用 config loader 的 checkout-root 定位，按 exact cwd、checkout root、已验证继承 root 查询显式 trust | 与 config layer 的既有优先级一致；checkout root 仅用于当前 checkout 的直接决定，主仓继承仍只由 hardened resolver 授权 | config/trust | 已采纳 |
 | 019 | 最终独立复验接受 `M4_W_39616_ADAPTATION_PASS`；`#39153` 只成为下一工作包，不因 086 尚未整合而提前启动 | 第一轮 P2 已关闭，安全闭环与相称行为证据完整；继续遵守本地整合授权边界 | 验收/WBS | 已采纳 |
+| 020 | 用户批准后以 fast-forward 把验收头并入本地 `main`，不推送；`#39153` 获得启动资格但不自动启动 | 完成本次明确整合授权，同时保持远端与后继任务的独立授权边界 | Git/交接 | 已采纳 |

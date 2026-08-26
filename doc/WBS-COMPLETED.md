@@ -2264,5 +2264,5 @@ formal retry 整改为 `d29e857`，最终独立验收提交为 `43cf0eeb3e1b4826
   `cf9287bf-ed1d-4a47-aaaf-d4b874877c29` 为 2/2，相关 scoped fix、fmt 与 diff 门禁通过。一次组合批次被 watchdog 因 memory full
   PSI 以 exit 125 主动停止，随后拆窄通过；该设施停止未冒充产品测试失败，也未清理 target。
 - 未建设 workspace registry、第二套 permission/trust、审计或可信平台，未升级冻结基线，也未运行 workspace 全量、Docker、真实
-  API/模型、训练、测评、CI/PR 或远端操作。086 分支尚未合入本地 `main`、未推送；获用户批准进入 `main` 后，`#39153` 才获得
-  启动资格，M4-W1 继续锁定。
+  API/模型、训练、测评、CI/PR 或远端操作。用户批准后，验收头已 fast-forward 进入本地 `main`，无冲突且未推送；`#39153`
+  已获得下一任务启动资格但尚未启动，M4-W1 继续锁定。
