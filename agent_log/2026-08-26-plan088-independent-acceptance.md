@@ -33,6 +33,8 @@
 - core 当前重解析与 fail-closed：run `20260826-081120-1000-3078649`，`6/6`，`final_rc=0`；
 - legacy/paginated resume/fork 正反集成：run `20260826-081144-1000-3079811`，`5/5`，`final_rc=0`；
 - scoped fix：run `20260826-081415-1000-3089181`，`final_rc=0`；随后 fmt 通过。
+- 验收后副作用顺序测试加固：提交 `ea99e979ec4189311d6319cc93a0d7dd526829b4`，run
+  `20260826-084312-1000-3172734`，`1/1`，`final_rc=0`；随后 fmt 通过。
 
 上述通过批次均为 `stop_reason=none`、`cleanup_reason=none`、swap peak `0`。通过批次最高项目采样为
 `273,409,286,144 B`（约 `273.41GB`），低于本任务 `285GB` 主动停止线；调试失败轮的最高项目采样为
@@ -41,14 +43,15 @@
 
 ## Finding 与代表用户作出的决定
 
-- **无阻塞 finding。** 唯一低等级测试保障余项是 invalid-profile 集成只断言 resume/fork 返回错误，没有直接断言 child 数量或
-  `thread/started` 缺失。静态生命周期顺序已经证明当前实现先拒绝，现有分层测试也覆盖共享 merge/config seam；接受该低风险余项，
-  不为此扩建副作用审计设施或重复重型门禁。
+- **无剩余 finding。** 首次验收记录的低等级测试保障余项已由 `ea99e979` 窄修闭合：既有 invalid-profile 场景现在比较拒绝前后
+  `thread/list` 的完整 thread ID 集合，并确认消息缓冲没有 `thread/started`。独立复核确认该断言覆盖目标顺序，且没有新增 helper、
+  生产逻辑或副作用审计设施。
 - 接受 legacy/paginated 正向主链、recent-settings 单测、严格 config 反例与一条端到端 invalid/override 反例的分层组合；不扩成
   history mode × invalid variant × resume/fork 的重复笛卡尔矩阵。
 - 接受不运行完整 workspace `just test`。实际共享写集已由 protocol、core、app-server lib 和端到端主链覆盖；扩大门禁与本任务风险
   不成比例。
-- 修正实施日志的资源峰值口径；该记录误差不影响资源门、实现正确性或验收结论。
+- 修正实施日志的资源峰值口径；该记录误差不影响资源门、实现正确性或验收结论。验收后测试加固首轮两次均停在 initialize 基线，
+  未触达新增断言；热目标复跑通过，不扩大到 app-server 全库或 workspace。
 - 088 与并行 087 后续由获批的后整合者加法式保留彼此 WBS 状态。本次不读取或覆盖 087 未提交内容，不合并、不推送，也不启动 M4-W1。
 
 最终状态：`ACCEPTED / TASK_GOAL_COMPLETE / M4_W_39153_ADAPTATION_PASS / PENDING_LOCAL_MAIN_INTEGRATION`。

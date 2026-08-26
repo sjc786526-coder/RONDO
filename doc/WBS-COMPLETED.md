@@ -2280,10 +2280,10 @@ formal retry 整改为 `d29e857`，最终独立验收提交为 `43cf0eeb3e1b4826
   requirements 重新解析。missing/invalid/disallowed/incompatible profile 明确失败，不使用历史 concrete permission snapshot，
   不静默切换 configured/required default；合法显式权限 override 保持最高优先级。
 - resume 的 config load 早于 runtime/thread 创建，fork 的 config load 早于 child 创建；静态独立审查确认 invalid persisted profile
-  不会启动可执行 runtime、MCP/model/tool 链或带默认权限继续。唯一低等级测试余项是负向集成未直接断言 child/started 不存在，
-  当前路径正确且分层证据充分，未为此扩建副作用审计设施。
+  不会启动可执行 runtime、MCP/model/tool 链或带默认权限继续。验收后测试加固又直接断言拒绝前后 thread ID 集合不变且没有
+  `thread/started`；没有新增 helper、生产逻辑或副作用审计设施。
 - 正式证据为 protocol `1/1`、core `6/6`、app-server lib `279/279`、legacy/paginated resume/fork 集成 `5/5`，scoped fix 与 fmt
-  通过；通过批次均 `stop=none / cleanup=none / swap peak=0`。未运行完整 workspace、Docker、真实 API/模型、训练、测评、CI/PR
-  或远端操作，未冒充通过。
+  通过；测试加固热目标又以 `1/1` 通过。通过批次均 `stop=none / cleanup=none / swap peak=0`。未运行完整 workspace、Docker、
+  真实 API/模型、训练、测评、CI/PR 或远端操作，未冒充通过。
 - 本任务未实施 M4-W1、primary binding、scoped authorization、replacement binding、workspace/permission registry 或第二套恢复状态。
   088 进入本地 `main` 前 M4-W1 继续锁定；进入后也只解锁另行规划资格，不自动启动。

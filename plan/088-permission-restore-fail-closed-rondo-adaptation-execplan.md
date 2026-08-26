@@ -282,16 +282,16 @@ XXX用以下内容代替：
   一项不阻塞的副作用顺序测试余项，形成独立验收报告并同步 Plan/WBS/COMPLETED，结论为 `M4_W_39153_ADAPTATION_PASS`。
 - 2026-08-26：用户后续要求关闭该低等级测试余项；在既有 invalid-profile 集成场景中比较失败前后 `thread/list` 的完整 ID 集合，并断言
   消息缓冲区没有 `thread/started`，未增加生产代码、helper 或副作用审计设施。单项聚焦复验 `1/1` 通过，随后 fmt 通过。
+- 2026-08-26：审查者复核提交 `ea99e979`、消息缓冲语义及保存的 watchdog/JUnit，确认窄修关闭 015 的低等级测试保障余项且没有引入
+  新 finding；`M4_W_39153_ADAPTATION_PASS` 保持成立。
 
 ### 当前工作
 
-- 产品实现与首次独立验收已经完成；用户追加的测试-only 防回归加固也已实现和聚焦验证，当前等待审查者复核该 follow-up 后继续等待
-  用户批准是否整合本地 `main`。
+- 产品实现、独立验收与测试-only 防回归加固复核均已完成；`M4_W_39153_ADAPTATION_PASS` 成立，当前只等待获批整合本地 `main`。
 
 ### 本任务剩余步骤
 
-- 审查者复核测试-only follow-up；随后等待用户批准是否整合本地 main，获批进入 main 后才把当前指针改为“另行规划 M4-W1
-  （尚未启动）”。
+- 等待用户批准是否整合本地 main；获批进入 main 后才把当前指针改为“另行规划 M4-W1（尚未启动）”。
 
 ### 阻塞项
 
@@ -299,8 +299,8 @@ XXX用以下内容代替：
 
 ### 当前验收状态
 
-- `FOLLOW_UP_IMPLEMENTED / EXECUTOR_VERIFIED / PENDING_INDEPENDENT_REVIEW`；此前 `M4_W_39153_ADAPTATION_PASS` 验收结论保留为历史事实，
-  当前分支的测试-only 增量待复核，M4-W1 仍锁定且未规划。
+- `ACCEPTED / TASK_GOAL_COMPLETE / M4_W_39153_ADAPTATION_PASS / PENDING_LOCAL_MAIN_INTEGRATION`；测试-only follow-up 已复核，M4-W1
+  仍锁定且未规划。
 
 ### 交接边界
 
@@ -329,5 +329,5 @@ XXX用以下内容代替：
 | 012 | recent-settings 投影按设置域逆序解析；最近 legacy `TurnContext` 也是 identity 边界，不向前复活更老 ID，同一 turn 内的 settings update 可覆盖 stale compaction context | 同时满足 RONDO 三态硬约束和既有 compaction 时序 | app-server/history | 已采纳 |
 | 013 | persisted profile 作为 Config 内部来源进入既有当前解析链，并在 profile allowlist 与 concrete requirement 两个 fallback 点对该来源转为 error | 复用单一 config/trust/requirements 权威，阻止无效历史 identity 静默换默认 | core/config | 已采纳 |
 | 014 | 正式门禁采用 protocol serde、core 六项、app-server 全库与 legacy/paginated resume/fork 五项集成，不扩大到完整 workspace | shared core 风险已由直接配置单测、全 app-server lib 和端到端主链覆盖；完整 workspace 与本任务写集不成比例 | 测试 | 已采纳 |
-| 015 | 独立验收接受一项低风险测试余项：invalid-profile 反例未直接断言 child/started 不存在，但静态生命周期顺序已在创建前拒绝，不为此扩建副作用审计或重复重型门禁 | 现有产品路径正确，分层证据与任务风险相称 | 验收/测试 | 已采纳 |
-| 016 | 用户后续收紧 015：只在现有 invalid-profile 场景断言 thread ID 集合不变且无 `thread/started`，不新增审计设施、不重跑宽门禁 | 关闭明确的防回归证据缺口，同时保持 follow-up 最小 | 测试 | 已采纳 |
+| 015 | 首次独立验收接受一项低风险测试余项：invalid-profile 反例未直接断言 child/started 不存在，但静态生命周期顺序已在创建前拒绝 | 当时产品路径正确且分层证据与任务风险相称；后由 016 关闭测试余项 | 验收/测试 | 已被 016 闭合 |
+| 016 | 用户后续收紧 015：只在现有 invalid-profile 场景断言 thread ID 集合不变且无 `thread/started`，不新增审计设施、不重跑宽门禁 | 关闭明确的防回归证据缺口，同时保持 follow-up 最小 | 测试 | 已验证 |
