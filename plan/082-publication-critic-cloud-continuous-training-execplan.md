@@ -314,11 +314,11 @@ XXX用以下内容代替：
 - RunPod 的查询、观测、费用核对和适合的资源操作软性优先使用对 Agent 友好的 RunPod MCP；MCP 不擅长的网络卷挂载 Pod 创建或其它动作
   可使用现有 RunPod CLI。两者如何组合由执行者按 live 能力自主选择，只要身份、单实例、预算和删除边界一致。
 - 正式开 Pod 前先通过实时控制面同时查看 A40/L40S 库存，选定一个 `gpu-id + data-center-id` 并创建/核验 Plan 082 网络卷。手动创建
-  抢不到时，可直接复用 `scripts/create-runpod-plan079-initial-when-ready.py`；以下是由当前 `--help` 与脚本构造逻辑核对出的最小模板，
+  抢不到时，可直接复用 `scripts/create-runpod-when-ready.py`；以下是由当前 `--help` 与脚本构造逻辑核对出的最小模板，
   占位符必须用本次 live 查询和已批准资源事实替换，不是可直接照抄的历史生产命令：
 
   ```bash
-  python scripts/create-runpod-plan079-initial-when-ready.py \
+  python scripts/create-runpod-when-ready.py \
     --pod-name 'rondo-plan082-<unique-name>' \
     --gpu-id '<live-selected-A40-or-L40S-gpu-id>' \
     --gpu-count 1 \
@@ -385,7 +385,7 @@ XXX用以下内容代替：
 - 2026-08-25：按用户追加要求把阶段 A 审查与用户人工付费批准拆开；正式开 Pod 前须同时刷新 A40/L40S，持久存储固定为网络卷，
   正式 Pod 保留到审查者确认无需再用，网络卷删除另须用户人工批准；RunPod 控制软性优先 MCP、CLI 补位。
 - 2026-08-25：只读核对已合并的 Plan 079 抢 Pod 脚本及当前 `--help`，确认
-  `scripts/create-runpod-plan079-initial-when-ready.py` 支持单目标轮询、网络卷挂载、exact-name 去重和不确定创建后的完整对账；已写入
+  `scripts/create-runpod-when-ready.py` 支持单目标轮询、网络卷挂载、exact-name 去重和不确定创建后的完整对账；已写入
   Plan 082 有限时长命令模板与边界。历史材料未保存可复核的完整生产调用，因此没有把模板冒充历史命令。
 - 2026-08-25：用户选择资源保留优先；12 小时/15 USD 约束实际训练活动，训练完成后的 GPU 审查等待、0 Pod 回传和卷删除等待费用分开
   持续报告；总累计费用首次达到 10 USD 时非阻断告警。GPU 阶段验收只关闭仍需 Pod 的事项，Pod 释放后其余无需 GPU 的发现留给最终验收。

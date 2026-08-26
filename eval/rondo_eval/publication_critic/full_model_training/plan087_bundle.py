@@ -50,7 +50,6 @@ REQUIRED_SOURCE_MEMBERS = {
     "eval/model-locks/publication-critic/skywork-reward-v2-qwen3-1.7b-e51ea3e0.json",
     "training/publication-critic-plan081/route-contract-v1.json",
     "training/publication-critic-plan087/README.md",
-    "training/publication-critic-plan087/runpod-create.py",
     "training/publication-critic-plan087/runpod-terminal.py",
 }
 

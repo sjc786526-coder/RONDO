@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Poll one RunPod GPU target and create a Pod as soon as stock appears.
 
-The caller supplies all Pod parameters and remains responsible for validating
-the created resource, network volume, price, budget, and task eligibility.  The
-script only automates frequent stock polling and the latency-sensitive create.
+The caller supplies all Pod parameters and remains responsible for independently
+validating the created resource, network volume, price, budget, and task
+eligibility.  The script only automates frequent stock polling and the
+latency-sensitive create.
 If create completion is uncertain, it waits the full reconciliation window and
 checks the exact Pod name before allowing another attempt.  It never starts,
 stops, or deletes any resource.  Run only one monitor for an exact Pod name;

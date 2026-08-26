@@ -154,69 +154,36 @@ runpodctl network-volume create --name "$PLAN087_VOLUME_NAME" \
 There is deliberately no network-volume delete command in this runbook or the
 task lifecycle helper.
 
-Create one Pod with the live, recorded image, price-relevant GPU ID, exact data
-center and selected volume. Set finite automatic stop and terminate times that
-fit the current budget snapshot; both values are absolute RFC3339 instants and
-stop must precede terminate. Use the task helper, which first requires the
-account Pod list to be empty and sends exactly one create. It may reconcile an
-uncertain create response only inside that invocation, from the empty baseline
-and unique Plan 087 identity, without a second create. A later invocation never
-adopts a pre-existing same-name Pod: the frozen client cannot prove its network
-volume and stop/terminate binding, so the helper fails closed. Inspect and
-terminalize the exact task Pod, confirm account-level zero, then create again;
-multiple matches or any unrelated Pod also fail closed.
-
-Creation is not confirmed merely because the Pod appears in the account list.
-The frozen `runpodctl` projects machine/image/disk fields but strips the raw
-network-volume attachment even when asked to include it. Therefore the create
-command emits only a pending receipt; it is never the upload/bootstrap gate.
+Create one Pod with the selected image, GPU ID, data center and volume. When
+stock is tight, use the repository-wide latency-sensitive helper:
 
 ```bash
-python3 training/publication-critic-plan087/runpod-create.py create \
+python3 scripts/create-runpod-when-ready.py \
   --pod-name "$PLAN087_POD_NAME" --image "$PLAN087_IMAGE" \
-  --gpu-id "$PLAN087_GPU_ID" --data-center-id "$PLAN087_DATA_CENTER" \
+  --gpu-id "$PLAN087_GPU_ID" --gpu-count 1 --cloud-type SECURE \
+  --data-center-id "$PLAN087_DATA_CENTER" \
   --network-volume-id "$PLAN087_VOLUME_ID" \
   --container-disk-gb "$PLAN087_CONTAINER_GB" \
-  --stop-after "$PLAN087_STOP_AT" --terminate-after "$PLAN087_TERMINATE_AT" \
-  --captured-at "$PLAN087_CREATE_CAPTURED_AT" \
-  > "$PLAN087_LOCAL_ROOT/runpod-create-pending.json"
+  --volume-mount-path /workspace --port 22/tcp \
+  --poll-seconds 5 --query-timeout-seconds 15 \
+  --create-timeout-seconds 30 --reconciliation-grace-seconds 30
 ```
 
-Before the pending receipt's finite `attachment_confirmation.deadline`, use the
-already-configured RunPod MCP safe entry `get_pod` with its exact Pod ID. The
-configured v2 backend returns the raw REST v2 Pod and ignores the v1-only
-`includeMachine` / `includeNetworkVolume` inputs, so do not rely on those flags.
-Persist the returned Pod object without reinterpretation in this small local
-envelope:
+The helper only polls inventory, submits create, and reconciles an uncertain
+response by exact name before another attempt. Its JSON lines are status output,
+not a resource qualification or receipt, and it performs no budget, price,
+volume-eligibility, readiness, upload, training, stop or delete work.
 
-```json
-{
-  "schema": "rondo-publication-critic-plan087-runpod-provider-observation-v1",
-  "captured_at": "<RFC3339 local capture time>",
-  "source": "runpod-mcp-get-pod-v2",
-  "pod": { "<exact MCP REST v2 Pod response fields>": "..." }
-}
-```
-
-If `mounts.network` is absent, empty or null during initialization, re-query
-only within that deadline. Then finalize the creation receipt locally:
-
-```bash
-python3 training/publication-critic-plan087/runpod-create.py confirm-attachment \
-  --pending-receipt "$PLAN087_LOCAL_ROOT/runpod-create-pending.json" \
-  --provider-observation "$PLAN087_LOCAL_ROOT/runpod-provider-observation.json" \
-  > "$PLAN087_LOCAL_ROOT/runpod-create.json"
-```
-
-Confirmation requires exactly one `mounts.network` entry whose `volumeId` is
-the requested task volume and whose `path` is `/workspace`, with no persistent
-mount. It also rechecks v2 image, GPU, cloud, data center, disk and live status.
-An omitted v2 `gpu.count` is normalized only to its documented default of one;
-an explicit non-integer or any count other than one fails.
-Missing/empty/null/wrong attachment data fail; confirmation after the pending
-deadline also fails. On failure, do not rerun create: terminalize the exact task
-Pod and confirm zero first. Do not connect, upload or bootstrap until
-`runpod-create.json` exists as the success receipt.
+Immediately after it reports an accepted or reconciled Pod, independently query
+that exact ID with the existing RunPod MCP v2 `get_pod`, `runpodctl pod get/list`,
+live GPU pricing/inventory and network-volume state. Check the actual price, one
+allowed GPU, Secure Cloud, exact data center, image/container disk, and exactly
+one network mount whose `volumeId` is the selected volume and whose path is
+`/workspace`. A field still initializing may be re-read for a short operator
+deadline, but no Plan 087 adapter or creation receipt is produced. If any fact
+is wrong or cannot be confirmed, immediately invoke `runpod-terminal.py` for
+the exact ID/name and confirm account-level zero before trying again. Do not
+connect, upload or bootstrap until the independent checks pass.
 
 Bind the confirmed exact ID and name in the task log. Use `runpodctl ssh info
 <pod-id>` after every start/restart to refresh the SSH endpoint. Before upload,

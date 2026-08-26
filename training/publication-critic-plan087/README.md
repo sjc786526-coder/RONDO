@@ -23,16 +23,14 @@ must be that exact checkpoint proven reusable in a separate process.
 
 The paid entrypoints bind every write to `RONDO_PLAN087_TASK_ROOT`, require an
 actual decimal-GB capacity preflight before checkpoint-producing segments,
-advance one hash-linked cumulative cost ledger, reconcile an ambiguous Pod
-create only within the same empty-account/single-create invocation, reconcile
-stop/delete outcomes by exact identity, and copy back only a manifest allowlist
-of small SHA-256-verified files. A pre-existing same-name Pod is never adopted
-because the frozen provider client cannot expose every creation-contract field.
-The frozen CLI result remains pending until the existing RunPod MCP v2 safe
-entry's raw REST v2 Pod explicitly reports exactly one requested
-`mounts.network[].volumeId` and `/workspace` path. Missing/empty/null
-initialization state may be re-queried only within the pending receipt's finite
-deadline; no final creation receipt is issued otherwise.
+advance one hash-linked cumulative cost ledger, reconcile stop/delete outcomes
+by exact identity, and copy back only a manifest allowlist of small
+SHA-256-verified files. When stock is tight, the repository-wide
+`scripts/create-runpod-when-ready.py` owns only polling, creation and exact-name
+duplicate reconciliation. Its status output is not a qualification receipt.
+After creation, the executor independently checks the actual price, GPU, data
+center and network-volume mount through existing RunPod MCP/CLI observations;
+a mismatch is immediately released through the retained terminal helper.
 
 `runbook.md` is the only operational entry. Stage A ends before any command in
 its paid section. The task never reads unseen, uses a third GPU type, publishes

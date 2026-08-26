@@ -121,7 +121,9 @@ class Plan087HandoffTests(unittest.TestCase):
                         _require_task_owned_paths(forbidden)
             self.assertEqual(list(sibling.iterdir()), [])
 
-    def test_source_archive_round_trip_is_committed_narrow_and_secret_free(self) -> None:
+    def test_source_archive_round_trip_is_committed_narrow_and_secret_free(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as directory:
             temporary = Path(directory)
             repo = temporary / "repo"

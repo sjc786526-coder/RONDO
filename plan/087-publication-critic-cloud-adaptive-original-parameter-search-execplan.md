@@ -90,7 +90,8 @@ Plan 087 分为两个授权阶段：
   小型 manifest 或回传接缝；只做窄复用/泛化，不改变历史计划结果、Judge、selection lock、unseen 或产品语义。
 - `training/publication-critic-plan087/` 下体积合规、受跟踪的初始路线候选、预算/停止/终态、运行入口、依赖、source/data bundle 与 runbook；
   不提交模型、checkpoint、cache、venv 或原始训练输出。
-- `scripts/` 中确有必要且职责可复用的 RunPod 单资源查询/创建/核对辅助；职责不契合时可使用 Plan 087 小工具，不建设通用调参或云编排平台。
+- `scripts/create-runpod-when-ready.py` 作为仓库唯一通用抢卡入口，只负责库存轮询、自动创建和不确定响应的 exact-name 防重复对账；
+  Plan 087 不建立专用 Pod 创建器、确认器或创建 receipt，不建设通用调参或云编排平台。
 - `eval/tests/` 中相称的 pure/fake/focused 测试和小型 fixture；`eval/results/publication-critic/` 中体积合规的正式搜索摘要。
 - 本计划“当前状态”和“关键决策记录”、`doc/WBS.md`、`doc/WBS/multi-agent-trusted-evidence.md`、最终验收后由审查者更新的
   `doc/WBS-COMPLETED.md`，以及有意义的精炼 `agent_log/`。并行 WBS 只做语义窄整合。
@@ -274,32 +275,19 @@ XXX用以下内容代替：
   合同歧义已修订，复验无剩余 High/Medium correctness/functionality finding。
 - 2026-08-26：执行者完成阶段 A 实现：在 Plan 081/082 中性核心之上增加 Plan 087 adaptive recipe/scope/search/finalize 薄层，
   闭合路线 lineage、hash-linked 累计保守预算、decimal GB 与实际可用 bytes 容量门、独立进程精确恢复后入选、三终态、窄 source/data
-  bundle、任务根写入边界、小型回传 allowlist、幂等 Pod create 与歧义 stop/delete 后核对；Plan 082 fixed recipe/formal validator
+  bundle、任务根写入边界、小型回传 allowlist与歧义 stop/delete 后核对；Plan 082 fixed recipe/formal validator
   保持历史语义。
 - 2026-08-26：两条初始路线、云端 runbook 与 exact Hugging Face revision bootstrap 已准备；新增测试与 Plan 081/082 相关历史回归共
   84 项通过（另有 34 个 subtests），shell syntax、Python AST、定向 Ruff 与 diff 检查通过。Stage A 本地数据投影只含
   train+validation，物理 unseen rows/body 为 0；未查询或修改 RunPod/HF、未运行本地真实模型/Cargo/Docker、未产生费用。
 - 2026-08-26：两路独立只读实现审查提出的容量口径/实际余量、费用快照链、恢复 receipt 绑定、路线 evidence lineage、远端任务根写入、
-  Pod API 歧义回查与小型 handoff 边界已窄修；focused tests 与 runbook 操作序列随整改同步，两路最终复验均无剩余 High/Medium finding。
-- 2026-08-26：阶段 A 首轮验收报告指出两个 Medium：同名 Pod 复用未绑定完整创建配置，以及路线收口/末端 scope 把自适应搜索机械冻结。
-  执行者确认问题存在并窄修：冻结 provider client 无法证明完整字段时禁止跨调用领养 Pod；弱路线可在完整观测/checkpoint 提前收口且不伪称恢复，
-  候选或明确必要的恢复点才要求 fresh-process receipt；新 exact-base 路线可按 inventory 选择任意末端深度、显式模块或全参数，同一路线内仍严格扩展。
+  stop/delete API 歧义回查与小型 handoff 边界已窄修；focused tests 与 runbook 操作序列随整改同步，两路最终复验均无剩余 High/Medium finding。
+- 2026-08-26：阶段 A 对当时的专用创建原型经历多轮审查，并同步关闭路线收口、恢复分责和动态 scope 问题；细节保留在形成时点的
+  `agent_log/`。用户最终仓库收口决定已移除该创建原型，现行创建流程由下方决策 017/023 定义。
 - 2026-08-26：整改后 Plan 081/082/087 相邻聚焦回归 90 项通过（另有 44 个 subtests），定向 Ruff/format、15 文件 AST、shell syntax
   与 diff check 通过。云端生命周期与训练/搜索两路只读复验均无剩余 High/Medium correctness/functionality finding；未访问任何 live 外部状态。
-- 2026-08-26：阶段 A 首轮整改复审保留一个 Medium：显式请求网络卷投影后仍接受缺失/null。执行者确认并窄修为同一单-create 调用在既有
-  有限 deadline 内必须得到 provider 的精确卷绑定。只读复核进一步证明冻结 `runpodctl` 会剥离该字段，因此最终方案改为 create 只产出 pending
-  receipt，再由既有 RunPod MCP v2 safe entry 的原始 `networkVolume.id` 完成确认；缺失/null 可在 deadline 内重查，错误/超时 fail closed。
-- 2026-08-26：网络卷窄整改后 Plan 081/082/087 相邻聚焦回归 93 项通过（另有 53 个 subtests），其中 create/terminal 定向 12 项（19 个
-  subtests）覆盖卷缺失/null/错误/稍后出现、deadline 和 provider 配置漂移；定向 Ruff/format、15 文件 AST、shell syntax、diff check 与 WBS untouched
-  门禁通过。未访问任何 live 外部状态，付费门保持关闭。
-- 2026-08-26：网络卷确认复审证明 MCP `get-pod` 在配置的 v2 backend 下原样返回 REST v2 Pod，上一批按 v1/mixed shape 校验导致真实成功路径不可达。
-  执行者保留 pending/final 设计，只把 final 接缝窄修为严格消费 v2 `disk/status/cloud/dataCenterId/mounts.network`；不再依赖只对 v1 生效的 include flags。
-- 2026-08-26：v2 接缝窄修后 Plan 081/082/087 相邻聚焦回归 93 项通过（另有 57 个 subtests），其中 create/terminal 定向 12 项（23 个
-  subtests）覆盖真实 v2 成功 shape、mount 各缺失/漂移形态及完整 provider 配置；定向 Ruff/format、15 文件 AST、shell/CLI syntax、diff check 与 WBS untouched 门禁通过。
-- 2026-08-26：v2 接缝复审保留一个默认字段 Medium：官方 `gpu.count` 可省略且默认 1。执行者在同一窄投影内只把缺失值归一化为 1，并严格拒绝
-  非整数、JSON boolean 和其它数值；不增加 v1 兼容或通用 provider 层。
-- 2026-08-26：默认 count 窄修后 Plan 081/082/087 相邻聚焦回归 93 项通过（另有 59 个 subtests），其中 create/terminal 定向 12 项（25 个
-  subtests）；定向 Ruff/format、15 文件 AST、shell/CLI syntax、diff check 与 WBS untouched 门禁通过。
+- 2026-08-26：阶段 A 最终聚焦回归 93 项通过（另有 59 个 subtests）；定向 Ruff/format、15 文件 AST、shell/CLI syntax、diff check 与
+  WBS untouched 门禁通过。
 - 2026-08-26：审查者以 High 0、Medium 0 验收阶段 A，并明确回复“阶段 A 验收通过，批准进入付费阶段”。执行者随后刷新 live 基线：
   账户 0 Pod、余额 9.1252646939 USD，固定任务总额 8.9852646939 USD；既有卷 `mwemzrn33y` 在 US-TX-3 可挂载 L40S。
 - 2026-08-26：阶段 B 以已提交 `6dd27d8` source archive、物理无 unseen 的 v8 train+validation bundle 和 exact
@@ -315,24 +303,31 @@ XXX用以下内容代替：
   剩余任务授权 5.9762646939 USD。终态 receipt 观察到的累计 task-window Pod billing 1.9811751181 USD 已由追加成本快照 40 纠正记录。
 - 2026-08-26：最终七个相邻聚焦 unittest 93 项通过；15 文件 AST、三个 shell syntax、CLI help、source/data/handoff exact-tree、
   terminal/result JSON 不变量、diff check 与 WBS untouched 门禁通过。获批后未修改 Python 实现，阶段 A 已验收的 Ruff 结果保持有效。
+- 2026-08-26：最终审查确认研究终态 High 0、Medium 0，但按用户最终仓库决定要求三项收口：通用化抢卡脚本、删除 Plan 087 专用
+  创建/确认/receipt 路线，以及在根 AGENTS/CLAUDE 工作流程写明“先创建、后独立核验、不符立即释放”。研究运行、6dd27d8 历史输入、
+  41 张费用快照、handoff、终态结果和远端资产不改写，也不恢复任何 Pod。
+- 2026-08-26：仓库收口已完成：通用入口/测试均移除 Plan 079 标识，Plan 087 专用创建器、创建测试、current bundle member 和 active
+  receipt 语义已删除，根 AGENTS/CLAUDE 第 7 条逐字一致；历史 `agent_log` 与 6dd27d8 输入证据保持原样。最终聚焦回归 91 项通过，
+  其中通用抢卡 6 项、Plan 087 terminal/source-bundle 定向 8 项；定向 Ruff/format、5 文件 AST、两个 CLI help、三个 shell syntax、
+  非历史旧引用、diff、结果 untouched 与 WBS untouched 门禁通过。
 
 ### 当前工作
 
-- 阶段 B/C 研究执行、候选保留、小型回传、云端归零、tracked 结果摘要与轻量门禁已完成；等待最终整体验收。
+- 研究执行与云端归零保持完成；用户指定的三项仓库收口和聚焦门禁均已完成，等待最终复验。
 
 ### 本任务剩余步骤
 
-1. 执行者提交 Plan 087 worktree 后用指定队列请求最终验收；审查者完成相称独立复核与必要整改。
+1. 执行者提交 Plan 087 worktree 后用指定队列请求最终复验；审查者完成相称独立复核与必要整改。
 2. 整体验收通过后按审查者既定决定统一更新 WBS/WBS-COMPLETED；此前保持两份权威 WBS untouched。
 
 ### 阻塞项
 
-- 当前无计划级或基础设施阻塞；研究终态等待最终整体验收。
+- 当前无计划级或基础设施阻塞；仓库收口等待最终复验。
 - 网络卷持续费用为终态后的保留成本，不属于 Plan 087 已关闭的任务总账；卷不得删除。
 
 ### 当前验收状态
 
-- `PROMISING_CANDIDATE_RETAINED / FINAL_REVIEW_PENDING / ZERO_POD`；有真实 L40S 训练、候选恢复、费用和资源终态证据，不含 unseen/product GO。
+- `PROMISING_CANDIDATE_RETAINED / FINAL_REVIEW_PENDING / ZERO_POD`；研究证据已通过，仓库收口已实现并待复验，不含 unseen/product GO。
 
 ### 交接边界
 
@@ -361,10 +356,11 @@ XXX用以下内容代替：
 | 013 | 真实 parameter inventory 动态解析 score/final、任意末端深度、显式模块前缀或全参数；新 exact-base 路线可重选，同一路线后续 phase 只允许实际参数集严格扩展 | 兼容 exact 模型命名和自适应职责切换，同时保持单条 checkpoint/optimizer scope 历史可复现 | training scope | 已采纳 |
 | 014 | 费用采用不可改写的 hash-linked 累计快照链；路线与终态必须按序绑定全部新增快照 | 同时覆盖延迟账单、Pod 替换和多段训练，避免只交末张快照丢失累计费用 | cost lineage | 已采纳 |
 | 015 | 候选 checkpoint 必须由不同 OS 进程的 verify-only 恢复 receipt 绑定 source/recovery process、route context、runtime 与 payload identity | 让“可恢复”成为实际执行证据，并阻止用其它 checkpoint 或同进程状态替代 | recovery | 已采纳 |
-| 016 | 所有云端写路径约束在显式 Plan 087 task root；Pod create/stop/delete 对不确定 API 响应先按唯一身份重查；本地回传只接受显式小文件 allowlist | 避免污染 Plan 082 roots、盲目重复计费实例或回传大权重树 | cloud lifecycle | 已采纳 |
-| 017 | 冻结 `runpodctl` 无法回读全部止费字段且会剥离卷 attachment，禁止跨调用复用同名 Pod；空账户后单次 create 只形成 pending receipt，最终成功必须由既有 RunPod MCP v2 safe entry 的原始 REST v2 Pod 明确观察到精确 `mounts.network[].volumeId/path` | 直接 CLI 轮询真实成功路径不可达；显式 v2 接缝的两阶段窄确认既保护 checkpoint 持久化和避免盲目二次 create，也不新建凭据/通用编排入口 | cloud lifecycle | 已采纳 |
+| 016 | 所有云端写路径约束在显式 Plan 087 task root；通用抢卡脚本只在 create 响应不确定时按 exact name 防重复对账，terminal 对 stop/delete 不确定响应按 exact identity 收口；本地回传只接受显式小文件 allowlist | 避免污染 Plan 082 roots、重复计费实例或回传大权重树，同时保持创建与资格核验分责 | cloud lifecycle | 已采纳 |
+| 017 | Pod 先由通用 `scripts/create-runpod-when-ready.py` 抢卡，再由执行者通过既有 RunPod MCP/CLI 独立核验实际价格、GPU、机房和网络卷挂载；脚本状态不是资格 receipt，任何不符或无法确认都立即由 terminal 能力释放 | 用户要求缩短抢卡关键路径并删除 Plan 087 专用创建/确认体系；独立后验核验仍保护实际资源正确性 | cloud lifecycle | 已采纳 |
 | 018 | 路线收口与 checkpoint 恢复分责：完整观测/checkpoint 可提前 `not_promising`，无恢复时明确记录 `none`；只有 promising 或明确必要恢复点承担 fresh-process 恢复 | 避免弱路线机械跑满和重复候选级恢复，同时保留候选可复用证据 | search/recovery | 已采纳 |
 | 019 | live FUSE mount 的 `df` 报共享后端容量时，以 provider decimal GB 配额减 task-root `du` 作为门禁余量，并保留原始观测 | 真实挂载不暴露任务卷 quota；该窄口径继续满足 60GB 上限和 checkpoint atomic staging 约束 | capacity | 已采纳 |
 | 020 | 成本终态采用余额差、provider task-window billing 与累计 wall-clock ledger 三者最大值；发现终态 billing receipt 晚于快照投影时，只追加 hash-linked 快照 40，不改写历史 | 覆盖延迟计费并保持累计账本不可改写；本次最大值仍为 ledger 3.009 USD | cost lineage | 已采纳 |
 | 021 | Route O 出现分布式 boundary 改善、projected within-PASS/ROC 伴随改善且关键 operating 指标未退化后立即停搜，不使用剩余预算做冗余 clean replay | ExecPlan 的终点是恢复合格的研究候选；正式复现属于后续独立工作，继续付费不会提高本任务结论必要性 | research terminal | 已采纳 |
 | 022 | 只保留 Route O recovery-qualified checkpoint/model snapshot；清理已确认非候选的大型路线工件，保留 57GB 既有卷且删除全部 Pod | 满足后续复用、小型本地交接、Plan 082 只读和终态零 compute 边界 | retention | 已采纳 |
+| 023 | 完整删除 Plan 087 专用 Pod 创建器、创建/确认测试、current bundle member 与 receipt 文档；已执行的 `6dd27d8` archive/receipt 作为历史输入证据不重建不改写 | 最终仓库只保留一个职责固定的通用抢卡入口，且历史研究证据身份不被纯收口伪装更新 | repository closure | 已采纳 |
