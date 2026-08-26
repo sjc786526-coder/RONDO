@@ -227,7 +227,7 @@ source change、损坏、不完整和 backend unavailable 均保守降级，不�
 
 **交接**：Plan 078 的 `#37847` 前置与 Plan 077 / M4-C1 已先期进入主线；M4-S2 随后完成产品验收，并作为后整合者保留 query read
 与 lifecycle write 两侧语义、收敛 shared 接缝。Plan 080 / M4-C2 已消费该交接，并在改产品代码前完成合并树 query×lifecycle
-基线 `45/45`，最终候选的同组邻接回归为 `47/47`。
+基线 `45/45`，最终验收实现的同组邻接回归为 `47/47`。
 
 #### M4-C2：正式 Session Control / TUI（Plan 080，`M4_C2_CONTROL_PASS`）
 

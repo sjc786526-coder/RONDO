@@ -2129,7 +2129,8 @@ formal retry 整改为 `d29e857`，最终独立验收提交为 `43cf0eeb3e1b4826
 ## M4-C2 正式 Session Control / TUI（Plan 080，2026-08-25）
 
 **状态**：稳定 app-server v2→client→TUI 控制链、fresh Session/store 正式轮、两轮独立审查整改与最终复验均已完成；验收通过、
-任务目标完成，结论为 `M4_C2_CONTROL_PASS`。产品候选提交为 `6865a649af11f8f93e069f436a8db855dad272cb`。
+任务目标完成，结论为 `M4_C2_CONTROL_PASS`。最终验收提交为 `6865a649af11f8f93e069f436a8db855dad272cb`，主线整合提交为
+`dbb8247baa202035476404c59a90af577368f238`。
 
 - 新增独立默认关闭的稳定 `session/control`。正式 query 投影 control proof/availability；committed online proof 绑定 live Root owner
   incarnation，Team mutation gate 与 M4-S2 close barrier 在线性化点复验 exact owner、Team instance/revision/commit generation。
@@ -2179,7 +2180,7 @@ formal retry 整改为 `d29e857`，最终独立验收提交为 `43cf0eeb3e1b4826
 ## M4-Z(core) Durable Team 全链收口（Plan 083，2026-08-26）
 
 **状态**：公开 S/C 全链、fresh store/真实进程替换正式轮、两轮独立审查整改与最终复验均已完成；验收通过、任务目标完成，结论为
-`M4_Z_CORE_PASS`。最终产品候选为 `0a68f37667188bb7886ce51d4f79436b54bb9faa`，主线整合提交为
+`M4_Z_CORE_PASS`。最终验收提交为 `0a68f37667188bb7886ce51d4f79436b54bb9faa`，主线整合提交为
 `c71bac2040c11fb8a46830f7f420dcec921a41b9`。
 
 - Durable child graph 持久化、participant commit 与 registry/residency 发布按 fail-closed 顺序收口；persisted Open descendant 与 loaded

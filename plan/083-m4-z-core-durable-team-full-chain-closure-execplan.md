@@ -29,7 +29,7 @@
 
 任务结束只允许形成以下诚实结论之一：
 
-- `M4_Z_CORE_PASS`：最终候选的相称门禁、全新 Session/store 正式全链和独立终审均成立，没有未关闭的高/中等级 correctness finding。
+- `M4_Z_CORE_PASS`：冻结验收提交的相称门禁、全新 Session/store 正式全链和独立终审均成立，没有未关闭的高/中等级 correctness finding。
 - `M4_Z_CORE_FAIL`：在本计划边界内经过合理调试、窄修和复验仍未满足一项或多项宏观验收；必须说明失败接缝、最后有效证据和未满足项。
   资源或基础设施 fail-closed 应单独说明，不能伪装为产品 correctness 失败，也不能冒充 PASS。
 
@@ -59,10 +59,10 @@
 - [ ] 实际修改面的 schema、snapshot、API 文档和生成物使用仓库既有工具同步并审阅；无遗留 `*.snap.new`、临时 fixture、调试输出或
       无解释生成差异。只运行覆盖 S/C 完整链与实际修改面的相称门禁，不要求且不运行 full workspace 全量测试。
 - [ ] 调试阶段先逐段打通并保留已验证进度，从首个失败接缝继续修复。确认整条产品链已经稳定后，冻结本轮代码与配置，再以新的
-      Session/store、无残留任务进程完整运行一轮；只有最终候选的该轮可作为 `M4_Z_CORE_PASS` 正式全链证据。正式轮暴露小问题时允许
+      Session/store、无残留任务进程完整运行一轮；只有冻结验收提交的该轮可作为 `M4_Z_CORE_PASS` 正式全链证据。正式轮暴露小问题时允许
       修复，但修复后须重新冻结，并从新的干净领域状态完整重跑最终全链。
-- [ ] 执行者完成全部候选实现、门禁、正式轮、自审、候选状态文档和精炼执行日志后形成 clean 本地提交，再按指定队列通知本会话审查者。
-      此时 Plan/WBS 只可写 `AWAITING_REVIEW` 或等强候选状态，不提前写 `M4_Z_CORE_PASS`，`doc/WBS-COMPLETED.md` 不提前追加完成历史。
+- [ ] 执行者完成全部待验收实现、门禁、正式轮、自审、待验收状态文档和精炼执行日志后形成 clean 本地提交，再按指定队列通知本会话审查者。
+      此时 Plan/WBS 只可写 `AWAITING_REVIEW` 或等强待验收状态，不提前写 `M4_Z_CORE_PASS`，`doc/WBS-COMPLETED.md` 不提前追加完成历史。
 - [ ] 本会话审查者独立终审；真实高/中等级 correctness finding 必须在本范围内交回执行者整改并复验。每轮整改完成后，执行者先提交全部
       变更再重新通知。审查聚焦正确性、功能性、遗漏接缝和局部修复的全局回归，不扩张为重型复跑、审计平台或额外可信体系。
 - [ ] 最终通过时由审查者写入精炼验收报告，更新本计划动态状态、受影响 WBS 当前事实和 `doc/WBS-COMPLETED.md`，并提交该验收收口；
@@ -132,8 +132,8 @@
    build/test、局部竞态和审查 finding 可自主窄修并重跑，无需因一次可修失败停工或整组报废；不得删测试、弱化断言、扩大 fallback 或
    把 skip/旧证据冒充通过。原则性合同冲突、授权外高危动作、未知 mutation replay 风险或资源门拒绝才停止对应动作。
 7. **相称门禁与正式证据**：只运行 S/C 全链与实际修改面的 core、thread-store、app-server、protocol、client、TUI、schema、snapshot、
-   scoped fix/clippy/fmt 和相邻回归；本任务明确不要求 full workspace 全量测试。先调试稳定、后冻结候选、再从全新 Session/store 完整跑
-   一轮，最终 PASS 只引用最终候选的正式轮和未被后续改动推翻的相称门禁。
+   scoped fix/clippy/fmt 和相邻回归；本任务明确不要求 full workspace 全量测试。先调试稳定、后冻结验收提交、再从全新 Session/store 完整跑
+   一轮，最终 PASS 只引用冻结验收提交的正式轮和未被后续改动推翻的相称门禁。
 8. **一次性重型授权与统一入口**：用户已授权本计划范围内必要的聚焦 Cargo build/test/clippy/fix、生成器、snapshot 和修复后重跑，
    无需逐项再次请示。所有重型命令全局串行、显式使用同一 069 `CARGO_TARGET_DIR`，并通过 `multidev/justfile` 已接入的 canonical
    `scripts/with-build-lock.sh`/watchdog；不得 direct Cargo、绕过 wrapper、提高并发上限、并行构建、`cargo clean` 或与 Docker/真实本地
@@ -145,7 +145,7 @@
    Windows `C:`、内存、swap、PSI 与其它根门禁不变并继续 fail-closed，不得用 WSL 虚拟余量代替；任务结束不做无目的清理。
 10. **外部与安全禁区**：不调用真实 API/模型，不训练、不运行 Docker、benchmark、CI/PR、发布、上传、付费或远端状态变更；不打开、
     搜索、打印、复制或记录 `.env.local` 内容。测试/fake/offline、真实子进程和未运行项必须清楚区分。
-11. **文档、审查与提交顺序**：执行者完成候选实现、正式证据、候选状态文档和执行日志后先提交，再按指定模板通知审查者；通知时
+11. **文档、审查与提交顺序**：执行者完成待验收实现、正式证据、待验收状态文档和执行日志后先提交，再按指定模板通知审查者；通知时
     WBS/Plan 标记 `AWAITING_REVIEW`，不得提前写 PASS 或向 COMPLETED 追加历史。若审查不通过，执行者在同一 worktree 整改、复验、
     提交后再通知；若审查通过，由审查者写验收报告、同步最终 Plan/WBS/COMPLETED 并提交验收收口。任何一方都不得在自身仍有未提交
     变更时发送验收消息，也不得重复发送相同消息。
@@ -189,7 +189,7 @@ UUID替换为 `01a03c53-7cf4-78e0-bea3-c1eb7c4015da`，安全处理消息正文�
 - 全链主场景宜优先落在已经能够跨进程、调用公开 JSON-RPC 并创建 task-owned store 的既有产品 harness；TUI 的确认、certainty、no-replay
   与重同步可由现有 client/TUI 状态机和 snapshot 在其职责层证明。若 live 架构表明另一组合更清晰，可以自主调整，不强制新增单一巨型测试。
 - close、archive/unarchive/delete 会改变后续现场或操作可用性，可以在同一 fresh store 内使用多个新 Session 组成正式场景组，不必为
-  追求一条字面线性脚本扭曲领域生命周期。关键是所有场景使用最终候选、全新领域状态且共同证明完整产品链。
+  追求一条字面线性脚本扭曲领域生命周期。关键是所有场景使用同一冻结验收提交、全新领域状态且共同证明完整产品链。
 - 故障矩阵优先选能代表提交前拒绝、提交后 response loss/unknown、partial cold lifecycle、descendant barrier 与 exact owner replacement 的
   少量确定性 interleaving；不枚举笛卡尔积，不建设通用 fault scheduler、因果追踪或测试专用 daemon。
 - 如果初始全链在现有产品上已经成立，只补集成回归、snapshot/fixture 与收口文档即可；如果暴露真实产品缺口，先补最小回归，再在原
@@ -216,14 +216,14 @@ UUID替换为 `01a03c53-7cf4-78e0-bea3-c1eb7c4015da`，安全处理消息正文�
   non-durable/shared workspace 场景。
 - 退出条件：结果未知不自动重放，失败不伪造终态或 authority handoff，所有宏观验收均有相称产品级或职责层回归。
 
-**D. 聚焦门禁、生成物与候选冻结**
+**D. 聚焦门禁、生成物与验收提交冻结**
 
 - 按实际写集运行必要 crate/协议/schema/snapshot/scoped fix/clippy/fmt 与相邻回归；逐项修复真实 finding并控制 target 增长。
-- 退出条件：最终代码和生成物稳定、无遗留临时产物，计划候选状态/日志记录了准确证据与未运行项；不再处于探索性修改阶段。
+- 退出条件：最终代码和生成物稳定、无遗留临时产物，计划待验收状态/日志记录了准确证据与未运行项；不再处于探索性修改阶段。
 
 **E. fresh 正式全链、独立终审与本地交付**
 
-- 冻结代码与配置，从新的 Session/store、无残留任务进程完整运行正式场景组。执行者完成全部候选变更、把 Plan/WBS 标记为
+- 冻结代码与配置，从新的 Session/store、无残留任务进程完整运行正式场景组。执行者完成全部待验收变更、把 Plan/WBS 标记为
   `AWAITING_REVIEW` 并提交后，按指定队列模板通知审查者。
 - 审查 finding 在同一范围内整改并复验；影响正式链的修复完成后重新冻结，并从新的干净状态重跑完整正式场景组。
 - 审查通过时由审查者记录报告、同步最终 Plan/WBS/COMPLETED 并提交；不通过时交回执行者继续整改。
@@ -242,21 +242,22 @@ UUID替换为 `01a03c53-7cf4-78e0-bea3-c1eb7c4015da`，安全处理消息正文�
   Session/Root/TeamInstance，继续 mutation，完成 descendant barrier、显式 child close、owner close、archive/unarchive/delete。
 - stable/experimental JSON schema 与 precomputed exports 已用既有生成测试同步；30 项宽聚焦回归、实际修改 crate 的 scoped clippy、
   `just fmt` 和 diff 自审均通过，无 `*.snap.new` 或临时 fixture。
-- 冻结候选从新的 TempDir、Session/store 完成正式全链：Nextest run `b0d0eadc-5c49-46d8-9e97-310cf35691ea`，`1/1` 通过；
+- 冻结验收提交从新的 TempDir、Session/store 完成正式全链：Nextest run `b0d0eadc-5c49-46d8-9e97-310cf35691ea`，`1/1` 通过；
   watchdog `20260825-235546-1000-2079406` 为 `stop=none / cleanup=none`。
 - 首轮审查的两项 finding 已在既有 owner seam 关闭：V2 `close_agent` 先证明当前 AgentControl 成员并拒绝 Root/self；durable child
   participant commit 延后到 Open graph edge 成功之后，确定性 activation 失败复用 Closed edge 与 exact runtime cleanup。
 - 命名 participant graph-failure 回归 `2/2`、V2 foreign/Root/self close 回归 `1/1`、fork/resume/crash/V1 close 邻接回归 `7/7`
   和冻结后的 `codex-core` scoped clippy 均通过；既有 30/30、schema 与 client/TUI 证据经首轮审查确认继续有效。
-- 新冻结候选从新的 TempDir、Session/store 重跑正式全链：Nextest run `8a93166f-a605-40c5-965d-d69ffa3fa999`，`1/1` 通过；
+- 新冻结验收提交从新的 TempDir、Session/store 重跑正式全链：Nextest run `8a93166f-a605-40c5-965d-d69ffa3fa999`，`1/1` 通过；
   watchdog `20260826-004938-1000-2191687` 为 `stop=none / cleanup=none`，退出后无残留任务进程。
 - 复审 finding 已在既有 exact-owner/graph seam 关闭：participant activation cleanup 先 teardown captured owner，再取得 exact map lease，
   持 lease 写 Closed edge，最后 exact-retire；teardown、missing/replaced owner 或 graph 写失败均保留 Open edge或受跟踪 owner阻塞 Root close。
 - 定向 failure-ordering 回归 `2/2`、graph/Root-close 邻接回归 `6/6`、`codex-core` scoped clippy 与 `fmt-check` 通过；冻结后的
   fresh 正式全链 Nextest `fc6e8c7d-ff74-4af0-9147-a91580541ef8` 为 `1/1`，watchdog
   `20260826-012504-1000-2261794` 为 `stop=none / cleanup=none`，退出后无残留任务进程。
-- 指定审查者已复核最终候选 `0a68f37667188bb7886ce51d4f79436b54bb9faa`、定向/邻接 JUnit、watchdog 与 fresh 正式轮；无未关闭的
-  高/中等级 correctness finding。最终验收见 `agent_log/2026-08-26-013416-plan083-final-independent-acceptance.md`。
+- 指定审查者已复核冻结验收提交 `0a68f37667188bb7886ce51d4f79436b54bb9faa`、定向/邻接 JUnit、watchdog 与 fresh 正式轮；无未关闭的
+  高/中等级 correctness finding。该实现随后已通过主线整合提交 `c71bac2040c11fb8a46830f7f420dcec921a41b9` 进入 `main`；最终验收见
+  `agent_log/2026-08-26-013416-plan083-final-independent-acceptance.md`。
 
 ### 当前工作
 
@@ -303,4 +304,4 @@ UUID替换为 `01a03c53-7cf4-78e0-bea3-c1eb7c4015da`，安全处理消息正文�
 | 014 | V2 `close_agent` 在工具边界以当前 AgentControl registry 证明 target membership，并拒绝 Root/self；V1 显式 ID 合同保持不变 | UUID 解析不是 Team authority，shared manager 中 foreign Session teardown 不可补偿 | tools/ownership | 已采纳 |
 | 015 | Durable child Session 可延后 participant activation；owner 先持久化 Open edge，再 commit participant，确定性 activation 失败用既有 Closed edge 与 exact runtime cleanup 收口 | graph 确定失败不得留下不可恢复的 committed phantom participant，也不另建事务或状态源 | core/team/graph | 已采纳 |
 | 016 | activation cleanup 复用 explicit close 的 owner 顺序：shutdown captured owner → exact map lease → Closed edge → exact retirement | 任一 teardown/owner/graph 失败都必须保留至少一项 Root close barrier，且持 lease 防止 same-ID replacement 竞态 | core/graph/lifecycle | 已采纳 |
-| 017 | 接受 `0a68f37` 为最终产品候选；复用仅测试编译的定向 fault seam 与已保存的相称/fresh 证据，不重复宽门禁 | 直接覆盖整改失败时序且未改变公开合同；额外通用故障平台或重跑 30/30、full workspace 不提高本次终审价值 | review/tests | 已采纳 |
+| 017 | 接受 `0a68f37` 为冻结验收提交；复用仅测试编译的定向 fault seam 与已保存的相称/fresh 证据，不重复宽门禁；验收通过后由 `c71bac2` 合入主线 | 直接覆盖整改失败时序且未改变公开合同；额外通用故障平台或重跑 30/30、full workspace 不提高本次终审价值 | review/tests | 已采纳 |
