@@ -30,6 +30,7 @@ mod thread;
 mod thread_data;
 mod turn;
 mod windows_sandbox;
+mod writer_workspace_binding;
 
 pub use account::*;
 pub use apps::*;
@@ -62,6 +63,7 @@ pub use thread::*;
 pub use thread_data::*;
 pub use turn::*;
 pub use windows_sandbox::*;
+pub use writer_workspace_binding::*;
 
 #[cfg(test)]
 mod tests;

@@ -1444,6 +1444,66 @@ impl UnifiedExecProcessManager {
         }
     }
 
+    /// Terminate every tracked process without discarding a handle whose termination failed.
+    ///
+    /// Bound writers use this as an authority-revocation barrier. The ordinary unbound cleanup
+    /// path intentionally retains its legacy fire-and-forget behavior.
+    pub(crate) async fn terminate_all_processes_confirmed(&self) -> Result<(), UnifiedExecError> {
+        #[cfg(test)]
+        let injected_failure = {
+            let mut configured = self.fail_confirmed_termination_after.lock().await;
+            if configured
+                .as_ref()
+                .is_some_and(|(remaining, _)| *remaining == 0)
+            {
+                configured.take().map(|(_, message)| message)
+            } else {
+                if let Some((remaining, _)) = configured.as_mut() {
+                    *remaining -= 1;
+                }
+                None
+            }
+        };
+        #[cfg(test)]
+        if let Some(message) = injected_failure {
+            return Err(UnifiedExecError::process_failed(message));
+        }
+        let processes = {
+            let store = self.process_store.lock().await;
+            store
+                .processes
+                .iter()
+                .map(|(process_id, entry)| (*process_id, Arc::clone(&entry.process)))
+                .collect::<Vec<_>>()
+        };
+        let mut first_error = None;
+        for (process_id, process) in processes {
+            if !process.has_exited()
+                && let Err(err) = process.terminate_confirmed().await
+            {
+                if first_error.is_none() {
+                    first_error = Some(err);
+                }
+                continue;
+            }
+            let removed = {
+                let mut store = self.process_store.lock().await;
+                let is_same_process = store
+                    .processes
+                    .get(&process_id)
+                    .is_some_and(|entry| Arc::ptr_eq(&entry.process, &process));
+                is_same_process.then(|| store.remove(process_id)).flatten()
+            };
+            if let Some(entry) = removed {
+                unregister_network_approval_for_entry(&entry).await;
+            }
+        }
+        match first_error {
+            Some(err) => Err(err),
+            None => Ok(()),
+        }
+    }
+
     pub(crate) async fn list_processes(&self) -> Vec<BackgroundTerminalInfo> {
         let store = self.process_store.lock().await;
         let mut entries = store

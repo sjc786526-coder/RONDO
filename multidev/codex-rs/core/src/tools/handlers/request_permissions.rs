@@ -91,8 +91,26 @@ impl RequestPermissionsHandler {
                 "request_permissions requires at least one permission".to_string(),
             ));
         }
+        let binding_external_write = args.writer_workspace_binding_external_write;
+        if binding_external_write && session.writer_workspace_binding_snapshot().await.is_none() {
+            return Err(FunctionCallError::RespondToModel(
+                "writer_workspace_binding_external_write requires an active writer workspace binding"
+                    .to_string(),
+            ));
+        }
+        if binding_external_write {
+            let fs = turn_environment.environment.get_filesystem();
+            args.permissions =
+                crate::writer_workspace_binding::canonicalize_external_write_permissions(
+                    args.permissions.into(),
+                    fs.as_ref(),
+                )
+                .await
+                .map_err(|err| FunctionCallError::RespondToModel(err.to_string()))?
+                .into();
+        }
 
-        let response = session
+        let mut response = session
             .request_permissions_for_environment(
                 &turn,
                 call_id,
@@ -106,6 +124,30 @@ impl RequestPermissionsHandler {
                     "request_permissions was cancelled before receiving a response".to_string(),
                 )
             })?;
+
+        if binding_external_write {
+            let writer_environment_fs = turn_environment.environment.get_filesystem();
+            session
+                .validate_writer_workspace_binding_for_turn(turn.as_ref())
+                .await
+                .map_err(|err| FunctionCallError::RespondToModel(err.to_string()))?;
+            crate::writer_workspace_binding::revalidate_external_write_permissions(
+                &response.permissions.clone().into(),
+                writer_environment_fs.as_ref(),
+            )
+            .await
+            .map_err(|err| FunctionCallError::RespondToModel(err.to_string()))?;
+            session
+                .record_writer_binding_external_write_grant(
+                    &turn,
+                    &turn_environment.environment_id,
+                    response.permissions.clone().into(),
+                )
+                .await?;
+            // The W1 authority is intentionally never session-durable even if
+            // the underlying reviewer granted the ordinary permission longer.
+            response.scope = codex_protocol::request_permissions::PermissionGrantScope::Turn;
+        }
 
         let content = serde_json::to_string(&response).map_err(|err| {
             FunctionCallError::Fatal(format!(

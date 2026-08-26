@@ -1,0 +1,144 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "AbsolutePathBuf": {
+      "description": "A path that is guaranteed to be absolute and normalized (though it is not guaranteed to be canonicalized or exist on the filesystem).\n\nIMPORTANT: When deserializing an `AbsolutePathBuf`, a base path must be set using [AbsolutePathBufGuard::new]. If no base path is set, the deserialization will fail unless the path being deserialized is already absolute.",
+      "type": "string"
+    },
+    "WriterWorkspaceBinding": {
+      "properties": {
+        "availability": {
+          "$ref": "#/definitions/WriterWorkspaceBindingAvailability"
+        },
+        "commonDir": {
+          "$ref": "#/definitions/AbsolutePathBuf"
+        },
+        "environmentId": {
+          "type": "string"
+        },
+        "generation": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "gitDir": {
+          "$ref": "#/definitions/AbsolutePathBuf"
+        },
+        "repositoryRoot": {
+          "$ref": "#/definitions/AbsolutePathBuf"
+        },
+        "worktreeRoot": {
+          "$ref": "#/definitions/AbsolutePathBuf"
+        }
+      },
+      "required": [
+        "availability",
+        "commonDir",
+        "environmentId",
+        "generation",
+        "gitDir",
+        "repositoryRoot",
+        "worktreeRoot"
+      ],
+      "type": "object"
+    },
+    "WriterWorkspaceBindingAvailability": {
+      "oneOf": [
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "available"
+              ],
+              "title": "AvailableWriterWorkspaceBindingAvailabilityType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "AvailableWriterWorkspaceBindingAvailability",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "reason": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "unavailable"
+              ],
+              "title": "UnavailableWriterWorkspaceBindingAvailabilityType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "reason",
+            "type"
+          ],
+          "title": "UnavailableWriterWorkspaceBindingAvailability",
+          "type": "object"
+        }
+      ]
+    },
+    "WriterWorkspaceBindingReplaceOutcome": {
+      "oneOf": [
+        {
+          "properties": {
+            "binding": {
+              "$ref": "#/definitions/WriterWorkspaceBinding"
+            },
+            "type": {
+              "enum": [
+                "applied"
+              ],
+              "title": "AppliedWriterWorkspaceBindingReplaceOutcomeType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "binding",
+            "type"
+          ],
+          "title": "AppliedWriterWorkspaceBindingReplaceOutcome",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "binding": {
+              "$ref": "#/definitions/WriterWorkspaceBinding"
+            },
+            "message": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "unknown"
+              ],
+              "title": "UnknownWriterWorkspaceBindingReplaceOutcomeType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "binding",
+            "message",
+            "type"
+          ],
+          "title": "UnknownWriterWorkspaceBindingReplaceOutcome",
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "properties": {
+    "outcome": {
+      "$ref": "#/definitions/WriterWorkspaceBindingReplaceOutcome"
+    }
+  },
+  "required": [
+    "outcome"
+  ],
+  "title": "WriterWorkspaceBindingReplaceResponse",
+  "type": "object"
+}

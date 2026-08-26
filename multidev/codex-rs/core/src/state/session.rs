@@ -313,6 +313,10 @@ impl SessionState {
             .get(environment_id)
             .cloned()
     }
+
+    pub(crate) fn clear_granted_permissions(&mut self) {
+        self.granted_permissions_by_environment_id.clear();
+    }
 }
 
 // Sometimes new snapshots don't include credits or plan information.

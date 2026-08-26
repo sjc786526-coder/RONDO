@@ -393,6 +393,9 @@ async fn handle_approved_mcp_tool_call(
         let result = async {
             let result = prepared_call
                 .call_with_preparation(|| async {
+                    sess.validate_writer_workspace_execution_authority(turn_context)
+                        .await
+                        .map_err(|err| anyhow::anyhow!(err.to_string()))?;
                     if let McpToolApprovalApplication::Apply { decision, policy } =
                         &approval_application
                     {

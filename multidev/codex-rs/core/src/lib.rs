@@ -179,6 +179,7 @@ mod state;
 mod tasks;
 mod user_shell_command;
 pub mod util;
+mod writer_workspace_binding;
 
 pub use attestation::AttestationContext;
 pub use attestation::AttestationProvider;
@@ -224,6 +225,9 @@ pub use experimental_session_control::ExperimentalSessionControlTeamRole;
 pub use experimental_session_control::ExperimentalSessionControlTeamUnavailableReason;
 pub use experimental_session_control::ExperimentalSessionControlVersion;
 pub use installation_id::resolve_installation_id;
+pub use writer_workspace_binding::WriterWorkspaceBindingError;
+pub use writer_workspace_binding::WriterWorkspaceBindingReplaceOutcome;
+pub use writer_workspace_binding::WriterWorkspaceBindingRequest;
 pub mod compact;
 mod memory_usage;
 pub mod otel_init;

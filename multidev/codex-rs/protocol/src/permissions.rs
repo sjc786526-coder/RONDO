@@ -421,6 +421,36 @@ impl FileSystemSandboxPolicy {
         }
     }
 
+    /// Preserve the current read/deny policy while reducing every write grant
+    /// to one exact workspace root. Callers must separately prove that the
+    /// source policy already allowed that root; this transform never grants
+    /// authority on its own.
+    pub fn restrict_writes_to_workspace_root(&self, root: AbsolutePathBuf) -> Self {
+        let mut entries = self
+            .entries
+            .iter()
+            .filter(|entry| !entry.access.can_write())
+            .cloned()
+            .collect::<Vec<_>>();
+        if self.has_full_disk_read_access() {
+            entries.push(FileSystemSandboxEntry::new(
+                FileSystemPath::Special {
+                    value: FileSystemSpecialPath::Root,
+                },
+                FileSystemAccessMode::Read,
+            ));
+        }
+        entries.push(FileSystemSandboxEntry::new(
+            FileSystemPath::Path { path: root },
+            FileSystemAccessMode::Write,
+        ));
+        Self {
+            kind: FileSystemSandboxKind::Restricted,
+            glob_scan_max_depth: self.glob_scan_max_depth,
+            entries,
+        }
+    }
+
     pub fn restricted(entries: Vec<FileSystemSandboxEntry>) -> Self {
         Self {
             kind: FileSystemSandboxKind::Restricted,
@@ -1966,6 +1996,43 @@ mod tests {
             }
         );
         Ok(())
+    }
+
+    #[test]
+    fn writer_workspace_restriction_preserves_reads_and_denies_but_narrows_writes() {
+        let temp = TempDir::new().expect("tempdir");
+        let writer = AbsolutePathBuf::from_absolute_path(temp.path().join("writer"))
+            .expect("absolute writer path");
+        let other = AbsolutePathBuf::from_absolute_path(temp.path().join("other"))
+            .expect("absolute other path");
+        let denied = AbsolutePathBuf::from_absolute_path(temp.path().join("denied"))
+            .expect("absolute denied path");
+        let source = FileSystemSandboxPolicy::restricted(vec![
+            FileSystemSandboxEntry::new(
+                FileSystemPath::Special {
+                    value: FileSystemSpecialPath::Root,
+                },
+                FileSystemAccessMode::Read,
+            ),
+            FileSystemSandboxEntry::new(
+                FileSystemPath::Path {
+                    path: other.clone(),
+                },
+                FileSystemAccessMode::Write,
+            ),
+            FileSystemSandboxEntry::new(
+                FileSystemPath::Path {
+                    path: denied.clone(),
+                },
+                FileSystemAccessMode::Deny,
+            ),
+        ]);
+
+        let restricted = source.restrict_writes_to_workspace_root(writer.clone());
+        assert!(restricted.can_read_path_with_cwd(other.as_path(), writer.as_path()));
+        assert!(!restricted.can_write_path_with_cwd(other.as_path(), writer.as_path()));
+        assert!(restricted.can_write_path_with_cwd(writer.as_path(), writer.as_path()));
+        assert!(!restricted.can_read_path_with_cwd(denied.as_path(), writer.as_path()));
     }
 
     #[cfg(windows)]

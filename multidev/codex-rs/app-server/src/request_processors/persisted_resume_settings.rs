@@ -4,6 +4,7 @@ use codex_protocol::config_types::ApprovalsReviewer;
 use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::RolloutItem;
+use codex_utils_absolute_path::AbsolutePathBuf;
 use serde_json::Value;
 use std::collections::HashMap;
 
@@ -17,6 +18,7 @@ pub(super) struct PersistedResumeSettings {
     pub(super) approval_policy: AskForApproval,
     pub(super) approvals_reviewer: Option<ApprovalsReviewer>,
     pub(super) active_permission_profile_id: Option<Option<String>>,
+    pub(super) writer_workspace_authority_roots: Option<Vec<AbsolutePathBuf>>,
 }
 
 impl From<ThreadConfigSnapshot> for PersistedResumeSettings {
@@ -27,6 +29,7 @@ impl From<ThreadConfigSnapshot> for PersistedResumeSettings {
             active_permission_profile_id: Some(
                 snapshot.active_permission_profile.map(|profile| profile.id),
             ),
+            writer_workspace_authority_roots: snapshot.writer_workspace_authority_roots,
         }
     }
 }
@@ -141,10 +144,27 @@ pub(super) fn latest_persisted_resume_settings(
         }
     }
 
+    let writer_workspace_authority_roots = history
+        .iter()
+        .rev()
+        .find_map(|item| match item {
+            RolloutItem::EventMsg(EventMsg::ThreadSettingsApplied(event)) => {
+                Some(&event.thread_settings)
+            }
+            _ => None,
+        })
+        .and_then(|settings| {
+            settings
+                .writer_workspace_binding
+                .as_ref()
+                .and(settings.writer_workspace_authority_roots.clone())
+        });
+
     Some(PersistedResumeSettings {
         approval_policy,
         approvals_reviewer,
         active_permission_profile_id,
+        writer_workspace_authority_roots,
     })
 }
 
@@ -181,5 +201,10 @@ pub(super) fn merge_persisted_thread_settings(
     if !has_permission_override(request_overrides, typesafe_overrides) {
         typesafe_overrides.persisted_permission_profile_id =
             persisted_settings.active_permission_profile_id.flatten();
+    }
+    if typesafe_overrides.workspace_roots.is_none()
+        && !raw_override_has(request_overrides, "workspace_roots")
+    {
+        typesafe_overrides.workspace_roots = persisted_settings.writer_workspace_authority_roots;
     }
 }

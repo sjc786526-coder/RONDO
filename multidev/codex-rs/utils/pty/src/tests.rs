@@ -1,5 +1,11 @@
 use std::collections::HashMap;
+use std::io;
 use std::path::Path;
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
 
 use pretty_assertions::assert_eq;
 
@@ -12,6 +18,58 @@ use crate::spawn_from_driver;
 use crate::spawn_pipe_process;
 use crate::spawn_pipe_process_no_stdin;
 use crate::spawn_pty_process;
+
+struct RetryableFailingTerminator {
+    attempts: Arc<AtomicUsize>,
+}
+
+impl crate::process::ChildTerminator for RetryableFailingTerminator {
+    fn signal(&mut self, signal: ProcessSignal) -> io::Result<()> {
+        Err(crate::process::unsupported_signal(signal))
+    }
+
+    fn kill(&mut self) -> io::Result<()> {
+        let attempt = self.attempts.fetch_add(1, Ordering::SeqCst);
+        if attempt == 0 {
+            Err(io::Error::other("injected local killer failure"))
+        } else {
+            Ok(())
+        }
+    }
+}
+
+#[tokio::test]
+async fn confirmed_termination_retains_local_killer_for_retry() {
+    let (writer_tx, _writer_rx) = tokio::sync::mpsc::channel(1);
+    let attempts = Arc::new(AtomicUsize::new(0));
+    let pending_task = || tokio::spawn(std::future::pending::<()>());
+    let handle = crate::process::ProcessHandle::new(
+        writer_tx,
+        Box::new(RetryableFailingTerminator {
+            attempts: Arc::clone(&attempts),
+        }),
+        pending_task(),
+        Vec::new(),
+        pending_task(),
+        pending_task(),
+        Arc::new(AtomicBool::new(false)),
+        Arc::new(Mutex::new(None)),
+        None,
+        None,
+    );
+
+    let error = handle
+        .terminate_confirmed()
+        .expect_err("the first local kill failure must propagate");
+    assert!(error.to_string().contains("injected local killer failure"));
+    assert_eq!(attempts.load(Ordering::SeqCst), 1);
+    assert!(!handle.has_exited());
+
+    handle
+        .terminate_confirmed()
+        .expect("the retained local killer should be retried");
+    assert_eq!(attempts.load(Ordering::SeqCst), 2);
+}
 
 #[cfg(windows)]
 #[path = "windows_tests.rs"]

@@ -19,6 +19,11 @@ use crate::session::resolve_multi_agent_version;
 use crate::session::session::Session;
 use crate::tasks::InterruptedTurnHistoryMarker;
 use crate::tasks::interrupted_turn_history_marker;
+use crate::writer_workspace_binding::WriterWorkspaceBindingRequest;
+use crate::writer_workspace_binding::WriterWorkspaceBindingState;
+use crate::writer_workspace_binding::capture_initial_binding;
+use crate::writer_workspace_binding::configured_authority_workspace_roots;
+use crate::writer_workspace_binding::revalidate_binding;
 use codex_agent_graph_store::AgentGraphStore;
 use codex_agent_graph_store::LocalAgentGraphStore;
 use codex_analytics::AnalyticsEventsClient;
@@ -327,6 +332,7 @@ pub struct StartThreadOptions {
     pub environments: Option<Vec<TurnEnvironmentSelection>>,
     pub thread_extension_init: ExtensionDataInit,
     pub client_mcp_extensions: ClientMcpExtensions,
+    pub writer_workspace_binding: Option<WriterWorkspaceBindingRequest>,
 }
 
 impl StartThreadOptions {
@@ -344,6 +350,7 @@ impl StartThreadOptions {
             environments: None,
             thread_extension_init: ExtensionDataInit::default(),
             client_mcp_extensions: ClientMcpExtensions::default(),
+            writer_workspace_binding: None,
         }
     }
 }
@@ -1890,6 +1897,7 @@ impl ThreadManagerState {
             /*inherited_environments*/ None,
             /*inherited_exec_policy*/ None,
             /*environments*/ None,
+            /*writer_workspace_binding*/ None,
             /*defer_durable_team_participant_registration*/ false,
         ))
         .await
@@ -1909,6 +1917,7 @@ impl ThreadManagerState {
         inherited_environments: Option<TurnEnvironmentSnapshot>,
         inherited_exec_policy: Option<Arc<crate::exec_policy::ExecPolicyManager>>,
         environments: Option<Vec<TurnEnvironmentSelection>>,
+        writer_workspace_binding: Option<WriterWorkspaceBindingRequest>,
         defer_durable_team_participant_registration: bool,
     ) -> CodexResult<NewThread> {
         let client_mcp_extensions = self.client_mcp_extensions_for_child(parent_thread_id).await;
@@ -1918,6 +1927,7 @@ impl ThreadManagerState {
             thread_source,
             metrics_service_name,
             environments,
+            writer_workspace_binding,
             client_mcp_extensions,
             ..StartThreadOptions::new(config)
         };
@@ -1984,6 +1994,7 @@ impl ThreadManagerState {
         inherited_environments: Option<TurnEnvironmentSnapshot>,
         inherited_exec_policy: Option<Arc<crate::exec_policy::ExecPolicyManager>>,
         environments: Option<Vec<TurnEnvironmentSelection>>,
+        writer_workspace_binding: Option<WriterWorkspaceBindingRequest>,
         thread_extension_init: ExtensionDataInit,
         defer_durable_team_participant_registration: bool,
     ) -> CodexResult<NewThread> {
@@ -1994,6 +2005,7 @@ impl ThreadManagerState {
             session_source: Some(session_source),
             thread_source,
             environments,
+            writer_workspace_binding,
             thread_extension_init,
             client_mcp_extensions,
             ..StartThreadOptions::new(config)
@@ -2049,6 +2061,7 @@ impl ThreadManagerState {
             environments,
             thread_extension_init,
             client_mcp_extensions,
+            writer_workspace_binding,
         } = options;
         let session_source = session_source.unwrap_or_else(|| self.session_source.clone());
         let environments = environments.unwrap_or_else(|| {
@@ -2058,6 +2071,46 @@ impl ThreadManagerState {
                 &config.workspace_roots,
             )
         });
+        let authority_environments = codex_protocol::protocol::TurnEnvironmentSelections::new(
+            config.cwd.clone(),
+            environments.clone(),
+        );
+        let resumed_binding = initial_history.get_resumed_writer_workspace_binding();
+        if writer_workspace_binding.is_some() && resumed_binding.is_some() {
+            return Err(CodexErr::InvalidRequest(
+                "thread resume cannot replace a persisted writer workspace binding".to_string(),
+            ));
+        }
+        let writer_workspace_binding: Option<WriterWorkspaceBindingState> =
+            if let Some(request) = writer_workspace_binding {
+                Some(
+                    capture_initial_binding(
+                        request,
+                        &config,
+                        &authority_environments,
+                        self.environment_manager.as_ref(),
+                    )
+                    .await
+                    .map_err(|err| CodexErr::InvalidRequest(err.to_string()))?,
+                )
+            } else if let Some(binding) = resumed_binding {
+                let mut state = WriterWorkspaceBindingState::resumed(binding);
+                match revalidate_binding(
+                    &state,
+                    config.permissions.permission_profile(),
+                    &authority_environments,
+                    &configured_authority_workspace_roots(&config),
+                    self.environment_manager.as_ref(),
+                )
+                .await
+                {
+                    Ok(()) => state.mark_available(),
+                    Err(err) => state.mark_unavailable(&err),
+                }
+                Some(state)
+            } else {
+                None
+            };
         let is_resumed_thread = matches!(&initial_history, InitialHistory::Resumed(_));
         if let InitialHistory::Resumed(resumed) = &initial_history {
             let mut threads = self.threads.write().await;
@@ -2149,6 +2202,7 @@ impl ThreadManagerState {
             user_shell_override,
             parent_trace,
             environment_selections: environments,
+            writer_workspace_binding,
             thread_extension_init,
             client_mcp_extensions,
             analytics_events_client: self.analytics_events_client.clone(),

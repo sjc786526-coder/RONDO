@@ -17,6 +17,7 @@ use codex_protocol::protocol::ThreadSettingsAppliedEvent;
 use codex_protocol::protocol::ThreadSettingsSnapshot;
 use codex_protocol::protocol::TurnContextItem;
 use codex_protocol::protocol::TurnStartedEvent;
+use codex_protocol::protocol::WriterWorkspaceBinding;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use pretty_assertions::assert_eq;
 use serde_json::json;
@@ -55,6 +56,8 @@ fn settings_item(
                         developer_instructions: None,
                     },
                 },
+                writer_workspace_binding: None,
+                writer_workspace_authority_roots: None,
             },
         },
     ))
@@ -119,6 +122,7 @@ fn latest_settings_snapshot_wins() {
             approval_policy: AskForApproval::OnRequest,
             approvals_reviewer: Some(ApprovalsReviewer::AutoReview),
             active_permission_profile_id: Some(Some("dev".to_string())),
+            writer_workspace_authority_roots: None,
         })
     );
 }
@@ -145,6 +149,7 @@ fn legacy_turn_context_does_not_revive_older_identity() {
             approval_policy: AskForApproval::OnRequest,
             approvals_reviewer: Some(ApprovalsReviewer::User),
             active_permission_profile_id: None,
+            writer_workspace_authority_roots: None,
         })
     );
 }
@@ -196,6 +201,7 @@ fn settings_applied_during_turn_wins_over_stale_compaction_context() {
             approval_policy: AskForApproval::Never,
             approvals_reviewer: Some(ApprovalsReviewer::AutoReview),
             active_permission_profile_id: Some(Some("dev".to_string())),
+            writer_workspace_authority_roots: None,
         })
     );
 }
@@ -230,6 +236,7 @@ fn later_turn_context_wins_over_earlier_turn_update() {
             approval_policy: AskForApproval::UnlessTrusted,
             approvals_reviewer: Some(ApprovalsReviewer::User),
             active_permission_profile_id: Some(Some("current".to_string())),
+            writer_workspace_authority_roots: None,
         })
     );
 }
@@ -240,6 +247,7 @@ fn raw_request_overrides_stay_ahead_of_persisted_settings() {
         approval_policy: AskForApproval::Never,
         approvals_reviewer: Some(ApprovalsReviewer::AutoReview),
         active_permission_profile_id: Some(Some("persisted".to_string())),
+        writer_workspace_authority_roots: None,
     };
     let request_overrides = HashMap::from([
         ("approval_policy".to_string(), json!("on-request")),
@@ -253,4 +261,75 @@ fn raw_request_overrides_stay_ahead_of_persisted_settings() {
     assert_eq!(typesafe_overrides.approval_policy, None);
     assert_eq!(typesafe_overrides.approvals_reviewer, None);
     assert_eq!(typesafe_overrides.persisted_permission_profile_id, None);
+}
+
+#[test]
+fn writer_authority_roots_resume_but_explicit_runtime_roots_win() {
+    let root = cwd();
+    let sibling = root.join("writer-sibling");
+    let mut item = settings_item(
+        AskForApproval::OnRequest,
+        ApprovalsReviewer::User,
+        Some(":workspace"),
+    );
+    let RolloutItem::EventMsg(EventMsg::ThreadSettingsApplied(event)) = &mut item else {
+        panic!("settings helper must return a settings event");
+    };
+    event.thread_settings.writer_workspace_binding = Some(WriterWorkspaceBinding {
+        generation: 1,
+        worktree_root: root.clone(),
+        git_dir: root.join(".git/worktrees/writer"),
+        common_dir: root.join(".git"),
+        repository_root: root.clone(),
+        environment_id: "local".to_string(),
+    });
+    event.thread_settings.writer_workspace_authority_roots =
+        Some(vec![root.clone(), sibling.clone()]);
+
+    let persisted = latest_persisted_resume_settings(&[item]).expect("persisted settings");
+    let mut restored = ConfigOverrides::default();
+    merge_persisted_thread_settings(persisted.clone(), None, &mut restored);
+    assert_eq!(restored.workspace_roots, Some(vec![root, sibling]));
+
+    let explicit = cwd().join("explicit");
+    let mut overridden = ConfigOverrides {
+        workspace_roots: Some(vec![explicit.clone()]),
+        ..Default::default()
+    };
+    merge_persisted_thread_settings(persisted, None, &mut overridden);
+    assert_eq!(overridden.workspace_roots, Some(vec![explicit]));
+}
+
+#[test]
+fn newer_unbound_settings_tombstone_older_writer_authority_roots() {
+    let root = cwd();
+    let mut bound = settings_item(
+        AskForApproval::OnRequest,
+        ApprovalsReviewer::User,
+        Some(":workspace"),
+    );
+    let RolloutItem::EventMsg(EventMsg::ThreadSettingsApplied(event)) = &mut bound else {
+        panic!("settings helper must return a settings event");
+    };
+    event.thread_settings.writer_workspace_binding = Some(WriterWorkspaceBinding {
+        generation: 1,
+        worktree_root: root.clone(),
+        git_dir: root.join(".git/worktrees/writer"),
+        common_dir: root.join(".git"),
+        repository_root: root.clone(),
+        environment_id: "local".to_string(),
+    });
+    event.thread_settings.writer_workspace_authority_roots = Some(vec![root]);
+    let unbound = settings_item(
+        AskForApproval::OnRequest,
+        ApprovalsReviewer::User,
+        Some(":workspace"),
+    );
+
+    assert_eq!(
+        latest_persisted_resume_settings(&[bound, unbound])
+            .expect("persisted settings")
+            .writer_workspace_authority_roots,
+        None
+    );
 }

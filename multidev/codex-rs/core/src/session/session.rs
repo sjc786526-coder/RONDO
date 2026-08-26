@@ -11,6 +11,7 @@ use crate::session::turn_context::EnvironmentConfig;
 use crate::shell_snapshot::ShellSnapshot;
 use crate::skills::SkillError;
 use crate::state::ActiveTurn;
+use crate::writer_workspace_binding::WriterWorkspaceBindingState;
 use codex_extension_api::ExtensionDataInit;
 use codex_http_client::ClientRouteClass;
 use codex_http_client::RouteAwareClientPool;
@@ -111,6 +112,11 @@ pub(crate) struct Session {
     pub(super) mcp_prewarm_task: std::sync::Mutex<Option<JoinHandle<()>>>,
     pub(crate) conversation: Arc<RealtimeConversationManager>,
     pub(crate) active_turn: Mutex<Option<ActiveTurn>>,
+    /// Serializes idle-turn admission through task installation with terminal runtime teardown.
+    /// A shutdown fence holds the sole permit until task/process teardown is complete.
+    pub(super) task_admission_gate: Arc<Semaphore>,
+    /// Serializes binding validation and transactional replacement.
+    pub(super) writer_workspace_binding_mutation: Mutex<()>,
     /// Shutdown submissions that were accepted and have not failed before runtime teardown.
     /// Canceled external waiters do not clear this authoritative lifecycle fence.
     pub(super) experimental_session_control_shutdown_submissions: Arc<AtomicUsize>,
@@ -161,6 +167,9 @@ pub(crate) struct SessionConfiguration {
     /// Sticky thread-level environment selections plus the legacy cwd used
     /// when a turn does not select an environment.
     pub(super) environments: TurnEnvironmentSelections,
+    /// Caller authority remains in `environments` and `permission_profile_state`;
+    /// this optional state projects the narrower execution cwd/write boundary.
+    pub(super) writer_workspace_binding: Option<WriterWorkspaceBindingState>,
     /// Directory containing all Codex state for this session.
     pub(super) codex_home: AbsolutePathBuf,
     /// Optional user-facing name for the thread, updated during the session.
@@ -190,15 +199,22 @@ pub(crate) struct SessionConfiguration {
 
 impl SessionConfiguration {
     pub(super) fn cwd(&self) -> &AbsolutePathBuf {
-        &self.environments.legacy_fallback_cwd
+        &self.effective_environments().legacy_fallback_cwd
     }
 
     pub(super) fn environment_selections(&self) -> &[TurnEnvironmentSelection] {
-        &self.environments.environments
+        &self.effective_environments().environments
+    }
+
+    pub(super) fn effective_environments(&self) -> &TurnEnvironmentSelections {
+        self.writer_workspace_binding
+            .as_ref()
+            .map(WriterWorkspaceBindingState::execution_environments)
+            .unwrap_or(&self.environments)
     }
 
     pub(super) fn primary_workspace_roots(&self) -> Vec<AbsolutePathBuf> {
-        self.environments
+        self.effective_environments()
             .environments
             .first()
             .map(|environment| {
@@ -225,7 +241,13 @@ impl SessionConfiguration {
                 .original_config_do_not_use
                 .permissions
                 .allow_login_shell,
-            permission_profile: self.permission_profile_state.snapshot(),
+            permission_profile: if self.writer_workspace_binding.is_some() {
+                crate::config::PermissionProfileSnapshot::legacy(
+                    self.materialized_permission_profile(),
+                )
+            } else {
+                self.permission_profile_state.snapshot()
+            },
         }
     }
 
@@ -240,9 +262,83 @@ impl SessionConfiguration {
             || self.permission_profile() != next.permission_profile()
     }
 
+    pub(super) fn writer_workspace_authority_differs(&self, next: &Self) -> bool {
+        self.environments != next.environments
+            || self.permission_profile_state != next.permission_profile_state
+            || self.approval_policy.value() != next.approval_policy.value()
+            || self.approvals_reviewer != next.approvals_reviewer
+            || self.windows_sandbox_level != next.windows_sandbox_level
+    }
+
+    pub(super) fn writer_workspace_authority_revision(&self) -> Option<u64> {
+        self.writer_workspace_binding
+            .as_ref()
+            .map(WriterWorkspaceBindingState::authority_revision)
+    }
+
+    pub(super) fn ensure_writer_workspace_authority_update_allowed(
+        &self,
+        next: &Self,
+        active_turn: bool,
+    ) -> ConstraintResult<()> {
+        if self.writer_workspace_binding.is_some()
+            && active_turn
+            && self.writer_workspace_authority_differs(next)
+        {
+            return Err(ConstraintError::InvalidValue {
+                field_name: "thread_settings",
+                candidate: "authority-relevant update during a bound writer turn".to_string(),
+                allowed: "model-only settings, or authority updates while the bound writer is idle"
+                    .to_string(),
+                requirement_source: codex_config::RequirementSource::Unknown,
+            });
+        }
+        Ok(())
+    }
+
     fn materialized_permission_profile(&self) -> PermissionProfile {
+        let profile = self.materialized_authority_permission_profile();
+        match &self.writer_workspace_binding {
+            Some(binding) => profile
+                .restrict_writes_to_workspace_root(binding.snapshot.binding.worktree_root.clone())
+                .unwrap_or_else(PermissionProfile::read_only),
+            None => profile,
+        }
+    }
+
+    fn materialized_authority_permission_profile(&self) -> PermissionProfile {
+        let workspace_roots = if self.writer_workspace_binding.is_some() {
+            self.authority_workspace_roots()
+        } else {
+            self.primary_workspace_roots()
+        };
         self.permission_profile()
-            .materialize_project_roots_with_workspace_roots(&self.primary_workspace_roots())
+            .materialize_project_roots_with_workspace_roots(&workspace_roots)
+    }
+
+    pub(super) fn authority_workspace_roots(&self) -> Vec<AbsolutePathBuf> {
+        let mut roots = self
+            .environments
+            .environments
+            .iter()
+            .flat_map(|environment| environment.workspace_roots.iter())
+            .filter_map(|root| root.to_abs_path().ok())
+            .collect::<Vec<_>>();
+        roots.extend(
+            self.original_config_do_not_use
+                .permissions
+                .user_visible_workspace_roots()
+                .iter()
+                .cloned(),
+        );
+        roots.extend(self.profile_workspace_roots().iter().cloned());
+        let mut deduped = Vec::with_capacity(roots.len());
+        for root in roots {
+            if !deduped.iter().any(|existing| existing == &root) {
+                deduped.push(root);
+            }
+        }
+        deduped
     }
 
     pub(super) fn active_permission_profile(&self) -> Option<ActivePermissionProfile> {
@@ -253,11 +349,46 @@ impl SessionConfiguration {
         self.permission_profile_state.profile_workspace_roots()
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "trusted projection replacement installs an exact allow-only snapshot"
+    )]
     pub(super) fn apply_permission_profile_to_permissions(
         &self,
         permissions: &mut crate::config::Permissions,
     ) {
-        permissions.set_permission_profile_state(self.permission_profile_state.clone());
+        if self.writer_workspace_binding.is_some() {
+            permissions
+                .replace_permission_profile_from_session_snapshot(
+                    crate::config::PermissionProfileSnapshot::legacy(
+                        self.materialized_permission_profile(),
+                    ),
+                )
+                .expect("writer binding profile is a trusted session projection");
+        } else {
+            permissions.set_permission_profile_state(self.permission_profile_state.clone());
+        }
+    }
+
+    /// Restore the session authority needed to admit an explicitly bound child writer.
+    ///
+    /// A bound parent's turn config is deliberately projected down to that parent's single
+    /// worktree. Reusing that projection to validate a child binding would make authorized
+    /// sibling worktrees unreachable. This restores only the authority already retained by the
+    /// session; the child's own binding is still responsible for applying its execution
+    /// projection after admission.
+    pub(super) fn apply_explicit_child_writer_authority(
+        &self,
+        config: &mut crate::config::Config,
+    ) -> Vec<TurnEnvironmentSelection> {
+        config
+            .permissions
+            .set_permission_profile_state(self.permission_profile_state.clone());
+        config
+            .permissions
+            .set_workspace_roots(self.authority_workspace_roots());
+        config.cwd = self.environments.legacy_fallback_cwd.clone();
+        self.environments.environments.clone()
     }
 
     #[cfg(test)]
@@ -277,6 +408,7 @@ impl SessionConfiguration {
         )
     }
 
+    #[cfg(test)]
     pub(super) fn file_system_sandbox_policy(&self) -> FileSystemSandboxPolicy {
         self.materialized_permission_profile()
             .file_system_sandbox_policy()
@@ -297,7 +429,7 @@ impl SessionConfiguration {
             approvals_reviewer: self.approvals_reviewer,
             permission_profile: self.materialized_permission_profile(),
             active_permission_profile: self.active_permission_profile(),
-            environments: self.environments.clone(),
+            environments: self.effective_environments().clone(),
             workspace_roots: self.primary_workspace_roots(),
             profile_workspace_roots: self.profile_workspace_roots().to_vec(),
             ephemeral: self.original_config_do_not_use.ephemeral,
@@ -311,13 +443,23 @@ impl SessionConfiguration {
             parent_thread_id: self.parent_thread_id,
             thread_source: self.thread_source.clone(),
             originator: self.originator.clone(),
+            writer_workspace_binding: self
+                .writer_workspace_binding
+                .as_ref()
+                .map(|binding| binding.snapshot.clone()),
+            writer_workspace_authority_roots: self
+                .writer_workspace_binding
+                .as_ref()
+                .map(|_| self.authority_workspace_roots()),
         }
     }
 
     pub(crate) fn apply(&self, updates: &SessionSettingsUpdate) -> ConstraintResult<Self> {
         let mut next_configuration = self.clone();
         let current_sandbox_policy = self.sandbox_policy();
-        let current_file_system_sandbox_policy = self.file_system_sandbox_policy();
+        let current_file_system_sandbox_policy = self
+            .materialized_authority_permission_profile()
+            .file_system_sandbox_policy();
         let current_network_sandbox_policy = self.network_sandbox_policy();
         let legacy_file_system_projection =
             FileSystemSandboxPolicy::from_legacy_sandbox_policy_preserving_deny_entries(
@@ -372,7 +514,7 @@ impl SessionConfiguration {
             next_configuration.windows_sandbox_level = windows_sandbox_level;
         }
 
-        let current_cwd = self.cwd().clone();
+        let current_cwd = self.environments.legacy_fallback_cwd.clone();
         let next_environments = updates
             .environments
             .clone()
@@ -467,6 +609,31 @@ impl SessionConfiguration {
         }
         if let Some(app_server_client_version) = updates.app_server_client_version.clone() {
             next_configuration.app_server_client_version = Some(app_server_client_version);
+        }
+        if let Some(binding) = next_configuration.writer_workspace_binding.as_ref() {
+            let authority_profile = next_configuration.materialized_authority_permission_profile();
+            let root = &binding.snapshot.binding.worktree_root;
+            if authority_profile.enforcement() != SandboxEnforcement::Managed
+                || !authority_profile
+                    .file_system_sandbox_policy()
+                    .can_write_path_with_cwd(root.as_path(), root.as_path())
+            {
+                return Err(ConstraintError::InvalidValue {
+                    field_name: "permission_profile",
+                    candidate: format!("{authority_profile:?}"),
+                    allowed: format!(
+                        "a managed profile that retains authority for the active writer workspace {}",
+                        root.display()
+                    ),
+                    requirement_source: codex_config::RequirementSource::Unknown,
+                });
+            }
+        }
+        if self.writer_workspace_binding.is_some()
+            && self.writer_workspace_authority_differs(&next_configuration)
+            && let Some(binding) = next_configuration.writer_workspace_binding.as_mut()
+        {
+            binding.advance_authority_revision();
         }
         Ok(next_configuration)
     }
@@ -1565,6 +1732,8 @@ impl Session {
                 mcp_prewarm_task: std::sync::Mutex::new(None),
                 conversation: Arc::new(RealtimeConversationManager::new()),
                 active_turn: Mutex::new(None),
+                task_admission_gate: Arc::new(Semaphore::new(/*permits*/ 1)),
+                writer_workspace_binding_mutation: Mutex::new(()),
                 experimental_session_control_shutdown_submissions: Arc::new(AtomicUsize::new(0)),
                 pending_durable_session_shutdown: std::sync::Mutex::new(None),
                 pending_user_message_admissions: Default::default(),
@@ -1663,9 +1832,18 @@ impl Session {
                 }
                 InitialHistory::Cleared => codex_hooks::SessionStartSource::Clear,
             };
+            let needs_initial_writer_binding_flush = matches!(
+                &initial_history,
+                InitialHistory::New | InitialHistory::Cleared
+            ) && session_configuration.writer_workspace_binding.is_some();
 
             // record_initial_history can emit events. We record only after the SessionConfiguredEvent is emitted.
-            Box::pin(sess.record_initial_history(initial_history)).await;
+            Box::pin(sess.try_record_initial_history(initial_history)).await?;
+            if needs_initial_writer_binding_flush {
+                // A fresh binding is part of the thread's durable identity. Do not return an
+                // executable Session until that exact generation is on stable storage.
+                sess.persist_writer_workspace_binding_event().await?;
+            }
             if matches!(&sess.fork_persistence, ForkPersistence::Referenced { .. }) {
                 // Keep the source reserved until the child's history reference is durable.
                 sess.try_ensure_rollout_materialized().await?;

@@ -18,6 +18,7 @@ use codex_core::CodexThread;
 use codex_core::StartThreadOptions;
 use codex_core::ThreadManager;
 use codex_core::TimeProvider;
+use codex_core::WriterWorkspaceBindingRequest;
 use codex_core::config::Config;
 use codex_core::resolve_installation_id;
 use codex_core::shell::Shell;
@@ -314,6 +315,7 @@ pub struct TestCodexBuilder {
     models_manager: Option<SharedModelsManager>,
     session_source: SessionSource,
     thread_store_wrapper: Option<Box<ThreadStoreWrapper>>,
+    writer_workspace_binding: Option<WriterWorkspaceBindingRequest>,
 }
 
 impl TestCodexBuilder {
@@ -357,6 +359,11 @@ impl TestCodexBuilder {
         F: FnOnce(Arc<dyn ThreadStore>) -> Arc<dyn ThreadStore> + Send + 'static,
     {
         self.thread_store_wrapper = Some(Box::new(wrapper));
+        self
+    }
+
+    pub fn with_writer_workspace_binding(mut self, binding: WriterWorkspaceBindingRequest) -> Self {
+        self.writer_workspace_binding = Some(binding);
         self
     }
 
@@ -741,6 +748,11 @@ impl TestCodexBuilder {
                 .await?
             }
             (None, Some(user_shell_override)) => {
+                if self.writer_workspace_binding.is_some() {
+                    return Err(anyhow!(
+                        "writer workspace binding test setup does not support a user shell override"
+                    ));
+                }
                 Box::pin(
                     codex_core::test_support::start_thread_with_user_shell_override(
                         thread_manager.as_ref(),
@@ -755,6 +767,7 @@ impl TestCodexBuilder {
                 Box::pin(thread_manager.start_thread(StartThreadOptions {
                     history_mode: self.history_mode,
                     client_mcp_extensions: client_mcp_extensions(),
+                    writer_workspace_binding: self.writer_workspace_binding.clone(),
                     ..StartThreadOptions::new(config.clone())
                 }))
                 .await?
@@ -1315,6 +1328,7 @@ pub fn test_codex() -> TestCodexBuilder {
         models_manager: None,
         session_source: SessionSource::Exec,
         thread_store_wrapper: None,
+        writer_workspace_binding: None,
     }
 }
 

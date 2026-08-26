@@ -4127,6 +4127,7 @@ async fn set_rate_limits_retains_previous_credits() {
         permission_profile_state: config.permissions.permission_profile_state().clone(),
         windows_sandbox_level: WindowsSandboxLevel::from_config(&config),
         environments: TurnEnvironmentSelections::new(config.cwd.clone(), Vec::new()),
+        writer_workspace_binding: None,
         codex_home: config.codex_home.clone(),
         thread_name: None,
         original_config_do_not_use: Arc::clone(&config),
@@ -4236,6 +4237,7 @@ async fn set_rate_limits_updates_plan_type_when_present() {
         permission_profile_state: config.permissions.permission_profile_state().clone(),
         windows_sandbox_level: WindowsSandboxLevel::from_config(&config),
         environments: TurnEnvironmentSelections::new(config.cwd.clone(), Vec::new()),
+        writer_workspace_binding: None,
         codex_home: config.codex_home.clone(),
         thread_name: None,
         original_config_do_not_use: Arc::clone(&config),
@@ -4783,6 +4785,7 @@ pub(crate) async fn make_session_configuration_for_tests() -> SessionConfigurati
         permission_profile_state: config.permissions.permission_profile_state().clone(),
         windows_sandbox_level: WindowsSandboxLevel::from_config(&config),
         environments: TurnEnvironmentSelections::new(config.cwd.clone(), Vec::new()),
+        writer_workspace_binding: None,
         codex_home: config.codex_home.clone(),
         thread_name: None,
         original_config_do_not_use: Arc::clone(&config),
@@ -5436,6 +5439,60 @@ async fn permission_profile_updates_apply_to_next_turn_environment() {
 }
 
 #[tokio::test]
+async fn explicit_child_writer_spawn_uses_session_authority_not_parent_turn_projection() {
+    let (session, turn_context) = make_session_and_context().await;
+    let authority_root = turn_context.config.cwd.join("authorized-sibling");
+    let authority_profile = PermissionProfile::workspace_write();
+    let authority_environment = TurnEnvironmentSelection {
+        environment_id: codex_exec_server::LOCAL_ENVIRONMENT_ID.to_string(),
+        cwd: PathUri::from_abs_path(&turn_context.config.cwd),
+        workspace_roots: vec![
+            PathUri::from_abs_path(&turn_context.config.cwd),
+            PathUri::from_abs_path(&authority_root),
+        ],
+    };
+    {
+        let mut state = session.state.lock().await;
+        state.session_configuration.environments = TurnEnvironmentSelections::new(
+            turn_context.config.cwd.clone(),
+            vec![authority_environment.clone()],
+        );
+        state
+            .session_configuration
+            .permission_profile_state
+            .set_legacy_permission_profile(authority_profile.clone())
+            .expect("install authority profile");
+    }
+
+    let mut child_config = (*turn_context.config).clone();
+    child_config
+        .permissions
+        .replace_permission_profile_from_session_snapshot(PermissionProfileSnapshot::legacy(
+            PermissionProfile::read_only(),
+        ))
+        .expect("install narrow parent projection");
+    child_config
+        .permissions
+        .set_workspace_roots(vec![turn_context.config.cwd.clone()]);
+
+    let environments = session
+        .prepare_explicit_child_writer_spawn(&mut child_config)
+        .await;
+
+    assert_eq!(environments, vec![authority_environment]);
+    assert_eq!(
+        child_config.permissions.permission_profile(),
+        &authority_profile
+    );
+    assert!(
+        child_config
+            .permissions
+            .workspace_roots()
+            .contains(&authority_root)
+    );
+}
+
+#[tokio::test]
 async fn relative_cwd_update_without_environments_resolves_under_session_cwd() {
     let (session, _turn_context) = make_session_and_context().await;
     let original_cwd = {
@@ -5578,6 +5635,7 @@ async fn session_new_fails_when_zsh_fork_enabled_without_packaged_zsh() {
         permission_profile_state: config.permissions.permission_profile_state().clone(),
         windows_sandbox_level: WindowsSandboxLevel::from_config(&config),
         environments: TurnEnvironmentSelections::new(config.cwd.clone(), Vec::new()),
+        writer_workspace_binding: None,
         codex_home: config.codex_home.clone(),
         thread_name: None,
         original_config_do_not_use: Arc::clone(&config),
@@ -5719,6 +5777,7 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
         permission_profile_state: config.permissions.permission_profile_state().clone(),
         windows_sandbox_level: WindowsSandboxLevel::from_config(&config),
         environments: TurnEnvironmentSelections::new(config.cwd.clone(), default_environments),
+        writer_workspace_binding: None,
         codex_home: config.codex_home.clone(),
         thread_name: None,
         original_config_do_not_use: Arc::clone(&config),
@@ -5920,6 +5979,8 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
         mcp_prewarm_task: std::sync::Mutex::new(None),
         conversation: Arc::new(RealtimeConversationManager::new()),
         active_turn: Mutex::new(None),
+        task_admission_gate: Arc::new(Semaphore::new(/*permits*/ 1)),
+        writer_workspace_binding_mutation: Mutex::new(()),
         experimental_session_control_shutdown_submissions: Arc::new(AtomicUsize::new(0)),
         pending_durable_session_shutdown: std::sync::Mutex::new(None),
         pending_user_message_admissions: Default::default(),
@@ -5997,6 +6058,7 @@ async fn make_session_with_config_and_rx(
         permission_profile_state: config.permissions.permission_profile_state().clone(),
         windows_sandbox_level: WindowsSandboxLevel::from_config(&config),
         environments: TurnEnvironmentSelections::new(config.cwd.clone(), default_environments),
+        writer_workspace_binding: None,
         codex_home: config.codex_home.clone(),
         thread_name: None,
         original_config_do_not_use: Arc::clone(&config),
@@ -6111,6 +6173,7 @@ async fn make_session_with_history_source_and_agent_control_and_rx(
         permission_profile_state: config.permissions.permission_profile_state().clone(),
         windows_sandbox_level: WindowsSandboxLevel::from_config(&config),
         environments: TurnEnvironmentSelections::new(config.cwd.clone(), default_environments),
+        writer_workspace_binding: None,
         codex_home: config.codex_home.clone(),
         thread_name: None,
         original_config_do_not_use: Arc::clone(&config),
@@ -6503,6 +6566,7 @@ async fn request_permissions_emits_event_when_granular_policy_allows_requests() 
                             }),
                             ..RequestPermissionProfile::default()
                         },
+                        writer_workspace_binding_external_write: false,
                     },
                     environment,
                     CancellationToken::new(),
@@ -6750,6 +6814,7 @@ async fn request_permissions_response_materializes_session_cwd_grants_before_rec
                         environment_id: None,
                         reason: Some("need cwd write".to_string()),
                         permissions: requested_permissions,
+                        writer_workspace_binding_external_write: false,
                     },
                     environment,
                     CancellationToken::new(),
@@ -6847,6 +6912,7 @@ async fn request_permissions_is_auto_denied_when_granular_policy_blocks_tool_req
                     }),
                     ..RequestPermissionProfile::default()
                 },
+                writer_workspace_binding_external_write: false,
             },
             environment,
             CancellationToken::new(),
@@ -7643,6 +7709,513 @@ async fn durable_shutdown_team_completion_failure_terminates_after_persistence_b
     );
 }
 
+#[cfg(debug_assertions)]
+async fn install_valid_writer_binding_for_shutdown_test(session: &Session) -> tempfile::TempDir {
+    let fixture = tempfile::tempdir().expect("create writer binding fixture");
+    let repository_root = fixture.path().join("repo");
+    let worktree_root = fixture.path().join("checkout");
+    let git_dir = repository_root.join(".git/worktrees/shutdown-test");
+    std::fs::create_dir_all(&git_dir).expect("create worktree administration");
+    std::fs::create_dir_all(&worktree_root).expect("create linked worktree");
+    std::fs::write(
+        worktree_root.join(".git"),
+        format!("gitdir: {}\n", git_dir.display()),
+    )
+    .expect("write linked worktree pointer");
+    std::fs::write(
+        git_dir.join("gitdir"),
+        format!("{}\n", worktree_root.join(".git").display()),
+    )
+    .expect("write worktree backlink");
+    std::fs::write(git_dir.join("commondir"), "../..\n").expect("write common dir pointer");
+
+    let worktree_root = worktree_root.abs();
+    let environment_manager = session.services.turn_environments.environment_manager();
+    let local_environment = environment_manager
+        .get_environment(codex_exec_server::LOCAL_ENVIRONMENT_ID)
+        .expect("local test environment");
+    let identity = codex_git_utils::resolve_linked_worktree_identity(
+        local_environment.get_filesystem().as_ref(),
+        &worktree_root,
+    )
+    .await
+    .expect("valid linked worktree identity");
+    {
+        let mut state = session.state.lock().await;
+        state.session_configuration.permission_profile_state =
+            PermissionProfileState::from_constrained_legacy(codex_config::Constrained::allow_any(
+                PermissionProfile::workspace_write(),
+            ))
+            .expect("install managed workspace-write profile");
+        state.session_configuration.environments = TurnEnvironmentSelections::new(
+            worktree_root.clone(),
+            vec![local(worktree_root.clone())],
+        );
+        state.session_configuration.writer_workspace_binding = Some(
+            crate::writer_workspace_binding::WriterWorkspaceBindingState::available(
+                codex_protocol::protocol::WriterWorkspaceBinding {
+                    generation: 1,
+                    worktree_root: identity.worktree_root,
+                    git_dir: identity.git_dir,
+                    common_dir: identity.common_dir,
+                    repository_root: identity.repository_root,
+                    environment_id: codex_exec_server::LOCAL_ENVIRONMENT_ID.to_string(),
+                },
+            ),
+        );
+    }
+    session
+        .validate_writer_workspace_binding()
+        .await
+        .expect("shutdown test binding must pass production revalidation");
+    fixture
+}
+
+#[cfg(debug_assertions)]
+#[tokio::test]
+async fn durable_bound_writer_revoke_failures_retain_and_resume_runtime() {
+    struct EmptyWritePermit;
+
+    impl codex_team_state::TeamWritePermit for EmptyWritePermit {
+        fn read_snapshot(
+            &mut self,
+        ) -> Result<Option<Vec<u8>>, codex_team_state::TeamDurabilityError> {
+            Ok(None)
+        }
+
+        fn compare_and_swap(
+            &mut self,
+            _expected_generation: u64,
+            _snapshot: Vec<u8>,
+        ) -> Result<(), codex_team_state::TeamDurabilityError> {
+            unreachable!("the revoke failure test does not commit Team state")
+        }
+    }
+
+    struct AbortableClosePermit;
+
+    impl codex_team_state::TeamClosePermit for AbortableClosePermit {
+        fn abort(self: Box<Self>) -> codex_team_state::TeamDurabilityFuture<'static, ()> {
+            Box::pin(async { Ok(()) })
+        }
+
+        fn complete(self: Box<Self>) -> codex_team_state::TeamDurabilityFuture<'static, ()> {
+            Box::pin(async { Ok(()) })
+        }
+    }
+
+    struct AbortableCloseAuthority {
+        identity: codex_team_state::DurableTeamIdentity,
+        owner_incarnation_id: Uuid,
+    }
+
+    impl codex_team_state::TeamWriteAuthority for AbortableCloseAuthority {
+        fn identity(&self) -> codex_team_state::DurableTeamIdentity {
+            self.identity
+        }
+
+        fn owner_incarnation_id(&self) -> Uuid {
+            self.owner_incarnation_id
+        }
+
+        fn begin_write(
+            &self,
+        ) -> Result<Box<dyn codex_team_state::TeamWritePermit>, codex_team_state::TeamDurabilityError>
+        {
+            Ok(Box::new(EmptyWritePermit))
+        }
+
+        fn begin_close(
+            &self,
+        ) -> codex_team_state::TeamDurabilityFuture<'_, Box<dyn codex_team_state::TeamClosePermit>>
+        {
+            Box::pin(async { Ok(Box::new(AbortableClosePermit) as Box<_>) })
+        }
+    }
+
+    let (mut session, _turn_context) = make_session_and_context().await;
+    let identity =
+        codex_team_state::DurableTeamIdentity::new(session.session_id(), session.thread_id);
+    let authority = Arc::new(AbortableCloseAuthority {
+        identity,
+        owner_incarnation_id: Uuid::new_v4(),
+    });
+    let durable_team =
+        codex_team_state::TeamStateHandle::create_durable(authority).expect("create durable Team");
+    session
+        .services
+        .agent_control
+        .install_team(durable_team)
+        .expect("install durable Team");
+
+    let store = Arc::new(codex_thread_store::InMemoryThreadStore::default());
+    let thread_store: Arc<dyn codex_thread_store::ThreadStore> = store.clone();
+    let config = session.get_config().await;
+    let live_thread = LiveThread::create(
+        Arc::clone(&thread_store),
+        CreateThreadParams {
+            session_id: session.session_id(),
+            thread_id: session.thread_id,
+            extra_config: None,
+            forked_from_id: None,
+            parent_thread_id: None,
+            source: SessionSource::Exec,
+            durable_team: Some(codex_protocol::protocol::DurableTeamSessionMeta::current(
+                session.session_id(),
+                session.thread_id,
+            )),
+            thread_source: None,
+            originator: "test_originator".to_string(),
+            base_instructions: BaseInstructions::default(),
+            dynamic_tools: Vec::new(),
+            selected_capability_roots: Vec::new(),
+            multi_agent_version: None,
+            history_mode: Default::default(),
+            subagent_history_start_ordinal: None,
+            history_base: None,
+            initial_window_id: Uuid::now_v7().to_string(),
+            metadata: ThreadPersistenceMetadata {
+                cwd: Some(config.cwd.to_path_buf()),
+                model_provider: config.model_provider_id.clone(),
+                memory_mode: if config.memories.generate_memories {
+                    ThreadMemoryMode::Enabled
+                } else {
+                    ThreadMemoryMode::Disabled
+                },
+            },
+        },
+    )
+    .await
+    .expect("create thread persistence");
+    session.services.thread_store = thread_store;
+    session.services.live_thread = Some(live_thread);
+    let _binding_fixture = install_valid_writer_binding_for_shutdown_test(&session).await;
+
+    let lifecycle_close = session
+        .services
+        .agent_control
+        .begin_durable_team_root_close(session.thread_id)
+        .expect("begin Root lifecycle close");
+    let (completion_tx, completion_rx) = oneshot::channel();
+    let session = Arc::new(session);
+    assert!(
+        session
+            .install_prepared_durable_session_shutdown(
+                "formal-close".to_string(),
+                PreparedDurableSessionShutdown {
+                    lifecycle_close,
+                    team_close: Box::new(AbortableClosePermit),
+                },
+                completion_tx,
+            )
+            .is_ok(),
+        "install formal shutdown handoff"
+    );
+    session
+        .services
+        .unified_exec_manager
+        .fail_next_confirmed_termination_for_tests("injected process revoke failure")
+        .await;
+    session
+        .experimental_session_control_shutdown_submissions
+        .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+
+    assert!(!handlers::shutdown(&session, "formal-close".to_string()).await);
+    assert!(matches!(
+        completion_rx.await.expect("formal completion"),
+        PreparedDurableSessionShutdownCompletion::RetainedError(message)
+            if message.contains("injected process revoke failure")
+    ));
+    assert_eq!(
+        store.calls().await.shutdown_thread,
+        0,
+        "process revoke failure must not close canonical persistence"
+    );
+    session
+        .persist_writer_workspace_binding_event()
+        .await
+        .expect("retained persistence remains writable");
+    let retry_close = session
+        .services
+        .agent_control
+        .begin_durable_team_root_close(session.thread_id)
+        .expect("aborted lifecycle close remains retryable");
+    retry_close.abort();
+
+    let turn_context = session
+        .new_default_turn_with_sub_id("active-before-retry-close".to_string())
+        .await;
+    session
+        .spawn_task(
+            turn_context,
+            Vec::new(),
+            NeverEndingTask {
+                kind: TaskKind::Regular,
+                listen_to_cancellation_token: true,
+            },
+        )
+        .await;
+    assert!(
+        session
+            .active_turn
+            .lock()
+            .await
+            .as_ref()
+            .and_then(|turn| turn.task.as_ref())
+            .is_some(),
+        "valid bound writer fixture must install the active task"
+    );
+    session
+        .input_queue
+        .enqueue_mailbox_communication(
+            InterAgentCommunication::new(
+                AgentPath::root(),
+                AgentPath::root(),
+                Vec::new(),
+                "pending failed-shutdown trigger".to_string(),
+                /*trigger_turn*/ true,
+            ),
+            /*parent_turn_id*/ None,
+        )
+        .await;
+    assert!(session.input_queue.has_trigger_turn_mailbox_items().await);
+
+    let lifecycle_close = session
+        .services
+        .agent_control
+        .begin_durable_team_root_close(session.thread_id)
+        .expect("begin retry Root lifecycle close");
+    let (completion_tx, completion_rx) = oneshot::channel();
+    assert!(
+        session
+            .install_prepared_durable_session_shutdown(
+                "retry-close".to_string(),
+                PreparedDurableSessionShutdown {
+                    lifecycle_close,
+                    team_close: Box::new(AbortableClosePermit),
+                },
+                completion_tx,
+            )
+            .is_ok(),
+        "install retry shutdown handoff"
+    );
+    session
+        .services
+        .unified_exec_manager
+        .fail_confirmed_termination_after_for_tests(
+            // Quiescence revokes once before abort, and abort performs its own confirmed writer
+            // cleanup. Fail the explicit late-insertion revoke after both have succeeded.
+            /*successful_calls_before_failure*/
+            2,
+            "injected late process revoke failure",
+        )
+        .await;
+    session
+        .experimental_session_control_shutdown_submissions
+        .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+
+    assert!(!handlers::shutdown(&session, "retry-close".to_string()).await);
+    assert!(matches!(
+        completion_rx.await.expect("retry formal completion"),
+        PreparedDurableSessionShutdownCompletion::RetainedError(message)
+            if message.contains("injected late process revoke failure")
+    ));
+    assert!(
+        !session.experimental_session_control_shutdown_in_progress(),
+        "failed close must reopen task admission"
+    );
+    assert!(
+        !session.input_queue.has_trigger_turn_mailbox_items().await,
+        "pending trigger must be admitted after the fence and marker roll back"
+    );
+    assert_eq!(
+        store.calls().await.shutdown_thread,
+        0,
+        "late process revoke failure must retain canonical persistence"
+    );
+    session
+        .persist_writer_workspace_binding_event()
+        .await
+        .expect("retained persistence remains writable after late revoke failure");
+    let retry_close = session
+        .services
+        .agent_control
+        .begin_durable_team_root_close(session.thread_id)
+        .expect("late revoke failure keeps Root close retryable");
+    retry_close.abort();
+    session.abort_all_tasks(TurnAbortReason::Interrupted).await;
+}
+
+#[cfg(debug_assertions)]
+#[tokio::test]
+async fn durable_bound_writer_shutdown_fences_pending_trigger_turn_until_teardown() {
+    struct EmptyWritePermit;
+
+    impl codex_team_state::TeamWritePermit for EmptyWritePermit {
+        fn read_snapshot(
+            &mut self,
+        ) -> Result<Option<Vec<u8>>, codex_team_state::TeamDurabilityError> {
+            Ok(None)
+        }
+
+        fn compare_and_swap(
+            &mut self,
+            _expected_generation: u64,
+            _snapshot: Vec<u8>,
+        ) -> Result<(), codex_team_state::TeamDurabilityError> {
+            unreachable!("the shutdown admission test does not commit Team state")
+        }
+    }
+
+    struct SuccessfulClosePermit;
+
+    impl codex_team_state::TeamClosePermit for SuccessfulClosePermit {
+        fn abort(self: Box<Self>) -> codex_team_state::TeamDurabilityFuture<'static, ()> {
+            Box::pin(async { Ok(()) })
+        }
+
+        fn complete(self: Box<Self>) -> codex_team_state::TeamDurabilityFuture<'static, ()> {
+            Box::pin(async { Ok(()) })
+        }
+    }
+
+    struct SuccessfulCloseAuthority {
+        identity: codex_team_state::DurableTeamIdentity,
+        owner_incarnation_id: Uuid,
+    }
+
+    impl codex_team_state::TeamWriteAuthority for SuccessfulCloseAuthority {
+        fn identity(&self) -> codex_team_state::DurableTeamIdentity {
+            self.identity
+        }
+
+        fn owner_incarnation_id(&self) -> Uuid {
+            self.owner_incarnation_id
+        }
+
+        fn begin_write(
+            &self,
+        ) -> Result<Box<dyn codex_team_state::TeamWritePermit>, codex_team_state::TeamDurabilityError>
+        {
+            Ok(Box::new(EmptyWritePermit))
+        }
+
+        fn begin_close(
+            &self,
+        ) -> codex_team_state::TeamDurabilityFuture<'_, Box<dyn codex_team_state::TeamClosePermit>>
+        {
+            Box::pin(async { Ok(Box::new(SuccessfulClosePermit) as Box<_>) })
+        }
+    }
+
+    let (mut session, _turn_context) = make_session_and_context().await;
+    let identity =
+        codex_team_state::DurableTeamIdentity::new(session.session_id(), session.thread_id);
+    let authority = Arc::new(SuccessfulCloseAuthority {
+        identity,
+        owner_incarnation_id: Uuid::new_v4(),
+    });
+    let durable_team =
+        codex_team_state::TeamStateHandle::create_durable(authority).expect("create durable Team");
+    session
+        .services
+        .agent_control
+        .install_team(durable_team)
+        .expect("install durable Team");
+    let store = attach_in_memory_thread_store(&mut session).await;
+    let _binding_fixture = install_valid_writer_binding_for_shutdown_test(&session).await;
+
+    let session = Arc::new(session);
+    let turn_context = session
+        .new_default_turn_with_sub_id("active-before-successful-close".to_string())
+        .await;
+    session
+        .spawn_task(
+            turn_context,
+            Vec::new(),
+            NeverEndingTask {
+                kind: TaskKind::Regular,
+                listen_to_cancellation_token: true,
+            },
+        )
+        .await;
+    assert!(
+        session
+            .active_turn
+            .lock()
+            .await
+            .as_ref()
+            .and_then(|turn| turn.task.as_ref())
+            .is_some(),
+        "valid bound writer fixture must install the active task"
+    );
+    session
+        .input_queue
+        .enqueue_mailbox_communication(
+            InterAgentCommunication::new(
+                AgentPath::root(),
+                AgentPath::root(),
+                Vec::new(),
+                "pending shutdown trigger".to_string(),
+                /*trigger_turn*/ true,
+            ),
+            /*parent_turn_id*/ None,
+        )
+        .await;
+    assert!(session.input_queue.has_trigger_turn_mailbox_items().await);
+    let lifecycle_close = session
+        .services
+        .agent_control
+        .begin_durable_team_root_close(session.thread_id)
+        .expect("begin Root lifecycle close");
+    let (completion_tx, completion_rx) = oneshot::channel();
+    assert!(
+        session
+            .install_prepared_durable_session_shutdown(
+                "formal-close".to_string(),
+                PreparedDurableSessionShutdown {
+                    lifecycle_close,
+                    team_close: Box::new(SuccessfulClosePermit),
+                },
+                completion_tx,
+            )
+            .is_ok(),
+        "install formal shutdown handoff"
+    );
+    session
+        .experimental_session_control_shutdown_submissions
+        .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+
+    assert!(handlers::shutdown(&session, "formal-close".to_string()).await);
+    assert!(matches!(
+        completion_rx.await.expect("formal completion"),
+        PreparedDurableSessionShutdownCompletion::Completed
+    ));
+    assert!(session.active_turn.lock().await.is_none());
+    assert!(
+        session.input_queue.has_trigger_turn_mailbox_items().await,
+        "shutdown must not consume pending work into a replacement turn"
+    );
+    session
+        .maybe_start_turn_for_pending_work_with_sub_id("post-close-trigger".to_string())
+        .await;
+    assert!(
+        session.active_turn.lock().await.is_none(),
+        "the successful shutdown fence must reject task admission after runtime teardown"
+    );
+    assert_eq!(
+        codex_thread_store::InMemoryThreadStoreCalls {
+            create_thread: 1,
+            append_items: 2,
+            flush_thread: 3,
+            shutdown_thread: 1,
+            update_thread_metadata: 2,
+            ..Default::default()
+        },
+        store.calls().await
+    );
+}
+
 #[tokio::test]
 async fn accepted_formal_shutdown_completion_loss_is_terminal_unknown() {
     let (completion_tx, completion_rx) = oneshot::channel();
@@ -8246,6 +8819,7 @@ where
         permission_profile_state: config.permissions.permission_profile_state().clone(),
         windows_sandbox_level: WindowsSandboxLevel::from_config(&config),
         environments: TurnEnvironmentSelections::new(config.cwd.clone(), default_environments),
+        writer_workspace_binding: None,
         codex_home: config.codex_home.clone(),
         thread_name: None,
         original_config_do_not_use: Arc::clone(&config),
@@ -8446,6 +9020,8 @@ where
         mcp_prewarm_task: std::sync::Mutex::new(None),
         conversation: Arc::new(RealtimeConversationManager::new()),
         active_turn: Mutex::new(None),
+        task_admission_gate: Arc::new(Semaphore::new(/*permits*/ 1)),
+        writer_workspace_binding_mutation: Mutex::new(()),
         experimental_session_control_shutdown_submissions: Arc::new(AtomicUsize::new(0)),
         pending_durable_session_shutdown: std::sync::Mutex::new(None),
         pending_user_message_admissions: Default::default(),

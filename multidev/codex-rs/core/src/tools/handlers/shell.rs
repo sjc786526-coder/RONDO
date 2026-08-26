@@ -77,6 +77,17 @@ async fn run_exec_like(args: RunExecLikeArgs) -> Result<FunctionToolOutput, Func
         shell_runtime_backend,
     } = args;
 
+    if exec_params
+        .sandbox_permissions
+        .requires_escalated_permissions()
+        && session.writer_workspace_binding_snapshot().await.is_some()
+    {
+        return Err(FunctionCallError::RespondToModel(
+            "`require_escalated` is unavailable while a writer workspace binding is active; use `request_permissions` with `writer_workspace_binding_external_write: true` for a turn-scoped reviewed exception"
+                .to_string(),
+        ));
+    }
+
     let fs = turn_environment.environment.get_filesystem();
 
     let explicit_env_overrides = turn

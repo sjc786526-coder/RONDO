@@ -191,6 +191,14 @@ impl ExecCommandHandler {
         };
         let sandbox_permissions =
             resolve_sandbox_permissions(args.sandbox_permissions, args.justification.as_deref())?;
+        if sandbox_permissions.requires_escalated_permissions()
+            && session.writer_workspace_binding_snapshot().await.is_some()
+        {
+            return Err(FunctionCallError::RespondToModel(
+                "`require_escalated` is unavailable while a writer workspace binding is active; use `request_permissions` with `writer_workspace_binding_external_write: true` for a turn-scoped reviewed exception"
+                    .to_string(),
+            ));
+        }
         let hook_command = args.cmd.clone();
         // TODO(anp) wire PathUri through implicit skills instead of skipping on foreign paths
         if let Some(native_cwd) = native_cwd.as_ref() {

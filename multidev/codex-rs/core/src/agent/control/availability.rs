@@ -421,6 +421,7 @@ mod tests {
                 /*inherited_environments*/ None,
                 /*inherited_exec_policy*/ None,
                 /*environments*/ None,
+                /*writer_workspace_binding*/ None,
                 /*defer_durable_team_participant_registration*/ false,
             )
             .await

@@ -58,6 +58,7 @@ use codex_rmcp_client::ElicitationAction;
 use codex_rmcp_client::ElicitationResponse;
 use serde_json::Value;
 use std::sync::Arc;
+use tokio::sync::OwnedSemaphorePermit;
 use tracing::debug;
 use tracing::info;
 use tracing::warn;
@@ -262,12 +263,12 @@ pub(super) async fn user_input_or_turn_inner(
                     client_id: client_user_message_id,
                 });
             }
-            sess.spawn_task(
+            sess.spawn_task_checked(
                 Arc::clone(&current_context),
                 task_input,
                 crate::tasks::RegularTask::new(),
             )
-            .await;
+            .await?;
             Ok(UserMessageAdmission::Started { turn_id: sub_id })
         }
         Err(err) => {
@@ -585,16 +586,73 @@ pub async fn set_thread_memory_mode(sess: &Arc<Session>, sub_id: String, mode: T
     }
 }
 
-async fn shutdown_session_runtime(sess: &Arc<Session>) {
+enum RuntimeShutdownMode {
+    Standard,
+    BoundWriterAlreadyQuiesced {
+        _task_admission_fence: OwnedSemaphorePermit,
+    },
+}
+
+async fn quiesce_bound_writer_before_durable_persistence(
+    sess: &Arc<Session>,
+) -> Result<RuntimeShutdownMode, String> {
+    if sess.writer_workspace_binding_snapshot().await.is_none() {
+        return Ok(RuntimeShutdownMode::Standard);
+    }
+    let task_admission_fence = Arc::clone(&sess.task_admission_gate)
+        .acquire_owned()
+        .await
+        .map_err(|_| "task admission gate closed during durable shutdown".to_string())?;
+    sess.services
+        .unified_exec_manager
+        .terminate_all_processes_confirmed()
+        .await
+        .map_err(|err| format!("failed to revoke bound writer processes: {err}"))?;
+    sess.abort_all_tasks_for_shutdown(TurnAbortReason::Interrupted)
+        .await;
+    // A tool may have crossed its final authority check before the first snapshot and inserted a
+    // process while its task was being cancelled. Close that window before persistence becomes
+    // irreversible.
+    sess.services
+        .unified_exec_manager
+        .terminate_all_processes_confirmed()
+        .await
+        .map_err(|err| format!("failed to revoke late bound writer processes: {err}"))?;
+    Ok(RuntimeShutdownMode::BoundWriterAlreadyQuiesced {
+        _task_admission_fence: task_admission_fence,
+    })
+}
+
+async fn shutdown_session_runtime(
+    sess: &Arc<Session>,
+    mode: RuntimeShutdownMode,
+) -> Result<(), String> {
+    let (_bound_writer_already_quiesced, _task_admission_fence) = match mode {
+        RuntimeShutdownMode::Standard => (false, None),
+        RuntimeShutdownMode::BoundWriterAlreadyQuiesced {
+            _task_admission_fence,
+        } => (true, Some(_task_admission_fence)),
+    };
     if let Some(startup_prewarm) = sess.take_session_startup_prewarm().await {
         startup_prewarm.abort().await;
     }
     let _ = sess.conversation.shutdown().await;
-    sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
-    sess.services
-        .unified_exec_manager
-        .terminate_all_processes()
-        .await;
+    if !_bound_writer_already_quiesced {
+        sess.abort_all_tasks_for_shutdown(TurnAbortReason::Interrupted)
+            .await;
+        if sess.writer_workspace_binding_snapshot().await.is_some() {
+            sess.services
+                .unified_exec_manager
+                .terminate_all_processes_confirmed()
+                .await
+                .map_err(|err| format!("failed to revoke bound writer processes: {err}"))?;
+        } else {
+            sess.services
+                .unified_exec_manager
+                .terminate_all_processes()
+                .await;
+        }
+    }
     if let Err(err) = sess.services.code_mode_service.shutdown().await {
         warn!("failed to shutdown code mode session: {err}");
     }
@@ -607,6 +665,7 @@ async fn shutdown_session_runtime(sess: &Arc<Session>) {
     sess.guardian_review_session.shutdown().await;
 
     crate::hook_runtime::run_session_end_hooks(sess).await;
+    Ok(())
 }
 
 async fn emit_thread_stop_lifecycle(sess: &Session) {
@@ -669,6 +728,38 @@ pub async fn shutdown(sess: &Arc<Session>, sub_id: String) -> bool {
         }
     }
 
+    let runtime_shutdown_mode = if durable_root {
+        match quiesce_bound_writer_before_durable_persistence(sess).await {
+            Ok(mode) => mode,
+            Err(error) => {
+                if let Some(team_close) = durable_team_close.take()
+                    && let Err(abort_error) = team_close.abort().await
+                {
+                    warn!(
+                        "failed to abort durable Team close after writer quiescence failure: {abort_error}"
+                    );
+                }
+                if let Some(lifecycle_close) = durable_lifecycle_close.take() {
+                    lifecycle_close.abort();
+                }
+                send_durable_close_error(sess, &sub_id, error.clone()).await;
+                if let Some(completion) = formal_shutdown_completion.take() {
+                    let _ = completion.send(
+                        PreparedDurableSessionShutdownCompletion::RetainedError(error),
+                    );
+                }
+                // Any admission fence owned by quiescence has been released with its error.
+                // Reopen session-control admission before asking the existing pending-work path
+                // to restore work suppressed by the shutdown-specific abort.
+                sess.finish_failed_experimental_session_control_shutdown();
+                sess.maybe_start_turn_for_pending_work().await;
+                return false;
+            }
+        }
+    } else {
+        RuntimeShutdownMode::Standard
+    };
+
     // A durable Root must retain its fully usable runtime when persistence cannot cross the close
     // boundary. Close its canonical writer first while the Team/lifecycle permits block new
     // mutation; only a successful persistence shutdown commits us to runtime teardown.
@@ -696,11 +787,32 @@ pub async fn shutdown(sess: &Arc<Session>, sub_id: String) -> bool {
                 "Failed to shutdown thread persistence".to_string(),
             ));
         }
+        // Persistence did not cross its irreversible boundary. Release the shutdown fence, then
+        // reopen admission and restore pending work suppressed during quiescence.
+        drop(runtime_shutdown_mode);
         sess.finish_failed_experimental_session_control_shutdown();
+        sess.maybe_start_turn_for_pending_work().await;
         return false;
     }
 
-    shutdown_session_runtime(sess).await;
+    if let Err(error) = shutdown_session_runtime(sess, runtime_shutdown_mode).await {
+        if let Some(team_close) = durable_team_close.take()
+            && let Err(abort_error) = team_close.abort().await
+        {
+            warn!("failed to abort durable Team close after runtime failure: {abort_error}");
+        }
+        if let Some(lifecycle_close) = durable_lifecycle_close.take() {
+            lifecycle_close.abort();
+        }
+        send_durable_close_error(sess, &sub_id, error.clone()).await;
+        if let Some(completion) = formal_shutdown_completion.take() {
+            let _ = completion.send(PreparedDurableSessionShutdownCompletion::RetainedError(
+                error,
+            ));
+        }
+        sess.finish_failed_experimental_session_control_shutdown();
+        return false;
+    }
     info!("Shutting down Codex instance");
     let history = sess.clone_history().await;
     let turn_count = history
@@ -973,7 +1085,9 @@ pub(super) async fn submission_loop(
     // If the submission loop exits because the channel closed without an
     // explicit shutdown op, still run session teardown.
     if !shutdown_received {
-        shutdown_session_runtime(&sess).await;
+        if let Err(error) = shutdown_session_runtime(&sess, RuntimeShutdownMode::Standard).await {
+            warn!("submission channel closed with incomplete runtime cleanup: {error}");
+        }
         emit_thread_stop_lifecycle(sess.as_ref()).await;
         let durable_root = sess
             .services

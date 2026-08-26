@@ -1,3 +1,5 @@
+use crate::WriterWorkspaceBindingReplaceOutcome;
+use crate::WriterWorkspaceBindingRequest;
 use crate::agent::AgentStatus;
 use crate::config::ConstraintResult;
 use crate::elicitation::ElicitationRegistration;
@@ -49,6 +51,7 @@ use codex_protocol::protocol::TokenUsageInfo;
 use codex_protocol::protocol::TurnEnvironmentSelection;
 use codex_protocol::protocol::TurnEnvironmentSelections;
 use codex_protocol::protocol::W3cTraceContext;
+use codex_protocol::protocol::WriterWorkspaceBindingSnapshot;
 use codex_protocol::user_input::UserInput;
 use codex_thread_store::StoredThread;
 use codex_thread_store::StoredThreadHistory;
@@ -95,6 +98,8 @@ pub struct ThreadConfigSnapshot {
     pub parent_thread_id: Option<ThreadId>,
     pub thread_source: Option<ThreadSource>,
     pub originator: String,
+    pub writer_workspace_binding: Option<WriterWorkspaceBindingSnapshot>,
+    pub writer_workspace_authority_roots: Option<Vec<AbsolutePathBuf>>,
 }
 
 /// Explains why `CodexThread::try_start_turn_if_idle` rejected an automatic
@@ -168,6 +173,10 @@ impl ThreadConfigSnapshot {
             reasoning_summary: self.reasoning_summary,
             personality: self.personality,
             collaboration_mode: self.collaboration_mode,
+            writer_workspace_binding: self
+                .writer_workspace_binding
+                .map(|snapshot| snapshot.binding),
+            writer_workspace_authority_roots: self.writer_workspace_authority_roots,
         }
     }
 }
@@ -754,6 +763,24 @@ impl CodexThread {
 
     pub async fn config_snapshot(&self) -> ThreadConfigSnapshot {
         self.session.thread_config_snapshot().await
+    }
+
+    /// Return the canonical binding projection after revalidating current local authority.
+    pub async fn writer_workspace_binding(&self) -> Option<WriterWorkspaceBindingSnapshot> {
+        self.session
+            .refresh_writer_workspace_binding_snapshot()
+            .await
+    }
+
+    /// Atomically replace an idle thread's active writer binding.
+    pub async fn replace_writer_workspace_binding(
+        &self,
+        request: WriterWorkspaceBindingRequest,
+        expected_generation: Option<u64>,
+    ) -> CodexResult<WriterWorkspaceBindingReplaceOutcome> {
+        self.session
+            .replace_writer_workspace_binding(request, expected_generation)
+            .await
     }
 
     /// Returns the files that supplied the thread's loaded model instructions.

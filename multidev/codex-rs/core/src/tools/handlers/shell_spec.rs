@@ -239,6 +239,13 @@ pub fn create_request_permissions_tool(description: String) -> ToolSpec {
                     .to_string(),
             )),
         ),
+        (
+            "writer_workspace_binding_external_write".to_string(),
+            JsonSchema::boolean(Some(
+                "For a bound writer, make this an explicit turn-scoped request to write outside the primary workspace. Ordinary permission or sandbox escalation does not grant this authority."
+                    .to_string(),
+            )),
+        ),
         ("permissions".to_string(), permission_profile_schema()),
     ]);
 
@@ -257,7 +264,7 @@ pub fn create_request_permissions_tool(description: String) -> ToolSpec {
 }
 
 pub fn request_permissions_tool_description() -> String {
-    "Request additional filesystem or network permissions from the user and wait for the client to grant a subset of the requested permission profile. Use environment_id to target a specific attached environment; omit it to use the primary environment. Relative filesystem paths resolve against the selected environment cwd. Granted permissions apply automatically to later shell-like commands in the current turn, or for the rest of the session if the client approves them at session scope."
+    "Request additional filesystem or network permissions from the user and wait for the client to grant a subset of the requested permission profile. Use environment_id to target a specific attached environment; omit it to use the primary environment. Relative filesystem paths resolve against the selected environment cwd. Bound writers must set writer_workspace_binding_external_write for an explicit, turn-scoped binding-external write grant; ordinary permissions and sandbox escalation cannot replace that second gate."
         .to_string()
 }
 

@@ -1189,6 +1189,16 @@ impl MessageProcessor {
             ClientRequest::ThreadRead { params, .. } => {
                 self.thread_processor.thread_read(params).await
             }
+            ClientRequest::WriterWorkspaceBindingRead { params, .. } => {
+                self.thread_processor
+                    .writer_workspace_binding_read(params)
+                    .await
+            }
+            ClientRequest::WriterWorkspaceBindingReplace { params, .. } => {
+                self.thread_processor
+                    .writer_workspace_binding_replace(params)
+                    .await
+            }
             ClientRequest::DurableSessionList { params, .. } => {
                 self.thread_processor.durable_session_list(params).await
             }

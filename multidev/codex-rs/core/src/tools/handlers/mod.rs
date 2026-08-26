@@ -284,14 +284,29 @@ pub(super) async fn apply_granted_turn_permissions(
 
     let granted_session_permissions = session.granted_session_permissions(environment_id).await;
     let granted_turn_permissions = session.granted_turn_permissions(environment_id).await;
-    let granted_permissions = merge_permission_profiles(
+    let mut granted_permissions = merge_permission_profiles(
         granted_session_permissions.as_ref(),
         granted_turn_permissions.as_ref(),
     );
-    let effective_permissions = merge_permission_profiles(
+    let mut effective_permissions = merge_permission_profiles(
         additional_permissions.as_ref(),
         granted_permissions.as_ref(),
     );
+    if let Some(binding) = session.writer_workspace_binding_snapshot().await {
+        let writer_grant = session
+            .writer_binding_external_write_grant(environment_id, binding.binding.generation)
+            .await;
+        granted_permissions = restrict_permissions_to_writer_binding_grant(
+            granted_permissions,
+            writer_grant.as_ref(),
+            cwd,
+        );
+        effective_permissions = restrict_permissions_to_writer_binding_grant(
+            effective_permissions,
+            writer_grant.as_ref(),
+            cwd,
+        );
+    }
     let permissions_preapproved = match (effective_permissions.as_ref(), granted_permissions) {
         (Some(effective_permissions), Some(granted_permissions)) => {
             permissions_are_preapproved(effective_permissions, granted_permissions, cwd)
@@ -311,6 +326,35 @@ pub(super) async fn apply_granted_turn_permissions(
         additional_permissions: effective_permissions,
         permissions_preapproved,
     }
+}
+
+fn restrict_permissions_to_writer_binding_grant(
+    permissions: Option<AdditionalPermissionProfile>,
+    writer_grant: Option<&AdditionalPermissionProfile>,
+    cwd: &Path,
+) -> Option<AdditionalPermissionProfile> {
+    let permissions = permissions?;
+    let file_system = writer_grant
+        .and_then(|grant| grant.file_system.clone())
+        .and_then(|granted_file_system| {
+            intersect_permission_profiles(
+                AdditionalPermissionProfile {
+                    network: None,
+                    file_system: permissions.file_system.clone(),
+                },
+                AdditionalPermissionProfile {
+                    network: None,
+                    file_system: Some(granted_file_system),
+                },
+                cwd,
+            )
+            .file_system
+        });
+    Some(AdditionalPermissionProfile {
+        network: permissions.network,
+        file_system,
+    })
+    .filter(|permissions| !permissions.is_empty())
 }
 
 fn permissions_are_preapproved(
@@ -333,6 +377,7 @@ mod tests {
     use super::implicit_granted_permissions;
     use super::normalize_and_validate_additional_permissions;
     use super::permissions_are_preapproved;
+    use super::restrict_permissions_to_writer_binding_grant;
     use crate::sandboxing::SandboxPermissions;
     use codex_protocol::models::AdditionalPermissionProfile;
     use codex_protocol::models::FileSystemPermissions;
@@ -368,6 +413,56 @@ mod tests {
             )),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn bound_writer_requires_the_w1_gate_for_ordinary_filesystem_grants() {
+        let cwd = tempdir().expect("cwd");
+        let outside = tempdir().expect("outside");
+        let mut ordinary = file_system_permissions(outside.path());
+        ordinary.network = network_permissions().network;
+
+        let restricted = restrict_permissions_to_writer_binding_grant(
+            Some(ordinary),
+            /*writer_grant*/ None,
+            cwd.path(),
+        )
+        .expect("network permission remains");
+        assert_eq!(restricted.network, network_permissions().network);
+        assert_eq!(restricted.file_system, None);
+    }
+
+    #[test]
+    fn bound_writer_uses_only_the_intersection_of_ordinary_and_w1_grants() {
+        let cwd = tempdir().expect("cwd");
+        let allowed = tempdir().expect("allowed");
+        let other = tempdir().expect("other");
+        let ordinary = file_system_permissions(allowed.path());
+
+        let matching = restrict_permissions_to_writer_binding_grant(
+            Some(ordinary.clone()),
+            Some(&file_system_permissions(allowed.path())),
+            cwd.path(),
+        )
+        .expect("matching dual grant");
+        assert_eq!(
+            matching
+                .file_system
+                .expect("matching filesystem grant")
+                .legacy_read_write_roots()
+                .expect("path-only grant")
+                .write,
+            Some(vec![
+                AbsolutePathBuf::from_absolute_path(allowed.path()).expect("absolute allowed")
+            ])
+        );
+
+        let disjoint = restrict_permissions_to_writer_binding_grant(
+            Some(ordinary),
+            Some(&file_system_permissions(other.path())),
+            cwd.path(),
+        );
+        assert_eq!(disjoint, None);
     }
 
     #[test]

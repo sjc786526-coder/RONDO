@@ -132,6 +132,7 @@ async fn permission_request_holds_an_elicitation_until_response() {
                         environment_id: None,
                         reason: None,
                         permissions: RequestPermissionProfile::default(),
+                        writer_workspace_binding_external_write: false,
                     },
                     environment,
                     CancellationToken::new(),

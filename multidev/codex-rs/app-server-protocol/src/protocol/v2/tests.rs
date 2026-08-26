@@ -4360,6 +4360,63 @@ fn thread_start_params_preserve_explicit_null_service_tier() {
 }
 
 #[test]
+fn writer_workspace_binding_protocol_round_trips_public_shapes() {
+    let worktree_root = absolute_path("repo/worktrees/writer-a");
+    let params: ThreadStartParams = serde_json::from_value(json!({
+        "writerWorkspaceBinding": {
+            "worktreeRoot": worktree_root,
+            "environmentId": "local",
+        }
+    }))
+    .expect("writer binding start params should deserialize");
+    assert_eq!(
+        params.writer_workspace_binding,
+        Some(WriterWorkspaceBindingParams {
+            worktree_root: worktree_root.clone(),
+            environment_id: Some("local".to_string()),
+        })
+    );
+
+    let binding = WriterWorkspaceBinding {
+        generation: 7,
+        worktree_root,
+        git_dir: absolute_path("repo/.git/worktrees/writer-a"),
+        common_dir: absolute_path("repo/.git"),
+        repository_root: absolute_path("repo"),
+        environment_id: "local".to_string(),
+        availability: WriterWorkspaceBindingAvailability::Available,
+    };
+    let read = WriterWorkspaceBindingReadResponse {
+        binding: Some(binding.clone()),
+    };
+    let value = serde_json::to_value(&read).expect("binding read response should serialize");
+    assert_eq!(value["binding"]["generation"], json!(7));
+    assert_eq!(
+        value["binding"]["availability"],
+        json!({ "type": "available" })
+    );
+    assert_eq!(
+        serde_json::from_value::<WriterWorkspaceBindingReadResponse>(value)
+            .expect("binding read response should deserialize"),
+        read
+    );
+
+    let replacement = WriterWorkspaceBindingReplaceResponse {
+        outcome: WriterWorkspaceBindingReplaceOutcome::Unknown {
+            binding,
+            message: "persistence outcome is unknown".to_string(),
+        },
+    };
+    let value = serde_json::to_value(&replacement).expect("binding replacement should serialize");
+    assert_eq!(value["outcome"]["type"], json!("unknown"));
+    assert_eq!(
+        serde_json::from_value::<WriterWorkspaceBindingReplaceResponse>(value)
+            .expect("binding replacement should deserialize"),
+        replacement
+    );
+}
+
+#[test]
 fn thread_lifecycle_responses_default_missing_optional_fields() {
     let response = json!({
         "thread": {

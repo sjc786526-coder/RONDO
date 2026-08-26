@@ -210,6 +210,8 @@ pub(crate) fn thread_settings_from_core_snapshot(
         reasoning_summary,
         personality,
         collaboration_mode,
+        writer_workspace_binding: _,
+        writer_workspace_authority_roots: _,
     } = snapshot;
     let sandbox_policy = codex_sandboxing::compatibility_sandbox_policy_for_permission_profile(
         &permission_profile,

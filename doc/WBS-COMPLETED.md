@@ -2288,3 +2288,30 @@ formal retry 整改为 `d29e857`，最终独立验收提交为 `43cf0eeb3e1b4826
   真实 API/模型、训练、测评、CI/PR 或远端操作，未冒充通过。
 - 本任务未实施 M4-W1、primary binding、scoped authorization、replacement binding、workspace/permission registry 或第二套恢复状态。
   进入本地 `main` 后只解锁 M4-W1 的另行规划资格；M4-W1 尚未启动。
+
+## M4-W1 Writer Workspace Binding 与第四期最终收口（Plan 089，2026-08-26）
+
+**状态**：生产实现、M4-S2/S/C 兼容、fresh 正式组合链、四轮独立审查整改与最终复验均已完成；验收通过、任务目标完成，结论为
+`M4_W1_PASS / PHASE_4_COMPLETE`。最终实现提交为 `eb4a3bb8530f25632affe7d0bae2f2fec3f6323a`，最终验收见
+`agent_log/2026-08-26-160307-plan089-m4-w1-final-acceptance.md`。
+
+- 为显式 writer 交付 exact local linked-worktree primary binding：首次动作前建立并验证默认 cwd/write root，每次写入重验
+  path/symlink/worktree identity 与当前 permission/sandbox；缺失、失配或失效 fail-closed，不回退 main、父 cwd 或其它可写目录。
+  W 关闭时 shared workspace 与普通单 Agent 行为保持不变。
+- 绑定外辅助写入复用现有 permission/reviewer，采用 turn-only W1 scoped authorization 双门；普通 sandbox escalation 不解除
+  binding。显式 replacement 在 idle admission 下先验证后换绑，generation 单调，失败保留旧 binding，flush 结果不确定返回 Unknown；
+  临时授权不随恢复或 replacement 迁移。
+- binding 以 strict durable append 持久化并在 exact resume、member reload、cold process replacement 后重验；顶层 fork/new/clear
+  不继承来源 binding，child reload 保持自身 authority roots。Query/Control、close/archive/unarchive/delete、owner replacement 与
+  terminal lifecycle 继续消费 canonical Session/Team 状态，不建立第三份 workspace authority。
+- 全部代表 bound writer 的本地写路径包含 shell、apply_patch、unified exec/PTY、extension 与 stdio MCP；binding/replacement/terminal
+  teardown confirmed revoke 长驻进程。durable close 以 task-admission fence 串行 reserve→install 与 teardown，成功不重启 pending work；
+  persistence 成功边界前失败会释放 fence、回滚 marker 并恢复原有 pending 调度，Root authority 与可写 persistence 保留。
+- 最终 frozen fresh app-server OS process replacement + unique offline Critic 正式链 `1/1` 通过，覆盖 fresh repository/two linked
+  worktrees/Session/store、隔离写、scoped 外写、cold resume、失效/replacement、继续 Team mutation、Query/Control 与 lifecycle，
+  并断言 Critic 恰好一次实际调用。最终失败回滚聚焦 Nextest `42450a18-8595-49d1-aa6e-9be035a82069` 为 `2/2`，JUnit SHA-256
+  `7ff1f84b38f41a440ee482b58061ffe4f53ff423184b2a9d28f9c4ecc2e70c9a`；相关 scoped clippy、fmt 与 diff 门禁通过。
+- canonical full workspace `just test` 已按要求尝试一次，但测试前被 rusty-v8 v150.4.0 prebuilt archive HTTP 404 阻断，未冒充通过；
+  规划基线的 cwd/空 rollout/Realtime 宽邻接问题独立归因。任务未运行 Docker、真实 API/模型、训练或云资源；资源不足时只按授权两次
+  精确清理 069 `target/debug/incremental/`，没有扩大到 deps、其它 cache 或来源不明资产。
+- binding 状态/失效展示和 replacement TUI 仅保留为未来未排期可选增强；没有 M4-W2、兼容补丁包或无编号必需收口任务。

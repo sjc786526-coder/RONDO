@@ -5174,6 +5174,17 @@
             }
           ],
           "description": "Optional client-supplied analytics source classification for this thread."
+        },
+        "writerWorkspaceBinding": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/WriterWorkspaceBindingParams"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional local linked-worktree binding established before the first model or tool action."
         }
       },
       "type": "object"
@@ -5622,6 +5633,58 @@
       },
       "required": [
         "mode"
+      ],
+      "type": "object"
+    },
+    "WriterWorkspaceBindingParams": {
+      "description": "Caller-prepared local linked worktree to bind as a writer's primary workspace.",
+      "properties": {
+        "environmentId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "worktreeRoot": {
+          "$ref": "#/definitions/AbsolutePathBuf"
+        }
+      },
+      "required": [
+        "worktreeRoot"
+      ],
+      "type": "object"
+    },
+    "WriterWorkspaceBindingReadParams": {
+      "properties": {
+        "threadId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "threadId"
+      ],
+      "type": "object"
+    },
+    "WriterWorkspaceBindingReplaceParams": {
+      "properties": {
+        "binding": {
+          "$ref": "#/definitions/WriterWorkspaceBindingParams"
+        },
+        "expectedGeneration": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "threadId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "binding",
+        "threadId"
       ],
       "type": "object"
     }
@@ -6227,6 +6290,54 @@
         "params"
       ],
       "title": "Thread/readRequest",
+      "type": "object"
+    },
+    {
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/RequestId"
+        },
+        "method": {
+          "enum": [
+            "writerWorkspaceBinding/read"
+          ],
+          "title": "WriterWorkspaceBinding/readRequestMethod",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/WriterWorkspaceBindingReadParams"
+        }
+      },
+      "required": [
+        "id",
+        "method",
+        "params"
+      ],
+      "title": "WriterWorkspaceBinding/readRequest",
+      "type": "object"
+    },
+    {
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/RequestId"
+        },
+        "method": {
+          "enum": [
+            "writerWorkspaceBinding/replace"
+          ],
+          "title": "WriterWorkspaceBinding/replaceRequestMethod",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/WriterWorkspaceBindingReplaceParams"
+        }
+      },
+      "required": [
+        "id",
+        "method",
+        "params"
+      ],
+      "title": "WriterWorkspaceBinding/replaceRequest",
       "type": "object"
     },
     {

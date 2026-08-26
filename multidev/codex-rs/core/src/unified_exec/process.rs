@@ -226,7 +226,9 @@ impl UnifiedExecProcess {
 
     pub(super) async fn terminate_confirmed(&self) -> Result<(), UnifiedExecError> {
         match &self.process_handle {
-            ProcessHandle::Local(process_handle) => process_handle.terminate(),
+            ProcessHandle::Local(process_handle) => process_handle
+                .terminate_confirmed()
+                .map_err(|err| UnifiedExecError::process_failed(err.to_string()))?,
             ProcessHandle::ExecServer(process_handle) => {
                 process_handle
                     .terminate()

@@ -73,6 +73,33 @@ impl ToolOrchestrator {
             Err(err) => return (Err(err), None),
         };
 
+        if let Err(err) = tool_ctx
+            .session
+            .validate_writer_workspace_execution_authority(tool_ctx.turn.as_ref())
+            .await
+        {
+            let rejection = ToolError::Rejected(err.to_string());
+            let Some(network_approval) = network_approval else {
+                return (Err(rejection), None);
+            };
+            let finalize_result = match network_approval.mode() {
+                NetworkApprovalMode::Immediate => {
+                    finish_immediate_network_approval(&tool_ctx.session, network_approval).await
+                }
+                NetworkApprovalMode::Deferred => {
+                    finish_deferred_network_approval(
+                        &tool_ctx.session,
+                        network_approval.into_deferred(),
+                    )
+                    .await
+                }
+            };
+            return match finalize_result {
+                Ok(()) => (Err(rejection), None),
+                Err(finalize_err) => (Err(finalize_err), None),
+            };
+        }
+
         let attempt_tool_ctx = ToolCtx {
             session: tool_ctx.session.clone(),
             turn: tool_ctx.turn.clone(),
@@ -222,13 +249,16 @@ impl ToolOrchestrator {
         );
         let managed_network_active = turn_ctx.network.is_some();
         let sandbox_preference = tool.sandbox_preference();
+        let writer_binding_active = tool_ctx
+            .session
+            .writer_workspace_binding_snapshot()
+            .await
+            .is_some();
         let sandbox_requested = match sandbox_override {
-            SandboxOverride::BypassSandboxFirstAttempt => false,
-            SandboxOverride::NoOverride => self.sandbox.should_sandbox(
-                &permissions,
-                sandbox_preference,
-                managed_network_active,
-            ),
+            SandboxOverride::BypassSandboxFirstAttempt if !writer_binding_active => false,
+            SandboxOverride::BypassSandboxFirstAttempt | SandboxOverride::NoOverride => self
+                .sandbox
+                .should_sandbox(&permissions, sandbox_preference, managed_network_active),
         };
         let initial_sandbox = if sandbox_requested {
             self.sandbox.select_initial(
@@ -330,8 +360,8 @@ impl ToolOrchestrator {
                     );
                     return Err(ToolError::Codex(err));
                 }
-                let unsandboxed_allowed =
-                    unsandboxed_execution_allowed(&file_system_sandbox_policy);
+                let unsandboxed_allowed = !writer_binding_active
+                    && unsandboxed_execution_allowed(&file_system_sandbox_policy);
                 // Under `Never` or `OnRequest`, do not retry without sandbox;
                 // surface a concise sandbox denial that preserves the
                 // original output.

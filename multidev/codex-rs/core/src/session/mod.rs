@@ -35,6 +35,7 @@ use crate::exec_policy::ExecPolicyManager;
 use crate::exec_policy::default_policy_path;
 use crate::experimental_session_control::ExperimentalSessionControlError;
 use crate::experimental_session_control::PreparedDurableSessionShutdown;
+use crate::function_tool::FunctionCallError;
 use crate::image_preparation::ImageResizeNoticeMode;
 use crate::image_preparation::prepare_response_items as prepare_image_response_items;
 use crate::parse_turn_item;
@@ -165,6 +166,7 @@ use futures::prelude::*;
 use rmcp::model::RequestId;
 use serde_json::Value;
 use tokio::sync::Mutex;
+use tokio::sync::OwnedSemaphorePermit;
 use tokio::sync::RwLock;
 use tokio::sync::oneshot;
 use tokio::sync::watch;
@@ -406,6 +408,25 @@ pub(crate) struct SessionIo {
     pub(crate) session_loop_termination: SessionLoopTermination,
 }
 
+/// Holds the task-admission permit from idle reservation until the task is installed.
+///
+/// Durable shutdown takes the same permit before aborting active work and retains it through
+/// runtime teardown, so a pending-work wakeup cannot cross the terminal boundary.
+pub(crate) struct IdleTurnReservation {
+    turn_state: Arc<Mutex<crate::state::TurnState>>,
+    task_admission: OwnedSemaphorePermit,
+}
+
+impl IdleTurnReservation {
+    pub(crate) fn turn_state(&self) -> &Arc<Mutex<crate::state::TurnState>> {
+        &self.turn_state
+    }
+
+    pub(crate) fn into_parts(self) -> (Arc<Mutex<crate::state::TurnState>>, OwnedSemaphorePermit) {
+        (self.turn_state, self.task_admission)
+    }
+}
+
 pub(crate) type SessionLoopTermination = Shared<BoxFuture<'static, ()>>;
 
 struct ShutdownSubmissionGuard {
@@ -514,6 +535,8 @@ pub(crate) struct SessionSpawnArgs {
     pub(crate) user_shell_override: Option<shell::Shell>,
     pub(crate) parent_trace: Option<W3cTraceContext>,
     pub(crate) environment_selections: Vec<TurnEnvironmentSelection>,
+    pub(crate) writer_workspace_binding:
+        Option<crate::writer_workspace_binding::WriterWorkspaceBindingState>,
     pub(crate) thread_extension_init: ExtensionDataInit,
     pub(crate) client_mcp_extensions: ClientMcpExtensions,
     pub(crate) analytics_events_client: Option<AnalyticsEventsClient>,
@@ -609,6 +632,7 @@ impl Session {
             parent_rollout_thread_trace,
             parent_trace: _,
             environment_selections,
+            writer_workspace_binding,
             thread_extension_init,
             client_mcp_extensions,
             analytics_events_client,
@@ -767,6 +791,7 @@ impl Session {
                 config.cwd.clone(),
                 environment_selections,
             ),
+            writer_workspace_binding,
             codex_home: config.codex_home.clone(),
             thread_name: None,
             original_config_do_not_use: Arc::clone(&config),
@@ -1450,7 +1475,10 @@ impl Session {
         state.clear_connector_selection();
     }
 
-    async fn record_initial_history(&self, conversation_history: InitialHistory) {
+    async fn try_record_initial_history(
+        &self,
+        conversation_history: InitialHistory,
+    ) -> std::io::Result<()> {
         let (is_subagent, is_paginated_subagent) = {
             let state = self.state.lock().await;
             let session_configuration = &state.session_configuration;
@@ -1554,17 +1582,21 @@ impl Session {
                         rollout_items.push(thread_settings_applied);
                     }
                 }
-                self.persist_rollout_items(&rollout_items).await;
-
-                // Forked threads should remain file-backed immediately after startup.
-                self.ensure_rollout_materialized().await;
-
-                // Flush after seeding history and any persisted rollout copy.
-                if !is_subagent {
-                    let _ = self.flush_rollout().await;
-                }
+                // A fork's current settings are the authority tombstone for its inherited
+                // prefix. Commit the assembled prefix/settings batch strictly so neither an
+                // explicit child binding nor an unbound tombstone can be lost while returning an
+                // executable child. Ephemeral unbound forks retain their legacy no-op behavior.
+                self.persist_rollout_items_strict(&rollout_items).await?;
             }
         }
+        Ok(())
+    }
+
+    #[cfg(test)]
+    async fn record_initial_history(&self, conversation_history: InitialHistory) {
+        self.try_record_initial_history(conversation_history)
+            .await
+            .expect("record initial test history");
     }
 
     #[instrument(
@@ -1671,10 +1703,16 @@ impl Session {
         state.set_previous_turn_settings(previous_turn_settings);
     }
 
+    #[expect(
+        clippy::await_holding_invalid_type,
+        reason = "bound writer settings updates share the serialized binding/admission boundary"
+    )]
     pub(crate) async fn update_settings(
         &self,
         updates: SessionSettingsUpdate,
     ) -> ConstraintResult<()> {
+        let _mutation = self.writer_workspace_binding_mutation.lock().await;
+        let active_turn = self.active_turn.lock().await.is_some();
         let notify_config_contributors = !self.services.extensions.config_contributors().is_empty();
         let (previous_config, new_config, permission_profile_changed, mcp_inputs_changed) = {
             let mut state = self.state.lock().await;
@@ -1685,6 +1723,9 @@ impl Session {
                     return Err(err);
                 }
             };
+            state
+                .session_configuration
+                .ensure_writer_workspace_authority_update_allowed(&updated, active_turn)?;
 
             let previous_config = notify_config_contributors
                 .then(|| Self::build_effective_session_config(&state.session_configuration));
@@ -1741,6 +1782,454 @@ impl Session {
     pub(crate) async fn thread_config_snapshot(&self) -> ThreadConfigSnapshot {
         let state = self.state.lock().await;
         state.session_configuration.thread_config_snapshot()
+    }
+
+    pub(crate) async fn writer_workspace_binding_snapshot(
+        &self,
+    ) -> Option<codex_protocol::protocol::WriterWorkspaceBindingSnapshot> {
+        let state = self.state.lock().await;
+        state
+            .session_configuration
+            .writer_workspace_binding
+            .as_ref()
+            .map(|binding| binding.snapshot.clone())
+    }
+
+    pub(crate) async fn mark_writer_workspace_binding_unavailable(&self, reason: String) {
+        let mut state = self.state.lock().await;
+        if let Some(binding) = state
+            .session_configuration
+            .writer_workspace_binding
+            .as_mut()
+        {
+            binding.snapshot.availability =
+                codex_protocol::protocol::WriterWorkspaceBindingAvailability::Unavailable {
+                    reason,
+                };
+        }
+    }
+
+    pub(crate) async fn prepare_explicit_child_writer_spawn(
+        &self,
+        config: &mut crate::config::Config,
+    ) -> Vec<TurnEnvironmentSelection> {
+        let state = self.state.lock().await;
+        state
+            .session_configuration
+            .apply_explicit_child_writer_authority(config)
+    }
+
+    pub(crate) async fn refresh_writer_workspace_binding_snapshot(
+        &self,
+    ) -> Option<codex_protocol::protocol::WriterWorkspaceBindingSnapshot> {
+        let _ = self.validate_writer_workspace_binding().await;
+        self.writer_workspace_binding_snapshot().await
+    }
+
+    #[expect(
+        clippy::await_holding_invalid_type,
+        reason = "active-turn identity and its turn-scoped grant must be updated atomically"
+    )]
+    pub(crate) async fn record_writer_binding_external_write_grant(
+        &self,
+        turn_context: &TurnContext,
+        environment_id: &str,
+        permissions: AdditionalPermissionProfile,
+    ) -> Result<(), FunctionCallError> {
+        let generation = {
+            let state = self.state.lock().await;
+            state
+                .session_configuration
+                .writer_workspace_binding
+                .as_ref()
+                .map(|binding| binding.snapshot.binding.generation)
+                .ok_or_else(|| {
+                    FunctionCallError::RespondToModel(
+                        "writer workspace binding is not active".to_string(),
+                    )
+                })?
+        };
+        let active = self.active_turn.lock().await;
+        let active_turn = active.as_ref().ok_or_else(|| {
+            FunctionCallError::RespondToModel(
+                "writer binding grant arrived after the originating turn ended".to_string(),
+            )
+        })?;
+        let Some(active_task) = active_turn.task.as_ref() else {
+            return Err(FunctionCallError::RespondToModel(
+                "writer binding grant arrived outside an active task".to_string(),
+            ));
+        };
+        if active_task.turn_context.sub_id != turn_context.sub_id {
+            return Err(FunctionCallError::RespondToModel(
+                "writer binding grant does not belong to the active turn".to_string(),
+            ));
+        }
+        let mut turn_state = active_turn.turn_state.lock().await;
+        turn_state.record_writer_binding_external_write_grant(
+            environment_id,
+            generation,
+            permissions,
+        );
+        Ok(())
+    }
+
+    pub(crate) async fn writer_binding_external_write_grant(
+        &self,
+        environment_id: &str,
+        generation: u64,
+    ) -> Option<AdditionalPermissionProfile> {
+        let turn_state = {
+            let active = self.active_turn.lock().await;
+            Arc::clone(&active.as_ref()?.turn_state)
+        };
+        turn_state
+            .lock()
+            .await
+            .writer_binding_external_write_grant(environment_id, generation)
+    }
+
+    #[expect(
+        clippy::await_holding_invalid_type,
+        reason = "binding revalidation and replacement share one serialized mutation boundary"
+    )]
+    pub(crate) async fn validate_writer_workspace_binding(&self) -> CodexResult<()> {
+        let _mutation = self.writer_workspace_binding_mutation.lock().await;
+        self.validate_writer_workspace_binding_locked().await
+    }
+
+    #[expect(
+        clippy::await_holding_invalid_type,
+        reason = "turn validation must share the serialized binding mutation boundary"
+    )]
+    pub(crate) async fn validate_writer_workspace_binding_for_turn(
+        &self,
+        turn_context: &TurnContext,
+    ) -> CodexResult<()> {
+        let _mutation = self.writer_workspace_binding_mutation.lock().await;
+        self.validate_writer_workspace_binding_locked().await?;
+        let (current, authority_revision) = {
+            let state = self.state.lock().await;
+            let configuration = &state.session_configuration;
+            (
+                configuration
+                    .writer_workspace_binding
+                    .as_ref()
+                    .map(|binding| binding.snapshot.binding.clone()),
+                configuration.writer_workspace_authority_revision(),
+            )
+        };
+        if current != turn_context.writer_workspace_binding
+            || authority_revision != turn_context.writer_workspace_authority_revision
+        {
+            return Err(CodexErr::InvalidRequest(
+                "writer workspace binding or execution authority changed after this turn context was created"
+                    .to_string(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Revalidate the captured binding and every active W1 physical target immediately before a
+    /// tool side effect. Ordinary unbound turns retain their existing execution behavior.
+    pub(crate) async fn validate_writer_workspace_execution_authority(
+        &self,
+        turn_context: &TurnContext,
+    ) -> CodexResult<()> {
+        self.validate_writer_workspace_binding_for_turn(turn_context)
+            .await?;
+        let Some(binding) = turn_context.writer_workspace_binding.as_ref() else {
+            return Ok(());
+        };
+        let Some(grant) = self
+            .writer_binding_external_write_grant(&binding.environment_id, binding.generation)
+            .await
+        else {
+            return Ok(());
+        };
+        let environment = self
+            .services
+            .turn_environments
+            .environment_manager()
+            .get_environment(&binding.environment_id)
+            .ok_or_else(|| {
+                CodexErr::InvalidRequest(
+                    "writer workspace binding environment is no longer available".to_string(),
+                )
+            })?;
+        crate::writer_workspace_binding::revalidate_external_write_permissions(
+            &grant,
+            environment.get_filesystem().as_ref(),
+        )
+        .await
+        .map_err(|err| CodexErr::InvalidRequest(err.to_string()))
+    }
+
+    #[expect(
+        clippy::await_holding_invalid_type,
+        reason = "binding validation and idle-turn reservation are one serialized admission boundary"
+    )]
+    async fn reserve_idle_turn_for_writer_binding_inner(
+        &self,
+        expected_turn_context: Option<&TurnContext>,
+    ) -> CodexResult<IdleTurnReservation> {
+        let task_admission = Arc::clone(&self.task_admission_gate)
+            .acquire_owned()
+            .await
+            .map_err(|_| CodexErr::InternalAgentDied)?;
+        if self.experimental_session_control_shutdown_in_progress() {
+            return Err(CodexErr::InvalidRequest(
+                "session shutdown is in progress; new task admission is unavailable".to_string(),
+            ));
+        }
+        let _mutation = self.writer_workspace_binding_mutation.lock().await;
+        self.validate_writer_workspace_binding_locked().await?;
+        let (current, authority_revision) = {
+            let state = self.state.lock().await;
+            let configuration = &state.session_configuration;
+            (
+                configuration
+                    .writer_workspace_binding
+                    .as_ref()
+                    .map(|binding| binding.snapshot.binding.clone()),
+                configuration.writer_workspace_authority_revision(),
+            )
+        };
+        if expected_turn_context.is_some_and(|expected| {
+            expected.writer_workspace_binding != current
+                || expected.writer_workspace_authority_revision != authority_revision
+        }) {
+            return Err(CodexErr::InvalidRequest(
+                "writer workspace binding or execution authority changed before turn admission"
+                    .to_string(),
+            ));
+        }
+        let turn_state = {
+            let mut active = self.active_turn.lock().await;
+            if active.is_some() {
+                return Err(CodexErr::InvalidRequest("thread is not idle".to_string()));
+            }
+            Arc::clone(
+                &active
+                    .get_or_insert_with(crate::state::ActiveTurn::default)
+                    .turn_state,
+            )
+        };
+        if current.is_some()
+            && let Err(err) = self
+                .services
+                .unified_exec_manager
+                .terminate_all_processes_confirmed()
+                .await
+        {
+            let mut active = self.active_turn.lock().await;
+            if active.as_ref().is_some_and(|active_turn| {
+                active_turn.task.is_none() && Arc::ptr_eq(&active_turn.turn_state, &turn_state)
+            }) {
+                *active = None;
+            }
+            drop(active);
+            let message =
+                format!("failed to revoke bound writer processes before turn admission: {err}");
+            self.mark_writer_workspace_binding_unavailable(message.clone())
+                .await;
+            return Err(CodexErr::InvalidRequest(message));
+        }
+        Ok(IdleTurnReservation {
+            turn_state,
+            task_admission,
+        })
+    }
+
+    pub(crate) async fn reserve_idle_turn_for_writer_binding(
+        &self,
+    ) -> CodexResult<IdleTurnReservation> {
+        self.reserve_idle_turn_for_writer_binding_inner(/*expected_binding*/ None)
+            .await
+    }
+
+    pub(crate) async fn reserve_idle_turn_for_writer_context(
+        &self,
+        turn_context: &TurnContext,
+    ) -> CodexResult<IdleTurnReservation> {
+        self.reserve_idle_turn_for_writer_binding_inner(Some(turn_context))
+            .await
+    }
+
+    async fn validate_writer_workspace_binding_locked(&self) -> CodexResult<()> {
+        let (binding, authority_profile, authority_environments, authority_workspace_roots) = {
+            let state = self.state.lock().await;
+            let configuration = &state.session_configuration;
+            let Some(binding) = configuration.writer_workspace_binding.clone() else {
+                return Ok(());
+            };
+            (
+                binding,
+                configuration.permission_profile(),
+                configuration.environments.clone(),
+                configuration.authority_workspace_roots(),
+            )
+        };
+        let result = crate::writer_workspace_binding::revalidate_binding(
+            &binding,
+            &authority_profile,
+            &authority_environments,
+            &authority_workspace_roots,
+            self.services
+                .turn_environments
+                .environment_manager()
+                .as_ref(),
+        )
+        .await;
+        let validation_error = {
+            let mut state = self.state.lock().await;
+            let Some(current) = state
+                .session_configuration
+                .writer_workspace_binding
+                .as_mut()
+            else {
+                return Err(CodexErr::InvalidRequest(
+                    "writer workspace binding changed during validation".to_string(),
+                ));
+            };
+            if current.snapshot.binding.generation != binding.snapshot.binding.generation {
+                return Err(CodexErr::InvalidRequest(
+                    "writer workspace binding changed during validation".to_string(),
+                ));
+            }
+            match result {
+                Ok(()) => {
+                    current.mark_available();
+                    return Ok(());
+                }
+                Err(err) => {
+                    current.mark_unavailable(&err);
+                    CodexErr::InvalidRequest(format!("writer workspace binding unavailable: {err}"))
+                }
+            }
+        };
+        if let Err(err) = self
+            .services
+            .unified_exec_manager
+            .terminate_all_processes_confirmed()
+            .await
+        {
+            return Err(CodexErr::InvalidRequest(format!(
+                "{validation_error}; failed to revoke writer processes: {err}"
+            )));
+        }
+        Err(validation_error)
+    }
+
+    #[expect(
+        clippy::await_holding_invalid_type,
+        reason = "replacement validation, channel revocation, state swap, and persistence are one serialized mutation"
+    )]
+    pub(crate) async fn replace_writer_workspace_binding(
+        &self,
+        request: crate::writer_workspace_binding::WriterWorkspaceBindingRequest,
+        expected_generation: Option<u64>,
+    ) -> CodexResult<crate::writer_workspace_binding::WriterWorkspaceBindingReplaceOutcome> {
+        let _mutation = self.writer_workspace_binding_mutation.lock().await;
+        if self.active_turn.lock().await.as_ref().is_some() {
+            return Err(CodexErr::InvalidRequest(
+                "writer workspace binding replacement requires an idle thread".to_string(),
+            ));
+        }
+        let (current, authority_profile, authority_environments, authority_workspace_roots) = {
+            let state = self.state.lock().await;
+            let configuration = &state.session_configuration;
+            let current = configuration
+                .writer_workspace_binding
+                .as_ref()
+                .ok_or_else(|| {
+                    CodexErr::InvalidRequest(
+                        "thread has no writer workspace binding to replace".to_string(),
+                    )
+                })?
+                .snapshot
+                .binding
+                .clone();
+            if expected_generation.is_some_and(|expected| expected != current.generation) {
+                return Err(CodexErr::InvalidRequest(format!(
+                    "writer workspace binding generation mismatch: expected {}, current {}",
+                    expected_generation.unwrap_or_default(),
+                    current.generation
+                )));
+            }
+            (
+                current,
+                configuration.permission_profile(),
+                configuration.environments.clone(),
+                configuration.authority_workspace_roots(),
+            )
+        };
+        let replacement = crate::writer_workspace_binding::capture_replacement_binding(
+            request,
+            &current,
+            &authority_profile,
+            &authority_environments,
+            &authority_workspace_roots,
+            self.services
+                .turn_environments
+                .environment_manager()
+                .as_ref(),
+        )
+        .await
+        .map_err(|err| CodexErr::InvalidRequest(err.to_string()))?;
+
+        // Old long-lived channels are revoked before the single successful swap boundary.
+        self.services
+            .unified_exec_manager
+            .terminate_all_processes_confirmed()
+            .await
+            .map_err(|err| {
+                CodexErr::InvalidRequest(format!(
+                    "failed to revoke processes for writer workspace replacement: {err}"
+                ))
+            })?;
+        let (snapshot, environment_config, environments) = {
+            let mut state = self.state.lock().await;
+            let configuration = &mut state.session_configuration;
+            let observed_generation = configuration
+                .writer_workspace_binding
+                .as_ref()
+                .map(|binding| binding.snapshot.binding.generation);
+            if observed_generation != Some(current.generation) {
+                return Err(CodexErr::InvalidRequest(
+                    "writer workspace binding changed during replacement".to_string(),
+                ));
+            }
+            let snapshot = replacement.snapshot.clone();
+            configuration.writer_workspace_binding = Some(replacement);
+            state.clear_granted_permissions();
+            let configuration = &state.session_configuration;
+            (
+                snapshot,
+                configuration.environment_config(),
+                configuration.environment_selections().to_vec(),
+            )
+        };
+        self.services
+            .turn_environments
+            .update_selections(&environments, &environment_config);
+        self.mark_mcp_runtime_dirty();
+        let outcome = match self.persist_writer_workspace_binding_event().await {
+            Ok(()) => {
+                crate::writer_workspace_binding::WriterWorkspaceBindingReplaceOutcome::Applied(
+                    snapshot,
+                )
+            }
+            Err(err) => {
+                crate::writer_workspace_binding::WriterWorkspaceBindingReplaceOutcome::Unknown {
+                    snapshot,
+                    message: format!(
+                        "binding replaced but durable append/materialization failed: {err}"
+                    ),
+                }
+            }
+        };
+        Ok(outcome)
     }
 
     pub(crate) async fn set_app_server_client_info(
@@ -3782,6 +4271,33 @@ impl Session {
         {
             error!("failed to record rollout items: {e:#}");
         }
+    }
+
+    async fn persist_rollout_items_strict(&self, items: &[RolloutItem]) -> std::io::Result<()> {
+        let Some(live_thread) = self.live_thread() else {
+            return Ok(());
+        };
+        live_thread
+            .append_items(items)
+            .await
+            .map_err(std::io::Error::other)?;
+        live_thread.persist().await.map_err(std::io::Error::other)?;
+        live_thread.flush().await.map_err(std::io::Error::other)
+    }
+
+    /// Persist the binding identity through a strict append/materialize/flush barrier.
+    /// Ordinary transcript recording remains best-effort; this identity cannot.
+    pub(crate) async fn persist_writer_workspace_binding_event(&self) -> std::io::Result<()> {
+        let live_thread = self
+            .live_thread_for_persistence("persist writer workspace binding")
+            .map_err(std::io::Error::other)?;
+        let event = RolloutItem::EventMsg(handlers::thread_settings_applied_event(self).await);
+        live_thread
+            .append_items(&[event])
+            .await
+            .map_err(std::io::Error::other)?;
+        live_thread.persist().await.map_err(std::io::Error::other)?;
+        live_thread.flush().await.map_err(std::io::Error::other)
     }
 
     pub(crate) async fn clone_history(&self) -> ContextManager {

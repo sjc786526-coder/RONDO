@@ -674,6 +674,16 @@ client_request_definitions! {
         serialization: thread_id(params.thread_id),
         response: v2::ThreadReadResponse,
     },
+    WriterWorkspaceBindingRead => "writerWorkspaceBinding/read" {
+        params: v2::WriterWorkspaceBindingReadParams,
+        serialization: thread_id(params.thread_id),
+        response: v2::WriterWorkspaceBindingReadResponse,
+    },
+    WriterWorkspaceBindingReplace => "writerWorkspaceBinding/replace" {
+        params: v2::WriterWorkspaceBindingReplaceParams,
+        serialization: thread_id(params.thread_id),
+        response: v2::WriterWorkspaceBindingReplaceResponse,
+    },
     DurableSessionList => "session/list" {
         params: v2::DurableSessionListParams,
         serialization: None,

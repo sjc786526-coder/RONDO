@@ -139,6 +139,9 @@ pub(super) async fn spawn_review_thread(
         parent_thread_id: parent_turn_context.parent_thread_id,
         originator: parent_turn_context.originator.clone(),
         environments: parent_turn_context.environments.clone(),
+        writer_workspace_binding: parent_turn_context.writer_workspace_binding.clone(),
+        writer_workspace_authority_revision: parent_turn_context
+            .writer_workspace_authority_revision,
         available_models,
         unified_exec_shell_mode,
         current_date: parent_turn_context.current_date.clone(),

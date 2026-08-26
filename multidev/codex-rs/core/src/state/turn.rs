@@ -94,6 +94,8 @@ pub(crate) struct TurnState {
     pub(crate) pending_input: TurnInputQueue,
     mailbox_delivery_phase: MailboxDeliveryPhase,
     granted_permissions_by_environment_id: HashMap<String, AdditionalPermissionProfile>,
+    writer_binding_external_write_grants_by_environment_id:
+        HashMap<String, (u64, AdditionalPermissionProfile)>,
     strict_auto_review_enabled: bool,
     pub(crate) tool_calls: u64,
     pub(crate) has_memory_citation: bool,
@@ -248,6 +250,34 @@ impl TurnState {
         self.granted_permissions_by_environment_id
             .get(environment_id)
             .cloned()
+    }
+
+    pub(crate) fn record_writer_binding_external_write_grant(
+        &mut self,
+        environment_id: &str,
+        generation: u64,
+        permissions: AdditionalPermissionProfile,
+    ) {
+        let current = self
+            .writer_binding_external_write_grants_by_environment_id
+            .get(environment_id)
+            .filter(|(current_generation, _)| *current_generation == generation)
+            .map(|(_, permissions)| permissions);
+        if let Some(permissions) = merge_permission_profiles(current, Some(&permissions)) {
+            self.writer_binding_external_write_grants_by_environment_id
+                .insert(environment_id.to_string(), (generation, permissions));
+        }
+    }
+
+    pub(crate) fn writer_binding_external_write_grant(
+        &self,
+        environment_id: &str,
+        generation: u64,
+    ) -> Option<AdditionalPermissionProfile> {
+        self.writer_binding_external_write_grants_by_environment_id
+            .get(environment_id)
+            .filter(|(stored_generation, _)| *stored_generation == generation)
+            .map(|(_, permissions)| permissions.clone())
     }
 
     pub(crate) fn enable_strict_auto_review(&mut self) {

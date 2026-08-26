@@ -2,6 +2,7 @@ use super::residency::is_v2_resident_session_source;
 use super::*;
 use crate::agent::role::apply_role_to_config_for_multi_agent_v2;
 use crate::config::PermissionProfileSnapshot;
+use crate::writer_workspace_binding::configured_authority_workspace_roots;
 use codex_extension_api::ExtensionDataInit;
 use codex_protocol::error::CodexErrorDetails;
 use codex_thread_store::StoredThread;
@@ -393,9 +394,33 @@ impl AgentControl {
         }))
     }
 
+    #[cfg(test)]
     pub(crate) async fn ensure_v2_agent_loaded(
         &self,
+        config: Config,
+        thread_id: ThreadId,
+    ) -> CodexResult<()> {
+        self.ensure_v2_agent_loaded_inner(config, /*bound_writer_authority*/ None, thread_id)
+            .await
+    }
+
+    /// Reload a V2 member while retaining a separate current authority snapshot for a persisted
+    /// bound writer. The ordinary resume config remains the execution projection for unbound
+    /// members; the wider snapshot is consumed only after the target history proves it is bound.
+    pub(crate) async fn ensure_v2_agent_loaded_with_bound_writer_authority(
+        &self,
+        config: Config,
+        bound_writer_authority: Config,
+        thread_id: ThreadId,
+    ) -> CodexResult<()> {
+        self.ensure_v2_agent_loaded_inner(config, Some(bound_writer_authority), thread_id)
+            .await
+    }
+
+    async fn ensure_v2_agent_loaded_inner(
+        &self,
         mut config: Config,
+        bound_writer_authority: Option<Config>,
         thread_id: ThreadId,
     ) -> CodexResult<()> {
         let _admission = self.reserve_team_child_admission()?;
@@ -423,6 +448,48 @@ impl AgentControl {
             history: Arc::new(history),
             rollout_path: stored_thread.rollout_path,
         });
+        if let Some((_, Some(persisted_roots))) =
+            initial_history.get_resumed_writer_workspace_binding_material()
+            && let Some(mut authority_config) = bound_writer_authority
+        {
+            let current_roots = configured_authority_workspace_roots(&authority_config);
+            let retained_roots = persisted_roots
+                .into_iter()
+                .filter(|root| current_roots.iter().any(|current| current == root))
+                .collect::<Vec<_>>();
+            let retained_profile_roots = authority_config
+                .permissions
+                .profile_workspace_roots()
+                .iter()
+                .filter(|root| retained_roots.iter().any(|retained| retained == *root))
+                .cloned()
+                .collect::<Vec<_>>();
+            let authority_profile = match authority_config.permissions.active_permission_profile() {
+                Some(active_permission_profile) => {
+                    PermissionProfileSnapshot::active_with_profile_workspace_roots(
+                        authority_config.permissions.permission_profile().clone(),
+                        active_permission_profile,
+                        retained_profile_roots,
+                    )
+                }
+                None => PermissionProfileSnapshot::legacy(
+                    authority_config.permissions.permission_profile().clone(),
+                ),
+            };
+            authority_config
+                .permissions
+                .set_permission_profile_from_session_snapshot(authority_profile)
+                .map_err(|err| {
+                    CodexErr::InvalidRequest(format!(
+                        "bound writer authority profile is invalid: {err}"
+                    ))
+                })?;
+            authority_config
+                .permissions
+                .set_workspace_roots(retained_roots.clone());
+            authority_config.workspace_roots = retained_roots;
+            config = authority_config;
+        }
         let (session_source, _) = initial_history
             .get_resumed_session_sources()
             .unwrap_or((stored_source, None));
@@ -637,6 +704,7 @@ impl AgentControl {
                     inheritance.environments,
                     inheritance.exec_policy,
                     options.environments.clone(),
+                    options.writer_workspace_binding.clone(),
                     /*defer_durable_team_participant_registration*/ true,
                 ))
                 .await?
@@ -1010,6 +1078,7 @@ impl AgentControl {
                 inherited_environments,
                 inherited_exec_policy,
                 options.environments.clone(),
+                options.writer_workspace_binding.clone(),
                 thread_extension_init,
                 /*defer_durable_team_participant_registration*/ true,
             )

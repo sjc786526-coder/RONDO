@@ -657,6 +657,64 @@ async fn terminating_initial_exec_command_rechecks_initial_response_state() -> a
     Ok(())
 }
 
+#[tokio::test]
+async fn confirmed_terminate_all_retains_failed_handles_and_removes_confirmed_processes() {
+    let manager = UnifiedExecProcessManager::default();
+    let cwd = PathUri::parse("file:///tmp").expect("test cwd");
+    let successful = Arc::new(
+        crate::unified_exec::process_tests::remote_process(
+            codex_exec_server::WriteStatus::Accepted,
+            /*terminate_error*/ None,
+            codex_sandboxing::SandboxType::None,
+        )
+        .await,
+    );
+    let failed = Arc::new(
+        crate::unified_exec::process_tests::remote_process(
+            codex_exec_server::WriteStatus::Accepted,
+            Some("terminate unavailable".to_string()),
+            codex_sandboxing::SandboxType::None,
+        )
+        .await,
+    );
+    let entry = |process_id, process: Arc<UnifiedExecProcess>| ProcessEntry {
+        process,
+        call_id: format!("call-{process_id}"),
+        process_id,
+        cwd: cwd.clone(),
+        initial_exec_command_active: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        hook_command: "sleep 60".to_string(),
+        tty: false,
+        network_approval: None,
+        session: std::sync::Weak::new(),
+        last_used: Instant::now(),
+    };
+    {
+        let mut store = manager.process_store.lock().await;
+        store.processes.insert(1, entry(1, Arc::clone(&successful)));
+        store.processes.insert(2, entry(2, Arc::clone(&failed)));
+    }
+
+    let error = manager
+        .terminate_all_processes_confirmed()
+        .await
+        .expect_err("one failed termination must fail the authority barrier");
+
+    assert!(matches!(error, UnifiedExecError::ProcessFailed { .. }));
+    assert!(successful.has_exited());
+    assert!(!failed.has_exited());
+    let store = manager.process_store.lock().await;
+    assert!(!store.processes.contains_key(&1));
+    assert!(Arc::ptr_eq(
+        &store
+            .processes
+            .get(&2)
+            .expect("failed handle retained")
+            .process,
+        &failed
+    ));
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn terminating_during_stdin_poll_returns_exited_response() -> anyhow::Result<()> {
     let (session, turn) = test_session_and_turn().await;

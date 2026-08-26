@@ -862,6 +862,8 @@ mod thread_processor_behavior_tests {
             parent_thread_id: None,
             thread_source: None,
             originator: "test_originator".to_string(),
+            writer_workspace_binding: None,
+            writer_workspace_authority_roots: None,
         };
 
         assert_eq!(

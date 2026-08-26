@@ -583,3 +583,11 @@ export type { WindowsWorldWritableWarningNotification } from "./WindowsWorldWrit
 export type { WorkspaceMessage } from "./WorkspaceMessage";
 export type { WorkspaceMessageType } from "./WorkspaceMessageType";
 export type { WriteStatus } from "./WriteStatus";
+export type { WriterWorkspaceBinding } from "./WriterWorkspaceBinding";
+export type { WriterWorkspaceBindingAvailability } from "./WriterWorkspaceBindingAvailability";
+export type { WriterWorkspaceBindingParams } from "./WriterWorkspaceBindingParams";
+export type { WriterWorkspaceBindingReadParams } from "./WriterWorkspaceBindingReadParams";
+export type { WriterWorkspaceBindingReadResponse } from "./WriterWorkspaceBindingReadResponse";
+export type { WriterWorkspaceBindingReplaceOutcome } from "./WriterWorkspaceBindingReplaceOutcome";
+export type { WriterWorkspaceBindingReplaceParams } from "./WriterWorkspaceBindingReplaceParams";
+export type { WriterWorkspaceBindingReplaceResponse } from "./WriterWorkspaceBindingReplaceResponse";

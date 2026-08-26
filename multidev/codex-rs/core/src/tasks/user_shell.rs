@@ -124,6 +124,16 @@ pub(crate) async fn execute_user_shell_command(
         session.send_event(turn_context.as_ref(), event).await;
     }
 
+    if session.writer_workspace_binding_snapshot().await.is_some() {
+        send_user_shell_error(
+            &session,
+            turn_context.as_ref(),
+            "/shell is unavailable while a writer workspace binding is active because it runs outside the managed filesystem sandbox",
+        )
+        .await;
+        return;
+    }
+
     let Some((turn_environment, environment_shell)) = turn_context
         .environments
         .local()
