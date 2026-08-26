@@ -947,7 +947,15 @@ class TorchContinuousTrainingAdapter:
                 self._values_equal(a, b) for a, b in zip(left, right)
             )
         if hasattr(self.torch, "is_tensor") and self.torch.is_tensor(left):
-            return bool(self.torch.equal(left, right))
+            try:
+                return bool(
+                    self.torch.equal(
+                        left.detach().cpu(),
+                        right.detach().cpu(),
+                    )
+                )
+            except (AttributeError, RuntimeError, TypeError):
+                return False
         if type(left).__module__.split(".", 1)[0] == "numpy" and hasattr(left, "shape"):
             try:
                 numpy = importlib.import_module("numpy")

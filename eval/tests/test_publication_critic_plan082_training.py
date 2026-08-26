@@ -1407,6 +1407,35 @@ class Plan082TrainingTests(unittest.TestCase):
             },
         )
 
+    def test_training_state_tensor_comparison_normalizes_devices(self) -> None:
+        class Tensor:
+            def __init__(self, values: tuple[int, ...], device: str) -> None:
+                self.values = values
+                self.device = device
+
+            def detach(self):
+                return self
+
+            def cpu(self):
+                return Tensor(self.values, "cpu")
+
+        def equal(left, right):
+            if left.device != "cpu" or right.device != "cpu":
+                raise RuntimeError("cross-device compare")
+            return left.values == right.values
+
+        adapter = object.__new__(TorchContinuousTrainingAdapter)
+        adapter.torch = SimpleNamespace(
+            is_tensor=lambda value: isinstance(value, Tensor),
+            equal=equal,
+        )
+        self.assertTrue(
+            adapter._values_equal(Tensor((1, 2), "cuda:0"), Tensor((1, 2), "cpu"))
+        )
+        self.assertFalse(
+            adapter._values_equal(Tensor((1, 2), "cuda:0"), Tensor((1, 3), "cpu"))
+        )
+
     def test_formal_freeze_precedes_namespace_and_is_only_candidate_gate(self) -> None:
         spec = _run_spec()
         route = read_json(PLAN081_ROUTE)
