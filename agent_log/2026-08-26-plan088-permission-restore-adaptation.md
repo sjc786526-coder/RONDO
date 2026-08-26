@@ -39,7 +39,8 @@
 - legacy/paginated cold resume、legacy/paginated fork、invalid profile 拒绝与显式 override 集成：`5/5` 通过，`883` skipped。
 - `just fix -p codex-protocol -p codex-core -p codex-app-server -p codex-exec` 通过并做一处所有权简化；随后
   `UV_CACHE_DIR=.uv-cache just fmt` 通过。依就近规则，fix/fmt 后未再运行测试。
-- 最终测试/修复批次均为 `stop=none`、`cleanup=none`、swap peak `0`。最高记录的项目占用约 `272.68GB`，低于 `285GB` 主动停止线；
+- 最终通过的测试/修复批次均为 `stop=none`、`cleanup=none`、swap peak `0`。通过批次最高项目采样为
+  `273,409,286,144 B`（约 `273.41GB`），低于 `285GB` 主动停止线；调试失败轮最高为 `274,184,130,560 B`，同样未触发停止或清理。
   scoped fix 内存峰值约 `6.27GB`，低于 `21/22GB` 门限。未触发 target 清理。
 
 未运行完整 workspace `just test`：实际风险已由 protocol、core、app-server 全库和端到端正反主链覆盖，继续扩大与本任务写集不成比例。

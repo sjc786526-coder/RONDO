@@ -25,35 +25,35 @@ resume/fork 必须在 runtime/fork 变得可执行、可继续或产生工具副
 
 ### 完成/验收标准
 
-- [ ] cold resume 与顶层 `thread/fork` 都能恢复最近有效持久设置的 approval policy、approvals reviewer 与 active profile identity；
+- [x] cold resume 与顶层 `thread/fork` 都能恢复最近有效持久设置的 approval policy、approvals reviewer 与 active profile identity；
       legacy JSONL 与 paginated history、最后一次 settings update、paginated source 的现有加载/边界路径均得到相称覆盖。
-- [ ] 新产生的 canonical persisted history 在普通真实 turn、settings update 与会重建 bounded model context 的 compaction 路径上保留恢复
+- [x] 新产生的 canonical persisted history 在普通真实 turn、settings update 与会重建 bounded model context 的 compaction 路径上保留恢复
       active profile identity 所需的最小事实；旧历史缺少该事实时仍按 legacy 兼容处理，不从 concrete permission snapshot 猜测 identity。
-- [ ] 每个设置域都保持“合法显式请求 override > 最近持久设置 > 当前配置”的优先级；显式权限 override 必须绕过无效的历史 profile
+- [x] 每个设置域都保持“合法显式请求 override > 最近持久设置 > 当前配置”的优先级；显式权限 override 必须绕过无效的历史 profile
       identity 并按当前配置正常解析，显式无效 override 继续走既有错误语义，不能由历史值或默认值掩盖。
-- [ ] 只恢复 active profile identity，不恢复持久历史里的 concrete `PermissionProfile`、sandbox、filesystem/network 或 workspace-roots
+- [x] 只恢复 active profile identity，不恢复持久历史里的 concrete `PermissionProfile`、sandbox、filesystem/network 或 workspace-roots
       快照；当前同名 profile 定义、project trust 与 requirements 决定实际运行权限，当前约束更严格时不得恢复越界权限。
-- [ ] 若最近设置明确记录了 active profile，但该 profile 当前已删除、改名、父 profile 缺失、定义损坏/循环、被 requirements 禁止或
+- [x] 若最近设置明确记录了 active profile，但该 profile 当前已删除、改名、父 profile 缺失、定义损坏/循环、被 requirements 禁止或
       以其他方式不兼容，resume/fork 明确失败或 unavailable；不得切换 configured default，即使该默认看似更保守，也不得扩大或改变
       sandbox/filesystem/network 权限、approval policy 或 reviewer。
-- [ ] 最近持久设置没有 active profile identity 的 thread 不回填更早的 identity，也不恢复历史 concrete permission snapshot；从未记录
+- [x] 最近持久设置没有 active profile identity 的 thread 不回填更早的 identity，也不恢复历史 concrete permission snapshot；从未记录
       active profile 的 legacy thread、没有相关持久设置的 thread 和普通当前配置路径保持兼容。
-- [ ] fail-closed 发生在 runtime/fork 变得可执行或可继续、初始化可能产生副作用的 MCP/tool 链、开始 model turn 或产生工具副作用之前；
+- [x] fail-closed 发生在 runtime/fork 变得可执行或可继续、初始化可能产生副作用的 MCP/tool 链、开始 model turn 或产生工具副作用之前；
       若既有架构先记录明确 failed/unavailable 且不可执行的 fork，可保留该生命周期，但不得报告成功、带默认权限继续或留下可执行半成品。
-- [ ] 普通新建 thread、已运行 thread 的既有 resume 语义、普通 fork、shared workspace、功能关闭态、S/C 已完成链和 Plan 086 hardened
+- [x] 普通新建 thread、已运行 thread 的既有 resume 语义、普通 fork、shared workspace、功能关闭态、S/C 已完成链和 Plan 086 hardened
       trust 不发生无关变化；auto-review/reviewer 恢复链有与实际写集相称的兼容证据。
-- [ ] 正反场景使用 task-owned 临时 config、store、thread、history 和 deterministic/fake/offline 设施；不得污染主工作区、其他 worktree
+- [x] 正反场景使用 task-owned 临时 config、store、thread、history 和 deterministic/fake/offline 设施；不得污染主工作区、其他 worktree
       或真实用户数据，也不建设通用 permission/workspace registry、第二套恢复状态、审计/可信平台或严格因果设施。
-- [ ] 调试阶段保留已验证进度，从首个未打通处自主窄修和重跑；全流程稳定后冻结代码与配置，从全新临时现场完成一轮 resume/fork 正反
+- [x] 调试阶段保留已验证进度，从首个未打通处自主窄修和重跑；全流程稳定后冻结代码与配置，从全新临时现场完成一轮 resume/fork 正反
       主场景及必要聚焦门禁，以该干净轮作为正式结果。影响正式链的后续修复须重新形成相称的干净正式轮。
-- [ ] 按实际写集完成格式化、必要生成物、scoped fix/lint、受影响 app-server/config/core 等聚焦测试与相称邻接回归；资源拒绝、skip、
+- [x] 按实际写集完成格式化、必要生成物、scoped fix/lint、受影响 app-server/config/core 等聚焦测试与相称邻接回归；资源拒绝、skip、
       未运行和基础设施失败如实记录，不通过删测试、弱化断言或扩大 fallback 凑绿。
-- [ ] 执行者形成 clean 的待验收本地提交并通过指定队列请求审查；范围内普通 finding 可自主整改、复验、提交并再次通知，直至独立审查
+- [x] 执行者形成 clean 的待验收本地提交并通过指定队列请求审查；范围内普通 finding 可自主整改、复验、提交并再次通知，直至独立审查
       没有未关闭的高/中等级 correctness/security finding，或审查者明确判定任务失败。
-- [ ] 独立验收通过后，审查者精炼同步本计划、`doc/WBS.md`、`doc/WBS/durable-team-runtime.md` 与
+- [x] 独立验收通过后，审查者精炼同步本计划、`doc/WBS.md`、`doc/WBS/durable-team-runtime.md` 与
       `doc/WBS-COMPLETED.md`，记录 `M4_W_39153_ADAPTATION_PASS` 已验收、等待用户批准整合，M4-W1 仍锁定；只有 088 获批进入 local
       main 后，整合阶段才把当前指针改为“另行规划 M4-W1（尚未启动）”。不得自动启动、实现或排期 M4-W1，也不得改写 087 的三期状态。
-- [ ] 最终检查精确写集、临时产物、`git diff --check`、主工作区和全部 worktree 元数据；只提交
+- [x] 最终检查精确写集、临时产物、`git diff --check`、主工作区和全部 worktree 元数据；只提交
       `worktree-088-permission-restore-adaptation` 本地分支并保持 088 worktree clean，不合并、不推送、不关闭 worktree，也不归档或
       重命名分支，等待用户另行批准整合。
 
@@ -278,17 +278,17 @@ XXX用以下内容代替：
   `stop=none`、`cleanup=none`，未运行 Docker、真实 API/模型、训练、测评或完整 workspace 门禁。
 - 2026-08-26：完成执行者静态自审与独立只读复核；未发现高/中等级 correctness finding。复核指出 paginated invalid-profile 和 fork
   override 可增加直接负向集成证据，但共享 merge/config 路径、paginated 正向集成和严格 config 单测已覆盖产品语义，未扩成重复矩阵。
+- 2026-08-26：审查者逐链核对实现与保存的 watchdog/JUnit，并经三路独立只读复核确认无高/中等级 correctness/security finding；接受
+  一项不阻塞的副作用顺序测试余项，形成独立验收报告并同步 Plan/WBS/COMPLETED，结论为 `M4_W_39153_ADAPTATION_PASS`。
 
 ### 当前工作
 
-- 执行者实现、正式验证、scoped fix/fmt、自审与实施记录已完成，候选正冻结为 088 本地提交并交给独立审查；尚未宣称
-  `M4_W_39153_ADAPTATION_PASS`。
+- 实现、正式验证、独立代码/测试/证据审查与文档收口已完成；`M4_W_39153_ADAPTATION_PASS` 已由审查者接受，当前只等待用户批准
+  是否整合本地 `main`。
 
 ### 本任务剩余步骤
 
-- 执行者提交 clean 候选并按指定队列请求独立审查；范围内 finding 自主整改、复验、提交并重新通知。
-- 审查通过后由审查者同步 Plan/WBS/COMPLETED 并提交，其中 WBS 只记录已验收、待整合且 M4-W1 仍锁定；随后等待用户批准是否整合
-  本地 main，获批进入 main 后才把当前指针改为“另行规划 M4-W1（尚未启动）”。
+- 等待用户批准是否整合本地 main；获批进入 main 后才把当前指针改为“另行规划 M4-W1（尚未启动）”。
 
 ### 阻塞项
 
@@ -296,7 +296,7 @@ XXX用以下内容代替：
 
 ### 当前验收状态
 
-- `IMPLEMENTED / EXECUTOR_VERIFIED / PENDING_INDEPENDENT_REVIEW`；`M4_W_39153_ADAPTATION_PASS` 尚未形成，M4-W1 仍锁定且未规划。
+- `ACCEPTED / TASK_GOAL_COMPLETE / M4_W_39153_ADAPTATION_PASS / PENDING_LOCAL_MAIN_INTEGRATION`；M4-W1 仍锁定且未规划。
 
 ### 交接边界
 
@@ -325,3 +325,4 @@ XXX用以下内容代替：
 | 012 | recent-settings 投影按设置域逆序解析；最近 legacy `TurnContext` 也是 identity 边界，不向前复活更老 ID，同一 turn 内的 settings update 可覆盖 stale compaction context | 同时满足 RONDO 三态硬约束和既有 compaction 时序 | app-server/history | 已采纳 |
 | 013 | persisted profile 作为 Config 内部来源进入既有当前解析链，并在 profile allowlist 与 concrete requirement 两个 fallback 点对该来源转为 error | 复用单一 config/trust/requirements 权威，阻止无效历史 identity 静默换默认 | core/config | 已采纳 |
 | 014 | 正式门禁采用 protocol serde、core 六项、app-server 全库与 legacy/paginated resume/fork 五项集成，不扩大到完整 workspace | shared core 风险已由直接配置单测、全 app-server lib 和端到端主链覆盖；完整 workspace 与本任务写集不成比例 | 测试 | 已采纳 |
+| 015 | 独立验收接受一项低风险测试余项：invalid-profile 反例未直接断言 child/started 不存在，但静态生命周期顺序已在创建前拒绝，不为此扩建副作用审计或重复重型门禁 | 现有产品路径正确，分层证据与任务风险相称 | 验收/测试 | 已采纳 |

@@ -2266,3 +2266,24 @@ formal retry 整改为 `d29e857`，最终独立验收提交为 `43cf0eeb3e1b4826
 - 未建设 workspace registry、第二套 permission/trust、审计或可信平台，未升级冻结基线，也未运行 workspace 全量、Docker、真实
   API/模型、训练、测评、CI/PR 或远端操作。用户批准后，验收头已 fast-forward 进入本地 `main`，无冲突且未推送；`#39153`
   已获得下一任务启动资格但尚未启动，M4-W1 继续锁定。
+
+## Permission Restore Fail-Closed RONDO 窄适配（Plan 088，2026-08-26）
+
+**状态**：`#39153@539a09cb28ca1ded4278c6d54716abbacab42428` 的 RONDO fail-closed 产品语义窄适配、正式聚焦验证与独立验收均已完成；
+验收通过、任务目标完成，结论为 `M4_W_39153_ADAPTATION_PASS`。实现提交为
+`57b7efbe12808b6e06089194ab6676b5a7e537e4`；当前等待用户批准整合本地 `main`。
+
+- cold resume 与顶层 fork 统一按“合法显式 override、最近持久设置、当前配置”恢复 approval policy、approvals reviewer 与
+  active permission-profile identity。canonical `TurnContext` 以 presence-aware 三态补足普通 turn/compaction 的最小 identity 事实；
+  legacy missing 与 explicit clear 都不会向前复活更老 ID。
+- 只恢复 profile identity，并通过当前 catalog、Plan 086 hardened project trust、profile inheritance、workspace roots、network 与
+  requirements 重新解析。missing/invalid/disallowed/incompatible profile 明确失败，不使用历史 concrete permission snapshot，
+  不静默切换 configured/required default；合法显式权限 override 保持最高优先级。
+- resume 的 config load 早于 runtime/thread 创建，fork 的 config load 早于 child 创建；静态独立审查确认 invalid persisted profile
+  不会启动可执行 runtime、MCP/model/tool 链或带默认权限继续。唯一低等级测试余项是负向集成未直接断言 child/started 不存在，
+  当前路径正确且分层证据充分，未为此扩建副作用审计设施。
+- 正式证据为 protocol `1/1`、core `6/6`、app-server lib `279/279`、legacy/paginated resume/fork 集成 `5/5`，scoped fix 与 fmt
+  通过；通过批次均 `stop=none / cleanup=none / swap peak=0`。未运行完整 workspace、Docker、真实 API/模型、训练、测评、CI/PR
+  或远端操作，未冒充通过。
+- 本任务未实施 M4-W1、primary binding、scoped authorization、replacement binding、workspace/permission registry 或第二套恢复状态。
+  088 进入本地 `main` 前 M4-W1 继续锁定；进入后也只解锁另行规划资格，不自动启动。
