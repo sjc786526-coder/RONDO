@@ -105,6 +105,7 @@ impl ThreadRequestProcessor {
                 DurableSessionControlRejectionReason::WrongStorage
             } else if precondition_residency(current_precondition)
                 != precondition_residency(&params.precondition)
+                || owner_incarnation_changed(current_precondition, &params.precondition)
             {
                 DurableSessionControlRejectionReason::NotCurrentOwner
             } else {
@@ -126,6 +127,10 @@ impl ThreadRequestProcessor {
                 DurableSessionControlRejectionReason::InvalidState,
                 "a delete retry anchor can authorize only an explicit delete attempt",
             )));
+        }
+
+        if let Some(hook) = &self.durable_session_control_preflight_hook {
+            hook(root_thread_id, operation).await;
         }
 
         let outcome = match params.operation {
@@ -450,6 +455,25 @@ fn precondition_residency(
     }
 }
 
+fn owner_incarnation_changed(
+    current: &DurableSessionControlPrecondition,
+    supplied: &DurableSessionControlPrecondition,
+) -> bool {
+    match (current, supplied) {
+        (
+            DurableSessionControlPrecondition::CommittedTeam {
+                owner_incarnation: current,
+                ..
+            },
+            DurableSessionControlPrecondition::CommittedTeam {
+                owner_incarnation: supplied,
+                ..
+            },
+        ) => current != supplied,
+        _ => false,
+    }
+}
+
 fn rejected(
     operation: DurableSessionControlOperationKind,
     reason: DurableSessionControlRejectionReason,
@@ -612,5 +636,28 @@ fn core_root_state(value: DurableSessionTeamRootState) -> CoreRootState {
         DurableSessionTeamRootState::Pending => CoreRootState::Pending,
         DurableSessionTeamRootState::Tracking => CoreRootState::Tracking,
         DurableSessionTeamRootState::Resolved => CoreRootState::Resolved,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn accepted_shutdown_terminal_error_maps_to_typed_unknown() {
+        let outcome = core_control_outcome(
+            DurableSessionControlOperationKind::Close,
+            CoreControlError::ShutdownTerminatedWithError {
+                message: "accepted shutdown terminated without a known final result".to_string(),
+            },
+        );
+
+        assert!(matches!(
+            outcome,
+            DurableSessionControlOutcome::Unknown {
+                operation: DurableSessionControlOperationKind::Close,
+                message,
+            } if message.contains("without a known final result")
+        ));
     }
 }

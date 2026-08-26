@@ -305,22 +305,36 @@ codex queue --thread UUID --message 'XXX'
   终止 Session loop，app-server 只退休 exact owner mapping，保留 replacement，并继续返回 typed Unknown 供用户显式恢复。
 - 整改窄回归共 34 项：首轮 29 项中 27 项通过，修正真实发布后生命周期测试期望和受控 TUI snapshot 后余下 2/2 通过；随后补齐
   default-off、query-only/control-off 与 removal token 邻接面 3/3。stable/experimental schema generator、七 crate scoped fix/clippy、
-  新增 post-persistence Team completion 故障注入 1/1、app-server exact-owner 清理邻接编译/测试 1/1，并完成 core/app-server scoped
+  新增 post-persistence Team completion 故障注入 1/1、普通 app-server query 邻接 1/1，并完成 core/app-server scoped
   fix/clippy；fmt/fmt-check 与 diff 检查均通过。所有重型命令经 canonical lock/watchdog、069 target 和 Plan 080 临时资源门执行。
 - 270GB 告警后没有扩大测试范围；确认无重型 owner、realpath/归属/非符号链接无误后，仅再次清空已获授权的 069
   `debug/incremental`，项目/target 从 `276,932,814,938 / 203,243,122,156 B` 降至
   `196,336,300,056 / 122,646,607,274 B`，`debug/deps` 保留。最终只读值为项目/target/incremental/deps
   `232,965,910,785 / 159,275,684,252 / 30,800,000,843 / 127,745,879,278 B`，Windows `C:` 可用
   `75,184,451,584 B`；所有完成的 watchdog 均 `stop=none / cleanup=none`。
+- 整改提交 `4b508916` 的独立复验报告 `agent_log/2026-08-25-175902-plan080-remediation-rereview.md` 又确认 3 个 Medium 与 1 个 Low：
+  loaded-descendant/no-Root 时 Archive/Delete query availability 与 server admission 不一致；accepted shutdown handoff 后 sender/loop
+  异常未进入 terminal exact-owner 清理；两个关键编排分支缺直接回归；owner-incarnation-only mismatch 错分为 stale。执行者复核后
+  确认四项均存在，并在同一授权内完成窄修。
+- query 现按 Root residency 统一投影 active Archive/Delete；`OwnerUnavailableHere` 为 unavailable，未知 residency 保持 unknown。owner
+  incarnation 明确变化在入口和领域线性化点统一为 `NotCurrentOwner`。accepted handoff 之后除显式 `RetainedError` 外的 completion loss、
+  loop-first 与 terminal completion 均返回 typed Unknown 并只退休 exact old owner；replacement 不受影响，mutation 不自动重放。
+- 冻结代码后的正式窄轮在新的临时 store 中 `13/13` 通过：含 Close 与 active Archive 的 after-preflight Team commit 先赢编排、
+  query residency policy、owner replacement、accepted handoff 三分支、typed Unknown、exact-owner/replacement-safe helper 与真实
+  ThreadManager 原语。core/app-server scoped fix、clippy、fmt/fmt-check 和 diff 检查通过；协议未变，按复验决定未重复生成 schema。
+  正式窄轮结束时项目/target/incremental/deps 为 `250,079,399,936 / 175,121,977,344 / 38,634,786,816 /
+  135,675,695,104 B`，Windows `C:` 可用 `75,179,724,800 B`；提交前只读复核为 `248,862,612,879 / 175,170,759,743 /
+  38,577,035,217 / 135,984,905,103 B`，Windows `C:` 可用 `75,175,342,080 B`，无重型 owner；全部正式 watchdog
+  `stop=none / cleanup=none`。
 
 ### 当前工作
 
-- Plan 080 产品代码、测试、生成物、权威文档与整改记录均已收口，本节随整改任务提交冻结；实现侧无已知未关闭的 high/medium
+- Plan 080 产品代码、测试、生成物、权威文档与两轮整改记录均已收口，本节随本轮整改任务提交冻结；实现侧无已知未关闭的 high/medium
   correctness finding。最终结论仍由整改提交后的独立复验判定，不以执行者自审冒充验收。
 
 ### 本任务剩余步骤
 
-- 无剩余 tracked 实现步骤。整改提交形成后，执行者按决策 009/010 发送一次跨会话独立验收交接并立即停止；该外部判定不通过继续改写
+- 无剩余 tracked 实现步骤。本轮整改提交形成后，执行者按决策 009/010 发送一次跨会话独立验收交接并立即停止；该外部判定不通过继续改写
   已冻结的任务合同，若返回范围内 finding，则另以新的整改批次更新“当前状态”。
 
 ### 阻塞项
@@ -330,7 +344,8 @@ codex queue --thread UUID --message 'XXX'
 
 ### 当前验收状态
 
-- 首次实现提交 `aadddf4` 的“不通过”结论保持为历史事实；整改实现与规定的窄复验已完成，当前为 `M4_C2_CONTROL_PASS` 候选，等待
+- 首次实现 `aadddf4` 与首轮整改 `4b508916` 的“不通过”结论保持为历史事实；第二轮整改实现与规定的窄复验已完成，当前为
+  `M4_C2_CONTROL_PASS` 候选，等待
   独立复验重判。在复验接受前不把候选状态写成最终验收通过。
 
 ### 交接边界
@@ -360,3 +375,5 @@ codex queue --thread UUID --message 'XXX'
 | 012 | `Close` 的成功 effect 命名为 `OwnerClosed`，后续正式 query 的 whole-Session lifecycle 仍可为 `Unknown` | M4-S2 能权威证明 loaded canonical Root owner 已经过 barrier 并移除，但没有 whole-Session lifecycle registry；避免为 UI 虚构更强终态或另建状态轴 | lifecycle/UI | 已采纳 |
 | 013 | committed online proof 增加 Root owner incarnation；破坏性 loaded lifecycle 通过 exact submission handoff 在既有 M4-S2 close barrier 内复验 owner/Team snapshot；Delete partial 只投影显式 retry-anchor proof | Team generation 不能区分 replacement owner，请求入口复验也不能覆盖随后获胜的 Team commit；M4-S2 已保留可恢复 Root marker，不需要新 registry 或自动 retry | authority/lifecycle/delete | 已采纳 |
 | 014 | formal close 在 persistence/runtime teardown 后跨过 rollback boundary；此后 Team completion 失败必须终止 owner，并由 app-server 仅移除 exact mapping，同时保留 typed Unknown | teardown 后已无法恢复可用 runtime；继续保留映射会产生不可查询控制、不可重试的半关闭 Root，而删除 replacement 或宣称成功同样不正确 | lifecycle/failure/removal | 已采纳 |
+| 015 | query 的 active Archive/Delete 采用 owner-or-cold residency policy；明确 owner incarnation 变化统一为 `NotCurrentOwner` | availability 必须与 server admission 同源，loaded descendant 不能被 UI 误报为可操作；replacement owner 不是普通 Team snapshot stale | query/control/errors | 已采纳 |
+| 016 | exact shutdown submission 被接受后，除显式 `RetainedError` 外的 completion/loop 异常均视为 terminal unknown；以仅供 in-process 测试使用的 after-preflight hook 直接证明 Team commit 先赢 | accepted boundary 后不再能把异常当作普通可回滚 handoff；doc-hidden hook 不引入协议、状态或生产默认路径，并能确定性覆盖 app-server 到 M4-S2 线性化点 | lifecycle/tests | 已采纳 |

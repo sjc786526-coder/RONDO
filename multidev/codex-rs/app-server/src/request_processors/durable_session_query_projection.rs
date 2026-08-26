@@ -234,7 +234,7 @@ fn operations(
             },
             owner_operation(residency),
             owner_operation(residency),
-            available(),
+            owner_or_cold_operation(residency),
             operation(
                 DurableSessionOperationAvailability::Unavailable {
                     reason: DurableSessionOperationAvailabilityReason::NotArchived,
@@ -276,7 +276,30 @@ fn operations(
         close,
         archive,
         unarchive,
-        delete: available(),
+        delete: owner_or_cold_operation(residency),
+    }
+}
+
+fn owner_or_cold_operation(residency: DurableSessionResidency) -> DurableSessionOperation {
+    match residency {
+        DurableSessionResidency::ObservedOwnerHere | DurableSessionResidency::NotObservedHere => {
+            operation(
+                DurableSessionOperationAvailability::Available,
+                DurableSessionFactProvenance::DerivedPolicy,
+            )
+        }
+        DurableSessionResidency::OwnerUnavailableHere => operation(
+            DurableSessionOperationAvailability::Unavailable {
+                reason: DurableSessionOperationAvailabilityReason::OwnerUnavailableHere,
+            },
+            DurableSessionFactProvenance::ServerRuntimeObservation,
+        ),
+        DurableSessionResidency::Unknown => operation(
+            DurableSessionOperationAvailability::Unknown {
+                reason: DurableSessionOperationAvailabilityReason::ResidencyUnknown,
+            },
+            DurableSessionFactProvenance::ServerRuntimeObservation,
+        ),
     }
 }
 
@@ -464,4 +487,54 @@ fn api_root_state(state: CoreRootState) -> ApiRootState {
 
 fn usize_to_u32(value: usize) -> u32 {
     u32::try_from(value).unwrap_or(u32::MAX)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn loaded_descendant_without_root_disables_archive_and_delete() {
+        // `observed_runtime` reports OwnerUnavailableHere when a descendant from this Session is
+        // loaded without its Root. The query policy must match the server admission check for
+        // both destructive active-store operations.
+        let operations = operations(
+            StorageScope::Active,
+            /*read_available*/ true,
+            DurableSessionResidency::OwnerUnavailableHere,
+            /*control_enabled*/ true,
+        );
+
+        for operation in [operations.archive, operations.delete] {
+            assert_eq!(
+                operation.availability,
+                DurableSessionOperationAvailability::Unavailable {
+                    reason: DurableSessionOperationAvailabilityReason::OwnerUnavailableHere,
+                }
+            );
+            assert_eq!(
+                operation.provenance,
+                DurableSessionFactProvenance::ServerRuntimeObservation
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_residency_keeps_archive_and_delete_unknown() {
+        let operations = operations(
+            StorageScope::Active,
+            /*read_available*/ true,
+            DurableSessionResidency::Unknown,
+            /*control_enabled*/ true,
+        );
+
+        for operation in [operations.archive, operations.delete] {
+            assert_eq!(
+                operation.availability,
+                DurableSessionOperationAvailability::Unknown {
+                    reason: DurableSessionOperationAvailabilityReason::ResidencyUnknown,
+                }
+            );
+        }
+    }
 }

@@ -24,8 +24,9 @@
   `20260825-165714-1000-1369350`。所有正式 test 使用 `--retries 0`，watchdog 均 `stop=none / cleanup=none`。
 - 整改收口前的独立只读复核另发现一项 Medium：persistence/runtime teardown 后若 Team close completion 失败，旧路径仍保留
   submission loop 与 owner mapping。修复后该不可回滚分支关闭 lifecycle、终止 loop，并让 app-server 只清 exact owner、保留
-  replacement，同时仍返回 typed Unknown。新增故障注入 1/1（watchdog `20260825-173155-1000-1427468`）与 app-server 邻接 1/1
-  （`20260825-173353-1000-1431720`）通过；前两次编译只暴露并修正模块导入和测试夹具接缝，未进入运行期。
+  replacement，同时仍返回 typed Unknown。新增故障注入 1/1（watchdog `20260825-173155-1000-1427468`）与普通 app-server query
+  邻接 1/1（`20260825-173353-1000-1431720`）通过；后者未直接覆盖 exact-owner cleanup 分支。前两次编译只暴露并修正模块导入和
+  测试夹具接缝，未进入运行期。
 - 最终 core/app-server scoped fix（watchdog `20260825-173544-1000-1438467`）与 clippy
   （`20260825-173946-1000-1449319`）通过，均 `stop=none / cleanup=none`。
 - 未参与修复的同一只读复核者最终确认该 Medium 的 terminal completion、loop termination、exact-owner removal、replacement 保留、

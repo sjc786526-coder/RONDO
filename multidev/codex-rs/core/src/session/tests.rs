@@ -7640,6 +7640,82 @@ async fn durable_shutdown_team_completion_failure_terminates_after_persistence_b
 }
 
 #[tokio::test]
+async fn accepted_formal_shutdown_completion_loss_is_terminal_unknown() {
+    let (completion_tx, completion_rx) = oneshot::channel();
+    let (termination_tx, termination_rx) = oneshot::channel();
+    let termination = async move {
+        let _ = termination_rx.await;
+    }
+    .boxed()
+    .shared();
+    drop(completion_tx);
+
+    let waiter = tokio::spawn(await_accepted_durable_session_shutdown(
+        completion_rx,
+        termination,
+    ));
+    tokio::task::yield_now().await;
+    assert!(
+        !waiter.is_finished(),
+        "sender loss after acceptance must wait for the Session loop to settle"
+    );
+    termination_tx
+        .send(())
+        .expect("the accepted shutdown waiter must retain termination");
+    assert!(matches!(
+        waiter.await.expect("shutdown waiter task"),
+        Err(ExperimentalSessionControlError::ShutdownTerminatedWithError { message })
+            if message.contains("completion channel closed")
+    ));
+}
+
+#[tokio::test]
+async fn accepted_formal_shutdown_loop_termination_is_terminal_unknown() {
+    let (_completion_tx, completion_rx) = oneshot::channel();
+
+    assert!(matches!(
+        await_accepted_durable_session_shutdown(
+            completion_rx,
+            completed_session_loop_termination(),
+        )
+        .await,
+        Err(ExperimentalSessionControlError::ShutdownTerminatedWithError { message })
+            if message.contains("Session loop terminated")
+    ));
+}
+
+#[tokio::test]
+async fn accepted_formal_shutdown_retained_error_remains_retryable() {
+    let (completion_tx, completion_rx) = oneshot::channel();
+    let (_termination_tx, termination_rx) = oneshot::channel::<()>();
+    let termination = async move {
+        let _ = termination_rx.await;
+    }
+    .boxed()
+    .shared();
+    assert!(
+        completion_tx
+            .send(PreparedDurableSessionShutdownCompletion::RetainedError(
+                "retryable before teardown".to_string(),
+            ))
+            .is_ok(),
+        "completion receiver must remain installed"
+    );
+
+    let outcome = tokio::time::timeout(
+        Duration::from_secs(1),
+        await_accepted_durable_session_shutdown(completion_rx, termination),
+    )
+    .await
+    .expect("a retained error must not wait for Session termination");
+    assert!(matches!(
+        outcome,
+        Err(ExperimentalSessionControlError::ShutdownHandoff { message })
+            if message == "retryable before teardown"
+    ));
+}
+
+#[tokio::test]
 async fn submission_loop_channel_close_runs_full_thread_teardown() {
     struct SessionStopMarker;
     struct ThreadStopMarker;

@@ -4,6 +4,7 @@ use super::thread_lifecycle::PendingThreadUnloads;
 use super::turn_processor::can_accept_direct_input;
 use super::*;
 use crate::error_code::method_not_found;
+use codex_app_server_protocol::DurableSessionControlOperationKind;
 use codex_app_server_protocol::SelectedCapabilityRoot;
 use codex_app_server_protocol::ThreadSection;
 use codex_app_server_protocol::ThreadSectionMoveParams;
@@ -17,6 +18,8 @@ use codex_protocol::mcp::ClientMcpExtensions;
 use codex_protocol::models::BUILT_IN_PERMISSION_PROFILE_DANGER_FULL_ACCESS;
 use codex_protocol::models::BUILT_IN_PERMISSION_PROFILE_WORKSPACE;
 use codex_protocol::protocol::ThreadHistoryMode;
+use std::future::Future;
+use std::pin::Pin;
 
 pub(super) const THREAD_LIST_DEFAULT_LIMIT: usize = 25;
 pub(super) const THREAD_LIST_MAX_LIMIT: usize = 100;
@@ -24,11 +27,35 @@ const CODEX_TUI_CLIENT_NAME: &str = "codex-tui";
 const THREAD_ROLLBACK_DEPRECATION_SUMMARY: &str =
     "thread/rollback is deprecated and will be removed soon";
 
+pub(crate) type DurableSessionControlPreflightHook = Arc<
+    dyn Fn(ThreadId, DurableSessionControlOperationKind) -> Pin<Box<dyn Future<Output = ()> + Send>>
+        + Send
+        + Sync,
+>;
+
 pub(super) enum FormalThreadRemovalError {
     AlreadyClosing,
     OwnerUnavailable,
     Control(ExperimentalSessionControlError),
     Replaced,
+}
+
+async fn remove_terminal_formal_owner_if_same<F, Fut>(
+    error: &ExperimentalSessionControlError,
+    remove_if_same: F,
+) -> bool
+where
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = bool>,
+{
+    if matches!(
+        error,
+        ExperimentalSessionControlError::ShutdownTerminatedWithError { .. }
+    ) {
+        remove_if_same().await
+    } else {
+        false
+    }
 }
 
 struct ThreadListFilters {
@@ -404,6 +431,7 @@ pub(crate) struct ThreadRequestProcessor {
     pub(super) background_tasks: TaskTracker,
     pub(super) skills_watcher: Arc<SkillsWatcher>,
     pub(super) initial_config_warnings: Arc<Vec<ConfigWarningNotification>>,
+    pub(super) durable_session_control_preflight_hook: Option<DurableSessionControlPreflightHook>,
 }
 
 /// Outcome of trying to satisfy a resume request from an already loaded thread.
@@ -436,6 +464,7 @@ impl ThreadRequestProcessor {
         log_db: Option<LogDbLayer>,
         skills_watcher: Arc<SkillsWatcher>,
         initial_config_warnings: Vec<ConfigWarningNotification>,
+        durable_session_control_preflight_hook: Option<DurableSessionControlPreflightHook>,
     ) -> Self {
         Self {
             auth_manager,
@@ -455,6 +484,7 @@ impl ThreadRequestProcessor {
             background_tasks: TaskTracker::new(),
             skills_watcher,
             initial_config_warnings: Arc::new(initial_config_warnings),
+            durable_session_control_preflight_hook,
         }
     }
 
@@ -1032,11 +1062,13 @@ impl ThreadRequestProcessor {
                             ..
                         },
                     ) => {
-                        if self
-                            .thread_manager
-                            .remove_thread_if_same(&thread_id, &conversation)
-                            .await
-                        {
+                        let removed = remove_terminal_formal_owner_if_same(&error, || async {
+                            self.thread_manager
+                                .remove_thread_if_same(&thread_id, &conversation)
+                                .await
+                        })
+                        .await;
+                        if removed {
                             self.finalize_thread_teardown(thread_id).await;
                         }
                         Err(FormalThreadRemovalError::Control(error))

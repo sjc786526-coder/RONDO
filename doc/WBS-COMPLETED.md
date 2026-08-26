@@ -2128,8 +2128,8 @@ formal retry 整改为 `d29e857`，最终独立验收提交为 `43cf0eeb3e1b4826
 
 ## M4-C2 正式 Session Control / TUI（Plan 080，2026-08-25）
 
-**状态**：稳定 app-server v2→client→TUI 控制链与 fresh Session/store 正式轮已完成；首次独立验收对 `aadddf4` 判定不通过，整改实现、
-生成物和窄复验现已完成，等待独立复验重判。当前不提前重申 `M4_C2_CONTROL_PASS`。
+**状态**：稳定 app-server v2→client→TUI 控制链与 fresh Session/store 正式轮已完成；独立验收对 `aadddf4`、复验对 `4b508916`
+先后判定不通过，两轮整改实现、生成物和窄复验现已完成，等待独立复验重判。当前不提前重申 `M4_C2_CONTROL_PASS`。
 
 - 新增独立默认关闭的稳定 `session/control`。正式 query 投影 control proof/availability；committed online proof 绑定 live Root owner
   incarnation，Team mutation gate 与 M4-S2 close barrier 在线性化点复验 exact owner、Team instance/revision/commit generation。
@@ -2142,14 +2142,18 @@ formal retry 整改为 `d29e857`，最终独立验收提交为 `43cf0eeb3e1b4826
   control 不 detach query attachment。双开时正式入口优先，C0 prototype 继续隔离。
 - persistence/runtime teardown 之后的 Team close completion 故障已按不可回滚终态处理：Session loop 终止，lifecycle 不重开，app-server
   只清理 exact owner mapping、保留 replacement，控制结果保持 typed Unknown；没有新增 registry 或 mutation 自动重试。
+- 第二轮整改统一了 loaded-descendant/no-Root 下 Archive/Delete query availability 与 server admission；accepted handoff 后 sender/loop
+  异常进入 terminal exact-owner cleanup，显式 RetainedError 仍可回滚；owner incarnation mismatch 统一为 `NotCurrentOwner`。Close 与
+  active Archive 的 after-preflight Team commit race、query residency、typed Unknown 和 replacement-safe cleanup 已形成 13/13 直接回归。
 - fresh 正式轮完成 owner close、cold archive/unarchive、进程重启 list/read rebuild、delete 与 SessionNotFound，且没有启动 turn、模型
   或 API。首次独立审查的 2 High、5 Medium、1 Low 均已有对应整改；执行者侧没有已知未关闭 high/medium finding。
 - 改产品代码前的合并树 query×lifecycle 基线为 `45/45`；原正式控制轮 `17/17`、邻接 query×lifecycle `47/47` 与 fresh 证据按审查
   结论在原覆盖范围继续有效。整改直接轮 29 项最终全部通过，另补 default-off/query-only/removal token 3/3、teardown 后故障注入
-  1/1 与 app-server 邻接 1/1；stable/experimental app-server schema、七 crate及最终 core/app-server scoped fix/clippy、fmt/fmt-check
-  和 diff 门禁通过。
+  1/1 与普通 app-server query 邻接 1/1；第二轮冻结代码直接回归 13/13。stable/experimental app-server schema、七 crate及最终
+  core/app-server scoped fix/clippy、fmt/fmt-check 和 diff 门禁通过。
 - 首轮获批清理只移除 069 `debug/incremental`。整改测试触及 270GB 告警后停止扩大范围，并在再次核对 owner/realpath/归属后只清同一
-  已授权 incremental；`debug/deps` 始终保留。最终项目/target 为 `232,965,910,785 / 159,275,684,252 B`。未运行 full-workspace、
+  已授权 incremental；`debug/deps` 始终保留。提交前项目/target 为 `248,862,612,879 / 175,170,759,743 B`。未运行 full-workspace、
   Docker、真实 API/模型、训练、测评、benchmark、CI/PR 或远端操作。初始执行与整改细节分别见
   `agent_log/2026-08-25-153057-plan080-m4-c2-session-control-tui.md`、
-  `agent_log/2026-08-25-170351-plan080-review-remediation.md`。
+  `agent_log/2026-08-25-170351-plan080-review-remediation.md`、
+  `agent_log/2026-08-25-190915-plan080-rereview-remediation.md`。

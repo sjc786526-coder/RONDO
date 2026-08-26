@@ -930,7 +930,7 @@ impl SessionIo {
         prepared: PreparedDurableSessionShutdown,
     ) -> Result<(), ExperimentalSessionControlError> {
         let submission_id = new_submission_id();
-        let (completion_tx, mut completion_rx) = oneshot::channel();
+        let (completion_tx, completion_rx) = oneshot::channel();
         session
             .install_prepared_durable_session_shutdown(
                 submission_id.clone(),
@@ -961,34 +961,11 @@ impl SessionIo {
         })?;
         registration.commit();
 
-        let session_loop_termination = self.session_loop_termination.clone();
-        let completion = tokio::select! {
-            biased;
-            completion = &mut completion_rx => {
-                completion.map_err(|_| ExperimentalSessionControlError::ShutdownHandoff {
-                    message: CodexErr::InternalAgentDied.to_string(),
-                })?
-            }
-            () = session_loop_termination.clone() => {
-                return Err(ExperimentalSessionControlError::ShutdownHandoff {
-                    message: CodexErr::InternalAgentDied.to_string(),
-                });
-            }
-        };
-        match completion {
-            PreparedDurableSessionShutdownCompletion::RetainedError(message) => {
-                return Err(ExperimentalSessionControlError::ShutdownHandoff { message });
-            }
-            PreparedDurableSessionShutdownCompletion::Completed => {}
-            PreparedDurableSessionShutdownCompletion::TerminatedError(message) => {
-                session_loop_termination.await;
-                return Err(
-                    ExperimentalSessionControlError::ShutdownTerminatedWithError { message },
-                );
-            }
-        }
-        session_loop_termination.await;
-        Ok(())
+        await_accepted_durable_session_shutdown(
+            completion_rx,
+            self.session_loop_termination.clone(),
+        )
+        .await
     }
 
     pub(crate) async fn next_event(&self) -> CodexResult<Event> {
@@ -1003,6 +980,47 @@ impl SessionIo {
     pub(crate) async fn agent_status(&self) -> AgentStatus {
         self.agent_status.borrow().clone()
     }
+}
+
+/// Wait for a formal shutdown only after its exact `Shutdown` submission was accepted. At this
+/// boundary every outcome except an explicit retained error is terminal for the submitted owner.
+async fn await_accepted_durable_session_shutdown(
+    mut completion_rx: oneshot::Receiver<PreparedDurableSessionShutdownCompletion>,
+    session_loop_termination: SessionLoopTermination,
+) -> Result<(), ExperimentalSessionControlError> {
+    let completion = tokio::select! {
+        biased;
+        completion = &mut completion_rx => {
+            match completion {
+                Ok(completion) => completion,
+                Err(_) => {
+                    session_loop_termination.clone().await;
+                    return Err(
+                        ExperimentalSessionControlError::ShutdownTerminatedWithError {
+                            message: "the accepted formal shutdown completion channel closed before reporting an outcome".to_string(),
+                        },
+                    );
+                }
+            }
+        }
+        () = session_loop_termination.clone() => {
+            return Err(ExperimentalSessionControlError::ShutdownTerminatedWithError {
+                message: "the Session loop terminated before the accepted formal shutdown reported an outcome".to_string(),
+            });
+        }
+    };
+    match completion {
+        PreparedDurableSessionShutdownCompletion::RetainedError(message) => {
+            return Err(ExperimentalSessionControlError::ShutdownHandoff { message });
+        }
+        PreparedDurableSessionShutdownCompletion::Completed => {}
+        PreparedDurableSessionShutdownCompletion::TerminatedError(message) => {
+            session_loop_termination.await;
+            return Err(ExperimentalSessionControlError::ShutdownTerminatedWithError { message });
+        }
+    }
+    session_loop_termination.await;
+    Ok(())
 }
 
 /// Generate a core submission ID. App-server exposes submission IDs that

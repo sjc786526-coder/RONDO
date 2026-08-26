@@ -11,6 +11,7 @@ use app_test_support::create_fake_rollout;
 use app_test_support::create_final_assistant_message_sse_response;
 use app_test_support::create_mock_responses_server_sequence_unchecked;
 use codex_app_server::in_process;
+use codex_app_server::in_process::InProcessServerEvent;
 use codex_app_server::in_process::InProcessStartArgs;
 use codex_app_server_protocol::ClientInfo;
 use codex_app_server_protocol::ClientRequest;
@@ -38,6 +39,7 @@ use codex_app_server_protocol::InitializeCapabilities;
 use codex_app_server_protocol::InitializeParams;
 use codex_app_server_protocol::JSONRPCError;
 use codex_app_server_protocol::RequestId;
+use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::ThreadArchiveParams;
 use codex_app_server_protocol::ThreadArchiveResponse;
 use codex_app_server_protocol::ThreadLoadedListParams;
@@ -53,6 +55,7 @@ use codex_arg0::Arg0DispatchPaths;
 use codex_config::CloudConfigBundleLoader;
 use codex_config::LoaderOverrides;
 use codex_core::config::ConfigBuilder;
+use codex_core::init_state_db;
 use codex_exec_server::EnvironmentManager;
 use codex_features::Feature;
 use codex_feedback::CodexFeedback;
@@ -62,10 +65,14 @@ use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::SubAgentSource;
 use codex_thread_store::InMemoryThreadStore;
 use core_test_support::responses;
+use core_test_support::streaming_sse::StreamingSseChunk;
+use core_test_support::streaming_sse::start_streaming_sse_server;
 use pretty_assertions::assert_eq;
 use serde_json::json;
 use std::sync::Arc;
 use tempfile::TempDir;
+use tokio::sync::Mutex;
+use tokio::sync::oneshot;
 use tokio::time::timeout;
 use uuid::Uuid;
 
@@ -733,7 +740,7 @@ async fn durable_session_control_revalidates_proof_and_reuses_cold_lifecycle() -
     assert!(matches!(
         rejected.outcome,
         DurableSessionControlOutcome::Rejected {
-            reason: DurableSessionControlRejectionReason::StalePrecondition,
+            reason: DurableSessionControlRejectionReason::NotCurrentOwner,
             ..
         }
     ));
@@ -905,7 +912,7 @@ async fn durable_session_control_rejects_a_replaced_owner_incarnation() -> Resul
     assert!(matches!(
         rejected.outcome,
         DurableSessionControlOutcome::Rejected {
-            reason: DurableSessionControlRejectionReason::StalePrecondition,
+            reason: DurableSessionControlRejectionReason::NotCurrentOwner,
             ..
         }
     ));
@@ -1157,6 +1164,288 @@ async fn durable_session_control_updates_only_the_current_loaded_root_snapshot()
         after.team.expect("Team projection").events[0].versions[0].root_state,
         DurableSessionTeamRootState::Resolved
     );
+    Ok(())
+}
+
+#[tokio::test]
+async fn durable_session_control_close_rejects_team_commit_after_preflight() -> Result<()> {
+    assert_team_commit_after_control_preflight_is_rejected(DurableSessionControlOperation::Close)
+        .await
+}
+
+#[tokio::test]
+async fn durable_session_control_active_archive_rejects_team_commit_after_preflight() -> Result<()>
+{
+    assert_team_commit_after_control_preflight_is_rejected(DurableSessionControlOperation::Archive)
+        .await
+}
+
+async fn assert_team_commit_after_control_preflight_is_rejected(
+    operation: DurableSessionControlOperation,
+) -> Result<()> {
+    let publish_args = serde_json::to_string(&json!({
+        "title": "commit after formal control preflight",
+        "summary": "the Team commit must win before lifecycle linearization",
+        "handoff": null
+    }))?;
+    let (model_release_tx, model_release_rx) = oneshot::channel();
+    let (model_server, _completions) = start_streaming_sse_server(vec![
+        vec![StreamingSseChunk {
+            gate: Some(model_release_rx),
+            body: responses::sse(vec![
+                responses::ev_response_created("preflight-race-publish"),
+                responses::ev_function_call_with_namespace(
+                    "preflight-race-call",
+                    "collaboration",
+                    "team_publish",
+                    &publish_args,
+                ),
+                responses::ev_completed("preflight-race-publish"),
+            ]),
+        }],
+        vec![StreamingSseChunk {
+            gate: None,
+            body: create_final_assistant_message_sse_response("published after preflight")?,
+        }],
+    ])
+    .await;
+    let codex_home = TempDir::new()?;
+    write_control_config(codex_home.path(), model_server.uri())?;
+    let loader_overrides = LoaderOverrides::without_managed_config_for_tests();
+    let cli_overrides = vec![
+        (
+            "features.multi_agent_v2.enabled".to_string(),
+            toml::Value::Boolean(true),
+        ),
+        (
+            "features.multi_agent_v2.team_state_enabled".to_string(),
+            toml::Value::Boolean(true),
+        ),
+        (
+            "features.multi_agent_v2.durable_team_enabled".to_string(),
+            toml::Value::Boolean(true),
+        ),
+    ];
+    let config = ConfigBuilder::default()
+        .codex_home(codex_home.path().to_path_buf())
+        .fallback_cwd(Some(codex_home.path().to_path_buf()))
+        .cli_overrides(cli_overrides.clone())
+        .loader_overrides(loader_overrides.clone())
+        .build()
+        .await?;
+    let state_db = init_state_db(&config)
+        .await
+        .expect("formal query requires the supported local ThreadStore");
+    let (preflight_entered_tx, preflight_entered_rx) = oneshot::channel();
+    let preflight_entered_tx = Arc::new(Mutex::new(Some(preflight_entered_tx)));
+    let (control_release_tx, control_release_rx) = oneshot::channel();
+    let control_release_rx = Arc::new(Mutex::new(Some(control_release_rx)));
+    let hook_entered = Arc::clone(&preflight_entered_tx);
+    let hook_release = Arc::clone(&control_release_rx);
+    let mut client = in_process::start_with_durable_session_control_preflight_hook(
+        InProcessStartArgs {
+            arg0_paths: Arg0DispatchPaths::default(),
+            config: Arc::new(config),
+            // Thread start reloads its Config through ConfigManager. Reuse the same explicit
+            // overrides so the injected in-process runtime and its Root agree on Team mode.
+            cli_overrides,
+            loader_overrides,
+            strict_config: false,
+            cloud_config_bundle: CloudConfigBundleLoader::default(),
+            thread_config_loader: Arc::new(codex_config::NoopThreadConfigLoader),
+            feedback: CodexFeedback::new(),
+            log_db: None,
+            state_db: Some(state_db),
+            environment_manager: Arc::new(EnvironmentManager::default_for_tests()),
+            config_warnings: Vec::new(),
+            session_source: SessionSource::Cli,
+            enable_codex_api_key_env: false,
+            initialize: InitializeParams {
+                client_info: default_client_info(),
+                capabilities: Some(InitializeCapabilities {
+                    experimental_api: false,
+                    ..Default::default()
+                }),
+            },
+            channel_capacity: in_process::DEFAULT_IN_PROCESS_CHANNEL_CAPACITY,
+        },
+        move |thread_id, operation| {
+            let hook_entered = Arc::clone(&hook_entered);
+            let hook_release = Arc::clone(&hook_release);
+            async move {
+                if let Some(entered) = hook_entered.lock().await.take() {
+                    let _ = entered.send((thread_id, operation));
+                }
+                let release = hook_release.lock().await.take();
+                if let Some(release) = release {
+                    let _ = release.await;
+                }
+            }
+        },
+    )
+    .await?;
+    let sender = client.sender();
+    let start: ThreadStartResponse = serde_json::from_value(
+        sender
+            .request(ClientRequest::ThreadStart {
+                request_id: RequestId::Integer(100),
+                params: ThreadStartParams {
+                    model: Some("mock-model".to_string()),
+                    ..Default::default()
+                },
+            })
+            .await?
+            .expect("thread/start must succeed"),
+    )?;
+    let root_thread_id = start.thread.id;
+    let before = timeout(DEFAULT_TIMEOUT, async {
+        let mut request_id = 101;
+        loop {
+            let response: DurableSessionReadResponse = serde_json::from_value(
+                sender
+                    .request(ClientRequest::DurableSessionRead {
+                        request_id: RequestId::Integer(request_id),
+                        params: DurableSessionReadParams {
+                            session_id: root_thread_id.clone(),
+                            root_thread_id: root_thread_id.clone(),
+                        },
+                    })
+                    .await?
+                    .expect("formal query must succeed"),
+            )?;
+            if response.session.team.is_some() && response.session.control_precondition.is_some() {
+                break Ok::<DurableSessionReadResponse, anyhow::Error>(response);
+            }
+            request_id += 1;
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await??;
+    let before_revision = before
+        .session
+        .team
+        .as_ref()
+        .expect("Team projection")
+        .revision;
+    let proof = before
+        .session
+        .control_precondition
+        .expect("loaded Root proof");
+    let _: TurnStartResponse = serde_json::from_value(
+        sender
+            .request(ClientRequest::TurnStart {
+                request_id: RequestId::Integer(10_002),
+                params: TurnStartParams {
+                    thread_id: root_thread_id.clone(),
+                    input: vec![UserInput::Text {
+                        text: "publish only after lifecycle preflight".to_string(),
+                        text_elements: Vec::new(),
+                    }],
+                    ..Default::default()
+                },
+            })
+            .await?
+            .expect("turn/start must succeed"),
+    )?;
+    timeout(DEFAULT_TIMEOUT, model_server.wait_for_request_count(1)).await?;
+
+    let control_sender = sender.clone();
+    let control_root = root_thread_id.clone();
+    let control_operation = operation.clone();
+    let control = tokio::spawn(async move {
+        control_sender
+            .request(ClientRequest::DurableSessionControl {
+                request_id: RequestId::Integer(10_003),
+                params: DurableSessionControlParams {
+                    session_id: control_root.clone(),
+                    root_thread_id: control_root,
+                    precondition: proof,
+                    operation: control_operation,
+                },
+            })
+            .await
+    });
+    let (hook_thread_id, hook_operation) = timeout(DEFAULT_TIMEOUT, preflight_entered_rx).await??;
+    assert_eq!(hook_thread_id.to_string(), root_thread_id);
+    assert_eq!(hook_operation, operation.kind());
+
+    model_release_tx
+        .send(())
+        .expect("model response gate must still be held");
+    timeout(DEFAULT_TIMEOUT, async {
+        loop {
+            match client.next_event().await {
+                Some(InProcessServerEvent::ServerNotification(notification))
+                    if matches!(
+                        notification.as_ref(),
+                        ServerNotification::TurnCompleted(completed)
+                            if completed.thread_id == root_thread_id
+                    ) =>
+                {
+                    break;
+                }
+                Some(_) => {}
+                None => panic!("in-process runtime ended before turn/completed"),
+            }
+        }
+    })
+    .await?;
+    control_release_tx
+        .send(())
+        .expect("formal control hook must still be held");
+    let control_response: DurableSessionControlResponse = serde_json::from_value(
+        timeout(DEFAULT_TIMEOUT, control)
+            .await???
+            .expect("formal control must return a typed response"),
+    )?;
+    assert!(matches!(
+        control_response.outcome,
+        DurableSessionControlOutcome::Rejected {
+            reason: DurableSessionControlRejectionReason::StalePrecondition,
+            ..
+        }
+    ));
+
+    let after: DurableSessionReadResponse = serde_json::from_value(
+        sender
+            .request(ClientRequest::DurableSessionRead {
+                request_id: RequestId::Integer(104),
+                params: DurableSessionReadParams {
+                    session_id: root_thread_id.clone(),
+                    root_thread_id: root_thread_id.clone(),
+                },
+            })
+            .await?
+            .expect("post-race formal query must succeed"),
+    )?;
+    assert_eq!(
+        after.session.storage_status,
+        DurableSessionStorageStatus::Active
+    );
+    assert_eq!(
+        after.session.residency,
+        DurableSessionResidency::ObservedOwnerHere
+    );
+    let after_team = after.session.team.expect("post-race Team projection");
+    assert!(after_team.revision > before_revision);
+    assert!(
+        after_team
+            .events
+            .iter()
+            .any(|event| event.title == "commit after formal control preflight")
+    );
+    let loaded: ThreadLoadedListResponse = serde_json::from_value(
+        sender
+            .request(ClientRequest::ThreadLoadedList {
+                request_id: RequestId::Integer(105),
+                params: ThreadLoadedListParams::default(),
+            })
+            .await?
+            .expect("thread/loaded/list must succeed"),
+    )?;
+    assert_eq!(loaded.data, vec![root_thread_id]);
+    client.shutdown().await?;
+    model_server.shutdown().await;
     Ok(())
 }
 

@@ -63,6 +63,7 @@ use crate::outgoing_message::OutgoingEnvelope;
 use crate::outgoing_message::OutgoingMessage;
 use crate::outgoing_message::OutgoingMessageSender;
 use crate::outgoing_message::QueuedOutgoingMessage;
+use crate::request_processors::DurableSessionControlPreflightHook;
 use crate::transport::CHANNEL_CAPACITY;
 use crate::transport::OutboundConnectionState;
 use crate::transport::route_outgoing_envelope;
@@ -86,6 +87,7 @@ use codex_core::resolve_installation_id;
 use codex_exec_server::EnvironmentManager;
 use codex_feedback::CodexFeedback;
 use codex_login::AuthManager;
+use codex_protocol::ThreadId;
 use codex_protocol::protocol::SessionSource;
 pub use codex_rollout::StateDbHandle;
 pub use codex_state::log_db::LogDbLayer;
@@ -352,7 +354,33 @@ impl InProcessClientHandle {
 /// This function sends `initialize` followed by `initialized` before returning
 /// the handle, so callers receive a ready-to-use runtime. If initialize fails,
 /// the runtime is shut down and an `InvalidData` error is returned.
-pub async fn start(mut args: InProcessStartArgs) -> IoResult<InProcessClientHandle> {
+pub async fn start(args: InProcessStartArgs) -> IoResult<InProcessClientHandle> {
+    start_with_optional_durable_session_control_preflight_hook(args, None).await
+}
+
+/// Test-only seam for deterministically ordering a concurrent Team commit after formal control
+/// preflight. Production in-process and transport entrypoints never install this hook.
+#[doc(hidden)]
+pub async fn start_with_durable_session_control_preflight_hook<F, Fut>(
+    args: InProcessStartArgs,
+    hook: F,
+) -> IoResult<InProcessClientHandle>
+where
+    F: Fn(ThreadId, codex_app_server_protocol::DurableSessionControlOperationKind) -> Fut
+        + Send
+        + Sync
+        + 'static,
+    Fut: std::future::Future<Output = ()> + Send + 'static,
+{
+    let hook: DurableSessionControlPreflightHook =
+        Arc::new(move |thread_id, operation| Box::pin(hook(thread_id, operation)));
+    start_with_optional_durable_session_control_preflight_hook(args, Some(hook)).await
+}
+
+async fn start_with_optional_durable_session_control_preflight_hook(
+    mut args: InProcessStartArgs,
+    durable_session_control_preflight_hook: Option<DurableSessionControlPreflightHook>,
+) -> IoResult<InProcessClientHandle> {
     if let Ok(Some(err)) = check_execpolicy_for_warnings(&args.config.config_layer_stack).await {
         let (path, range) = crate::exec_policy_warning_location(&err);
         args.config_warnings.push(ConfigWarningNotification {
@@ -363,7 +391,7 @@ pub async fn start(mut args: InProcessStartArgs) -> IoResult<InProcessClientHand
         });
     }
     let initialize = args.initialize.clone();
-    let client = start_uninitialized(args).await?;
+    let client = start_uninitialized(args, durable_session_control_preflight_hook).await?;
 
     let initialize_response = client
         .request(ClientRequest::Initialize {
@@ -402,7 +430,10 @@ async fn run_outbound_router(
     }
 }
 
-async fn start_uninitialized(args: InProcessStartArgs) -> IoResult<InProcessClientHandle> {
+async fn start_uninitialized(
+    args: InProcessStartArgs,
+    durable_session_control_preflight_hook: Option<DurableSessionControlPreflightHook>,
+) -> IoResult<InProcessClientHandle> {
     args.config.auth_config().validate()?;
     let channel_capacity = args.channel_capacity.max(1);
     let installation_id = resolve_installation_id(&args.config.codex_home).await?;
@@ -476,6 +507,7 @@ async fn start_uninitialized(args: InProcessStartArgs) -> IoResult<InProcessClie
                 rpc_transport: AppServerRpcTransport::InProcess,
                 remote_control_handle: None,
                 plugin_startup_tasks: crate::PluginStartupTasks::Start,
+                durable_session_control_preflight_hook,
             }));
             let mut thread_created_rx = processor.thread_created_receiver();
             let session = Arc::new(ConnectionSessionState::new());
