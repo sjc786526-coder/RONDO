@@ -1,0 +1,72 @@
+{
+  "claims": {
+    "cloud_authorized": false,
+    "gpu_validated": false,
+    "local_fixture_only": true,
+    "quality_candidate_produced": false,
+    "real_model_loaded": false
+  },
+  "controller": {
+    "checkpoint_points": "runtime_configurable",
+    "continuous_updates": true,
+    "observation_points": "runtime_configurable",
+    "pause_continue_resume": true
+  },
+  "data": {
+    "dataset_revision": "v8",
+    "manifest_content_sha256": "a9a31a61e0a1e070ee8d076dd313b7efabb5e01ffa42773a841b123a2686cb98",
+    "manifest_file_sha256": "70cbbbd1b754227b3c84f9117c1e74ee630713ae12d7041e48522bd751ea5661",
+    "membership_sha256": "ce04c05eaab49ef04cc335062aefd31f31e7a89857c8321603d70e996661a15f",
+    "pair_and_label_semantics": "frozen_unchanged",
+    "source": "plan066_unseen_free_train_validation_projection_v1",
+    "training_split": "train",
+    "unseen_test_body_exported": false,
+    "validation_split": "validation"
+  },
+  "model": {
+    "direction": "higher_is_better",
+    "projection": "stable_sigmoid_v1",
+    "repository": "Skywork/Skywork-Reward-V2-Qwen3-1.7B",
+    "revision": "e51ea3e08fb81326c3b812a7ff0cb9cee83e59cc",
+    "scalar": "logits[:,0]"
+  },
+  "schema": "rondo-publication-critic-plan081-route-v1",
+  "selection": {
+    "base_role": "research_incumbent",
+    "candidate_requires_better_than_base": true,
+    "comparison_policy": "runtime_configurable_same_validation_cohort",
+    "otherwise": "no_improvement",
+    "product_go_required": false,
+    "training_best_role": "best_within_training_sequence"
+  },
+  "update_route": {
+    "actual_scope_recorded_in_checkpoint": true,
+    "initial_scope": "partial_runtime_inventory",
+    "lora": false,
+    "method": "direct_original_parameter_update",
+    "peft": false,
+    "qlora": false,
+    "quantized_training": false,
+    "recipe_fields_deferred": [
+      "parameter_names",
+      "learning_rate",
+      "batch",
+      "update_count",
+      "optimizer",
+      "scheduler",
+      "scope_expansion_policy"
+    ],
+    "recipe_fields_fixed_here": [],
+    "scope_expansion": "observation_driven_runtime_decision"
+  },
+  "validation": {
+    "feeds_parameter_updates": false,
+    "gradient_access": false,
+    "m3_c2_claim": false,
+    "may_inform_scope_and_stop_decisions": true,
+    "qualification_claim": false,
+    "retains_full_metrics_and_signed_pair_margins": true,
+    "split": "validation",
+    "unseen_claim": false
+  }
+}
