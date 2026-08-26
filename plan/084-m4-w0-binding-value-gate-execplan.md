@@ -272,14 +272,16 @@ XXX用以下内容代替：
   `BINDING_ONLY_GO`，等待指定审查者复验。
 - 2026-08-26：指定审查者复验 `17fb9d7...c187083...` 整改增量、实际实现与保存的 JUnit/watchdog，确认两个 P2 和直接证据缺口均已
   闭合，无剩余 correctness/functionality finding；最终接受唯一终态 `BINDING_ONLY_GO`。本任务验收通过、目标完成，未重跑重型 Cargo。
+- 2026-08-26：用户批准整合后，以 no-ff merge `df0e2902117139a100294cf08ab61edb46f633c0` 将已验收的 084 分支合入
+  本地 `main`；随后只同步本交付事实并提交，未推送远端。
 
 ### 当前工作
 
-- W0 原型、整改、聚焦正式轮与最终独立验收全部完成，计划冻结；未实施正式 W1。
+- W0 原型、整改、聚焦正式轮、最终独立验收与本地 main 整合全部完成，计划冻结；未实施正式 W1，也未推送远端。
 
 ### 本任务剩余步骤
 
-- 本任务内无剩余步骤。工作树保持 clean 本地提交，等待用户另行批准合并与推送。
+- 本任务内无剩余步骤。本地 main 已完成整合；远端推送不在本次授权内。
 
 ### 阻塞项
 
@@ -289,7 +291,7 @@ XXX用以下内容代替：
 
 ### 当前验收状态
 
-- `COMPLETED / ACCEPTED`；最终唯一终态为 `BINDING_ONLY_GO`，验收通过、任务目标完成。
+- `COMPLETED / ACCEPTED / MERGED_LOCAL_MAIN`；最终唯一终态为 `BINDING_ONLY_GO`，验收通过、任务目标完成。
 
 ### 交接边界
 
@@ -319,3 +321,4 @@ XXX用以下内容代替：
 | 015 | 唯一终态收敛为 `BINDING_ONLY_GO`，并保持“原型可行/产品价值”与生产 trust 保证分离 | 同口径 deterministic/真实 Git 证据支持 binding，未支持 handoff；指定审查者已最终接受 | 价值门/验收 | 已采纳 |
 | 016 | 初次 admission 在任何目标 path/Git 读取前先核对调用者精确 roots 与写策略；actual action 再以普通相对组件、真实目标 policy 和 no-symlink walk 约束 bound root | 闭合首次验收的授权顺序与跨 writer 写入 P2，同时不预建 W1 race-free 文件能力 | 权限/执行 | 已采纳 |
 | 017 | baseline 把合理任务文本、branch/HEAD/status/diff 与同一 fake action 组成显式对照；补足 cold invalidation 与各类失败的另一 writer 隔离后维持 `BINDING_ONLY_GO` | 整改增强证据公平性与直接性，最终复验确认未产生 structured handoff 独有缺口 | 价值门/测试 | 已采纳 |
+| 018 | 用户批准后以 no-ff merge 将最终验收提交整合到本地 main；本批只追加准确整合事实，不推送 | 遵守 worktree 交付流程，并区分本地整合与远端发布授权 | Git/交付 | 已采纳 |

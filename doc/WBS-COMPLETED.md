@@ -2202,7 +2202,8 @@ formal retry 整改为 `d29e857`，最终独立验收提交为 `43cf0eeb3e1b4826
 ## M4-W0 Writer Workspace Binding 原型与价值门（Plan 084，2026-08-26）
 
 **状态**：test-only 价值原型、首次独立验收整改与最终复验均已完成；验收通过、任务目标完成，唯一终态为
-`BINDING_ONLY_GO`。最终实现提交为 `c1870836cb3cc829d5055ffe77b042a500df18b0`。
+`BINDING_ONLY_GO`。最终实现提交为 `c1870836cb3cc829d5055ffe77b042a500df18b0`，最终独立验收提交为
+`d3d0ffe5d70ed81f9b7f2b6536fb568260a56c0c`，本地主线整合提交为 `df0e2902117139a100294cf08ab61edb46f633c0`。
 
 - task-owned 临时 Git repository/two-linked-worktree fixture 以同一 fake action 形成 cooperative 与 caller-relative baseline，证明
   binding 能在两个 writer 首次动作前固定各自 cwd、workspace roots、permission 与 Git identity；cold reload 重新核对当前授权、
