@@ -1,0 +1,38 @@
+{
+  "activation_checkpointing": true,
+  "attention_backend": "sdpa",
+  "binary_micro_batch_size": 1,
+  "gradient_clip_norm": 1.0,
+  "macro_update": "one_full_v8_train_cohort",
+  "objective": {
+    "binary_loss": "softplus(-signed_target*logits[:,0])",
+    "component_weights": {
+      "binary": 0.3333333333333333,
+      "boundary": 0.3333333333333333,
+      "within_pass": 0.3333333333333333
+    },
+    "direction": "preferred_minus_dispreferred",
+    "pair_loss": "softplus(dispreferred-preferred)",
+    "pair_margin": 0.0,
+    "pair_temperature": 1.0,
+    "scalar": "logits[:,0]"
+  },
+  "optimizer": {
+    "betas": [
+      0.9,
+      0.999
+    ],
+    "epsilon": 1e-08,
+    "fused": true,
+    "learning_rate": 1e-05,
+    "name": "torch.optim.AdamW",
+    "weight_decay": 0.01
+  },
+  "pair_micro_batch_size": 1,
+  "parameter_dtype": "float32",
+  "scheduler": {
+    "name": "constant"
+  },
+  "schema": "rondo-publication-critic-plan082-training-recipe-v1",
+  "seed": 20260825
+}

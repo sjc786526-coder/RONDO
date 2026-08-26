@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-import json
+from collections.abc import Callable, Mapping
 import os
 from pathlib import Path
 import shutil
@@ -42,8 +41,7 @@ PLAN054_FREEZE_SHA256 = (
     "2a8081d3700f4209f5ac3cd7dabb7f6d31d0cb0b0ea0e9e8c639c8f10dbebfeb"
 )
 MODEL_LOCK_RELATIVE = (
-    "eval/model-locks/publication-critic/"
-    "skywork-reward-v2-qwen3-1.7b-e51ea3e0.json"
+    "eval/model-locks/publication-critic/skywork-reward-v2-qwen3-1.7b-e51ea3e0.json"
 )
 TEMPLATE_FILES = (
     "eval/templates/publication-critic/input-contract-v2.md",
@@ -203,7 +201,10 @@ def verify_bundle(bundle_root: Path) -> dict[str, Any]:
         if sha256_file(file_path) != metadata["sha256"]:
             raise FullModelTrainingError("bundle_file_hash_mismatch")
         train_bodies += int(metadata["contains_train_body"])
-    if train_bodies != 1 or files.get(DATA_RELATIVE, {}).get("contains_train_body") is not True:
+    if (
+        train_bodies != 1
+        or files.get(DATA_RELATIVE, {}).get("contains_train_body") is not True
+    ):
         raise FullModelTrainingError("bundle_train_body_boundary_invalid")
     if PORTABLE_RELATIVE not in files:
         raise FullModelTrainingError("bundle_portable_contract_missing")
@@ -225,9 +226,22 @@ def verify_bundle(bundle_root: Path) -> dict[str, Any]:
     }
 
 
-def create_deterministic_archive(bundle_root: Path, archive_path: Path) -> dict[str, Any]:
+def create_deterministic_archive(
+    bundle_root: Path, archive_path: Path
+) -> dict[str, Any]:
+    return create_verified_archive(bundle_root, archive_path, verifier=verify_bundle)
+
+
+def create_verified_archive(
+    bundle_root: Path,
+    archive_path: Path,
+    *,
+    verifier: Callable[[Path], dict[str, Any]],
+) -> dict[str, Any]:
+    """Create the shared deterministic tar format after a task verifier passes."""
+
     root = safe_directory(Path(bundle_root))
-    bundle = verify_bundle(root)
+    bundle = verifier(root)
     destination = Path(archive_path)
     if destination.exists() or destination.is_symlink():
         raise FullModelTrainingError("bundle_archive_already_exists")
@@ -250,6 +264,7 @@ def create_deterministic_archive(bundle_root: Path, archive_path: Path) -> dict[
                 with path.open("rb") as handle:
                     archive.addfile(info, handle)
         os.replace(temporary, destination)
+        destination.chmod(0o600)
     except BaseException:
         temporary.unlink(missing_ok=True)
         raise
@@ -266,6 +281,23 @@ def extract_verified_archive(
     *,
     expected_sha256: str,
 ) -> dict[str, Any]:
+    return extract_archive_with_verifier(
+        archive_path,
+        output_root,
+        expected_sha256=expected_sha256,
+        verifier=verify_bundle,
+    )
+
+
+def extract_archive_with_verifier(
+    archive_path: Path,
+    output_root: Path,
+    *,
+    expected_sha256: str,
+    verifier: Callable[[Path], dict[str, Any]],
+) -> dict[str, Any]:
+    """Safely extract the shared tar format and run a task-specific verifier."""
+
     source = regular_file(Path(archive_path), maximum_bytes=512 * 1024 * 1024)
     if sha256_file(source) != expected_sha256:
         raise FullModelTrainingError("bundle_archive_hash_mismatch")
@@ -283,9 +315,13 @@ def extract_verified_archive(
                 raise FullModelTrainingError("bundle_archive_empty")
             for member in members:
                 pure = safe_relative(member.name)
-                if member.name in seen or not member.isfile():
+                if member.name in seen:
                     raise FullModelTrainingError("bundle_archive_member_invalid")
                 seen.add(member.name)
+                if member.isdir():
+                    continue
+                if not member.isfile():
+                    raise FullModelTrainingError("bundle_archive_member_invalid")
                 if member.size < 0 or member.size > 64 * 1024 * 1024:
                     raise FullModelTrainingError("bundle_archive_member_too_large")
                 handle = archive.extractfile(member)
@@ -295,7 +331,7 @@ def extract_verified_archive(
                 if len(raw) != member.size:
                     raise FullModelTrainingError("bundle_archive_member_size_mismatch")
                 write_exclusive(staging.joinpath(*pure.parts), raw)
-        result = verify_bundle(staging)
+        result = verifier(staging)
         os.replace(staging, destination)
         return result
     except (tarfile.TarError, OSError) as exc:
@@ -329,7 +365,9 @@ def _local_readiness(repo_root: Path) -> tuple[dict[str, Any], bytes]:
     except Exception as exc:
         raise FullModelTrainingError("local_plan059_freeze_verifier_failed") from exc
     source_hashes = smoke.get("source_hashes")
-    if not isinstance(source_hashes, Mapping) or set(source_hashes) != set(SOURCE_FILES):
+    if not isinstance(source_hashes, Mapping) or set(source_hashes) != set(
+        SOURCE_FILES
+    ):
         raise FullModelTrainingError("local_source_hashes_invalid")
     manifest_files = manifest.get("files")
     if not isinstance(manifest_files, Mapping):
@@ -344,9 +382,14 @@ def _local_readiness(repo_root: Path) -> tuple[dict[str, Any], bytes]:
         ):
             raise FullModelTrainingError("local_smoke_source_mismatch")
     bundle_entry = manifest_files.get("train-only-smoke-bundle.json")
-    if not isinstance(bundle_entry, Mapping) or bundle_entry.get("sha256") != SMOKE_BUNDLE_SHA256:
+    if (
+        not isinstance(bundle_entry, Mapping)
+        or bundle_entry.get("sha256") != SMOKE_BUNDLE_SHA256
+    ):
         raise FullModelTrainingError("local_smoke_manifest_entry_mismatch")
-    freeze_path = repo_root / "eval/manifests/publication-critic/measurement-freeze-v4.json"
+    freeze_path = (
+        repo_root / "eval/manifests/publication-critic/measurement-freeze-v4.json"
+    )
     if sha256_file(freeze_path) != PLAN054_FREEZE_SHA256:
         raise FullModelTrainingError("local_plan054_freeze_hash_mismatch")
     model_lock_path = repo_root / MODEL_LOCK_RELATIVE
@@ -377,7 +420,8 @@ def _local_readiness(repo_root: Path) -> tuple[dict[str, Any], bytes]:
             repo_root / "eval/templates/publication-critic/render-contract-v3.json"
         ),
         "product_packet_limits_sha256": sha256_file(
-            repo_root / "eval/templates/publication-critic/product-packet-limits-v1.json"
+            repo_root
+            / "eval/templates/publication-critic/product-packet-limits-v1.json"
         ),
         "model_lock_sha256": sha256_file(model_lock_path),
         "model": {

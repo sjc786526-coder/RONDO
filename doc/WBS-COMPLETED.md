@@ -2218,3 +2218,31 @@ formal retry 整改为 `d29e857`，最终独立验收提交为 `43cf0eeb3e1b4826
   spawn/resume/reload 相邻回归；scoped fix/fmt 与 diff 门禁通过。最终独立复验复用该保存证据，未扩大重跑范围。
 - 未实施 M4-W1、上游增量或 Workspace 控制面，未运行 full workspace、Docker、真实模型/API、训练、性能测评、CI/PR 或远端操作。
   正式 W1 尚未立项，后续先按实际消费决定上游窄适配；当前路线只由 WBS 维护。
+
+## Publication Critic 1.7B 云端连续训练与候选形成（Plan 082，2026-08-26）
+
+**状态**：阶段 A、真实 commissioning、参数开发、干净正式轮、GPU 专项验收、大型资产交接与最终验收均已完成；验收通过、任务目标完成，
+研究终态为 `VALID_NO_IMPROVEMENT`。结果相关源码为 `ff7e8a1f70b03c6b2d7a8f9a7967734d918b363b`，最终执行者提交为
+`2f91f32ed0d8703038f3142e740159443b23a883`。
+
+- exact `Skywork/Skywork-Reward-V2-Qwen3-1.7B@e51ea3e08fb81326c3b812a7ff0cb9cee83e59cc`、冻结 v8、pair/input/scalar
+  方向、无 unseen 与非 PEFT 边界保持不变。正式 freeze `747420ddce99e73b1e787cc4b1979629c9e5a353da6595273d0b780923b6ab87`
+  在观察正式结果前绑定环境、recipe、scope、比较与保留规则；干净正式轮从 exact base 和空 namespace 完成四步 score-head 原参数更新。
+- 同 cohort boundary pair mean margin 从 base `0.8252560622` 连续回落到 step 4 `0.8252007961`，没有形成 better-than-base
+  checkpoint，因此按冻结规则诚实发布 `VALID_NO_IMPROVEMENT`。该终态完成研究目标，但不提供产品 GO、本地部署资格、M3-C2/unseen
+  证据或 M3-D 解锁；Publication Critic 继续 default-off。
+- step 2 checkpoint 经另一新进程实际恢复 model、optimizer、scheduler、RNG 与 data state 后继续完成 step 4。正式 step 2/step 4
+  checkpoint、五份正式 observation 与三个 snapshot 由冻结 bootstrap 精确保留；39 个正式对象合计 `13,797,142,360` bytes，连同
+  bootstrap 共 40/40 文件、`13,797,156,884` bytes，已在本地逐对象验证 bytes/SHA-256、exact-tree、`0600/0700` 权限与无符号链接。
+  最终 verification receipt SHA-256 为 `7e7782b764db2a8a45bbe1a639337980b3086dc91b0975b453df4fe098e60fef`。
+- 正式训练使用 US-TX-3 Secure L40S；GPU 专项验收关闭 Pod 依赖后删除训练 Pod。因 US-TX-3 不支持网络卷 S3 API，按用户一次性例外
+  使用单个 Secure RTX 4090 transfer Pod 通过 SSH/rsync 只读续传，完成校验后立即删除。最终实时复核为 0 Pod、持续 compute 费率为 0；
+  唯一 40GB Standard 网络卷 `mwemzrn33y` 继续保留，未经用户本人明确批准不得删除。
+- 2026-08-26T11:54Z provider 可见 Plan 082 入账至少约 `$1.720537`，当前小时仍可能延迟追记；按已知训练/transfer Pod 完整墙钟、
+  transfer container disk 与已见卷费计算的资源口径约 `$2.32`，另有约 `$0.003889/h` 的持续卷费。费用远低于 `$10` 告警和 `$15`
+  边界；执行者交接时的 `$1.007324` 是延迟账单快照，`$1.728857` 不再作为保守上界。
+- 最终审查复跑 Plan 081/082 training、handoff、scripts 与 Plan 068 相邻轻量回归 83/83；相关 Ruff 0.15.12、compileall、五支 shell
+  `bash -n` 和 `git diff --check` 均通过。终审未重哈希约 13.8GB checkpoint payload，而是复核正式 loader/validator、已生成逐对象摘要、
+  实树 bytes/权限和 manifest/receipt 闭合关系；无遗留高/中等级 correctness/functionality finding。
+- 最终验收后，用户本人明确决定继续保留 40GB Standard 网络卷 `mwemzrn33y`；该卷当前仍未删除并继续产生约 `$0.003889/h` 的卷费。
+  未来若改变决定，删除仍须新的明确人工授权。

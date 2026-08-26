@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 import json
 import math
 from pathlib import Path
@@ -39,7 +40,25 @@ StateWriter = Callable[[Path, Mapping[str, Any]], None]
 StateReader = Callable[[Path], Mapping[str, Any]]
 
 
-class ContinuousTrainingController:
+@dataclass(frozen=True)
+class ControllerEvidenceProfile:
+    """Immutable claim profile layered over the shared controller mechanics."""
+
+    controller_schema: str
+    evidence_kind: str
+    research_candidate_eligible: bool
+    real_quality_claim: bool
+
+
+PLAN081_FIXTURE_PROFILE = ControllerEvidenceProfile(
+    controller_schema=CONTROLLER_SCHEMA,
+    evidence_kind="fixture_fake",
+    research_candidate_eligible=False,
+    real_quality_claim=False,
+)
+
+
+class _ContinuousTrainingControllerCore:
     """Drive updates and observations through a small explicit adapter seam.
 
     Plan 081 intentionally supports only ``fixture_fake`` evidence.  A future
@@ -58,6 +77,7 @@ class ContinuousTrainingController:
         validation_dataset: ValidationDataset,
         artifact_store: Plan081ArtifactStore,
         report_threshold: float = 0.5,
+        evidence_profile: ControllerEvidenceProfile,
     ) -> None:
         validated = validate_route_contract(route_contract)
         if (
@@ -83,12 +103,15 @@ class ContinuousTrainingController:
         self.validation_dataset = validation_dataset
         self.artifact_store = artifact_store
         self.report_threshold = float(report_threshold)
+        if not isinstance(evidence_profile, ControllerEvidenceProfile):
+            raise FullModelTrainingError("continuous_controller_profile_invalid")
+        self.evidence_profile = evidence_profile
         validation_identity = validation_identity_sha256(validation_dataset)
         training_identity = training_identity_sha256(training_dataset)
         if set(training_dataset.supervision) & set(validation_dataset.supervision):
             raise FullModelTrainingError("plan081_train_validation_overlap")
         self.state: dict[str, Any] = {
-            "schema": CONTROLLER_SCHEMA,
+            "schema": self.evidence_profile.controller_schema,
             "route_contract_sha256": sha256_bytes(canonical_json_bytes(validated)),
             "validation_identity_sha256": validation_identity,
             "training_identity_sha256": training_identity,
@@ -96,7 +119,7 @@ class ContinuousTrainingController:
             "control_plan": control_plan.as_dict(),
             "comparison_policy": comparison_policy.as_dict(),
             "report_threshold": self.report_threshold,
-            "evidence_kind": "fixture_fake",
+            "evidence_kind": self.evidence_profile.evidence_kind,
             "status": "created",
             "current_step": 0,
             "current_scope": initial_scope.as_dict(),
@@ -107,7 +130,7 @@ class ContinuousTrainingController:
             "updates": [],
             "observations": [],
             "base": None,
-            "selection": _empty_selection(),
+            "selection": _empty_selection(self.evidence_profile),
             "turning_points": [],
             "latest_checkpoint_id": None,
             "resume_count": 0,
@@ -148,6 +171,7 @@ class ContinuousTrainingController:
     def initialize(self, adapter: Any) -> dict[str, Any]:
         if self.state["status"] != "created" or self.state["base"] is not None:
             raise FullModelTrainingError("plan081_controller_already_initialized")
+        self._validate_adapter(adapter)
         self._require_input_identities()
         self._bind_training_state_codec(adapter)
         scope = TrainableScope.from_value(self.state["current_scope"])
@@ -217,6 +241,7 @@ class ContinuousTrainingController:
             report_threshold=report_threshold,
         )
         controller._require_input_identities()
+        controller._validate_adapter(adapter)
         controller._bind_training_state_codec(adapter)
         _assert_fresh_exact_base(adapter)
         scope = TrainableScope.from_value(controller.state["current_scope"])
@@ -227,9 +252,7 @@ class ContinuousTrainingController:
             existing = artifact_store.read_observation("base-step-000000")
             reference = artifact_store.verify_observation("base-step-000000")
         except FullModelTrainingError as exc:
-            raise FullModelTrainingError(
-                "plan081_base_restart_unavailable"
-            ) from exc
+            raise FullModelTrainingError("plan081_base_restart_unavailable") from exc
         if existing != observation:
             raise FullModelTrainingError("plan081_base_restart_mismatch")
         controller._accept_base(observation, reference)
@@ -238,15 +261,19 @@ class ContinuousTrainingController:
         )
         return controller
 
-    def _base_observation(
-        self, adapter: Any, scope: TrainableScope
-    ) -> dict[str, Any]:
+    def _base_observation(self, adapter: Any, scope: TrainableScope) -> dict[str, Any]:
         observation = self._evaluate(adapter, global_step=0, scope=scope)
-        observation["comparisons"] = {"base": "incumbent", "previous": None, "best": None}
+        observation["comparisons"] = {
+            "base": "incumbent",
+            "previous": None,
+            "best": None,
+        }
         observation["evidence"] = {
-            "kind": "fixture_fake",
-            "research_candidate_eligible": False,
-            "real_quality_claim": False,
+            "kind": self.evidence_profile.evidence_kind,
+            "research_candidate_eligible": (
+                self.evidence_profile.research_candidate_eligible
+            ),
+            "real_quality_claim": self.evidence_profile.real_quality_claim,
         }
         return observation
 
@@ -266,12 +293,14 @@ class ContinuousTrainingController:
             training_best=None,
             latest=None,
             policy=self.comparison_policy,
+            profile=self.evidence_profile,
         )
         self.state["status"] = "paused"
 
     def run(self, adapter: Any, *, stop_after: int | None = None) -> dict[str, Any]:
         if self.state["base"] is None:
             raise FullModelTrainingError("plan081_controller_not_initialized")
+        self._validate_adapter(adapter)
         self._require_input_identities()
         current = int(self.state["current_step"])
         target = self.control_plan.maximum_updates if stop_after is None else stop_after
@@ -298,9 +327,7 @@ class ContinuousTrainingController:
             scope = self._run_step(adapter, step=step, scope=scope)
 
         self.state["status"] = (
-            "completed"
-            if target == self.control_plan.maximum_updates
-            else "paused"
+            "completed" if target == self.control_plan.maximum_updates else "paused"
         )
         return self.archive_summary()
 
@@ -339,14 +366,18 @@ class ContinuousTrainingController:
 
             if step in self.control_plan.checkpoint_steps:
                 if observation_record is None:
-                    raise FullModelTrainingError("plan081_checkpoint_without_observation")
+                    raise FullModelTrainingError(
+                        "plan081_checkpoint_without_observation"
+                    )
                 checkpoint_id = _artifact_id(
                     "checkpoint", int(self.state["artifact_generation"]), step
                 )
                 training_state = adapter.capture_training_state()
                 _validate_training_state(training_state)
                 if training_state["data"] != receipt["data_cursor"]:
-                    raise FullModelTrainingError("plan081_data_cursor_checkpoint_mismatch")
+                    raise FullModelTrainingError(
+                        "plan081_data_cursor_checkpoint_mismatch"
+                    )
                 codec_id, state_writer, state_reader = _adapter_training_state_codec(
                     adapter
                 )
@@ -356,9 +387,10 @@ class ContinuousTrainingController:
                     )
                 checkpoint_state = json.loads(json.dumps(self.state))
                 checkpoint_record = checkpoint_state["observations"][-1]
-                if checkpoint_record["observation_id"] != observation_record[
-                    "observation_id"
-                ]:
+                if (
+                    checkpoint_record["observation_id"]
+                    != observation_record["observation_id"]
+                ):
                     raise FullModelTrainingError(
                         "plan081_checkpoint_observation_history_invalid"
                     )
@@ -453,12 +485,11 @@ class ContinuousTrainingController:
         try:
             with _checkpoint_recovery_probe(adapter) as probe:
                 if probe is adapter:
-                    raise FullModelTrainingError(
-                        "plan081_checkpoint_probe_not_fresh"
-                    )
+                    raise FullModelTrainingError("plan081_checkpoint_probe_not_fresh")
+                self._validate_adapter(probe)
                 _assert_fresh_exact_base(probe)
-                codec_id, _state_writer, state_reader = (
-                    _adapter_training_state_codec(probe)
+                codec_id, _state_writer, state_reader = _adapter_training_state_codec(
+                    probe
                 )
                 if codec_id != expected_codec_id:
                     raise FullModelTrainingError(
@@ -517,14 +548,14 @@ class ContinuousTrainingController:
     ) -> "ContinuousTrainingController":
         artifact_store.recover_incomplete_staging()
         codec_id, _state_writer, state_reader = _adapter_training_state_codec(adapter)
-        checkpoint_metadata = artifact_store.verify_checkpoint(checkpoint_id)["metadata"]
+        checkpoint_metadata = artifact_store.verify_checkpoint(checkpoint_id)[
+            "metadata"
+        ]
         if checkpoint_metadata.get("training_state_codec") != codec_id:
             raise FullModelTrainingError("plan081_training_state_codec_mismatch")
         try:
             controller_state, training_state, model_root = (
-                artifact_store.read_checkpoint(
-                    checkpoint_id, state_reader=state_reader
-                )
+                artifact_store.read_checkpoint(checkpoint_id, state_reader=state_reader)
             )
         except FullModelTrainingError:
             raise
@@ -546,6 +577,7 @@ class ContinuousTrainingController:
             artifact_store=artifact_store,
             report_threshold=report_threshold,
         )
+        controller._validate_adapter(adapter)
         controller._accept_resumed_state(
             controller_state, checkpoint_id, training_state_codec=codec_id
         )
@@ -554,9 +586,7 @@ class ContinuousTrainingController:
             raise FullModelTrainingError("plan081_data_cursor_checkpoint_mismatch")
         needs_retention = not artifact_store.has_retention_completion(checkpoint_id)
         if needs_retention and not artifact_store.is_latest_checkpoint(checkpoint_id):
-            raise FullModelTrainingError(
-                "plan081_checkpoint_retention_incomplete"
-            )
+            raise FullModelTrainingError("plan081_checkpoint_retention_incomplete")
         _assert_fresh_exact_base(adapter)
         _restore_adapter_checkpoint(
             adapter,
@@ -575,6 +605,11 @@ class ContinuousTrainingController:
         controller.state["artifact_generation"] = fresh_generation
         controller.state["status"] = "paused"
         return controller
+
+    def _validate_adapter(self, adapter: Any) -> None:
+        """Subclass hook for stronger runtime identity without changing Plan 081."""
+
+        del adapter
 
     def archive_summary(self) -> dict[str, Any]:
         return {
@@ -611,7 +646,8 @@ class ContinuousTrainingController:
         self._require_input_identities()
         if (
             not isinstance(receipt, Mapping)
-            or set(receipt) != {
+            or set(receipt)
+            != {
                 "raw_logits",
                 "gradient_access",
                 "training_state_unchanged",
@@ -638,12 +674,16 @@ class ContinuousTrainingController:
     ) -> dict[str, Any]:
         value = self._evaluate(adapter, global_step=step, scope=scope)
         base = self.state["base"]
-        previous = self.state["observations"][-1] if self.state["observations"] else base
+        previous = (
+            self.state["observations"][-1] if self.state["observations"] else base
+        )
         training_best = _training_best_record(self.state)
         best_reference = training_best or base
         comparisons = {
             "base": compare_values(
-                value["comparison_value"], base["comparison_value"], self.comparison_policy
+                value["comparison_value"],
+                base["comparison_value"],
+                self.comparison_policy,
             ),
             "previous": compare_values(
                 value["comparison_value"],
@@ -658,17 +698,22 @@ class ContinuousTrainingController:
         }
         value["comparisons"] = comparisons
         value["evidence"] = {
-            "kind": "fixture_fake",
-            "research_candidate_eligible": False,
-            "real_quality_claim": False,
+            "kind": self.evidence_profile.evidence_kind,
+            "research_candidate_eligible": (
+                self.evidence_profile.research_candidate_eligible
+            ),
+            "real_quality_claim": self.evidence_profile.real_quality_claim,
         }
         generation = int(self.state["artifact_generation"])
         observation_id = _artifact_id("observation", generation, step)
         snapshot_id = _artifact_id("snapshot", generation, step)
         reference = self.artifact_store.write_observation(observation_id, value)
+        snapshot_saver = getattr(adapter, "save_evaluation_snapshot", None)
+        if not callable(snapshot_saver):
+            snapshot_saver = adapter.save_model
         self.artifact_store.save_snapshot(
             snapshot_id,
-            model_saver=adapter.save_model,
+            model_saver=snapshot_saver,
             metadata={
                 "global_step": step,
                 "scope": scope.as_dict(),
@@ -720,6 +765,7 @@ class ContinuousTrainingController:
             base=self.state["base"],
             observations=self.state["observations"],
             policy=self.comparison_policy,
+            profile=self.evidence_profile,
         )
 
     def _apply_retention(self, *, prune_checkpoints: bool) -> None:
@@ -747,11 +793,23 @@ class ContinuousTrainingController:
             checkpoint_id = _checkpoint_for_snapshot(self.state, turning["snapshot_id"])
             if checkpoint_id is not None:
                 checkpoint_ids.add(checkpoint_id)
+        snapshot_ids.update(self._additional_retained_snapshot_ids())
+        checkpoint_ids.update(self._additional_retained_checkpoint_ids())
         self.artifact_store.prune(
             keep_snapshot_ids=snapshot_ids,
             keep_checkpoint_ids=checkpoint_ids,
             prune_checkpoints=prune_checkpoints,
         )
+
+    def _additional_retained_checkpoint_ids(self) -> set[str]:
+        """Subclass hook for explicit checkpoint roles beyond Plan 081."""
+
+        return set()
+
+    def _additional_retained_snapshot_ids(self) -> set[str]:
+        """Subclass hook for explicit snapshot roles beyond Plan 081."""
+
+        return set()
 
     def _accept_update_receipt(
         self, value: Any, *, step: int, scope: TrainableScope
@@ -794,9 +852,8 @@ class ContinuousTrainingController:
         required = set(self.state)
         if (
             set(value) != required
-            or value.get("schema") != CONTROLLER_SCHEMA
-            or value.get("route_contract_sha256")
-            != self.state["route_contract_sha256"]
+            or value.get("schema") != self.evidence_profile.controller_schema
+            or value.get("route_contract_sha256") != self.state["route_contract_sha256"]
             or value.get("validation_identity_sha256")
             != self.state["validation_identity_sha256"]
             or value.get("training_identity_sha256")
@@ -805,7 +862,7 @@ class ContinuousTrainingController:
             or value.get("control_plan") != self.control_plan.as_dict()
             or value.get("comparison_policy") != self.comparison_policy.as_dict()
             or value.get("report_threshold") != self.report_threshold
-            or value.get("evidence_kind") != "fixture_fake"
+            or value.get("evidence_kind") != self.evidence_profile.evidence_kind
             or value.get("latest_checkpoint_id") != checkpoint_id
             or not isinstance(value.get("base"), Mapping)
             or not isinstance(value.get("selection"), Mapping)
@@ -903,11 +960,9 @@ class ContinuousTrainingController:
                 ),
                 None,
             )
-            if (
-                previous_record is None
-                or decision.get("decided_after_observation_id")
-                != previous_record.get("observation_id")
-            ):
+            if previous_record is None or decision.get(
+                "decided_after_observation_id"
+            ) != previous_record.get("observation_id"):
                 raise FullModelTrainingError("plan081_checkpoint_scope_history_invalid")
             decisions_by_step[decision["before_update"]] = {
                 **decision,
@@ -938,7 +993,9 @@ class ContinuousTrainingController:
             step for step in self.control_plan.observation_steps if step <= current
         ]
         if len(value["observations"]) != len(expected_steps):
-            raise FullModelTrainingError("plan081_checkpoint_observation_history_invalid")
+            raise FullModelTrainingError(
+                "plan081_checkpoint_observation_history_invalid"
+            )
         for record, step in zip(value["observations"], expected_steps):
             record_generation = record.get("artifact_generation")
             if (
@@ -999,6 +1056,7 @@ class ContinuousTrainingController:
             base=base,
             observations=value["observations"],
             policy=self.comparison_policy,
+            profile=self.evidence_profile,
         )
         if value["selection"] != expected_selection:
             raise FullModelTrainingError("plan081_checkpoint_selection_invalid")
@@ -1011,7 +1069,18 @@ class ContinuousTrainingController:
             raise FullModelTrainingError("plan081_checkpoint_retention_state_invalid")
 
 
-def _empty_selection() -> dict[str, Any]:
+class ContinuousTrainingController(_ContinuousTrainingControllerCore):
+    """Concrete Plan 081 controller permanently bound to fixture evidence."""
+
+    def __init__(self, **kwargs: Any) -> None:
+        if "evidence_profile" in kwargs or "_evidence_profile" in kwargs:
+            raise FullModelTrainingError(
+                "plan081_controller_profile_override_forbidden"
+            )
+        super().__init__(**kwargs, evidence_profile=PLAN081_FIXTURE_PROFILE)
+
+
+def _empty_selection(profile: ControllerEvidenceProfile) -> dict[str, Any]:
     return {
         "base_incumbent_snapshot_id": "exact-base-incumbent",
         "training_best_snapshot_id": None,
@@ -1019,8 +1088,8 @@ def _empty_selection() -> dict[str, Any]:
         "target_candidate_state": "no_improvement",
         "control_candidate_snapshot_id": None,
         "research_candidate_snapshot_id": None,
-        "research_candidate_eligible": False,
-        "evidence_kind": "fixture_fake",
+        "research_candidate_eligible": profile.research_candidate_eligible,
+        "evidence_kind": profile.evidence_kind,
     }
 
 
@@ -1030,6 +1099,7 @@ def _selection(
     training_best: Mapping[str, Any] | None,
     latest: Mapping[str, Any] | None,
     policy: ComparisonPolicy,
+    profile: ControllerEvidenceProfile,
 ) -> dict[str, Any]:
     better = (
         training_best is not None
@@ -1051,9 +1121,13 @@ def _selection(
             training_best["snapshot_id"] if better else None
         ),
         # Fake evidence can exercise the branch but never creates a real candidate.
-        "research_candidate_snapshot_id": None,
-        "research_candidate_eligible": False,
-        "evidence_kind": "fixture_fake",
+        "research_candidate_snapshot_id": (
+            training_best["snapshot_id"]
+            if better and profile.research_candidate_eligible
+            else None
+        ),
+        "research_candidate_eligible": (better and profile.research_candidate_eligible),
+        "evidence_kind": profile.evidence_kind,
     }
 
 
@@ -1062,6 +1136,7 @@ def _selection_from_records(
     base: Mapping[str, Any],
     observations: list[Mapping[str, Any]],
     policy: ComparisonPolicy,
+    profile: ControllerEvidenceProfile,
 ) -> dict[str, Any]:
     training_best = None
     for record in observations:
@@ -1075,6 +1150,7 @@ def _selection_from_records(
         training_best=training_best,
         latest=observations[-1] if observations else None,
         policy=policy,
+        profile=profile,
     )
 
 
@@ -1129,9 +1205,7 @@ def _training_best_record(state: Mapping[str, Any]) -> Mapping[str, Any] | None:
     )
 
 
-def _checkpoint_for_snapshot(
-    state: Mapping[str, Any], snapshot_id: Any
-) -> str | None:
+def _checkpoint_for_snapshot(state: Mapping[str, Any], snapshot_id: Any) -> str | None:
     if not isinstance(snapshot_id, str):
         return None
     return next(
@@ -1158,13 +1232,9 @@ def _scope_decision_for_step(
     )
 
 
-def _scope_expanded_since_last_observation(
-    state: Mapping[str, Any], step: int
-) -> bool:
+def _scope_expanded_since_last_observation(state: Mapping[str, Any], step: int) -> bool:
     previous_step = (
-        int(state["observations"][-1]["global_step"])
-        if state["observations"]
-        else 0
+        int(state["observations"][-1]["global_step"]) if state["observations"] else 0
     )
     return any(
         previous_step < int(decision["before_update"]) <= step
@@ -1232,9 +1302,7 @@ def _restore_adapter_checkpoint(
         adapter.load_model(model_root)
         model_assertion = getattr(adapter, "assert_checkpoint_model_loaded", None)
         if not callable(model_assertion):
-            raise FullModelTrainingError(
-                "plan081_checkpoint_model_assertion_missing"
-            )
+            raise FullModelTrainingError("plan081_checkpoint_model_assertion_missing")
         model_assertion(model_root)
         adapter.configure_trainable_scope(scope)
         adapter.assert_trainable_scope(scope)
@@ -1244,15 +1312,11 @@ def _restore_adapter_checkpoint(
         restored_state = adapter.capture_training_state()
         _validate_training_state(restored_state)
         if not _training_states_equal(adapter, restored_state, training_state):
-            raise FullModelTrainingError(
-                "plan081_checkpoint_restore_state_mismatch"
-            )
+            raise FullModelTrainingError("plan081_checkpoint_restore_state_mismatch")
     except FullModelTrainingError:
         raise
     except Exception as exc:
-        raise FullModelTrainingError(
-            "plan081_checkpoint_restore_failed"
-        ) from exc
+        raise FullModelTrainingError("plan081_checkpoint_restore_failed") from exc
 
 
 def _training_states_equal(
@@ -1262,21 +1326,15 @@ def _training_states_equal(
 ) -> bool:
     comparator = getattr(adapter, "training_states_equal", None)
     if not callable(comparator):
-        raise FullModelTrainingError(
-            "plan081_training_state_comparator_missing"
-        )
+        raise FullModelTrainingError("plan081_training_state_comparator_missing")
     try:
         result = comparator(left, right)
     except FullModelTrainingError:
         raise
     except Exception as exc:
-        raise FullModelTrainingError(
-            "plan081_training_state_compare_failed"
-        ) from exc
+        raise FullModelTrainingError("plan081_training_state_compare_failed") from exc
     if type(result) is not bool:
-        raise FullModelTrainingError(
-            "plan081_training_state_compare_result_invalid"
-        )
+        raise FullModelTrainingError("plan081_training_state_compare_result_invalid")
     return result
 
 

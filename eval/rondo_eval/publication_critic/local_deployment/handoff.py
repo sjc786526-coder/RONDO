@@ -70,28 +70,52 @@ class DownloadSpec:
         _require_sha256(self.sha256)
 
 
-class HandoffClient:
-    """Small injected-client facade for the exact Plan 068 winner volume."""
+@dataclass(frozen=True)
+class HandoffScope:
+    """Non-secret S3 namespace binding for a single task-owned handoff."""
+
+    bucket: str
+    root: str
+    allowed_prefixes: tuple[str, ...]
+    allowed_objects: frozenset[str] = frozenset()
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.bucket, str)
+            or not self.bucket
+            or len(self.bucket) > 128
+            or any(
+                character not in "abcdefghijklmnopqrstuvwxyz0123456789-"
+                for character in self.bucket
+            )
+            or not isinstance(self.allowed_prefixes, tuple)
+            or not self.allowed_prefixes
+            or len(set(self.allowed_prefixes)) != len(self.allowed_prefixes)
+        ):
+            raise HandoffError("handoff_scope_invalid")
+        _safe_list_prefix(self.root)
+        for prefix in self.allowed_prefixes:
+            _safe_list_prefix(prefix)
+        for relative_key in self.allowed_objects:
+            _safe_object_key(relative_key)
+
+
+class ScopedHandoffClient:
+    """Small injected-client facade for one already validated S3 scope."""
 
     def __init__(
         self,
         s3_client: Any,
         *,
-        bucket: str = VOLUME_ID,
-        root: str = HANDOFF_ROOT,
-        additional_object_keys: Iterable[str] = (),
+        scope: HandoffScope,
     ) -> None:
-        if bucket != VOLUME_ID:
-            raise HandoffError("handoff_bucket_not_allowed")
-        if root != HANDOFF_ROOT:
-            raise HandoffError("handoff_root_not_allowed")
-        additions: set[str] = set()
-        for value in additional_object_keys:
-            additions.add(_safe_object_key(value))
+        if not isinstance(scope, HandoffScope):
+            raise HandoffError("handoff_scope_invalid")
         self._client = s3_client
-        self.bucket = bucket
-        self.root = root
-        self._allowed_objects = ALLOWED_ROOT_OBJECTS | frozenset(additions)
+        self.bucket = scope.bucket
+        self.root = scope.root
+        self._allowed_prefixes = scope.allowed_prefixes
+        self._allowed_objects = scope.allowed_objects
 
     def list_level(
         self,
@@ -103,7 +127,7 @@ class HandoffClient:
         """List one delimiter-bounded level below an allowed prefix."""
 
         prefix = _safe_list_prefix(relative_prefix)
-        if prefix and not _under_allowed_prefix(prefix):
+        if prefix and not _under_allowed_prefix(prefix, self._allowed_prefixes):
             raise HandoffError("handoff_prefix_not_allowed")
         if (
             isinstance(max_entries, bool)
@@ -140,13 +164,17 @@ class HandoffClient:
                 raise HandoffError("handoff_list_response_invalid")
             page_objects = response.get("Contents", [])
             page_prefixes = response.get("CommonPrefixes", [])
-            if not isinstance(page_objects, list) or not isinstance(page_prefixes, list):
+            if not isinstance(page_objects, list) or not isinstance(
+                page_prefixes, list
+            ):
                 raise HandoffError("handoff_list_response_invalid")
             for item in page_objects:
                 if not isinstance(item, Mapping):
                     raise HandoffError("handoff_list_response_invalid")
                 key = _strip_remote_root(item.get("Key"), absolute_prefix, self.root)
-                size = _nonnegative_int(item.get("Size"), "handoff_list_response_invalid")
+                size = _nonnegative_int(
+                    item.get("Size"), "handoff_list_response_invalid"
+                )
                 etag = item.get("ETag")
                 if etag is not None and not isinstance(etag, str):
                     raise HandoffError("handoff_list_response_invalid")
@@ -321,9 +349,41 @@ class HandoffClient:
 
     def _allowed_key(self, relative_key: str) -> str:
         key = _safe_object_key(relative_key)
-        if not _under_allowed_prefix(key) and key not in self._allowed_objects:
+        if (
+            not _under_allowed_prefix(key, self._allowed_prefixes)
+            and key not in self._allowed_objects
+        ):
             raise HandoffError("handoff_object_not_allowed")
         return key
+
+
+class HandoffClient(ScopedHandoffClient):
+    """Historical Plan 068 wrapper with its fixed volume and task root."""
+
+    def __init__(
+        self,
+        s3_client: Any,
+        *,
+        bucket: str = VOLUME_ID,
+        root: str = HANDOFF_ROOT,
+        additional_object_keys: Iterable[str] = (),
+    ) -> None:
+        if bucket != VOLUME_ID:
+            raise HandoffError("handoff_bucket_not_allowed")
+        if root != HANDOFF_ROOT:
+            raise HandoffError("handoff_root_not_allowed")
+        additions = frozenset(
+            _safe_object_key(value) for value in additional_object_keys
+        )
+        super().__init__(
+            s3_client,
+            scope=HandoffScope(
+                bucket=VOLUME_ID,
+                root=HANDOFF_ROOT,
+                allowed_prefixes=ALLOWED_PREFIXES,
+                allowed_objects=ALLOWED_ROOT_OBJECTS | additions,
+            ),
+        )
 
 
 def _safe_list_prefix(value: str) -> str:
@@ -357,8 +417,8 @@ def _safe_parts(value: str) -> tuple[str, ...]:
     return path.parts
 
 
-def _under_allowed_prefix(value: str) -> bool:
-    return any(value.startswith(prefix) for prefix in ALLOWED_PREFIXES)
+def _under_allowed_prefix(value: str, prefixes: Iterable[str]) -> bool:
+    return any(value.startswith(prefix) for prefix in prefixes)
 
 
 def _strip_remote_root(value: Any, absolute_prefix: str, root: str) -> str:

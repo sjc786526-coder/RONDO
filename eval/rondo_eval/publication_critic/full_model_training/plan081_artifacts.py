@@ -163,14 +163,23 @@ class Plan081ArtifactStore:
     ) -> tuple[dict[str, Any], Mapping[str, Any], Path]:
         """Verify and decode state without mutating a runtime adapter."""
 
+        controller = self.read_checkpoint_controller_state(artifact_id)
+        root = self.root / "recovery-checkpoints" / artifact_id
+        reader = state_reader or _read_json_state
+        training = reader(root / "training-state")
+        if not isinstance(training, Mapping):
+            raise FullModelTrainingError("plan081_checkpoint_state_invalid")
+        return controller, training, safe_directory(root / "payload")
+
+    def read_checkpoint_controller_state(self, artifact_id: str) -> dict[str, Any]:
+        """Verify a checkpoint and read only its small controller state."""
+
         self.verify_checkpoint(artifact_id)
         root = self.root / "recovery-checkpoints" / artifact_id
         controller = read_json(root / "controller-state.json")
-        reader = state_reader or _read_json_state
-        training = reader(root / "training-state")
-        if not isinstance(controller, Mapping) or not isinstance(training, Mapping):
+        if not isinstance(controller, Mapping):
             raise FullModelTrainingError("plan081_checkpoint_state_invalid")
-        return dict(controller), training, safe_directory(root / "payload")
+        return dict(controller)
 
     def prune(
         self,
@@ -347,6 +356,23 @@ class Plan081ArtifactStore:
         for checkpoint_id in checkpoint_ids:
             self.verify_checkpoint(checkpoint_id)
         return tuple(checkpoint_ids)
+
+    def verified_snapshot_ids(self) -> tuple[str, ...]:
+        """Return live snapshot trees in artifact-id order after full verification."""
+
+        self.recover_incomplete_staging()
+        snapshot_ids = sorted(self._artifact_ids("model-snapshots"))
+        for snapshot_id in snapshot_ids:
+            self.verify_snapshot(snapshot_id)
+        return tuple(snapshot_ids)
+
+    def verified_observation_ids(self) -> tuple[str, ...]:
+        """Return permanent observation records in artifact-id order."""
+
+        observation_ids = sorted(self._artifact_ids("observations"))
+        for observation_id in observation_ids:
+            self.verify_observation(observation_id)
+        return tuple(observation_ids)
 
     def discard_unqualified_checkpoint(self, checkpoint_id: str) -> bool:
         """Hide and remove a newly published checkpoint that failed qualification."""
