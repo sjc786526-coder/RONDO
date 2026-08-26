@@ -77,18 +77,13 @@ def _provider_observation(
         "id": pending["pod"]["id"],
         "name": args.pod_name,
         "image": args.image,
-        "containerDiskInGb": args.container_disk_gb,
+        "disk": args.container_disk_gb,
+        "status": "STARTING",
         "gpu": {"id": args.gpu_id, "count": 1},
-        "volumeMountPath": "/workspace",
-        "desiredStatus": "RUNNING",
-        "machine": {
-            "gpuTypeId": args.gpu_id,
-            "dataCenterId": args.data_center_id,
-            "secureCloud": True,
-        },
-        "networkVolume": {
-            "id": args.network_volume_id,
-            "dataCenterId": args.data_center_id,
+        "cloud": "SECURE",
+        "dataCenterId": args.data_center_id,
+        "mounts": {
+            "network": [{"volumeId": args.network_volume_id, "path": "/workspace"}]
         },
     }
     pod.update(pod_overrides)
@@ -96,8 +91,6 @@ def _provider_observation(
         "schema": create.PROVIDER_OBSERVATION_SCHEMA,
         "captured_at": "2026-08-26T12:00:05Z",
         "source": "runpod-mcp-get-pod-v2",
-        "include_machine": True,
-        "include_network_volume": True,
         "pod": pod,
     }
 
@@ -351,7 +344,7 @@ class Plan087ScriptTests(unittest.TestCase):
         )
         self.assertEqual(result["attachment_confirmation"]["status"], "pending")
 
-    def test_mcp_confirmation_rejects_missing_null_or_wrong_volume(self) -> None:
+    def test_mcp_v2_confirmation_accepts_exact_and_rejects_mount_drift(self) -> None:
         args = _create_args()
         state = {"pod": None}
 
@@ -371,17 +364,35 @@ class Plan087ScriptTests(unittest.TestCase):
             sleeper=lambda _seconds: None,
             wall_clock=lambda: CONFIRMATION_START,
         )
-        cases = {
-            "missing": ...,
-            "null": None,
-            "wrong": {"id": "other-volume"},
-        }
-        for label, network_volume in cases.items():
+
+        def missing_mounts(pod):
+            pod.pop("mounts")
+
+        def missing_network(pod):
+            pod["mounts"] = {}
+
+        def empty_network(pod):
+            pod["mounts"]["network"] = []
+
+        def null_network(pod):
+            pod["mounts"]["network"] = None
+
+        def wrong_volume(pod):
+            pod["mounts"]["network"][0]["volumeId"] = "other-volume"
+
+        def wrong_path(pod):
+            pod["mounts"]["network"][0]["path"] = "/other"
+
+        for label, drift in {
+            "missing_mounts": missing_mounts,
+            "missing_network": missing_network,
+            "empty_network": empty_network,
+            "null_network": null_network,
+            "wrong_volume": wrong_volume,
+            "wrong_path": wrong_path,
+        }.items():
             observation = _provider_observation(args, pending)
-            if network_volume is ...:
-                observation["pod"].pop("networkVolume")
-            else:
-                observation["pod"]["networkVolume"] = network_volume
+            drift(observation["pod"])
             with (
                 self.subTest(label=label),
                 self.assertRaisesRegex(
@@ -404,6 +415,10 @@ class Plan087ScriptTests(unittest.TestCase):
                 "network_volume_id"
             ],
             args.network_volume_id,
+        )
+        self.assertEqual(
+            final["creation_contract_binding"]["provider_observed"]["status"],
+            "STARTING",
         )
         with self.assertRaisesRegex(
             create.CreateError, "attachment_confirmation_timeout"
@@ -441,29 +456,33 @@ class Plan087ScriptTests(unittest.TestCase):
         def wrong_gpu(pod):
             pod["gpu"]["id"] = "NVIDIA L40S"
 
-        def wrong_machine_gpu(pod):
-            pod["machine"]["gpuTypeId"] = "NVIDIA L40S"
+        def wrong_gpu_count(pod):
+            pod["gpu"]["count"] = 2
 
         def wrong_region(pod):
-            pod["machine"]["dataCenterId"] = "US-KS-2"
+            pod["dataCenterId"] = "US-KS-2"
 
         def wrong_cloud(pod):
-            pod["machine"]["secureCloud"] = False
+            pod["cloud"] = "COMMUNITY"
 
         def wrong_disk(pod):
-            pod["containerDiskInGb"] += 1
+            pod["disk"] += 1
 
-        def wrong_mount(pod):
-            pod["volumeMountPath"] = "/other"
+        def wrong_status(pod):
+            pod["status"] = "ERROR"
+
+        def persistent_and_network(pod):
+            pod["mounts"]["persistent"] = {"size": 20, "path": "/workspace"}
 
         for label, drift in {
             "image": wrong_image,
             "gpu": wrong_gpu,
-            "machine_gpu": wrong_machine_gpu,
+            "gpu_count": wrong_gpu_count,
             "region": wrong_region,
             "cloud": wrong_cloud,
             "disk": wrong_disk,
-            "mount": wrong_mount,
+            "status": wrong_status,
+            "persistent_and_network": persistent_and_network,
         }.items():
             observation = _provider_observation(args, pending)
             drift(observation["pod"])

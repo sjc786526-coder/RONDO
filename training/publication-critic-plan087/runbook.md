@@ -179,23 +179,23 @@ python3 training/publication-critic-plan087/runpod-create.py create \
 ```
 
 Before the pending receipt's finite `attachment_confirmation.deadline`, use the
-already-configured RunPod MCP safe entry `get_pod` with its exact Pod ID and
-both `includeMachine=true` and `includeNetworkVolume=true`. Persist the returned
-Pod object without reinterpretation in this small local envelope:
+already-configured RunPod MCP safe entry `get_pod` with its exact Pod ID. The
+configured v2 backend returns the raw REST v2 Pod and ignores the v1-only
+`includeMachine` / `includeNetworkVolume` inputs, so do not rely on those flags.
+Persist the returned Pod object without reinterpretation in this small local
+envelope:
 
 ```json
 {
   "schema": "rondo-publication-critic-plan087-runpod-provider-observation-v1",
   "captured_at": "<RFC3339 local capture time>",
   "source": "runpod-mcp-get-pod-v2",
-  "include_machine": true,
-  "include_network_volume": true,
-  "pod": { "<exact MCP Pod response fields>": "..." }
+  "pod": { "<exact MCP REST v2 Pod response fields>": "..." }
 }
 ```
 
-If `networkVolume` is absent/null during initialization, re-query only within
-that deadline. Then finalize the creation receipt locally:
+If `mounts.network` is absent, empty or null during initialization, re-query
+only within that deadline. Then finalize the creation receipt locally:
 
 ```bash
 python3 training/publication-critic-plan087/runpod-create.py confirm-attachment \
@@ -204,12 +204,13 @@ python3 training/publication-critic-plan087/runpod-create.py confirm-attachment 
   > "$PLAN087_LOCAL_ROOT/runpod-create.json"
 ```
 
-Confirmation requires `networkVolume.id` to be the exact requested task volume
-and `volumeMountPath` to be `/workspace`, and rechecks image, GPU, cloud, data
-center and disk. Missing/null/wrong attachment data fail; confirmation after
-the pending deadline also fails. On failure, do not rerun create: terminalize
-the exact task Pod and confirm zero first. Do not connect, upload or bootstrap
-until `runpod-create.json` exists as the success receipt.
+Confirmation requires exactly one `mounts.network` entry whose `volumeId` is
+the requested task volume and whose `path` is `/workspace`, with no persistent
+mount. It also rechecks v2 image, GPU, cloud, data center, disk and live status.
+Missing/empty/null/wrong attachment data fail; confirmation after the pending
+deadline also fails. On failure, do not rerun create: terminalize the exact task
+Pod and confirm zero first. Do not connect, upload or bootstrap until
+`runpod-create.json` exists as the success receipt.
 
 Bind the confirmed exact ID and name in the task log. Use `runpodctl ssh info
 <pod-id>` after every start/restart to refresh the SSH endpoint. Before upload,

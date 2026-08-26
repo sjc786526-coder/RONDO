@@ -142,8 +142,6 @@ def confirm_exact_pod_attachment(
         "schema",
         "captured_at",
         "source",
-        "include_machine",
-        "include_network_volume",
         "pod",
     }:
         raise CreateError("provider_attachment_observation_invalid")
@@ -151,8 +149,6 @@ def confirm_exact_pod_attachment(
     if (
         provider_observation.get("schema") != PROVIDER_OBSERVATION_SCHEMA
         or provider_observation.get("source") != "runpod-mcp-get-pod-v2"
-        or provider_observation.get("include_machine") is not True
-        or provider_observation.get("include_network_volume") is not True
         or observed_at < started_at
         or observed_at > deadline
         or observed_at > observed_now
@@ -162,46 +158,11 @@ def confirm_exact_pod_attachment(
     pod = provider_observation.get("pod")
     if not isinstance(pod, Mapping):
         raise CreateError("provider_attachment_observation_invalid")
-    gpu = pod.get("gpu")
-    machine = pod.get("machine")
-    network_volume = pod.get("networkVolume")
-    if (
-        pod.get("id") != pending["pod"]["id"]
-        or pod.get("name") != pending["pod"]["name"]
-        or pod.get("image") != requested["image"]
-        or pod.get("containerDiskInGb") != requested["container_disk_gb"]
-        or pod.get("volumeMountPath") != requested["volume_mount_path"]
-        or pod.get("desiredStatus") != "RUNNING"
-        or not isinstance(gpu, Mapping)
-        or gpu.get("id") != requested["gpu_id"]
-        or gpu.get("count") != requested["gpu_count"]
-        or not isinstance(machine, Mapping)
-        or machine.get("gpuTypeId") != requested["gpu_id"]
-        or machine.get("dataCenterId") != requested["data_center_id"]
-        or machine.get("secureCloud") is not True
-        or not isinstance(network_volume, Mapping)
-        or network_volume.get("id") != requested["network_volume_id"]
-        or (
-            network_volume.get("dataCenterId") is not None
-            and network_volume.get("dataCenterId") != requested["data_center_id"]
-        )
-    ):
-        raise CreateError("provider_attachment_configuration_drifted")
-    runpodctl_observed = pending["creation_contract_binding"]["runpodctl_observed"]
-    provider_observed = {
-        "id": pod["id"],
-        "name": pod["name"],
-        "image": pod["image"],
-        "gpu_id": gpu["id"],
-        "gpu_count": gpu["count"],
-        "cloud_type": "SECURE",
-        "data_center_id": machine["dataCenterId"],
-        "network_volume_id": network_volume["id"],
-        "container_disk_gb": pod["containerDiskInGb"],
-        "volume_mount_path": pod["volumeMountPath"],
-        "desired_status": pod["desiredStatus"],
-        "runtime_status": runpodctl_observed["runtime_status"],
-    }
+    provider_observed = _project_runpod_mcp_v2_pod(
+        pod,
+        pending_pod=pending["pod"],
+        requested=requested,
+    )
     return {
         "schema": CREATE_SCHEMA,
         "captured_at": provider_observation["captured_at"],
@@ -211,12 +172,61 @@ def confirm_exact_pod_attachment(
         "creation_contract_binding": {
             "basis": "single_exact_create_request_after_empty_account",
             "requested": requested,
-            "runpodctl_observed": runpodctl_observed,
+            "runpodctl_observed": pending["creation_contract_binding"][
+                "runpodctl_observed"
+            ],
             "provider_observed": provider_observed,
             "provider_observation_source": "runpod-mcp-get-pod-v2",
             "cross_process_reuse_allowed": False,
         },
         "account_pod_count": 1,
+    }
+
+
+def _project_runpod_mcp_v2_pod(
+    pod: Mapping[str, Any],
+    *,
+    pending_pod: Mapping[str, Any],
+    requested: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Validate one unmodified REST v2 Pod and return its narrow projection."""
+
+    gpu = pod.get("gpu")
+    mounts = pod.get("mounts")
+    network = mounts.get("network") if isinstance(mounts, Mapping) else None
+    persistent = mounts.get("persistent") if isinstance(mounts, Mapping) else None
+    if (
+        pod.get("id") != pending_pod["id"]
+        or pod.get("name") != pending_pod["name"]
+        or pod.get("image") != requested["image"]
+        or pod.get("disk") != requested["container_disk_gb"]
+        or pod.get("status") not in {"PROVISIONING", "STARTING", "RUNNING"}
+        or pod.get("cloud") != requested["cloud_type"]
+        or pod.get("dataCenterId") != requested["data_center_id"]
+        or not isinstance(gpu, Mapping)
+        or gpu.get("id") != requested["gpu_id"]
+        or gpu.get("count") != requested["gpu_count"]
+        or persistent is not None
+        or not isinstance(network, Sequence)
+        or isinstance(network, (str, bytes, bytearray))
+        or len(network) != 1
+        or not isinstance(network[0], Mapping)
+        or network[0].get("volumeId") != requested["network_volume_id"]
+        or network[0].get("path") != requested["volume_mount_path"]
+    ):
+        raise CreateError("provider_attachment_configuration_drifted")
+    return {
+        "id": pod["id"],
+        "name": pod["name"],
+        "image": pod["image"],
+        "gpu_id": gpu["id"],
+        "gpu_count": gpu["count"],
+        "cloud_type": pod["cloud"],
+        "data_center_id": pod["dataCenterId"],
+        "network_volume_id": network[0]["volumeId"],
+        "container_disk_gb": pod["disk"],
+        "volume_mount_path": network[0]["path"],
+        "status": pod["status"],
     }
 
 
