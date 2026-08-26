@@ -2,7 +2,7 @@
 
 最后更新：2026-08-26（Plan 079 已完成 Skywork 4B BF16 base 正式质量测评并取得 `4B_BASE_QUALITY_NO_GO`；
 Plan 081 已完成 exact 1.7B 非 LoRA 训练路线本地收敛与云端就绪并取得 `LOCAL_TRAINING_READINESS_PASS`，
-下一三期工作包 Plan 082 已完成阶段 A 整改复验剩余两项问题的局部修复并等待再次复验；付费阶段仍须用户本人明确人工批准，
+下一三期工作包 Plan 082 付费前阶段 A 已通过独立验收；付费阶段仍须用户本人明确人工批准，
 M3-D 保持锁定；
 Plan 077 / M4-C1、Plan 078 / M4-S2 已分别取得
 `M4_C1_QUERY_PASS`、`M4_S2_PASS`；Plan 080 / M4-C2 已通过最终独立验收并取得 `M4_C2_CONTROL_PASS`）
@@ -25,7 +25,7 @@ Plan 077 / M4-C1、Plan 078 / M4-S2 已分别取得
 | 0：量化测评基准 | 既有设施与首次 schema v7 正式 canary 已完成，当前无 active campaign | 保留设施；历史结果见 COMPLETED，新 campaign 须重新立项与授权 |
 | 1：Harness 优化 | **正式收口；当前无 active 工作包** | 当前不继续新增观测或内核/热路径优化；既有实现、设施与历史结果保留。未来可由用户另行决定是否重新立项，本次收口不作永久禁止 |
 | 2：本地审批模型 | **已收口，今后不再开启** | 最终结论为“保留为实验”；不改生产默认，不再规划后续工作包 |
-| 3：RONDO Multi | 第一、二期及其收口案例、**三期 M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、M3-C2、Plan 064、Plan 071、Plan 073、Plan 075、Plan 079、Plan 081 与四期 M4-A、M4-C0、M4-S1、M4-C1、M4-S2、M4-C2、Plan 074 已完成** | Plan 081 已以 exact 1.7B、冻结 pair/input/v8、非 LoRA 和可动态扩大部分参数直接更新的路线取得本地训练就绪；Plan 082 付费前阶段 A 整改复验确认原 9 项失效路径已关闭，剩余的多参数数值变化证明与 retained bootstrap 输出隔离两项问题也已完成局部修复和非付费验证，当前等待再次复验。真实模型/GPU/云端/费用/训练仍须阶段 A 验收通过后再取得用户本人明确人工付费批准。阶段 B 必须使用任务网络卷；正式训练后先以小型证据关闭所有 GPU 依赖再释放 Pod，随后在 0 Pod 和安全磁盘窗口通过网络卷 S3-compatible API 回传大型资产并最终验收，网络卷删除另须用户人工批准。研究目标仍是形成同口径优于 base 的候选，不要求直接产品 GO；Critic 保持 default-off，M3-D 保持锁定。四期 S/C 必成子线已具备正式持久 Session、查询与控制能力；下一必成工作包是须另行立项授权的 M4-Z(core)，M4-W0 继续按独立价值门推进 |
+| 3：RONDO Multi | 第一、二期及其收口案例、**三期 M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、M3-C2、Plan 064、Plan 071、Plan 073、Plan 075、Plan 079、Plan 081 与四期 M4-A、M4-C0、M4-S1、M4-C1、M4-S2、M4-C2、Plan 074 已完成** | Plan 081 已以 exact 1.7B、冻结 pair/input/v8、非 LoRA 和可动态扩大部分参数直接更新的路线取得本地训练就绪；Plan 082 付费前阶段 A 已通过独立验收，无遗留高/中等级 correctness/functionality finding。真实模型/GPU/云端/费用/训练仍须用户本人明确人工付费批准。阶段 B 必须使用任务网络卷；正式训练后先以小型证据关闭所有 GPU 依赖再释放 Pod，随后在 0 Pod 和安全磁盘窗口通过网络卷 S3-compatible API 回传大型资产并最终验收，网络卷删除另须用户人工批准。研究目标仍是形成同口径优于 base 的候选，不要求直接产品 GO；Critic 保持 default-off，M3-D 保持锁定。四期 S/C 必成子线已具备正式持久 Session、查询与控制能力；下一必成工作包是须另行立项授权的 M4-Z(core)，M4-W0 继续按独立价值门推进 |
 
 ### 方向命名口径
 
@@ -43,7 +43,7 @@ Plan 077 / M4-C1、Plan 078 / M4-S2 已分别取得
 ## 2. 下一工作包与顺序
 
 方向 3 是当前唯一仍在推进的产品线。Plan 081 已取得 `LOCAL_TRAINING_READINESS_PASS`；三期 Plan 082 的不付费真实训练接缝与
-云端准备已完成整改复验剩余两项问题的局部修复和本地验证，当前等待阶段 A 再次复验。验收通过后仍须用户本人明确人工批准，才执行真实云端 commissioning/训练参数开发。
+云端准备已通过阶段 A 独立验收，当前等待用户本人明确人工批准；批准由审查者通过指定队列传达后，才执行真实云端 commissioning/训练参数开发。
 训练后先做保留 Pod 的 GPU 专项验收，0 Pod 大型资产交接完成后再做最终验收。
 四期 Plan 080 / M4-C2 已取得 `M4_C2_CONTROL_PASS`；下一必成工作包是需要
 另行立项与授权的 M4-Z(core) 全链收口。M4-W0 继续按自身价值门条件推进。
