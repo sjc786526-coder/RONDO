@@ -2246,3 +2246,65 @@ formal retry 整改为 `d29e857`，最终独立验收提交为 `43cf0eeb3e1b4826
   实树 bytes/权限和 manifest/receipt 闭合关系；无遗留高/中等级 correctness/functionality finding。
 - 最终验收后，用户本人明确决定继续保留 40GB Standard 网络卷 `mwemzrn33y`；该卷当前仍未删除并继续产生约 `$0.003889/h` 的卷费。
   未来若改变决定，删除仍须新的明确人工授权。
+
+## Linked-Worktree Trust RONDO 窄适配（Plan 086，2026-08-26）
+
+**状态**：`#39616@bc3545b805de6e91a11b88114fe1673b678633ca` 的产品安全语义窄适配、一次独立审查整改与最终复验均已完成；
+验收通过、任务目标完成，结论为 `M4_W_39616_ADAPTATION_PASS`。主体提交为
+`3dc31d5f39edaef7d8f4a440c364db98dc0f9039`，nested cwd 整改提交为
+`fdbdaf8e2ba2c33fbe3162858b07bffe90be87ba`。
+
+- linked worktree 只有在 `.git` pointer、worktree admin directory、`gitdir` backlink、`commondir`、registered checkout、canonical
+  identity、common directory 与 main checkout ownership 全部可证明时才继承主仓 trust；缺失、伪造、失配、symlink、超限和代表性
+  metadata 变化均 fail-closed。
+- project config、hooks、permission/active-project、host MCP、app-server/TUI trust target 与邻接 resolver 消费采用同一 hardened
+  结论。独立审查发现并关闭 nested linked-worktree cwd 跳过 checkout root 显式 trust 的 P2；最终顺序为 exact cwd、当前 checkout
+  root、已验证继承 root，直接显式 `trusted/untrusted` 保持优先。
+- resolver/path/config 正式聚焦簇 21/21、合法 config/hooks 2/2、host MCP 1/1、app-server hooks 1/1 通过；整改正式轮 Nextest
+  `cf9287bf-ed1d-4a47-aaaf-d4b874877c29` 为 2/2，相关 scoped fix、fmt 与 diff 门禁通过。一次组合批次被 watchdog 因 memory full
+  PSI 以 exit 125 主动停止，随后拆窄通过；该设施停止未冒充产品测试失败，也未清理 target。
+- 未建设 workspace registry、第二套 permission/trust、审计或可信平台，未升级冻结基线，也未运行 workspace 全量、Docker、真实
+  API/模型、训练、测评、CI/PR 或远端操作。用户批准后，验收头已 fast-forward 进入本地 `main`，无冲突且未推送；`#39153`
+  已获得下一任务启动资格但尚未启动，M4-W1 继续锁定。
+
+## Permission Restore Fail-Closed RONDO 窄适配（Plan 088，2026-08-26）
+
+**状态**：`#39153@539a09cb28ca1ded4278c6d54716abbacab42428` 的 RONDO fail-closed 产品语义窄适配、正式聚焦验证与独立验收均已完成；
+验收通过、任务目标完成，结论为 `M4_W_39153_ADAPTATION_PASS`。实现提交为
+`57b7efbe12808b6e06089194ab6676b5a7e537e4`，测试加固提交为 `ea99e979ec4189311d6319cc93a0d7dd526829b4`；用户批准后，验收头
+`9d8b1afde4c7d537a3d6fcab48da4fae286d95d4` 已 fast-forward 进入本地 `main`。
+
+- cold resume 与顶层 fork 统一按“合法显式 override、最近持久设置、当前配置”恢复 approval policy、approvals reviewer 与
+  active permission-profile identity。canonical `TurnContext` 以 presence-aware 三态补足普通 turn/compaction 的最小 identity 事实；
+  legacy missing 与 explicit clear 都不会向前复活更老 ID。
+- 只恢复 profile identity，并通过当前 catalog、Plan 086 hardened project trust、profile inheritance、workspace roots、network 与
+  requirements 重新解析。missing/invalid/disallowed/incompatible profile 明确失败，不使用历史 concrete permission snapshot，
+  不静默切换 configured/required default；合法显式权限 override 保持最高优先级。
+- resume 的 config load 早于 runtime/thread 创建，fork 的 config load 早于 child 创建；静态独立审查确认 invalid persisted profile
+  不会启动可执行 runtime、MCP/model/tool 链或带默认权限继续。验收后测试加固又直接断言拒绝前后 thread ID 集合不变且没有
+  `thread/started`；没有新增 helper、生产逻辑或副作用审计设施。
+- 正式证据为 protocol `1/1`、core `6/6`、app-server lib `279/279`、legacy/paginated resume/fork 集成 `5/5`，scoped fix 与 fmt
+  通过；测试加固热目标又以 `1/1` 通过。通过批次均 `stop=none / cleanup=none / swap peak=0`。未运行完整 workspace、Docker、
+  真实 API/模型、训练、测评、CI/PR 或远端操作，未冒充通过。
+- 本任务未实施 M4-W1、primary binding、scoped authorization、replacement binding、workspace/permission registry 或第二套恢复状态。
+  进入本地 `main` 后只解锁 M4-W1 的另行规划资格；M4-W1 尚未启动。
+
+## Publication Critic 1.7B 云端自适应原参数路线搜索（Plan 087，2026-08-26）
+
+**状态**：非付费阶段、付费自适应搜索、资产保留、止费、最终仓库收口与独立验收均已完成；验收通过、任务目标完成，终态为
+`PROMISING_CANDIDATE_RETAINED / ZERO_POD`。正式结果提交为 `995adb8`，最终仓库整改提交为 `2a8ab98`。
+
+- exact BF16 `Skywork/Skywork-Reward-V2-Qwen3-1.7B@e51ea3e08fb81326c3b812a7ff0cb9cee83e59cc`、冻结 v8 train/validation、
+  pair/input/scalar 语义、unseen 隔离与非 PEFT/非量化训练边界保持不变。从 exact base 完成 A–O 15 条自适应原参数路线。
+- Route O 更新末块内部输入变换/归一化九张量、共 `33,558,784` 个原参数，一次 full-cohort 更新取得 raw boundary margin
+  `+0.00390625`、projected boundary `+0.00086113`、projected within-PASS `+0.00013894` 与 ROC AUC `+0.00140056`；关键
+  operating 指标未退化。精确 checkpoint 经不同 OS 进程 no-update 恢复，完整权重只留网络卷。
+- 该结果满足任务内研究候选启发式，但没有证明效果可靠：15 条路线共用 validation 自适应选择，Route O 只有一次更新且没有 clean
+  reproduction；raw within-PASS 轻微回退，strict/threshold 指标不变，AUC 增量只对应一个跨类 ordering。它不授予 unseen、
+  M3-C1/M3-C2、产品资格或 M3-D 解锁。
+- 任务保守费用 `$3.009`，低于冻结的 `$8.9852646939` 上限；全部 Pod 已 stop/delete 并复核 0 Pod、compute `$0/h`。用户决定保留
+  57GB 网络卷 `mwemzrn33y`，未经授权不得删除；Plan 087 剩余预算和外部动作授权不向后续任务转移。
+- 最终仓库收口把抢卡入口通用化为 `scripts/create-runpod-when-ready.py`，删除 Plan 087 专用创建器/receipt 路线，并在根
+  `AGENTS.md` / `CLAUDE.md` 固定“先创建、后独立核验、不符立即释放”。相邻聚焦测试 91 项、34 个 subtests 通过；最终审查 High 0、
+  Medium 0。结果见 `eval/results/publication-critic/plan087-adaptive-search-v1.{json,md}`，原因研究见
+  `doc/research/2026-08-26-publication-critic-training-route-outcome-analysis.md`。

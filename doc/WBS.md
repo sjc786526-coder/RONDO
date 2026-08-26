@@ -3,11 +3,12 @@
 最后更新：2026-08-26（Plan 079 已完成 Skywork 4B BF16 base 正式质量测评并取得 `4B_BASE_QUALITY_NO_GO`；
 Plan 081 已完成 exact 1.7B 非 LoRA 训练路线本地收敛与云端就绪并取得 `LOCAL_TRAINING_READINESS_PASS`，
 Plan 082 已完成一轮有效干净正式训练并取得 `VALID_NO_IMPROVEMENT`，GPU 专项验收、大型资产逐对象交接和最终验收均已通过且 Pod 已释放；
-用户本人已明确决定继续保留网络卷，当前仍未删除；Plan 087 非付费阶段 A 已实现并通过本地聚焦门禁，等待审查者验收，付费门仍关闭，
-M3-D 保持锁定；Plan 077 / M4-C1、Plan 078 / M4-S2 已分别取得
+Plan 087 已完成预算内自适应搜索、保留 Route O 研究候选并取得 `PROMISING_CANDIDATE_RETAINED`，最终验收通过且 0 Pod；
+用户本人已明确决定继续保留网络卷，当前仍未删除，M3-D 保持锁定；Plan 077 / M4-C1、Plan 078 / M4-S2 已分别取得
 `M4_C1_QUERY_PASS`、`M4_S2_PASS`；Plan 080 / M4-C2 已通过最终独立验收并取得 `M4_C2_CONTROL_PASS`；
 Plan 083 / M4-Z(core) 已通过最终独立验收并取得 `M4_Z_CORE_PASS`；Plan 084 / M4-W0 已通过最终独立验收并取得
-`BINDING_ONLY_GO`；Plan 086 / `#39616` 已通过最终独立验收、进入本地 `main` 并取得 `M4_W_39616_ADAPTATION_PASS`）
+`BINDING_ONLY_GO`；Plan 086 / `#39616` 已通过最终独立验收、进入本地 `main` 并取得 `M4_W_39616_ADAPTATION_PASS`；
+Plan 088 / `#39153` 已通过独立验收、进入本地 `main` 并取得 `M4_W_39153_ADAPTATION_PASS`）
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段指针、跨方向关系、
 稳定工程边界和授权门；已完成成果与验收见 `doc/WBS-COMPLETED.md`，单次任务合同见 `plan/`，执行细节见
@@ -27,7 +28,7 @@ Plan 083 / M4-Z(core) 已通过最终独立验收并取得 `M4_Z_CORE_PASS`；Pl
 | 0：量化测评基准 | 既有设施与首次 schema v7 正式 canary 已完成，当前无 active campaign | 保留设施；历史结果见 COMPLETED，新 campaign 须重新立项与授权 |
 | 1：Harness 优化 | **正式收口；当前无 active 工作包** | 当前不继续新增观测或内核/热路径优化；既有实现、设施与历史结果保留。未来可由用户另行决定是否重新立项，本次收口不作永久禁止 |
 | 2：本地审批模型 | **已收口，今后不再开启** | 最终结论为“保留为实验”；不改生产默认，不再规划后续工作包 |
-| 3：RONDO Multi | 第一、二期及其收口案例、**三期 M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、M3-C2、Plan 064、Plan 071、Plan 073、Plan 075、Plan 079、Plan 081、Plan 082 与四期 M4-A、M4-C0、M4-S1、M4-C1、M4-S2、M4-C2、M4-Z(core)、Plan 074、Plan 083、Plan 084、Plan 086 已完成**；Plan 087 阶段 A 待审，M4-W0 为 `BINDING_ONLY_GO`，Plan 086 为 `M4_W_39616_ADAPTATION_PASS` | Plan 082 的 score-head-only 正式轮终态为 `VALID_NO_IMPROVEMENT`，用户决定继续保留 40GB 网络卷 `mwemzrn33y`。Plan 087 已在不运行本地 Cargo/Docker/真实模型和不访问云资源的边界内闭合自适应 scope/recipe、路线 lineage、hash-linked 保守预算、容量、精确恢复/候选、任务根写入、小型回传与 0 Pod 终态能力；阶段 A 等待审查，明确批准前不进入单张 A40/L40S 与 9 USD 付费搜索。它不提供产品 GO；Critic 保持 default-off，M3-D 保持锁定。四期 `#39616` 已进入本地 `main`；下一工作包为尚未启动的 `#39153` fail-closed 窄适配，M4-W1 继续锁定且不新增读取隔离或第二套权限体系 |
+| 3：RONDO Multi | 第一、二期及其收口案例、**三期 M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、M3-C2、Plan 064、Plan 071、Plan 073、Plan 075、Plan 079、Plan 081、Plan 082、Plan 087 与四期 M4-A、M4-C0、M4-S1、M4-C1、M4-S2、M4-C2、M4-Z(core)、Plan 074、Plan 083、Plan 084、Plan 086、Plan 088 已完成**；M4-W0 为 `BINDING_ONLY_GO`，Plan 086 / 088 分别为 `M4_W_39616_ADAPTATION_PASS` / `M4_W_39153_ADAPTATION_PASS` | Plan 087 在 exact BF16 1.7B、冻结 v8/pair/input 与非 PEFT/非量化边界内完成 15 条自适应路线，Route O 形成恢复合格的微弱研究候选，终态 `PROMISING_CANDIDATE_RETAINED / ZERO_POD`；共用 validation 且未 clean reproduction，效果可靠性未确认。用户决定继续保留 57GB 网络卷 `mwemzrn33y`。下一研究工作包只能另行规划并授权干净正式复现，不自动解锁 unseen、M3-C1/M3-C2、产品 GO 或 M3-D。四期 Plan 086 / `#39616` 与 Plan 088 / `#39153` 已依次进入本地 `main`；下一工作包为“另行规划 M4-W1（尚未启动）”，且不新增读取隔离或第二套权限体系 |
 
 ### 方向命名口径
 
@@ -49,14 +50,16 @@ Plan 083 / M4-Z(core) 已通过最终独立验收并取得 `M4_Z_CORE_PASS`；Pl
 唯一训练 Pod 已释放并确认持续 compute 费率为 0；保留卷所在 `US-TX-3` 不提供 S3 API，故按用户一次性授权使用单个 transfer Pod
 只读回传冻结 39 对象。全部对象完成本地 bytes/SHA-256 校验后 transfer Pod 已删除；最终验收通过。用户本人随后明确决定继续保留
 网络卷 `mwemzrn33y`，该卷当前仍未删除，状态为 `FINAL_REVIEW_ACCEPTED / ZERO_POD / VOLUME_RETAINED_BY_USER_DECISION`。
-Plan 087 是 Publication Critic 当前工作包：非付费阶段 A 已完成实现、输入投影、运行入口、聚焦 fake/fixture 门禁及资源/费用终态语义，
-当前等待审查者验收；只有审查者明确回复批准进入付费阶段后，才刷新实时余额、库存、价格与卷状态，并在单张 A40/L40S 48GB、同时一个
-计费 Pod 和 9 USD 新增总预算内执行真实自适应搜索。该任务不运行本地 Cargo、Docker或真实模型，不使用共享 target，可与尚未启动的
-`#39153` 窄适配在不争用共享资源时并行；共享 WBS 已基于 Plan 086 进入 `main` 后的当前事实做加法整合。
+Plan 087 已完成 exact BF16 1.7B 的 A–O 15 条自适应路线并通过最终验收；Route O 更新末块内部输入变换/归一化九张量、
+共 `33,558,784` 个原参数，一次 full-cohort 更新后形成 `PROMISING_CANDIDATE_RETAINED`。该信号很小且使用同一 validation 自适应选择，
+目前只具备研究候选资格；下一 Publication Critic 工作包应另行规划并授权预冻结 Route O 的干净正式复现，Plan 087 剩余预算不转移。
+任务终态为 0 Pod、compute `$0/h`；57GB 卷 `mwemzrn33y` 保留且不得擅自删除，Plan 087 保守费用 `$3.009`，低于冻结上限
+`$8.9852646939`。
 四期 Plan 080 / M4-C2 已取得 `M4_C2_CONTROL_PASS`；Plan 083 / M4-Z(core) 已完成 fresh 正式全链、两轮独立审查整改与最终验收并取得
 `M4_Z_CORE_PASS`。Plan 084 / M4-W0 已通过最终独立验收并取得 `BINDING_ONLY_GO`；Plan 086 / `#39616` linked-worktree trust
-RONDO 窄适配已通过最终独立验收、进入本地 `main` 并取得 `M4_W_39616_ADAPTATION_PASS`。下一工作包为 `#39153`
-permission restore fail-closed 窄适配；`#39153` 尚未启动，正式 M4-W1 继续等待该严格前置完成并另行立项。
+RONDO 窄适配已通过最终独立验收、进入本地 `main` 并取得 `M4_W_39616_ADAPTATION_PASS`。Plan 088 / `#39153` permission restore
+fail-closed 窄适配也已通过独立验收、进入本地 `main` 并取得 `M4_W_39153_ADAPTATION_PASS`。`#39616 → #39153` 前置已经闭合；
+下一工作包为另行规划 M4-W1，尚未启动且不自动获得实施授权。
 方向 1 已正式收口，不作为方向 3 的前置或旁支。
 
 ### 方向 3：Publication Critic 三期
@@ -101,18 +104,20 @@ permission restore fail-closed 窄适配；`#39153` 尚未启动，正式 M4-W1 
   Standard 网络卷 `v1us0nmk0p` 返回 404、已不存在，Plan 082 在创建资源前仍通过既有安全入口复核且不依赖或恢复该卷；
   Plan 082 已从 exact base 完成冻结的 score-head 四步正式训练；boundary pair mean margin 从 `0.8252560622` 逐步轻微回落至
   `0.8252007961`，而 ROC AUC、strict win rate 与 balanced accuracy 不变，故诚实形成 `VALID_NO_IMPROVEMENT`。step 2 已由新进程
-  恢复并继续更新，step 2 与 step 4 两份完整 checkpoint、正式/commissioning 原始 observations、输入和日志继续保留在 40GB 任务卷；
-  当前实际占用约 31.21GB，无需删除或扩容。若后续容量确实逼近上限，须先报告并优先按用户授权扩容，不删除大 checkpoint。
+  恢复并继续更新，step 2 与 step 4 两份完整 checkpoint、正式/commissioning 原始 observations、输入和日志在 Plan 082 完成时保留于
+  40GB 任务卷，任务根实际占用约 31.21GB；Plan 087 后续将同一卷扩至 57GB 并保留候选。当前卷按用户决定继续保留，不删除大 checkpoint；
+  任何再次扩容须由新任务重新授权。
   冻结 bootstrap 的 39 个正式对象也已完整回传到项目 ignored 目录并逐对象验证；正式对象共 `13,797,142,360` bytes，加 bootstrap 后
   `13,797,156,884` bytes。最终验收确认 formal/retention/receipt 与本地 exact-tree 闭合；transfer Pod 已删除并确认 0 Pod，网络卷继续
   保留；用户本人已经明确决定继续保留，卷 `mwemzrn33y` 当前仍未删除。
   Plan 082 训练活动受 12 小时/15 USD 上限约束，训练与后续资源保留/无 Pod 回传费用分账报告，总累计达到 10 USD 时非阻断告警；
   详细结果与后续边界见三期子 WBS。
-- Plan 087 接续 Plan 082 的 `VALID_NO_IMPROVEMENT`，保持 exact 1.7B、冻结 v8/pair/input、unseen 隔离和非 PEFT/非量化边界；阶段 A
-  已准备两条有实际差异的 terminal-backbone 原参数路线、从真实 inventory 动态解析的单调 scope、同 cohort 完整指标/pair margin、
-  route lineage、累计保守预算、checkpoint 容量预检、独立进程精确恢复后入选和精确 Pod 删除到 0 的合同/入口。当前只有 fake/fixture 与
-  本地 bundle 证据，无 RunPod/HF 查询、真实模型、训练、费用或候选；付费门等待审查者明确批准。阶段 B 在 9 USD 内找到候选即停，
-  不足下一次完整闭环时形成预算终态，基础设施证据不足单列 inconclusive；大型 checkpoint 只留不删除的网络卷，M3-D 继续锁定。
+- Plan 087 接续 Plan 082 的 `VALID_NO_IMPROVEMENT`，保持 exact 1.7B、冻结 v8/pair/input、unseen 隔离和非 PEFT/非量化边界，
+  在单张 L40S 与 9 USD 授权内完成 A–O 15 条 exact-base 路线。Route O 的 `33,558,784` 个末块内部输入变换/归一化原参数经一次
+  full-cohort 更新取得 raw boundary margin `+0.00390625`、projected boundary `+0.00086113`、projected within-PASS
+  `+0.00013894` 与 ROC AUC `+0.00140056`，关键 operating 指标未退化；checkpoint 已由不同 OS 进程 no-update 恢复，终态为
+  `PROMISING_CANDIDATE_RETAINED / FINAL_REVIEW_ACCEPTED / ZERO_POD`。由于 15 条路线共用 validation 且没有干净重跑，效果可靠性、
+  重复性与独立泛化未确认；后续只允许另行立项和授权的冻结 recipe 正式复现，不解锁 unseen、M3-C1/M3-C2、产品启用或 M3-D。
 
 ### 方向 3：Durable Team Runtime 四期
 
@@ -135,8 +140,9 @@ permission restore fail-closed 窄适配；`#39153` 尚未启动，正式 M4-W1 
   任一 teardown/owner/graph 失败仍保留 Root close barrier，最终独立验收无未关闭的高/中等级 correctness finding，结论为
   `M4_Z_CORE_PASS`。Plan 084 / M4-W0 的 test-only 原型经首次验收整改与最终独立复验取得 `BINDING_ONLY_GO`：binding 具有
   产品价值，现有 Git branch/HEAD/status/diff 与合理自然语言足以交接，不新增 structured handoff。Plan 086 已完成 `#39616`
-  linked-worktree trust 窄适配、进入本地 `main` 并取得 `M4_W_39616_ADAPTATION_PASS`；下一步为尚未启动的 `#39153`
-  permission restore 窄适配。正式 W1 尚未立项，且仍须等待 `#39153` 进入主线；W1 本身再收口 primary binding、
+  linked-worktree trust 窄适配、进入本地 `main` 并取得 `M4_W_39616_ADAPTATION_PASS`；Plan 088 / `#39153` permission restore
+  fail-closed 窄适配已进入本地 `main` 并取得 `M4_W_39153_ADAPTATION_PASS`。正式 W1 尚未立项；下一步须另行规划，W1 本身再收口
+  primary binding、
   scoped out-of-binding write authorization、
   reload/resume 重验与 replacement binding。
 - 四期不依赖 Publication Critic 训练、真实模型、真实 API 或性能测评，可以与三期模型链并行；它保持 shared workspace
@@ -146,9 +152,8 @@ permission restore fail-closed 窄适配；`#39153` 尚未启动，正式 M4-W1 
   `mwemzrn33y` 当前仍未删除。Plan 082 当前不再主动占用本地网络、磁盘写入或 Cargo build lock。Plan 083 的一次性重型批次已经结束且
   不向后续任务转移；其它后续第四期任务仍须按各自授权边界执行，所有重型任务继续按根 `AGENTS.md` 与三期本地模型、Docker 等重型任务
   互斥。详细资源关系见四期子 WBS。
-- Plan 087 阶段 A 不运行本地 Cargo、Docker或真实模型，不创建 Cargo target，也不下载大型 checkpoint；阶段 B 获批后只运行一个远端
-  A40/L40S Pod，并可与 `#39153` 的本地工作并行。若 `#39153` 或其它任务开始占用与 Plan 087 相冲突的真实本地模型、Docker或云端资源，
-  仍按根门禁错峰；双方共享文档由后完成者基于届时 `main` 做语义加法，不覆盖另一方向事实。
+- Plan 087 已结束并释放全部 Pod，不再占用本地 Cargo/Docker/真实模型、共享 target 或云 compute；只有用户决定保留的 57GB 网络卷继续计费。
+  后续复现与四期任务的资源竞争仍由新任务按根门禁协调，不继承 Plan 087 的费用或外部动作授权。
 
 如果未来重新启动方向 1，它仍与方向 3 保持产品源码和任务合同独立；本地重型 Cargo、Docker、真实本地模型
 加载/推理继续全局串行，并由实际进入实施的工作包协调共享资源。

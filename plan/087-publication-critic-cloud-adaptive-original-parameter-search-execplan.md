@@ -313,27 +313,30 @@ XXX用以下内容代替：
 
 ### 当前工作
 
-- 研究执行与云端归零保持完成；用户指定的三项仓库收口和聚焦门禁均已完成，等待最终复验。
+- 无。本计划已完成最终验收并冻结，后续交接只见当前 WBS。
 
 ### 本任务剩余步骤
 
-1. 执行者提交 Plan 087 worktree 后用指定队列请求最终复验；审查者完成相称独立复核与必要整改。
-2. 整体验收通过后按审查者既定决定统一更新 WBS/WBS-COMPLETED；此前保持两份权威 WBS untouched。
+- 无。Route O 的干净正式复现不属于本计划，须按 WBS 另行立项和授权。
 
 ### 阻塞项
 
-- 当前无计划级或基础设施阻塞；仓库收口等待最终复验。
+- 当前无计划级或基础设施阻塞。
 - 网络卷持续费用为终态后的保留成本，不属于 Plan 087 已关闭的任务总账；卷不得删除。
 
 ### 当前验收状态
 
-- `PROMISING_CANDIDATE_RETAINED / FINAL_REVIEW_PENDING / ZERO_POD`；研究证据已通过，仓库收口已实现并待复验，不含 unseen/product GO。
+- `PROMISING_CANDIDATE_RETAINED / FINAL_REVIEW_ACCEPTED / ZERO_POD / VOLUME_RETAINED`；研究执行与仓库收口均已验收，不含
+  clean reproduction、unseen 或 product GO。
 
 ### 交接边界
 
 - 执行者直接使用本计划已创建的 Plan 087 worktree，不另建工作树，不在主工作区修改 tracked 文件。
 - 阶段 A 和最终交付都必须先提交 worktree，再按指定队列发送一次相应消息并停止会话；普通可修问题在阶段授权内自主修复重跑。
 - 本任务完成后冻结本计划；候选干净正式复现、部署/资格、M3-C2、unseen 或产品启用只链接 WBS，不在本计划继续安排。
+
+最终验收见 `agent_log/2026-08-26-133503-plan087-final-acceptance.md`；跨路线原因分析见
+`doc/research/2026-08-26-publication-critic-training-route-outcome-analysis.md`。
 
 ## 6. 关键决策记录
 
