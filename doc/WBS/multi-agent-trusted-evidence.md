@@ -337,7 +337,7 @@ A40 48GB 首选、L40S 48GB 备选，实际训练活动不超过 12 小时/15 US
 **任务合同**：[`Plan 082 ExecPlan`](../../plan/082-publication-critic-cloud-continuous-training-execplan.md)。
 
 **当前状态**：付费前阶段 A 已完成真实训练 adapter/runner、物理无 unseen 的 source/data bundle、云端入口、freeze/finalize、
-恢复/归档接缝和聚焦轻量验证；首轮审查确认的 9 项 correctness/functionality finding 已局部整改，当前等待复验。任何计费 Pod/网络卷、数据上传、真实模型下载和云端训练仍须先通过阶段 A 验收，再等待用户本人
+恢复/归档接缝和聚焦轻量验证；整改复验确认原 9 项失效路径已关闭，剩余的多参数数值变化证明与 retained bootstrap 输出隔离两项问题也已局部修复，当前等待再次复验。任何计费 Pod/网络卷、数据上传、真实模型下载和云端训练仍须先通过阶段 A 验收，再等待用户本人
 明确人工批准进入付费阶段。审查者验收通过本身不构成付费批准。任务依次经过阶段 A 付费申请、保留 Pod 的 GPU 阶段小型证据验收和
 0 Pod 大型资产回传后的最终验收三个主要队列门。
 

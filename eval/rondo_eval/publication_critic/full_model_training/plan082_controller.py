@@ -144,7 +144,8 @@ class Plan082ContinuousTrainingController(_ContinuousTrainingControllerCore):
                 "parameter_elements",
                 "maximum_absolute_change",
             }
-            or change.get("method") != "torch.equal_selected_nonzero_gradient_parameter"
+            or change.get("method")
+            != "torch.equal_any_nonzero_gradient_parameter_cpu_snapshots"
             or change.get("parameter_name") not in scope.parameter_names
             or not isinstance(change.get("parameter_elements"), int)
             or isinstance(change["parameter_elements"], bool)

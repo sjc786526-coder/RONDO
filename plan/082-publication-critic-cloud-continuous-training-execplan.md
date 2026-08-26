@@ -401,10 +401,12 @@ XXX用以下内容代替：
 - 2026-08-26：主物理根新增 ignored `handoff-runtime-v1` 固定 boto3 环境和 `stage-a-remediation-dry-run` 非秘密 fixture；inventory/download
   两个 preflight 均显示 exact worktree/Python prefix、`secret_access=false`、`network_access=false`。整改未访问 RunPod/HF/S3、凭据、真实模型，
   未创建 Pod/卷、未训练或产生费用。
+- 2026-08-26：阶段 A 整改复验确认原 9 项失效路径已关闭，但剩余 2 项 Medium：单参数探针可在其它 scope 参数已变化后误报 no-op，
+  retained bootstrap 输出可污染正式 artifact tree。两项均已局部修复并补直接负例；付费门继续关闭，正在形成新提交并申请复验。
 
 ### 当前工作
 
-- 阶段 A 首轮审查的 9 项 finding 已完成局部整改与非付费验证，正在形成新提交并请求复验；阶段 B 未授权。
+- 阶段 A 整改复验剩余的 2 项 finding 已完成局部整改与非付费验证，正在形成新提交并请求复验；阶段 B 未授权。
 
 ### 本任务剩余步骤
 
@@ -469,5 +471,5 @@ XXX用以下内容代替：
 | 016 | 固定模型/数据/objective 身份，参数化 recipe、scope、控制点、路径、实时资源和 handoff；不增加签名链、registry 或通用云编排 | 保持后续 commissioning 可修且架构契合，同时把复杂度限制在正确性与功能所需范围 | maintainability | 已采纳 |
 | 017 | 正式候选从完整 checkpoint-backed observation 中选择并保留其 checkpoint/snapshot；全 observation training-best 只作诊断 | 避免最好观测没有可恢复权重，也不因非 checkpoint 观测更好而错误判整轮无效 | selection/retention | 已采纳 |
 | 018 | 进程 receipt 在训练 segment 前 write-once 发布，正式 freeze 显式选择末次非终 checkpoint 作为新进程恢复边界 | 中断后仍能消费已资格化 checkpoint，并保证正式轮实际走一次恢复后继续更新 | recovery | 已采纳 |
-| 019 | recipe 显式参数化模型参数 dtype；每个已接受 update 只克隆当前 scope 中最小的非零梯度参数并证明 optimizer 前后数值不同，不做全模型逐步哈希 | 以低额外显存闭合 BF16 no-op；策略可能保守拒绝但绝不把未证明变化记成进展，commissioning 可调整 dtype/LR/scope | training correctness | 已采纳 |
-| 020 | 用小型实际环境 receipt、真实 retention artifact producer 与固定项目局部 boto3 launcher 分别闭合 freeze、GPU 释放前清单和 0 Pod 回传入口 | 直接验证真实接缝且保持职责分离，不引入签名链、通用环境管理器或第二套工件平台 | environment/handoff | 已采纳 |
+| 019 | recipe 显式参数化模型参数 dtype；每个 update 对当前 scope 全部非零梯度参数保留 CPU 前值，optimizer 后逐个精确比较，至少一个真实数值变化才接受，不做 GPU 全 scope clone 或全模型逐步哈希 | 消除单参数探针的 false no-op，同时把额外内存移到 CPU；commissioning 仍可调整 dtype/LR/scope | training correctness | 已采纳 |
+| 020 | 用小型实际环境 receipt、真实 retention artifact producer 与固定项目局部 boto3 launcher 分别闭合 freeze、GPU 释放前清单和 0 Pod 回传入口；retained bootstrap 只能写入 task root 内、artifact root 外的无符号链接新路径 | 直接验证真实接缝且保持职责分离，避免 producer 污染正式工件，不引入签名链、通用环境管理器或第二套工件平台 | environment/handoff | 已采纳 |

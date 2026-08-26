@@ -79,11 +79,13 @@ only a commissioning candidate; adjust the optimizer/batch/scope/control
 parameters from real memory and training behavior as needed, while preserving
 the fixed scalar, direction, Binary/Pair losses and equal component weights.
 The recipe also selects `parameter_dtype` (`float32` or `bfloat16`); this is a
-commissioning parameter, not a hidden loader default. Every accepted macro
-update records one current-scope original parameter whose stored numeric value
-changed across the optimizer step. A nonzero gradient with no representable
-change is rejected, so commissioning must adjust dtype, learning rate, or scope
-before freezing. The run-spec schema is:
+commissioning parameter, not a hidden loader default. Before each optimizer
+step the adapter copies every current-scope parameter with a nonzero gradient
+to CPU, then records the first one whose stored numeric value actually changed.
+Only an update where all such parameters remain bit-identical is rejected, so
+commissioning must adjust dtype, learning rate, or scope before freezing. This
+keeps the proof exact without cloning the trainable scope on GPU or adding a
+full-model hash. The run-spec schema is:
 
 ```json
 {
@@ -199,6 +201,12 @@ env PYTHONPATH="$source_root/eval" "$task_root/venv/bin/python" -B -P -m \
   --task-root "$task_root" --artifact-root "$artifact_root" \
   --formal-result "$FORMAL_RESULT" --output "$BOOTSTRAP_MANIFEST"
 ```
+
+`BOOTSTRAP_MANIFEST` must be a fresh ordinary path under the task root and
+outside the formal artifact root. Its existing parent chain must not contain
+symbolic links. The producer rejects artifact-tree aliases before verifying or
+scanning retained objects, so manifest publication cannot invalidate a retained
+checkpoint, snapshot or observation.
 
 The nonsecret Plan 082 S3
 binding records the live volume ID, region-matching HTTPS RunPod endpoint, task

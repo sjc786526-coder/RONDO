@@ -96,7 +96,7 @@ class _Plan082FakeAdapter(_Plan081FakeAdapter):
     def apply_update(self, step, scope, training_dataset):
         receipt = super().apply_update(step, scope, training_dataset)
         receipt["parameter_change"] = {
-            "method": "torch.equal_selected_nonzero_gradient_parameter",
+            "method": "torch.equal_any_nonzero_gradient_parameter_cpu_snapshots",
             "parameter_name": scope.parameter_names[0],
             "parameter_elements": 1,
             "maximum_absolute_change": 0.01,
@@ -373,6 +373,9 @@ class _Parameter:
         return id(self)
 
     def detach(self):
+        return self
+
+    def cpu(self):
         return self
 
     def clone(self):
@@ -1212,6 +1215,9 @@ class Plan082TrainingTests(unittest.TestCase):
         self,
     ) -> None:
         scope = TrainableScope.from_value(_run_spec()["initial_scope"])
+        expanded_scope = TrainableScope.from_value(
+            _scope("expanded", ["tail.weight", "tail.bias"], 3)
+        )
 
         def exercise(adapter):
             adapter.configure_trainable_scope(scope)
@@ -1234,7 +1240,7 @@ class Plan082TrainingTests(unittest.TestCase):
                 return adapter.apply_update(1, scope, _training())
 
         noop = _component_adapter(_EvalAdapter)
-        noop.configure_trainable_scope(scope)
+        noop.configure_trainable_scope(expanded_scope)
         noop.optimizer.mutate_on_step = False
         with (
             mock.patch(
@@ -1255,7 +1261,7 @@ class Plan082TrainingTests(unittest.TestCase):
                 FullModelTrainingError, "plan082_update_parameter_unchanged"
             ),
         ):
-            noop.apply_update(1, scope, _training())
+            noop.apply_update(1, expanded_scope, _training())
         self.assertEqual(noop.global_step, 0)
         self.assertEqual(noop.data_cursor, {"macro_update": 0})
 
@@ -1263,6 +1269,37 @@ class Plan082TrainingTests(unittest.TestCase):
         receipt = exercise(changed)
         self.assertEqual(receipt["parameter_change"]["parameter_name"], "tail.weight")
         self.assertGreater(receipt["parameter_change"]["maximum_absolute_change"], 0)
+
+        changed_after_unchanged_probe = _component_adapter(_EvalAdapter)
+        changed_after_unchanged_probe.configure_trainable_scope(expanded_scope)
+
+        def mutate_weight_only() -> None:
+            weight = changed_after_unchanged_probe.model.rows["tail.weight"]
+            weight.values[0] += 0.125
+            weight._version += 1
+
+        changed_after_unchanged_probe.optimizer.step = mutate_weight_only
+        with (
+            mock.patch(
+                "rondo_eval.publication_critic.full_model_training.plan082_adapter."
+                "tokenize_dataset",
+                return_value={},
+            ),
+            mock.patch(
+                "rondo_eval.publication_critic.full_model_training.plan082_adapter.binary_loss",
+                return_value=_Loss(changed_after_unchanged_probe.model),
+            ),
+            mock.patch(
+                "rondo_eval.publication_critic.full_model_training.plan082_adapter.pair_loss",
+                return_value=_Loss(changed_after_unchanged_probe.model),
+            ),
+            mock.patch.object(changed_after_unchanged_probe, "_require_finite_loss"),
+        ):
+            receipt = changed_after_unchanged_probe.apply_update(
+                1, expanded_scope, _training()
+            )
+        self.assertEqual(receipt["parameter_change"]["parameter_name"], "tail.weight")
+        self.assertEqual(changed_after_unchanged_probe.global_step, 1)
 
     def test_validation_rejects_parameter_buffer_and_rng_drift(self) -> None:
         dataset = _validation()

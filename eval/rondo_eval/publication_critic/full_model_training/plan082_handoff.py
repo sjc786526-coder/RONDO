@@ -312,6 +312,7 @@ def create_retained_bootstrap_manifest(
     )
     if artifact == task or not artifact.is_relative_to(task):
         raise HandoffError("plan082_handoff_artifact_root_invalid")
+    output = _retained_bootstrap_destination(destination, task, artifact)
     store = Plan081ArtifactStore(artifact)
     retention = formal_result["retention"]
     rows_by_kind: dict[str, list[Mapping[str, Any]]] = {}
@@ -412,7 +413,7 @@ def create_retained_bootstrap_manifest(
                     }
                 )
     return create_bootstrap_manifest(
-        destination,
+        output,
         freeze_sha256=freeze,
         objects=objects,
     )
@@ -814,6 +815,39 @@ def _existing_directory(value: Path, code: str) -> Path:
     if path.is_symlink() or not path.is_dir():
         raise HandoffError(code)
     return path.resolve()
+
+
+def _retained_bootstrap_destination(
+    destination: Path, task_root: Path, artifact_root: Path
+) -> Path:
+    """Require a fresh task-local output that cannot alias retained artifacts."""
+
+    target = Path(os.path.abspath(os.fspath(destination)))
+    try:
+        parent_relative = target.parent.relative_to(task_root)
+    except ValueError:
+        raise HandoffError("plan082_handoff_destination_invalid") from None
+    if (
+        target == artifact_root
+        or target.is_relative_to(artifact_root)
+        or artifact_root.is_relative_to(target)
+        or target.exists()
+        or target.is_symlink()
+    ):
+        raise HandoffError("plan082_handoff_destination_invalid")
+
+    parent = task_root
+    for part in parent_relative.parts:
+        parent /= part
+        try:
+            info = os.lstat(parent)
+        except OSError:
+            raise HandoffError("plan082_handoff_destination_invalid") from None
+        if not stat.S_ISDIR(info.st_mode) or stat.S_ISLNK(info.st_mode):
+            raise HandoffError("plan082_handoff_destination_invalid")
+    if target.resolve(strict=False) != target:
+        raise HandoffError("plan082_handoff_destination_invalid")
+    return target
 
 
 def _safe_relative(value: str) -> PurePosixPath:

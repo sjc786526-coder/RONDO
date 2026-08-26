@@ -541,22 +541,13 @@ class TorchContinuousTrainingAdapter:
         norm_value = float(norm.item() if hasattr(norm, "item") else norm)
         if not math.isfinite(norm_value) or norm_value <= 0:
             raise FullModelTrainingError("plan082_gradient_invalid")
-        changed_name, changed_parameter, before_value = self._parameter_change_probe(
-            scope
-        )
+        change_probes = self._parameter_change_probes(scope)
         self.optimizer.step()
-        if self.torch.equal(before_value, changed_parameter.detach()):
+        changed = self._first_parameter_change(change_probes)
+        if changed is None:
             self.optimizer.zero_grad(set_to_none=True)
             raise FullModelTrainingError("plan082_update_parameter_unchanged")
-        maximum_change = float(
-            (changed_parameter.detach().float() - before_value.float())
-            .abs()
-            .max()
-            .item()
-        )
-        if not math.isfinite(maximum_change) or maximum_change <= 0:
-            self.optimizer.zero_grad(set_to_none=True)
-            raise FullModelTrainingError("plan082_update_parameter_change_invalid")
+        changed_name, changed_parameter, maximum_change = changed
         self.scheduler.step()
         self.optimizer.zero_grad(set_to_none=True)
         self.global_step = step
@@ -586,7 +577,7 @@ class TorchContinuousTrainingAdapter:
             "scope": scope.as_dict(),
             "data_cursor": copy.deepcopy(self.data_cursor),
             "parameter_change": {
-                "method": "torch.equal_selected_nonzero_gradient_parameter",
+                "method": "torch.equal_any_nonzero_gradient_parameter_cpu_snapshots",
                 "parameter_name": changed_name,
                 "parameter_elements": int(changed_parameter.numel()),
                 "maximum_absolute_change": maximum_change,
@@ -814,7 +805,9 @@ class TorchContinuousTrainingAdapter:
         if any(parameter.grad is not None for parameter in self.model.parameters()):
             raise FullModelTrainingError("plan082_validation_gradient_present")
 
-    def _parameter_change_probe(self, scope: TrainableScope) -> tuple[str, Any, Any]:
+    def _parameter_change_probes(
+        self, scope: TrainableScope
+    ) -> list[tuple[str, Any, Any]]:
         named = dict(self.model.named_parameters())
         candidates = sorted(
             (
@@ -824,6 +817,7 @@ class TorchContinuousTrainingAdapter:
             ),
             key=lambda item: (item[0], item[1]),
         )
+        probes: list[tuple[str, Any, Any]] = []
         for _elements, name, parameter in candidates:
             try:
                 nonzero = bool(self.torch.count_nonzero(parameter.grad).item())
@@ -832,8 +826,40 @@ class TorchContinuousTrainingAdapter:
                     "plan082_update_parameter_probe_failed"
                 ) from exc
             if nonzero:
-                return name, parameter, parameter.detach().clone()
-        raise FullModelTrainingError("plan082_update_parameter_probe_missing")
+                try:
+                    before = parameter.detach().cpu().clone()
+                except Exception as exc:
+                    raise FullModelTrainingError(
+                        "plan082_update_parameter_probe_failed"
+                    ) from exc
+                probes.append((name, parameter, before))
+        if not probes:
+            raise FullModelTrainingError("plan082_update_parameter_probe_missing")
+        return probes
+
+    def _first_parameter_change(
+        self, probes: Sequence[tuple[str, Any, Any]]
+    ) -> tuple[str, Any, float] | None:
+        for name, parameter, before in probes:
+            try:
+                current = parameter.detach().cpu()
+                if self.torch.equal(before, current):
+                    continue
+                maximum_change = float(
+                    (current.float() - before.float()).abs().max().item()
+                )
+            except Exception as exc:
+                self.optimizer.zero_grad(set_to_none=True)
+                raise FullModelTrainingError(
+                    "plan082_update_parameter_change_invalid"
+                ) from exc
+            if not math.isfinite(maximum_change) or maximum_change <= 0:
+                self.optimizer.zero_grad(set_to_none=True)
+                raise FullModelTrainingError(
+                    "plan082_update_parameter_change_invalid"
+                )
+            return name, parameter, maximum_change
+        return None
 
     def _training_state_guard(self) -> dict[str, Any]:
         if self.optimizer is None or self.scheduler is None:

@@ -305,6 +305,36 @@ class Plan082HandoffTests(unittest.TestCase):
                     formal_result=result,
                 )
 
+            checkpoint_root = artifact_root / "recovery-checkpoints" / checkpoint_id
+            checkpoint_alias = task_root / "checkpoint-alias"
+            checkpoint_alias.symlink_to(checkpoint_root, target_is_directory=True)
+            unsafe_destinations = {
+                "outside_task": Path(directory) / "outside-bootstrap.json",
+                "artifact_same": artifact_root,
+                "artifact_ancestor": task_root / "runs",
+                "artifact_descendant": checkpoint_root / "bootstrap.json",
+                "artifact_symlink_alias": checkpoint_alias / "bootstrap.json",
+            }
+            for name, unsafe_destination in unsafe_destinations.items():
+                with (
+                    self.subTest(destination=name),
+                    self.assertRaisesRegex(
+                        HandoffError, "plan082_handoff_destination_invalid"
+                    ),
+                ):
+                    create_retained_bootstrap_manifest(
+                        unsafe_destination,
+                        freeze_sha256="a" * 64,
+                        task_root=task_root,
+                        artifact_root=artifact_root,
+                        formal_result=result,
+                    )
+            self.assertFalse((checkpoint_root / "bootstrap.json").exists())
+            self.assertEqual(
+                store.verify_checkpoint(checkpoint_id)["content_sha256"],
+                checkpoint["content_sha256"],
+            )
+
     def test_local_handoff_preflight_binds_source_environment_without_secrets(
         self,
     ) -> None:
