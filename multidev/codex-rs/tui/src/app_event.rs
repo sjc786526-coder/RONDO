@@ -12,11 +12,14 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
+use crate::durable_session_control::DurableSessionControlConfirmation;
 use crate::durable_session_query::DurableSessionQueryCompletion;
 use crate::inline_visualization::InlineVisualizationContext;
+use codex_app_server_client::DurableSessionControlAttemptTicket;
 use codex_app_server_protocol::AddCreditsNudgeCreditType;
 use codex_app_server_protocol::AddCreditsNudgeEmailStatus;
 use codex_app_server_protocol::ConsumeAccountRateLimitResetCreditResponse;
+use codex_app_server_protocol::DurableSessionControlResponse;
 use codex_app_server_protocol::GetAccountRateLimitsResponse;
 use codex_app_server_protocol::GetAccountTokenUsageResponse;
 use codex_app_server_protocol::MarketplaceAddResponse;
@@ -192,6 +195,15 @@ pub(crate) enum AppEvent {
     DurableSessionQueryCommand(String),
     /// One bounded background `session/list` or `session/read` completion.
     DurableSessionQueryCompleted(DurableSessionQueryCompletion),
+    /// User-invoked command for the stable, proof-bound Session control surface.
+    DurableSessionControlCommand(String),
+    /// A mutation confirmation captured from one accepted `session/read` view.
+    DurableSessionControlConfirmed(DurableSessionControlConfirmation),
+    /// The sole completion for one send-once formal control attempt.
+    DurableSessionControlCompleted {
+        ticket: DurableSessionControlAttemptTicket,
+        result: Result<DurableSessionControlResponse, String>,
+    },
     /// User-invoked command for the default-off experimental Session prototype.
     ExperimentalSessionControlCommand(String),
     /// Open the agent picker for switching active threads.

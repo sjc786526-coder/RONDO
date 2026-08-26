@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::app_server_session::DurableSessionQueryRequest;
+use crate::durable_session_control::render_transport_unknown;
 use crate::durable_session_query::DURABLE_SESSIONS_USAGE;
 use crate::durable_session_query::DurableSessionCommand;
 use crate::durable_session_query::DurableSessionListScope;
@@ -11,6 +12,7 @@ use crate::durable_session_query::render_projection;
 use crate::durable_session_query::render_query_failure;
 use crate::durable_session_query::render_refreshing;
 use crate::durable_session_query::render_sync_loss;
+use codex_app_server_client::DurableSessionControlCertainty;
 use codex_app_server_client::DurableSessionQueryAttachment;
 use codex_app_server_client::DurableSessionQueryProjection;
 use codex_app_server_client::QueryReadApplyResult;
@@ -41,6 +43,10 @@ impl App {
                 return;
             }
         };
+        let control_was_pending = matches!(
+            app_server.durable_session_control_certainty(),
+            DurableSessionControlCertainty::Pending { .. }
+        );
         let request = match command {
             DurableSessionCommand::List { scope } => {
                 app_server.durable_session_begin_list(DurableSessionListParams {
@@ -66,12 +72,22 @@ impl App {
                 return;
             }
         };
+        if control_was_pending
+            && !matches!(
+                app_server.durable_session_control_certainty(),
+                DurableSessionControlCertainty::Pending { .. }
+            )
+        {
+            self.add_durable_session_output(render_transport_unknown(
+                "the query attachment changed while a control attempt was pending",
+            ));
+        }
 
         self.add_durable_session_output(render_refreshing());
         self.spawn_durable_session_query(app_server, request);
     }
 
-    fn spawn_durable_session_query(
+    pub(super) fn spawn_durable_session_query(
         &self,
         app_server: &AppServerSession,
         request: DurableSessionQueryRequest,
@@ -112,7 +128,10 @@ impl App {
                         "session/read timed out after 15s; no retry was attempted".to_string()
                     })
                     .and_then(|result| result.map_err(|error| error.to_string()));
-                    DurableSessionQueryCompletion::Session { ticket, result }
+                    DurableSessionQueryCompletion::Session {
+                        ticket,
+                        result: Box::new(result),
+                    }
                 }
             };
             app_event_tx.send(AppEvent::DurableSessionQueryCompleted(completion));
@@ -137,7 +156,7 @@ impl App {
                 }
                 Err(error) => self.render_durable_session_query_failure(app_server, ticket, &error),
             },
-            DurableSessionQueryCompletion::Session { ticket, result } => match result {
+            DurableSessionQueryCompletion::Session { ticket, result } => match *result {
                 Ok(response) => {
                     let apply = app_server.durable_session_apply_read(ticket, response);
                     self.render_applied_durable_session_query(app_server, apply);
@@ -199,7 +218,10 @@ impl App {
         self.add_durable_session_output(render_query_failure(retained, error));
     }
 
-    fn render_durable_session_projection(&self, app_server: &AppServerSession) -> Option<String> {
+    pub(super) fn render_durable_session_projection(
+        &self,
+        app_server: &AppServerSession,
+    ) -> Option<String> {
         let freshness = app_server.durable_session_view_freshness();
         match (
             app_server.durable_session_attachment(),
@@ -239,7 +261,7 @@ impl App {
         self.add_durable_session_output(render_sync_loss(retained, reason));
     }
 
-    fn add_durable_session_output(&mut self, rendered: String) {
+    pub(super) fn add_durable_session_output(&mut self, rendered: String) {
         self.chat_widget.add_plain_history_lines(
             rendered
                 .lines()

@@ -1,6 +1,91 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
+    "DurableSessionControlPrecondition": {
+      "description": "Query proof that the server must revalidate before applying a control operation.\n\nA committed Team proof can authorize the operations exposed by its query projection. The delete-retry proof is deliberately narrower: it exists only after an earlier delete removed the Team snapshot but retained the canonical Root marker as the ThreadStore retry anchor.",
+      "oneOf": [
+        {
+          "properties": {
+            "commit_fingerprint": {
+              "type": "string"
+            },
+            "commit_generation": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "expected_residency": {
+              "$ref": "#/definitions/DurableSessionResidency"
+            },
+            "expected_storage_status": {
+              "$ref": "#/definitions/DurableSessionStorageStatus"
+            },
+            "owner_incarnation": {
+              "description": "Opaque identity of the observed loaded owner incarnation. Cold proofs carry `None`.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "team_instance_id": {
+              "type": "string"
+            },
+            "team_revision": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "type": {
+              "enum": [
+                "committedTeam"
+              ],
+              "title": "CommittedTeamDurableSessionControlPreconditionType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "commit_fingerprint",
+            "commit_generation",
+            "expected_residency",
+            "expected_storage_status",
+            "team_instance_id",
+            "team_revision",
+            "type"
+          ],
+          "title": "CommittedTeamDurableSessionControlPrecondition",
+          "type": "object"
+        },
+        {
+          "description": "Proof of a canonical cold Root marker whose committed Team snapshot is already absent. Only an explicit `Delete` attempt may consume this proof.",
+          "properties": {
+            "expected_residency": {
+              "$ref": "#/definitions/DurableSessionResidency"
+            },
+            "expected_storage_status": {
+              "$ref": "#/definitions/DurableSessionStorageStatus"
+            },
+            "root_marker_fingerprint": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "deleteRetryAnchor"
+              ],
+              "title": "DeleteRetryAnchorDurableSessionControlPreconditionType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "expected_residency",
+            "expected_storage_status",
+            "root_marker_fingerprint",
+            "type"
+          ],
+          "title": "DeleteRetryAnchorDurableSessionControlPrecondition",
+          "type": "object"
+        }
+      ]
+    },
     "DurableSessionDomainLifecycle": {
       "description": "Domain lifecycle, independent of storage placement and runtime residency.",
       "enum": [
@@ -126,6 +211,8 @@
         "residencyUnknown",
         "ownerUnavailableHere",
         "notObservedHere",
+        "controlDisabled",
+        "alreadyLoaded",
         "alreadyArchived",
         "notArchived",
         "closing",
@@ -151,6 +238,9 @@
         "resume": {
           "$ref": "#/definitions/DurableSessionOperation"
         },
+        "setRootState": {
+          "$ref": "#/definitions/DurableSessionOperation"
+        },
         "unarchive": {
           "$ref": "#/definitions/DurableSessionOperation"
         }
@@ -160,6 +250,7 @@
         "close",
         "delete",
         "resume",
+        "setRootState",
         "unarchive"
       ],
       "type": "object"
@@ -525,6 +616,17 @@
     "DurableSessionView": {
       "description": "Read-only projection of one canonical durable Session.\n\nDurable identity, storage placement, domain lifecycle, server-local runtime residency, operation availability, and read completeness remain independent axes. A caller must not infer one axis from another.",
       "properties": {
+        "controlPrecondition": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/DurableSessionControlPrecondition"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Exact query proof accepted by `session/control`, when the read can prove every required identity, storage, residency, and committed Team fact."
+        },
         "domainLifecycle": {
           "$ref": "#/definitions/DurableSessionDomainLifecycle"
         },

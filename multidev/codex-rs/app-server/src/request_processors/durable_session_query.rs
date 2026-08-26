@@ -18,6 +18,7 @@ use codex_app_server_protocol::DurableSessionReadStatus;
 use codex_app_server_protocol::DurableSessionResidency;
 use codex_app_server_protocol::DurableSessionStorageStatus;
 use codex_app_server_protocol::DurableSessionView;
+use codex_core::DurableSessionReadError as CoreReadError;
 use codex_core::project_committed_durable_session;
 use codex_protocol::SessionId;
 use codex_protocol::protocol::SessionMeta;
@@ -32,6 +33,7 @@ use serde::Serialize;
 
 #[path = "durable_session_query_projection.rs"]
 mod projection;
+use projection::authenticated_delete_retry_view;
 use projection::authenticated_view;
 use projection::core_read_status;
 use projection::team_projection;
@@ -43,7 +45,7 @@ const SESSION_LIST_MAX_SCANNED_THREADS: usize = 400;
 const SESSION_LIST_MAX_SOURCE_PAGES: usize = 16;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum StorageScope {
+pub(super) enum StorageScope {
     Active,
     Archived,
 }
@@ -57,7 +59,7 @@ impl StorageScope {
         }
     }
 
-    fn status(self) -> DurableSessionStorageStatus {
+    pub(super) fn status(self) -> DurableSessionStorageStatus {
         match self {
             Self::Active => DurableSessionStorageStatus::Active,
             Self::Archived => DurableSessionStorageStatus::Archived,
@@ -77,7 +79,7 @@ impl StorageScope {
 }
 
 #[derive(Debug)]
-enum CanonicalMetaFailure {
+pub(super) enum CanonicalMetaFailure {
     NotFound,
     Unavailable,
     Unsupported,
@@ -309,8 +311,11 @@ impl ThreadRequestProcessor {
                         DurableSessionReadStatus::Unsupported {
                             issue: DurableSessionReadIssue::LegacySession,
                         },
-                        self.observed_residency(meta.session_id, root_thread_id)
-                            .await,
+                        self.observed_runtime(meta.session_id, root_thread_id)
+                            .await
+                            .0,
+                        None,
+                        self.config.features.enabled(Feature::DurableSessionControl),
                         None,
                     ),
                 }
@@ -334,7 +339,7 @@ impl ThreadRequestProcessor {
         }
     }
 
-    async fn read_canonical_meta_anywhere(
+    pub(super) async fn read_canonical_meta_anywhere(
         &self,
         root_thread_id: ThreadId,
     ) -> Result<(SessionMeta, StorageScope), CanonicalMetaFailure> {
@@ -379,12 +384,13 @@ impl ThreadRequestProcessor {
             .map_err(map_meta_error)
     }
 
-    async fn project_authenticated_session(
+    pub(super) async fn project_authenticated_session(
         &self,
         meta: SessionMeta,
         scope: StorageScope,
         root_thread_id: ThreadId,
     ) -> DurableSessionView {
+        let control_enabled = self.config.features.enabled(Feature::DurableSessionControl);
         let codex_home = self.config.codex_home.to_path_buf();
         let projection_meta = meta.clone();
         let projected = tokio::task::spawn_blocking(move || {
@@ -392,9 +398,8 @@ impl ThreadRequestProcessor {
         })
         .await;
         let reread = self.read_canonical_meta(root_thread_id, scope).await;
-        let residency = self
-            .observed_residency(meta.session_id, root_thread_id)
-            .await;
+        let (residency, owner_incarnation) =
+            self.observed_runtime(meta.session_id, root_thread_id).await;
         if !matches!(reread, Ok(ref after) if same_durable_lineage(&meta, after)) {
             return authenticated_view(
                 &meta,
@@ -404,6 +409,8 @@ impl ThreadRequestProcessor {
                 },
                 residency,
                 None,
+                control_enabled,
+                owner_incarnation,
             );
         }
         match projected {
@@ -413,10 +420,21 @@ impl ThreadRequestProcessor {
                 DurableSessionReadStatus::Available,
                 residency,
                 Some(team_projection(team)),
+                control_enabled,
+                owner_incarnation,
             ),
-            Ok(Err(error)) => {
-                authenticated_view(&meta, scope, core_read_status(error), residency, None)
+            Ok(Err(CoreReadError::SnapshotMissing)) => {
+                authenticated_delete_retry_view(&meta, scope, residency, control_enabled)
             }
+            Ok(Err(error)) => authenticated_view(
+                &meta,
+                scope,
+                core_read_status(error),
+                residency,
+                None,
+                control_enabled,
+                owner_incarnation,
+            ),
             Err(error) => {
                 tracing::warn!(%root_thread_id, %error, "Durable Session snapshot task failed");
                 authenticated_view(
@@ -427,16 +445,18 @@ impl ThreadRequestProcessor {
                     },
                     residency,
                     None,
+                    control_enabled,
+                    owner_incarnation,
                 )
             }
         }
     }
 
-    async fn observed_residency(
+    async fn observed_runtime(
         &self,
         session_id: SessionId,
         root_thread_id: ThreadId,
-    ) -> DurableSessionResidency {
+    ) -> (DurableSessionResidency, Option<String>) {
         if let Ok(root) = self.thread_manager.get_thread(root_thread_id).await
             && root.is_running()
         {
@@ -445,7 +465,16 @@ impl ThreadRequestProcessor {
                 && configured.thread_id == root_thread_id
                 && configured.session_id == session_id
             {
-                return DurableSessionResidency::ObservedOwnerHere;
+                return match root.durable_session_control_owner_incarnation_id().await {
+                    Ok(owner_incarnation) => (
+                        DurableSessionResidency::ObservedOwnerHere,
+                        Some(owner_incarnation),
+                    ),
+                    Err(error) => {
+                        tracing::debug!(%root_thread_id, %error, "loaded Root owner incarnation is unavailable");
+                        (DurableSessionResidency::OwnerUnavailableHere, None)
+                    }
+                };
             }
         }
         for loaded_id in self.thread_manager.list_thread_ids().await {
@@ -457,10 +486,10 @@ impl ThreadRequestProcessor {
             }
             let configured = thread.session_configured();
             if configured.parent_thread_id.is_some() && configured.session_id == session_id {
-                return DurableSessionResidency::OwnerUnavailableHere;
+                return (DurableSessionResidency::OwnerUnavailableHere, None);
             }
         }
-        DurableSessionResidency::NotObservedHere
+        (DurableSessionResidency::NotObservedHere, None)
     }
 }
 

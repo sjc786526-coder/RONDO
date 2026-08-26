@@ -6,6 +6,7 @@ use crate::agents_md_manager::AgentsMdManager;
 use crate::config::ConstraintError;
 use crate::environment_selection::ThreadEnvironments;
 use crate::environment_selection::TurnEnvironmentSnapshot;
+use crate::experimental_session_control::PreparedDurableSessionShutdown;
 use crate::session::turn_context::EnvironmentConfig;
 use crate::shell_snapshot::ShellSnapshot;
 use crate::skills::SkillError;
@@ -37,6 +38,27 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use tokio::sync::Semaphore;
+use tokio::sync::oneshot;
+
+pub(super) struct PendingDurableSessionShutdown {
+    submission_id: String,
+    prepared: PreparedDurableSessionShutdown,
+    completion: oneshot::Sender<PreparedDurableSessionShutdownCompletion>,
+}
+
+pub(super) struct ClaimedDurableSessionShutdown {
+    pub(super) prepared: PreparedDurableSessionShutdown,
+    pub(super) completion: oneshot::Sender<PreparedDurableSessionShutdownCompletion>,
+}
+
+pub(super) enum PreparedDurableSessionShutdownCompletion {
+    Completed,
+    /// The close failed before runtime teardown, so the same loaded owner remains retryable.
+    RetainedError(String),
+    /// Runtime teardown crossed the rollback boundary. The Session loop terminates and its exact
+    /// app-server owner mapping must be retired even though the close result remains unknown.
+    TerminatedError(String),
+}
 
 pub(super) struct DurableRootActivation {
     identity: DurableTeamIdentity,
@@ -92,6 +114,10 @@ pub(crate) struct Session {
     /// Shutdown submissions that were accepted and have not failed before runtime teardown.
     /// Canceled external waiters do not clear this authoritative lifecycle fence.
     pub(super) experimental_session_control_shutdown_submissions: Arc<AtomicUsize>,
+    /// One formal shutdown handoff keyed to the exact queued `Shutdown` submission that owns it.
+    /// Ordinary shutdowns cannot consume another request's prevalidated close barriers.
+    pub(super) pending_durable_session_shutdown:
+        std::sync::Mutex<Option<PendingDurableSessionShutdown>>,
     pub(crate) pending_user_message_admissions:
         crate::user_message_admission::PendingUserMessageAdmissions,
     pub(crate) input_queue: InputQueue,
@@ -528,6 +554,61 @@ async fn warm_plugins_and_skills_for_session_init(
 }
 
 impl Session {
+    pub(super) fn install_prepared_durable_session_shutdown(
+        &self,
+        submission_id: String,
+        prepared: PreparedDurableSessionShutdown,
+        completion: oneshot::Sender<PreparedDurableSessionShutdownCompletion>,
+    ) -> Result<(), PreparedDurableSessionShutdown> {
+        let mut pending = self
+            .pending_durable_session_shutdown
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if pending.is_some() {
+            return Err(prepared);
+        }
+        *pending = Some(PendingDurableSessionShutdown {
+            submission_id,
+            prepared,
+            completion,
+        });
+        Ok(())
+    }
+
+    pub(super) fn cancel_prepared_durable_session_shutdown(&self, submission_id: &str) {
+        let mut pending = self
+            .pending_durable_session_shutdown
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if pending
+            .as_ref()
+            .is_some_and(|pending| pending.submission_id == submission_id)
+        {
+            pending.take();
+        }
+    }
+
+    pub(super) fn take_prepared_durable_session_shutdown(
+        &self,
+        submission_id: &str,
+    ) -> Option<ClaimedDurableSessionShutdown> {
+        let mut pending = self
+            .pending_durable_session_shutdown
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if pending
+            .as_ref()
+            .is_none_or(|pending| pending.submission_id != submission_id)
+        {
+            return None;
+        }
+        let pending = pending.take()?;
+        Some(ClaimedDurableSessionShutdown {
+            prepared: pending.prepared,
+            completion: pending.completion,
+        })
+    }
+
     pub(crate) fn finish_failed_experimental_session_control_shutdown(&self) {
         let previous = self
             .experimental_session_control_shutdown_submissions
@@ -1447,6 +1528,7 @@ impl Session {
                 conversation: Arc::new(RealtimeConversationManager::new()),
                 active_turn: Mutex::new(None),
                 experimental_session_control_shutdown_submissions: Arc::new(AtomicUsize::new(0)),
+                pending_durable_session_shutdown: std::sync::Mutex::new(None),
                 pending_user_message_admissions: Default::default(),
                 input_queue: InputQueue::new(),
                 guardian_review_session: GuardianReviewSessionManager::default(),

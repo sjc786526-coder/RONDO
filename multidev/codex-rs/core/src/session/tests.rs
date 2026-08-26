@@ -5919,6 +5919,7 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
         conversation: Arc::new(RealtimeConversationManager::new()),
         active_turn: Mutex::new(None),
         experimental_session_control_shutdown_submissions: Arc::new(AtomicUsize::new(0)),
+        pending_durable_session_shutdown: std::sync::Mutex::new(None),
         pending_user_message_admissions: Default::default(),
         input_queue: super::input_queue::InputQueue::new(),
         guardian_review_session: crate::guardian::GuardianReviewSessionManager::default(),
@@ -7470,6 +7471,250 @@ async fn shutdown_complete_does_not_append_to_thread_store_after_shutdown() {
     );
 }
 
+#[cfg(debug_assertions)]
+#[tokio::test]
+async fn durable_shutdown_team_completion_failure_terminates_after_persistence_boundary() {
+    struct EmptyWritePermit;
+
+    impl codex_team_state::TeamWritePermit for EmptyWritePermit {
+        fn read_snapshot(
+            &mut self,
+        ) -> Result<Option<Vec<u8>>, codex_team_state::TeamDurabilityError> {
+            Ok(None)
+        }
+
+        fn compare_and_swap(
+            &mut self,
+            _expected_generation: u64,
+            _snapshot: Vec<u8>,
+        ) -> Result<(), codex_team_state::TeamDurabilityError> {
+            unreachable!("the shutdown fault test does not commit Team state")
+        }
+    }
+
+    struct FailingClosePermit;
+
+    impl codex_team_state::TeamClosePermit for FailingClosePermit {
+        fn abort(self: Box<Self>) -> codex_team_state::TeamDurabilityFuture<'static, ()> {
+            Box::pin(async { Ok(()) })
+        }
+
+        fn complete(self: Box<Self>) -> codex_team_state::TeamDurabilityFuture<'static, ()> {
+            Box::pin(async {
+                Err(codex_team_state::TeamDurabilityError::unknown(
+                    "injected post-persistence close failure",
+                ))
+            })
+        }
+    }
+
+    struct FailingCloseAuthority {
+        identity: codex_team_state::DurableTeamIdentity,
+        owner_incarnation_id: Uuid,
+    }
+
+    impl codex_team_state::TeamWriteAuthority for FailingCloseAuthority {
+        fn identity(&self) -> codex_team_state::DurableTeamIdentity {
+            self.identity
+        }
+
+        fn owner_incarnation_id(&self) -> Uuid {
+            self.owner_incarnation_id
+        }
+
+        fn begin_write(
+            &self,
+        ) -> Result<Box<dyn codex_team_state::TeamWritePermit>, codex_team_state::TeamDurabilityError>
+        {
+            Ok(Box::new(EmptyWritePermit))
+        }
+
+        fn begin_close(
+            &self,
+        ) -> codex_team_state::TeamDurabilityFuture<'_, Box<dyn codex_team_state::TeamClosePermit>>
+        {
+            Box::pin(async { Ok(Box::new(FailingClosePermit) as Box<_>) })
+        }
+    }
+
+    let (mut session, _turn_context) = make_session_and_context().await;
+    let identity =
+        codex_team_state::DurableTeamIdentity::new(session.session_id(), session.thread_id);
+    let authority = Arc::new(FailingCloseAuthority {
+        identity,
+        owner_incarnation_id: Uuid::new_v4(),
+    });
+    let durable_team =
+        codex_team_state::TeamStateHandle::create_durable(authority).expect("create durable Team");
+    session
+        .services
+        .agent_control
+        .install_team(durable_team)
+        .expect("install durable Team");
+
+    let store = Arc::new(codex_thread_store::InMemoryThreadStore::default());
+    let thread_store: Arc<dyn codex_thread_store::ThreadStore> = store.clone();
+    let config = session.get_config().await;
+    let live_thread = LiveThread::create(
+        Arc::clone(&thread_store),
+        CreateThreadParams {
+            session_id: session.session_id(),
+            thread_id: session.thread_id,
+            extra_config: None,
+            forked_from_id: None,
+            parent_thread_id: None,
+            source: SessionSource::Exec,
+            durable_team: Some(codex_protocol::protocol::DurableTeamSessionMeta::current(
+                session.session_id(),
+                session.thread_id,
+            )),
+            thread_source: None,
+            originator: "test_originator".to_string(),
+            base_instructions: BaseInstructions::default(),
+            dynamic_tools: Vec::new(),
+            selected_capability_roots: Vec::new(),
+            multi_agent_version: None,
+            history_mode: Default::default(),
+            subagent_history_start_ordinal: None,
+            history_base: None,
+            initial_window_id: Uuid::now_v7().to_string(),
+            metadata: ThreadPersistenceMetadata {
+                cwd: Some(config.cwd.to_path_buf()),
+                model_provider: config.model_provider_id.clone(),
+                memory_mode: if config.memories.generate_memories {
+                    ThreadMemoryMode::Enabled
+                } else {
+                    ThreadMemoryMode::Disabled
+                },
+            },
+        },
+    )
+    .await
+    .expect("create thread persistence");
+    session.services.thread_store = thread_store;
+    session.services.live_thread = Some(live_thread);
+
+    let lifecycle_close = session
+        .services
+        .agent_control
+        .begin_durable_team_root_close(session.thread_id)
+        .expect("begin Root lifecycle close");
+    let (completion_tx, completion_rx) = oneshot::channel();
+    let session = Arc::new(session);
+    assert!(
+        session
+            .install_prepared_durable_session_shutdown(
+                "formal-close".to_string(),
+                PreparedDurableSessionShutdown {
+                    lifecycle_close,
+                    team_close: Box::new(FailingClosePermit),
+                },
+                completion_tx,
+            )
+            .is_ok(),
+        "install formal shutdown handoff"
+    );
+
+    assert!(handlers::shutdown(&session, "formal-close".to_string()).await);
+    assert!(matches!(
+        completion_rx.await.expect("formal completion"),
+        PreparedDurableSessionShutdownCompletion::TerminatedError(message)
+            if message.contains("injected post-persistence close failure")
+    ));
+    assert!(
+        session
+            .services
+            .agent_control
+            .begin_durable_team_root_close(session.thread_id)
+            .is_err(),
+        "the terminal failure must not reopen child admission"
+    );
+    assert_eq!(
+        codex_thread_store::InMemoryThreadStoreCalls {
+            create_thread: 1,
+            shutdown_thread: 1,
+            ..Default::default()
+        },
+        store.calls().await
+    );
+}
+
+#[tokio::test]
+async fn accepted_formal_shutdown_completion_loss_is_terminal_unknown() {
+    let (completion_tx, completion_rx) = oneshot::channel();
+    let (termination_tx, termination_rx) = oneshot::channel();
+    let termination = async move {
+        let _ = termination_rx.await;
+    }
+    .boxed()
+    .shared();
+    drop(completion_tx);
+
+    let waiter = tokio::spawn(await_accepted_durable_session_shutdown(
+        completion_rx,
+        termination,
+    ));
+    tokio::task::yield_now().await;
+    assert!(
+        !waiter.is_finished(),
+        "sender loss after acceptance must wait for the Session loop to settle"
+    );
+    termination_tx
+        .send(())
+        .expect("the accepted shutdown waiter must retain termination");
+    assert!(matches!(
+        waiter.await.expect("shutdown waiter task"),
+        Err(ExperimentalSessionControlError::ShutdownTerminatedWithError { message })
+            if message.contains("completion channel closed")
+    ));
+}
+
+#[tokio::test]
+async fn accepted_formal_shutdown_loop_termination_is_terminal_unknown() {
+    let (_completion_tx, completion_rx) = oneshot::channel();
+
+    assert!(matches!(
+        await_accepted_durable_session_shutdown(
+            completion_rx,
+            completed_session_loop_termination(),
+        )
+        .await,
+        Err(ExperimentalSessionControlError::ShutdownTerminatedWithError { message })
+            if message.contains("Session loop terminated")
+    ));
+}
+
+#[tokio::test]
+async fn accepted_formal_shutdown_retained_error_remains_retryable() {
+    let (completion_tx, completion_rx) = oneshot::channel();
+    let (_termination_tx, termination_rx) = oneshot::channel::<()>();
+    let termination = async move {
+        let _ = termination_rx.await;
+    }
+    .boxed()
+    .shared();
+    assert!(
+        completion_tx
+            .send(PreparedDurableSessionShutdownCompletion::RetainedError(
+                "retryable before teardown".to_string(),
+            ))
+            .is_ok(),
+        "completion receiver must remain installed"
+    );
+
+    let outcome = tokio::time::timeout(
+        Duration::from_secs(1),
+        await_accepted_durable_session_shutdown(completion_rx, termination),
+    )
+    .await
+    .expect("a retained error must not wait for Session termination");
+    assert!(matches!(
+        outcome,
+        Err(ExperimentalSessionControlError::ShutdownHandoff { message })
+            if message == "retryable before teardown"
+    ));
+}
+
 #[tokio::test]
 async fn submission_loop_channel_close_runs_full_thread_teardown() {
     struct SessionStopMarker;
@@ -8198,6 +8443,7 @@ where
         conversation: Arc::new(RealtimeConversationManager::new()),
         active_turn: Mutex::new(None),
         experimental_session_control_shutdown_submissions: Arc::new(AtomicUsize::new(0)),
+        pending_durable_session_shutdown: std::sync::Mutex::new(None),
         pending_user_message_admissions: Default::default(),
         input_queue: super::input_queue::InputQueue::new(),
         guardian_review_session: crate::guardian::GuardianReviewSessionManager::default(),

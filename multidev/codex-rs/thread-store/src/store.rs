@@ -72,15 +72,10 @@ where
             Ok(()) => archived_thread_ids.push(thread_id),
             Err(err) if archived_thread_ids.is_empty() => return Err(err),
             Err(err) => {
-                return Err(ThreadStoreError::Internal {
-                    message: format!(
-                        "archive partially completed; archived thread ids: {}; failed thread {thread_id}: {err}",
-                        archived_thread_ids
-                            .iter()
-                            .map(ToString::to_string)
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    ),
+                return Err(ThreadStoreError::Partial {
+                    completed_thread_ids: archived_thread_ids,
+                    failed_thread_id: thread_id,
+                    message: err.to_string(),
                 });
             }
         }
@@ -404,9 +399,14 @@ mod tests {
         .await
         .expect_err("the batch must not report success after a runtime partial failure");
 
-        let message = error.to_string();
-        assert!(message.contains(&thread_ids[0].to_string()));
-        assert!(message.contains(&thread_ids[1].to_string()));
+        assert!(matches!(
+            error,
+            ThreadStoreError::Partial {
+                completed_thread_ids,
+                failed_thread_id,
+                ..
+            } if completed_thread_ids == vec![thread_ids[0]] && failed_thread_id == thread_ids[1]
+        ));
         assert_eq!(attempts.load(Ordering::Acquire), 2);
     }
 }

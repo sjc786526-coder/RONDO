@@ -123,6 +123,16 @@ pub enum ThreadStoreError {
         message: String,
     },
 
+    /// An ordered batch crossed its mutation boundary before a later member failed.
+    #[error(
+        "thread-store operation partially completed; completed thread ids: {completed_thread_ids:?}; failed thread {failed_thread_id}: {message}"
+    )]
+    Partial {
+        completed_thread_ids: Vec<ThreadId>,
+        failed_thread_id: ThreadId,
+        message: String,
+    },
+
     /// The store implementation does not support this operation yet.
     #[error("thread-store unsupported operation: {operation}")]
     Unsupported {

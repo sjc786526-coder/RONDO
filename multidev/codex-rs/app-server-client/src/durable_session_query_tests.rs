@@ -72,11 +72,13 @@ fn protocol_view(
         "residency": "notObservedHere",
         "operationAvailability": {
             "resume": unknown_protocol_operation(),
+            "setRootState": unknown_protocol_operation(),
             "close": unknown_protocol_operation(),
             "archive": unknown_protocol_operation(),
             "unarchive": unknown_protocol_operation(),
             "delete": unknown_protocol_operation()
         },
+        "controlPrecondition": null,
         "provenance": {
             "identity": "sessionMeta",
             "storageStatus": "threadStore",

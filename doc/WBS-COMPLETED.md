@@ -2125,3 +2125,36 @@ formal retry 整改为 `d29e857`，最终独立验收提交为 `43cf0eeb3e1b4826
   `py_compile`、shell syntax、JSON 与 diff checks 通过。最终独立复验无剩余 correctness/functionality finding。
 - 结果见 `eval/results/publication-critic/skywork-reward-v2-qwen3-4b-base-quality-v1.{json,md}`，执行与验收细节见对应 Plan 079
   `agent_log`。本任务没有形成后继任务授权；三期当前状态与后续选择只由 `doc/WBS.md` 及三期子 WBS 维护。
+
+## M4-C2 正式 Session Control / TUI（Plan 080，2026-08-25）
+
+**状态**：稳定 app-server v2→client→TUI 控制链、fresh Session/store 正式轮、两轮独立审查整改与最终复验均已完成；验收通过、
+任务目标完成，结论为 `M4_C2_CONTROL_PASS`。产品候选提交为 `6865a649af11f8f93e069f436a8db855dad272cb`。
+
+- 新增独立默认关闭的稳定 `session/control`。正式 query 投影 control proof/availability；committed online proof 绑定 live Root owner
+  incarnation，Team mutation gate 与 M4-S2 close barrier 在线性化点复验 exact owner、Team instance/revision/commit generation。
+  cold archive/unarchive/delete 复用原生 ThreadStore 生命周期；控制面不直接写持久介质，也未新建第二套 Session/Team 状态源。
+- `Close` 复用 M4-S2 owner removal barrier，成功只承诺 `OwnerClosed`；whole-Session lifecycle 不能由现有领域事实证明时仍为 typed
+  `Unknown`。Applied/Rejected/Partial/Unknown 贯穿 protocol、client 与 TUI，response loss、timeout、disconnect、lag、detach 和
+  late completion 均不自动重放 mutation，操作后只用正式 query 重建当前视图。
+- parented child 在正式 control 入口 fail closed。Delete 对 M4-S2 保留的 canonical Root retry anchor 只允许权威重读后的用户显式重试，
+  不自动重放。TUI `/session-control` 在展示确认前由 query availability/freshness 驱动 preview，并显示 Session/Root/目标范围；仅关闭
+  control 不 detach query attachment。双开时正式入口优先，C0 prototype 继续隔离。
+- persistence/runtime teardown 之后的 Team close completion 故障已按不可回滚终态处理：Session loop 终止，lifecycle 不重开，app-server
+  只清理 exact owner mapping、保留 replacement，控制结果保持 typed Unknown；没有新增 registry 或 mutation 自动重试。
+- 第二轮整改统一了 loaded-descendant/no-Root 下 Archive/Delete query availability 与 server admission；accepted handoff 后 sender/loop
+  异常进入 terminal exact-owner cleanup，显式 RetainedError 仍可回滚；owner incarnation mismatch 统一为 `NotCurrentOwner`。Close 与
+  active Archive 的 after-preflight Team commit race、query residency、typed Unknown 和 replacement-safe cleanup 已形成 13/13 直接回归。
+- fresh 正式轮完成 owner close、cold archive/unarchive、进程重启 list/read rebuild、delete 与 SessionNotFound，且没有启动 turn、模型
+  或 API。首次独立审查的 2 High、5 Medium、1 Low 及后续复验 finding 均已闭合；最终独立复验无未关闭 correctness finding。
+- 改产品代码前的合并树 query×lifecycle 基线为 `45/45`；原正式控制轮 `17/17`、邻接 query×lifecycle `47/47` 与 fresh 证据按审查
+  结论在原覆盖范围继续有效。整改直接轮 29 项最终全部通过，另补 default-off/query-only/removal token 3/3、teardown 后故障注入
+  1/1 与普通 app-server query 邻接 1/1；第二轮冻结代码直接回归 13/13。stable/experimental app-server schema、七 crate及最终
+  core/app-server scoped fix/clippy、fmt/fmt-check 和 diff 门禁通过。
+- 首轮获批清理只移除 069 `debug/incremental`。整改测试触及 270GB 告警后停止扩大范围，并在再次核对 owner/realpath/归属后只清同一
+  已授权 incremental；`debug/deps` 始终保留。提交前项目/target 为 `248,862,612,879 / 175,170,759,743 B`。未运行 full-workspace、
+  Docker、真实 API/模型、训练、测评、benchmark、CI/PR 或远端操作。初始执行与整改细节分别见
+  `agent_log/2026-08-25-153057-plan080-m4-c2-session-control-tui.md`、
+  `agent_log/2026-08-25-170351-plan080-review-remediation.md`、
+  `agent_log/2026-08-25-190915-plan080-rereview-remediation.md`；最终独立验收见
+  `agent_log/2026-08-25-192431-plan080-final-independent-acceptance.md`，无剩余 correctness/functionality finding。

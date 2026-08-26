@@ -36,6 +36,79 @@ mod thread_list_cwd_filter_tests {
     }
 }
 
+mod terminal_formal_owner_cleanup_tests {
+    use super::super::remove_terminal_formal_owner_if_same;
+    use codex_core::ExperimentalSessionControlError;
+    use std::sync::Arc;
+    use tokio::sync::Mutex;
+
+    fn terminal_unknown() -> ExperimentalSessionControlError {
+        ExperimentalSessionControlError::ShutdownTerminatedWithError {
+            message: "accepted shutdown terminated without a known final result".to_string(),
+        }
+    }
+
+    #[tokio::test]
+    async fn terminal_unknown_removes_exact_old_owner() {
+        let mapped_owner = Arc::new(Mutex::new(Some(1_u8)));
+        let cleanup_owner = Arc::clone(&mapped_owner);
+
+        let removed =
+            remove_terminal_formal_owner_if_same(&terminal_unknown(), move || async move {
+                let mut mapped = cleanup_owner.lock().await;
+                if *mapped == Some(1) {
+                    *mapped = None;
+                    true
+                } else {
+                    false
+                }
+            })
+            .await;
+
+        assert!(removed);
+        assert_eq!(*mapped_owner.lock().await, None);
+    }
+
+    #[tokio::test]
+    async fn terminal_unknown_preserves_same_id_replacement() {
+        let mapped_owner = Arc::new(Mutex::new(Some(2_u8)));
+        let cleanup_owner = Arc::clone(&mapped_owner);
+
+        let removed =
+            remove_terminal_formal_owner_if_same(&terminal_unknown(), move || async move {
+                let mut mapped = cleanup_owner.lock().await;
+                if *mapped == Some(1) {
+                    *mapped = None;
+                    true
+                } else {
+                    false
+                }
+            })
+            .await;
+
+        assert!(!removed);
+        assert_eq!(*mapped_owner.lock().await, Some(2));
+    }
+
+    #[tokio::test]
+    async fn retained_shutdown_error_does_not_remove_owner() {
+        let cleanup_called = Arc::new(Mutex::new(false));
+        let cleanup_called_by_closure = Arc::clone(&cleanup_called);
+        let error = ExperimentalSessionControlError::ShutdownHandoff {
+            message: "retained and retryable".to_string(),
+        };
+
+        let removed = remove_terminal_formal_owner_if_same(&error, move || async move {
+            *cleanup_called_by_closure.lock().await = true;
+            true
+        })
+        .await;
+
+        assert!(!removed);
+        assert!(!*cleanup_called.lock().await);
+    }
+}
+
 mod background_terminal_pagination_tests {
     use super::super::paginate_background_terminals;
     use codex_app_server_protocol::ThreadBackgroundTerminal;

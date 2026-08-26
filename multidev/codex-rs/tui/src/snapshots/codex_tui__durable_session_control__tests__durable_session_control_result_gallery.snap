@@ -1,0 +1,12 @@
+---
+source: tui/src/durable_session_control_tests.rs
+expression: "[applied, rejected, unknown].join(\"\\n\\n\")"
+---
+Durable Session control: applied archive; affected threads=2
+The attached query view is stale; a fresh session/read is required before another mutation.
+
+Durable Session control: rejected Delete; reason=StalePrecondition; no effect was confirmed: the committed Team changed
+The attached query view is stale; a fresh session/read is required before another mutation.
+
+Durable Session control result unknown: session/control timed out after submission
+The request was submitted once and was not replayed. A fresh session/read is required before another mutation.

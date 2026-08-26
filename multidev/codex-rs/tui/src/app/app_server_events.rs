@@ -36,7 +36,11 @@ impl App {
     ) {
         match event {
             AppServerEvent::Lagged { skipped } => {
-                app_server_client.durable_session_on_lagged();
+                let control_retired = app_server_client.durable_session_on_lagged();
+                self.render_durable_session_control_sync_loss(
+                    control_retired,
+                    "app-server event lag made the pending control result unknown",
+                );
                 self.render_durable_session_sync_loss(
                     app_server_client,
                     "app-server event lag; refresh is required",
@@ -62,7 +66,11 @@ impl App {
                     .await;
             }
             AppServerEvent::Disconnected { message } => {
-                app_server_client.durable_session_on_disconnected();
+                let control_retired = app_server_client.durable_session_on_disconnected();
+                self.render_durable_session_control_sync_loss(
+                    control_retired,
+                    "app-server disconnected before the pending control result was observed",
+                );
                 self.render_durable_session_sync_loss(
                     app_server_client,
                     "app-server disconnected; reconnect and refresh are required",
@@ -83,7 +91,11 @@ impl App {
         &mut self,
         app_server_client: &AppServerSession,
     ) {
-        app_server_client.durable_session_on_event_stream_closed();
+        let control_retired = app_server_client.durable_session_on_event_stream_closed();
+        self.render_durable_session_control_sync_loss(
+            control_retired,
+            "app-server event stream closed before the pending control result was observed",
+        );
         self.render_durable_session_sync_loss(
             app_server_client,
             "app-server event stream closed; reconnect and refresh are required",

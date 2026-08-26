@@ -135,7 +135,7 @@ impl SlashCommand {
             }
             SlashCommand::Experimental => "toggle experimental features",
             SlashCommand::Sessions => "inspect Sessions",
-            SlashCommand::SessionControl => "use experimental Session control",
+            SlashCommand::SessionControl => "control durable Sessions",
             SlashCommand::AutoReview => "approve one retry of a recent auto-review denial",
             SlashCommand::Memories => "configure memory use and generation",
             SlashCommand::Mcp => "list configured MCP tools; use /mcp verbose for details",

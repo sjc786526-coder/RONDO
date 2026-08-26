@@ -27,7 +27,7 @@ pub(crate) enum DurableSessionQueryCompletion {
     },
     Session {
         ticket: QueryReadTicket,
-        result: Result<DurableSessionReadResponse, String>,
+        result: Box<Result<DurableSessionReadResponse, String>>,
     },
 }
 
@@ -173,8 +173,9 @@ pub(crate) fn render_projection(
         ),
         format!("durable read: {}", read_status_label(&view.read_status)),
         format!(
-            "operations: resume={} | close={} | archive={} | unarchive={} | delete={}",
+            "operations: resume={} | set-root-state={} | close={} | archive={} | unarchive={} | delete={}",
             operation_label(&view.operation_availability.resume),
+            operation_label(&view.operation_availability.set_root_state),
             operation_label(&view.operation_availability.close),
             operation_label(&view.operation_availability.archive),
             operation_label(&view.operation_availability.unarchive),
@@ -363,6 +364,8 @@ fn operation_reason_label(reason: DurableSessionOperationAvailabilityReason) -> 
         DurableSessionOperationAvailabilityReason::ResidencyUnknown => "residency-unknown",
         DurableSessionOperationAvailabilityReason::OwnerUnavailableHere => "owner-unavailable-here",
         DurableSessionOperationAvailabilityReason::NotObservedHere => "not-observed-here",
+        DurableSessionOperationAvailabilityReason::ControlDisabled => "control-disabled",
+        DurableSessionOperationAvailabilityReason::AlreadyLoaded => "already-loaded",
         DurableSessionOperationAvailabilityReason::AlreadyArchived => "already-archived",
         DurableSessionOperationAvailabilityReason::NotArchived => "not-archived",
         DurableSessionOperationAvailabilityReason::Closing => "closing",

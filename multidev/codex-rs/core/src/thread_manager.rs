@@ -1524,6 +1524,26 @@ impl ThreadManagerState {
         thread.with_experimental_session_control_residency(operation)
     }
 
+    /// Revalidate the current map entry for the formal shutdown that already published its
+    /// shutdown-attempt fence. This bypasses ordinary online residency admission only for that
+    /// fenced caller; replacement remains excluded by the map read lease.
+    pub(crate) async fn with_current_running_session_for_formal_shutdown<T>(
+        &self,
+        thread_id: ThreadId,
+        expected: &Session,
+        operation: impl FnOnce() -> T,
+    ) -> Option<T> {
+        let threads = self.threads.read().await;
+        let thread = threads.get(&thread_id)?;
+        if thread.session_source.is_internal()
+            || !thread.is_running()
+            || !std::ptr::eq(thread.session.as_ref(), expected)
+        {
+            return None;
+        }
+        thread.with_formal_shutdown_residency(operation)
+    }
+
     /// Drop a map-resident thread whose submit channel is already closed.
     ///
     /// Product availability treats this as unloaded, then classifies from stored resume material.

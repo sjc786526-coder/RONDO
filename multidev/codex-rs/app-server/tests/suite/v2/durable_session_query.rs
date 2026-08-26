@@ -8,35 +8,54 @@ use app_test_support::MockResponsesConfig;
 use app_test_support::TestAppServer;
 use app_test_support::create_fake_parented_rollout_with_source;
 use app_test_support::create_fake_rollout;
+use app_test_support::create_final_assistant_message_sse_response;
+use app_test_support::create_mock_responses_server_sequence_unchecked;
 use codex_app_server::in_process;
+use codex_app_server::in_process::InProcessServerEvent;
 use codex_app_server::in_process::InProcessStartArgs;
 use codex_app_server_protocol::ClientInfo;
 use codex_app_server_protocol::ClientRequest;
+use codex_app_server_protocol::DurableSessionControlEffect;
+use codex_app_server_protocol::DurableSessionControlOperation;
+use codex_app_server_protocol::DurableSessionControlOutcome;
+use codex_app_server_protocol::DurableSessionControlParams;
+use codex_app_server_protocol::DurableSessionControlRejectionReason;
+use codex_app_server_protocol::DurableSessionControlResponse;
 use codex_app_server_protocol::DurableSessionDomainLifecycle;
 use codex_app_server_protocol::DurableSessionFactProvenance;
 use codex_app_server_protocol::DurableSessionListParams;
 use codex_app_server_protocol::DurableSessionListResponse;
+use codex_app_server_protocol::DurableSessionOperationAvailability;
 use codex_app_server_protocol::DurableSessionReadIssue;
 use codex_app_server_protocol::DurableSessionReadParams;
 use codex_app_server_protocol::DurableSessionReadResponse;
 use codex_app_server_protocol::DurableSessionReadStatus;
 use codex_app_server_protocol::DurableSessionResidency;
 use codex_app_server_protocol::DurableSessionStorageStatus;
+use codex_app_server_protocol::DurableSessionTeamProducerState;
+use codex_app_server_protocol::DurableSessionTeamRootState;
 use codex_app_server_protocol::ExperimentalSessionReadParams;
 use codex_app_server_protocol::InitializeCapabilities;
 use codex_app_server_protocol::InitializeParams;
 use codex_app_server_protocol::JSONRPCError;
 use codex_app_server_protocol::RequestId;
+use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::ThreadArchiveParams;
 use codex_app_server_protocol::ThreadArchiveResponse;
 use codex_app_server_protocol::ThreadLoadedListParams;
 use codex_app_server_protocol::ThreadLoadedListResponse;
+use codex_app_server_protocol::ThreadResumeParams;
+use codex_app_server_protocol::ThreadResumeResponse;
 use codex_app_server_protocol::ThreadStartParams;
 use codex_app_server_protocol::ThreadStartResponse;
+use codex_app_server_protocol::TurnStartParams;
+use codex_app_server_protocol::TurnStartResponse;
+use codex_app_server_protocol::UserInput;
 use codex_arg0::Arg0DispatchPaths;
 use codex_config::CloudConfigBundleLoader;
 use codex_config::LoaderOverrides;
 use codex_core::config::ConfigBuilder;
+use codex_core::init_state_db;
 use codex_exec_server::EnvironmentManager;
 use codex_features::Feature;
 use codex_feedback::CodexFeedback;
@@ -46,10 +65,14 @@ use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::SubAgentSource;
 use codex_thread_store::InMemoryThreadStore;
 use core_test_support::responses;
+use core_test_support::streaming_sse::StreamingSseChunk;
+use core_test_support::streaming_sse::start_streaming_sse_server;
 use pretty_assertions::assert_eq;
 use serde_json::json;
 use std::sync::Arc;
 use tempfile::TempDir;
+use tokio::sync::Mutex;
+use tokio::sync::oneshot;
 use tokio::time::timeout;
 use uuid::Uuid;
 
@@ -93,6 +116,22 @@ async fn durable_session_query_is_default_off() -> Result<()> {
             .message
             .contains("Durable Session query is disabled")
     );
+    let control_id = ThreadId::new().to_string();
+    let control = session_control(
+        &mut mcp,
+        &control_id,
+        dummy_committed_precondition(),
+        DurableSessionControlOperation::Delete,
+    )
+    .await?;
+    assert!(matches!(
+        control.outcome,
+        DurableSessionControlOutcome::Rejected {
+            reason: DurableSessionControlRejectionReason::Unsupported,
+            ..
+        }
+    ));
+    assert!(loaded_thread_ids(&mut mcp).await?.is_empty());
     Ok(())
 }
 
@@ -151,6 +190,87 @@ async fn durable_session_query_is_stable_and_independent_of_experimental_api() -
         .await?;
     let error = read_error(&mut mcp, request_id).await?;
     assert_eq!(error.error.code, -32600);
+    let control = session_control(
+        &mut mcp,
+        &id,
+        dummy_committed_precondition(),
+        DurableSessionControlOperation::Delete,
+    )
+    .await?;
+    assert!(matches!(
+        control.outcome,
+        DurableSessionControlOutcome::Rejected {
+            reason: DurableSessionControlRejectionReason::Unsupported,
+            ..
+        }
+    ));
+    assert!(loaded_thread_ids(&mut mcp).await?.is_empty());
+    Ok(())
+}
+
+#[tokio::test]
+async fn durable_session_control_rejects_a_non_durable_root_without_side_effects() -> Result<()> {
+    let codex_home = TempDir::new()?;
+    MockResponsesConfig::new("http://127.0.0.1:1")
+        .enable_feature(Feature::DurableSessionQuery)
+        .enable_feature(Feature::DurableSessionControl)
+        .disable_feature(Feature::MultiAgentV2)
+        .write(codex_home.path())?;
+    let legacy_id = create_fake_rollout(
+        codex_home.path(),
+        "2026-08-25T10-00-00",
+        "2026-08-25T10:00:00Z",
+        "legacy control rejection",
+        Some("mock_provider"),
+        /*git_info*/ None,
+    )?;
+    let legacy_thread_id = ThreadId::from_string(&legacy_id)?;
+    let rollout = codex_core::find_thread_path_by_id_str(
+        codex_home.path(),
+        &legacy_id,
+        /*state_db_ctx*/ None,
+    )
+    .await?
+    .expect("legacy Root rollout");
+    let rollout_before = std::fs::read(&rollout)?;
+    let mut mcp = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .without_auto_env()
+        .build_initialized_with_timeout(DEFAULT_TIMEOUT)
+        .await?;
+
+    let read = session_read(&mut mcp, &legacy_id).await?.session;
+    assert_eq!(
+        read.read_status,
+        DurableSessionReadStatus::Unsupported {
+            issue: DurableSessionReadIssue::LegacySession,
+        }
+    );
+    let control = session_control(
+        &mut mcp,
+        &legacy_id,
+        dummy_committed_precondition(),
+        DurableSessionControlOperation::Delete,
+    )
+    .await?;
+    assert!(matches!(
+        control.outcome,
+        DurableSessionControlOutcome::Rejected {
+            reason: DurableSessionControlRejectionReason::InvalidState,
+            ..
+        }
+    ));
+    assert_eq!(std::fs::read(&rollout)?, rollout_before);
+    assert!(
+        codex_core::find_thread_path_by_id_str(
+            codex_home.path(),
+            &legacy_thread_id.to_string(),
+            /*state_db_ctx*/ None,
+        )
+        .await?
+        .is_some()
+    );
+    assert!(loaded_thread_ids(&mut mcp).await?.is_empty());
     Ok(())
 }
 
@@ -584,6 +704,752 @@ async fn durable_session_query_reads_cold_commits_without_activation_or_writes()
 }
 
 #[tokio::test]
+async fn durable_session_control_revalidates_proof_and_reuses_cold_lifecycle() -> Result<()> {
+    let model_server = responses::start_mock_server().await;
+    let codex_home = TempDir::new()?;
+    write_control_config(codex_home.path(), &model_server.uri())?;
+    let mut mcp = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized_with_timeout(DEFAULT_TIMEOUT)
+        .await?;
+    let root_thread_id = start_durable_session(&mut mcp).await?;
+
+    let active = session_read(&mut mcp, &root_thread_id).await?.session;
+    assert_eq!(active.storage_status, DurableSessionStorageStatus::Active);
+    assert_eq!(active.residency, DurableSessionResidency::ObservedOwnerHere);
+    let proof = active
+        .control_precondition
+        .expect("control-enabled complete query should return a proof");
+
+    let mut stale = proof.clone();
+    let codex_app_server_protocol::DurableSessionControlPrecondition::CommittedTeam {
+        team_revision,
+        ..
+    } = &mut stale
+    else {
+        panic!("complete Team query should return a committed Team proof");
+    };
+    *team_revision = team_revision.saturating_add(1);
+    let rejected = session_control(
+        &mut mcp,
+        &root_thread_id,
+        stale,
+        DurableSessionControlOperation::Archive,
+    )
+    .await?;
+    assert!(matches!(
+        rejected.outcome,
+        DurableSessionControlOutcome::Rejected {
+            reason: DurableSessionControlRejectionReason::NotCurrentOwner,
+            ..
+        }
+    ));
+    assert_eq!(
+        session_read(&mut mcp, &root_thread_id)
+            .await?
+            .session
+            .storage_status,
+        DurableSessionStorageStatus::Active
+    );
+
+    let archived = session_control(
+        &mut mcp,
+        &root_thread_id,
+        proof,
+        DurableSessionControlOperation::Archive,
+    )
+    .await?;
+    assert!(matches!(
+        archived.outcome,
+        DurableSessionControlOutcome::Applied {
+            effect: DurableSessionControlEffect::Archived { .. }
+        }
+    ));
+    let archived_view = session_read(&mut mcp, &root_thread_id).await?.session;
+    assert_eq!(
+        archived_view.storage_status,
+        DurableSessionStorageStatus::Archived
+    );
+    assert!(loaded_thread_ids(&mut mcp).await?.is_empty());
+
+    let unarchived = session_control(
+        &mut mcp,
+        &root_thread_id,
+        archived_view
+            .control_precondition
+            .expect("archived query should return a fresh proof"),
+        DurableSessionControlOperation::Unarchive,
+    )
+    .await?;
+    assert!(matches!(
+        unarchived.outcome,
+        DurableSessionControlOutcome::Applied {
+            effect: DurableSessionControlEffect::Unarchived
+        }
+    ));
+    let cold_active = session_read(&mut mcp, &root_thread_id).await?.session;
+    assert_eq!(
+        cold_active.storage_status,
+        DurableSessionStorageStatus::Active
+    );
+    assert_eq!(
+        cold_active.residency,
+        DurableSessionResidency::NotObservedHere
+    );
+
+    let deleted = session_control(
+        &mut mcp,
+        &root_thread_id,
+        cold_active
+            .control_precondition
+            .expect("cold active query should return a fresh proof"),
+        DurableSessionControlOperation::Delete,
+    )
+    .await?;
+    assert!(matches!(
+        deleted.outcome,
+        DurableSessionControlOutcome::Applied {
+            effect: DurableSessionControlEffect::Deleted { .. }
+        }
+    ));
+    let missing = session_read(&mut mcp, &root_thread_id).await?.session;
+    assert_eq!(
+        missing.read_status,
+        DurableSessionReadStatus::Unavailable {
+            issue: DurableSessionReadIssue::SessionNotFound,
+        }
+    );
+    assert!(
+        model_server
+            .received_requests()
+            .await
+            .unwrap_or_default()
+            .iter()
+            .all(|request| !request.url.path().ends_with("/responses"))
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn durable_session_control_rejects_a_replaced_owner_incarnation() -> Result<()> {
+    let model_server = responses::start_mock_server().await;
+    let codex_home = TempDir::new()?;
+    write_control_config(codex_home.path(), &model_server.uri())?;
+    let mut mcp = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized_with_timeout(DEFAULT_TIMEOUT)
+        .await?;
+    let root_thread_id = start_durable_session(&mut mcp).await?;
+
+    let owner_a = session_read(&mut mcp, &root_thread_id).await?.session;
+    let owner_a_proof = owner_a
+        .control_precondition
+        .expect("loaded owner A should project a formal proof");
+    let closed = session_control(
+        &mut mcp,
+        &root_thread_id,
+        owner_a_proof.clone(),
+        DurableSessionControlOperation::Close,
+    )
+    .await?;
+    assert!(matches!(
+        closed.outcome,
+        DurableSessionControlOutcome::Applied {
+            effect: DurableSessionControlEffect::OwnerClosed,
+        }
+    ));
+    assert!(loaded_thread_ids(&mut mcp).await?.is_empty());
+
+    let resume_id = mcp
+        .send_thread_resume_request(ThreadResumeParams {
+            thread_id: root_thread_id.clone(),
+            ..Default::default()
+        })
+        .await?;
+    let ThreadResumeResponse { thread, .. } =
+        timeout(DEFAULT_TIMEOUT, mcp.read_response(resume_id)).await??;
+    assert_eq!(thread.id, root_thread_id);
+
+    let owner_b = session_read(&mut mcp, &root_thread_id).await?.session;
+    let owner_b_proof = owner_b
+        .control_precondition
+        .clone()
+        .expect("replacement owner B should project a formal proof");
+    let (
+        codex_app_server_protocol::DurableSessionControlPrecondition::CommittedTeam {
+            owner_incarnation: Some(owner_a_incarnation),
+            team_instance_id: owner_a_team,
+            team_revision: owner_a_revision,
+            commit_generation: owner_a_generation,
+            commit_fingerprint: owner_a_fingerprint,
+            ..
+        },
+        codex_app_server_protocol::DurableSessionControlPrecondition::CommittedTeam {
+            owner_incarnation: Some(owner_b_incarnation),
+            team_instance_id: owner_b_team,
+            team_revision: owner_b_revision,
+            commit_generation: owner_b_generation,
+            commit_fingerprint: owner_b_fingerprint,
+            ..
+        },
+    ) = (&owner_a_proof, &owner_b_proof)
+    else {
+        panic!("both loaded owners should carry committed Team proofs and authority incarnations");
+    };
+    assert_ne!(owner_a_incarnation, owner_b_incarnation);
+    assert_eq!(owner_a_team, owner_b_team);
+    assert_eq!(owner_a_revision, owner_b_revision);
+    assert_eq!(owner_a_generation, owner_b_generation);
+    assert_eq!(owner_a_fingerprint, owner_b_fingerprint);
+
+    let rejected = session_control(
+        &mut mcp,
+        &root_thread_id,
+        owner_a_proof,
+        DurableSessionControlOperation::Close,
+    )
+    .await?;
+    assert!(matches!(
+        rejected.outcome,
+        DurableSessionControlOutcome::Rejected {
+            reason: DurableSessionControlRejectionReason::NotCurrentOwner,
+            ..
+        }
+    ));
+    assert_eq!(loaded_thread_ids(&mut mcp).await?, vec![root_thread_id]);
+    assert_eq!(
+        session_read(&mut mcp, &thread.id)
+            .await?
+            .session
+            .control_precondition,
+        Some(owner_b_proof)
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn durable_session_control_rejects_a_parented_self_consistent_root_before_delete()
+-> Result<()> {
+    let model_server = responses::start_mock_server().await;
+    let codex_home = TempDir::new()?;
+    write_control_config(codex_home.path(), &model_server.uri())?;
+    let mut primary = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized_with_timeout(DEFAULT_TIMEOUT)
+        .await?;
+    let root_thread_id = start_durable_session(&mut primary).await?;
+    let rollout = codex_core::find_thread_path_by_id_str(
+        codex_home.path(),
+        &root_thread_id,
+        /*state_db_ctx*/ None,
+    )
+    .await?
+    .expect("durable Root rollout");
+    let snapshot = team_snapshot_path(codex_home.path(), &root_thread_id);
+    drop(primary);
+
+    let mut cold_reader = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .without_auto_env()
+        .build_initialized_with_timeout(DEFAULT_TIMEOUT)
+        .await?;
+    let cold_proof = session_read(&mut cold_reader, &root_thread_id)
+        .await?
+        .session
+        .control_precondition
+        .expect("cold self-consistent durable Root proof");
+    assert!(matches!(
+        &cold_proof,
+        codex_app_server_protocol::DurableSessionControlPrecondition::CommittedTeam {
+            expected_residency: DurableSessionResidency::NotObservedHere,
+            owner_incarnation: None,
+            ..
+        }
+    ));
+    drop(cold_reader);
+
+    rewrite_parent_thread_id(&rollout, ThreadId::new())?;
+    let rollout_before = std::fs::read(&rollout)?;
+    let snapshot_before = std::fs::read(&snapshot)?;
+    let mut restarted = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .without_auto_env()
+        .build_initialized_with_timeout(DEFAULT_TIMEOUT)
+        .await?;
+    let rejected = session_control(
+        &mut restarted,
+        &root_thread_id,
+        cold_proof,
+        DurableSessionControlOperation::Delete,
+    )
+    .await?;
+    assert!(matches!(
+        rejected.outcome,
+        DurableSessionControlOutcome::Rejected {
+            reason: DurableSessionControlRejectionReason::NotCurrentOwner,
+            ..
+        }
+    ));
+    assert_eq!(std::fs::read(&rollout)?, rollout_before);
+    assert_eq!(std::fs::read(&snapshot)?, snapshot_before);
+    assert!(loaded_thread_ids(&mut restarted).await?.is_empty());
+    Ok(())
+}
+
+#[tokio::test]
+async fn durable_session_control_explicitly_retries_delete_from_the_root_marker() -> Result<()> {
+    let model_server = responses::start_mock_server().await;
+    let codex_home = TempDir::new()?;
+    write_control_config(codex_home.path(), &model_server.uri())?;
+    let mut primary = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized_with_timeout(DEFAULT_TIMEOUT)
+        .await?;
+    let root_thread_id = start_durable_session(&mut primary).await?;
+    let rollout = codex_core::find_thread_path_by_id_str(
+        codex_home.path(),
+        &root_thread_id,
+        /*state_db_ctx*/ None,
+    )
+    .await?
+    .expect("durable Root rollout");
+    let snapshot = team_snapshot_path(codex_home.path(), &root_thread_id);
+    drop(primary);
+    std::fs::remove_file(&snapshot)?;
+    assert!(rollout.is_file());
+
+    let mut restarted = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .without_auto_env()
+        .build_initialized_with_timeout(DEFAULT_TIMEOUT)
+        .await?;
+    let recovery = session_read(&mut restarted, &root_thread_id).await?.session;
+    assert_eq!(
+        recovery.read_status,
+        DurableSessionReadStatus::Incomplete {
+            issue: DurableSessionReadIssue::TeamSnapshotMissing,
+        }
+    );
+    assert_eq!(
+        recovery.operation_availability.delete.availability,
+        DurableSessionOperationAvailability::Available
+    );
+    let recovery_proof = recovery
+        .control_precondition
+        .expect("explicit delete retry proof");
+    assert!(matches!(
+        &recovery_proof,
+        codex_app_server_protocol::DurableSessionControlPrecondition::DeleteRetryAnchor {
+            expected_storage_status: DurableSessionStorageStatus::Active,
+            expected_residency: DurableSessionResidency::NotObservedHere,
+            ..
+        }
+    ));
+    assert!(loaded_thread_ids(&mut restarted).await?.is_empty());
+
+    let deleted = session_control(
+        &mut restarted,
+        &root_thread_id,
+        recovery_proof,
+        DurableSessionControlOperation::Delete,
+    )
+    .await?;
+    assert!(matches!(
+        deleted.outcome,
+        DurableSessionControlOutcome::Applied {
+            effect: DurableSessionControlEffect::Deleted { .. }
+        }
+    ));
+    assert!(!rollout.exists());
+    assert!(!snapshot.exists());
+    assert_eq!(
+        session_read(&mut restarted, &root_thread_id)
+            .await?
+            .session
+            .read_status,
+        DurableSessionReadStatus::Unavailable {
+            issue: DurableSessionReadIssue::SessionNotFound,
+        }
+    );
+    assert!(
+        model_server
+            .received_requests()
+            .await
+            .unwrap_or_default()
+            .iter()
+            .all(|request| !request.url.path().ends_with("/responses"))
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn durable_session_control_updates_only_the_current_loaded_root_snapshot() -> Result<()> {
+    let publish_args = serde_json::to_string(&json!({
+        "title": "formal control event",
+        "summary": "bind one root-state change to a committed query proof",
+        "handoff": null
+    }))?;
+    let model_server = create_mock_responses_server_sequence_unchecked(vec![
+        responses::sse(vec![
+            responses::ev_response_created("formal-publish"),
+            responses::ev_function_call_with_namespace(
+                "formal-publish-call",
+                "collaboration",
+                "team_publish",
+                &publish_args,
+            ),
+            responses::ev_completed("formal-publish"),
+        ]),
+        create_final_assistant_message_sse_response("published")?,
+    ])
+    .await;
+    let codex_home = TempDir::new()?;
+    write_control_config(codex_home.path(), &model_server.uri())?;
+    let mut mcp = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized_with_timeout(DEFAULT_TIMEOUT)
+        .await?;
+    let root_thread_id = start_durable_session(&mut mcp).await?;
+    let _: TurnStartResponse = mcp
+        .request(|request_id| ClientRequest::TurnStart {
+            request_id,
+            params: TurnStartParams {
+                thread_id: root_thread_id.clone(),
+                input: vec![UserInput::Text {
+                    text: "publish one durable Team event".to_string(),
+                    text_elements: Vec::new(),
+                }],
+                ..Default::default()
+            },
+        })
+        .await?;
+    timeout(
+        DEFAULT_TIMEOUT,
+        mcp.read_stream_until_notification_message("turn/completed"),
+    )
+    .await??;
+
+    let before = session_read(&mut mcp, &root_thread_id).await?.session;
+    let proof = before
+        .control_precondition
+        .clone()
+        .expect("complete loaded query proof");
+    let version = &before.team.as_ref().expect("Team projection").events[0].versions[0];
+    assert_eq!(version.root_state, DurableSessionTeamRootState::Tracking);
+    let operation = DurableSessionControlOperation::SetRootState {
+        version_id: version.version_id.clone(),
+        expected_producer_state: DurableSessionTeamProducerState::Open,
+        expected_root_state: DurableSessionTeamRootState::Tracking,
+        next_root_state: DurableSessionTeamRootState::Resolved,
+    };
+    let updated =
+        session_control(&mut mcp, &root_thread_id, proof.clone(), operation.clone()).await?;
+    assert!(matches!(
+        updated.outcome,
+        DurableSessionControlOutcome::Applied {
+            effect: DurableSessionControlEffect::RootStateUpdated { changed: true, .. }
+        }
+    ));
+
+    let stale = session_control(&mut mcp, &root_thread_id, proof, operation).await?;
+    assert!(matches!(
+        stale.outcome,
+        DurableSessionControlOutcome::Rejected {
+            reason: DurableSessionControlRejectionReason::StalePrecondition,
+            ..
+        }
+    ));
+    let after = session_read(&mut mcp, &root_thread_id).await?.session;
+    assert_eq!(
+        after.team.expect("Team projection").events[0].versions[0].root_state,
+        DurableSessionTeamRootState::Resolved
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn durable_session_control_close_rejects_team_commit_after_preflight() -> Result<()> {
+    assert_team_commit_after_control_preflight_is_rejected(DurableSessionControlOperation::Close)
+        .await
+}
+
+#[tokio::test]
+async fn durable_session_control_active_archive_rejects_team_commit_after_preflight() -> Result<()>
+{
+    assert_team_commit_after_control_preflight_is_rejected(DurableSessionControlOperation::Archive)
+        .await
+}
+
+async fn assert_team_commit_after_control_preflight_is_rejected(
+    operation: DurableSessionControlOperation,
+) -> Result<()> {
+    let publish_args = serde_json::to_string(&json!({
+        "title": "commit after formal control preflight",
+        "summary": "the Team commit must win before lifecycle linearization",
+        "handoff": null
+    }))?;
+    let (model_release_tx, model_release_rx) = oneshot::channel();
+    let (model_server, _completions) = start_streaming_sse_server(vec![
+        vec![StreamingSseChunk {
+            gate: Some(model_release_rx),
+            body: responses::sse(vec![
+                responses::ev_response_created("preflight-race-publish"),
+                responses::ev_function_call_with_namespace(
+                    "preflight-race-call",
+                    "collaboration",
+                    "team_publish",
+                    &publish_args,
+                ),
+                responses::ev_completed("preflight-race-publish"),
+            ]),
+        }],
+        vec![StreamingSseChunk {
+            gate: None,
+            body: create_final_assistant_message_sse_response("published after preflight")?,
+        }],
+    ])
+    .await;
+    let codex_home = TempDir::new()?;
+    write_control_config(codex_home.path(), model_server.uri())?;
+    let loader_overrides = LoaderOverrides::without_managed_config_for_tests();
+    let cli_overrides = vec![
+        (
+            "features.multi_agent_v2.enabled".to_string(),
+            toml::Value::Boolean(true),
+        ),
+        (
+            "features.multi_agent_v2.team_state_enabled".to_string(),
+            toml::Value::Boolean(true),
+        ),
+        (
+            "features.multi_agent_v2.durable_team_enabled".to_string(),
+            toml::Value::Boolean(true),
+        ),
+    ];
+    let config = ConfigBuilder::default()
+        .codex_home(codex_home.path().to_path_buf())
+        .fallback_cwd(Some(codex_home.path().to_path_buf()))
+        .cli_overrides(cli_overrides.clone())
+        .loader_overrides(loader_overrides.clone())
+        .build()
+        .await?;
+    let state_db = init_state_db(&config)
+        .await
+        .expect("formal query requires the supported local ThreadStore");
+    let (preflight_entered_tx, preflight_entered_rx) = oneshot::channel();
+    let preflight_entered_tx = Arc::new(Mutex::new(Some(preflight_entered_tx)));
+    let (control_release_tx, control_release_rx) = oneshot::channel();
+    let control_release_rx = Arc::new(Mutex::new(Some(control_release_rx)));
+    let hook_entered = Arc::clone(&preflight_entered_tx);
+    let hook_release = Arc::clone(&control_release_rx);
+    let mut client = in_process::start_with_durable_session_control_preflight_hook(
+        InProcessStartArgs {
+            arg0_paths: Arg0DispatchPaths::default(),
+            config: Arc::new(config),
+            // Thread start reloads its Config through ConfigManager. Reuse the same explicit
+            // overrides so the injected in-process runtime and its Root agree on Team mode.
+            cli_overrides,
+            loader_overrides,
+            strict_config: false,
+            cloud_config_bundle: CloudConfigBundleLoader::default(),
+            thread_config_loader: Arc::new(codex_config::NoopThreadConfigLoader),
+            feedback: CodexFeedback::new(),
+            log_db: None,
+            state_db: Some(state_db),
+            environment_manager: Arc::new(EnvironmentManager::default_for_tests()),
+            config_warnings: Vec::new(),
+            session_source: SessionSource::Cli,
+            enable_codex_api_key_env: false,
+            initialize: InitializeParams {
+                client_info: default_client_info(),
+                capabilities: Some(InitializeCapabilities {
+                    experimental_api: false,
+                    ..Default::default()
+                }),
+            },
+            channel_capacity: in_process::DEFAULT_IN_PROCESS_CHANNEL_CAPACITY,
+        },
+        move |thread_id, operation| {
+            let hook_entered = Arc::clone(&hook_entered);
+            let hook_release = Arc::clone(&hook_release);
+            async move {
+                if let Some(entered) = hook_entered.lock().await.take() {
+                    let _ = entered.send((thread_id, operation));
+                }
+                let release = hook_release.lock().await.take();
+                if let Some(release) = release {
+                    let _ = release.await;
+                }
+            }
+        },
+    )
+    .await?;
+    let sender = client.sender();
+    let start: ThreadStartResponse = serde_json::from_value(
+        sender
+            .request(ClientRequest::ThreadStart {
+                request_id: RequestId::Integer(100),
+                params: ThreadStartParams {
+                    model: Some("mock-model".to_string()),
+                    ..Default::default()
+                },
+            })
+            .await?
+            .expect("thread/start must succeed"),
+    )?;
+    let root_thread_id = start.thread.id;
+    let before = timeout(DEFAULT_TIMEOUT, async {
+        let mut request_id = 101;
+        loop {
+            let response: DurableSessionReadResponse = serde_json::from_value(
+                sender
+                    .request(ClientRequest::DurableSessionRead {
+                        request_id: RequestId::Integer(request_id),
+                        params: DurableSessionReadParams {
+                            session_id: root_thread_id.clone(),
+                            root_thread_id: root_thread_id.clone(),
+                        },
+                    })
+                    .await?
+                    .expect("formal query must succeed"),
+            )?;
+            if response.session.team.is_some() && response.session.control_precondition.is_some() {
+                break Ok::<DurableSessionReadResponse, anyhow::Error>(response);
+            }
+            request_id += 1;
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await??;
+    let before_revision = before
+        .session
+        .team
+        .as_ref()
+        .expect("Team projection")
+        .revision;
+    let proof = before
+        .session
+        .control_precondition
+        .expect("loaded Root proof");
+    let _: TurnStartResponse = serde_json::from_value(
+        sender
+            .request(ClientRequest::TurnStart {
+                request_id: RequestId::Integer(10_002),
+                params: TurnStartParams {
+                    thread_id: root_thread_id.clone(),
+                    input: vec![UserInput::Text {
+                        text: "publish only after lifecycle preflight".to_string(),
+                        text_elements: Vec::new(),
+                    }],
+                    ..Default::default()
+                },
+            })
+            .await?
+            .expect("turn/start must succeed"),
+    )?;
+    timeout(DEFAULT_TIMEOUT, model_server.wait_for_request_count(1)).await?;
+
+    let control_sender = sender.clone();
+    let control_root = root_thread_id.clone();
+    let control_operation = operation.clone();
+    let control = tokio::spawn(async move {
+        control_sender
+            .request(ClientRequest::DurableSessionControl {
+                request_id: RequestId::Integer(10_003),
+                params: DurableSessionControlParams {
+                    session_id: control_root.clone(),
+                    root_thread_id: control_root,
+                    precondition: proof,
+                    operation: control_operation,
+                },
+            })
+            .await
+    });
+    let (hook_thread_id, hook_operation) = timeout(DEFAULT_TIMEOUT, preflight_entered_rx).await??;
+    assert_eq!(hook_thread_id.to_string(), root_thread_id);
+    assert_eq!(hook_operation, operation.kind());
+
+    model_release_tx
+        .send(())
+        .expect("model response gate must still be held");
+    timeout(DEFAULT_TIMEOUT, async {
+        loop {
+            match client.next_event().await {
+                Some(InProcessServerEvent::ServerNotification(notification))
+                    if matches!(
+                        notification.as_ref(),
+                        ServerNotification::TurnCompleted(completed)
+                            if completed.thread_id == root_thread_id
+                    ) =>
+                {
+                    break;
+                }
+                Some(_) => {}
+                None => panic!("in-process runtime ended before turn/completed"),
+            }
+        }
+    })
+    .await?;
+    control_release_tx
+        .send(())
+        .expect("formal control hook must still be held");
+    let control_response: DurableSessionControlResponse = serde_json::from_value(
+        timeout(DEFAULT_TIMEOUT, control)
+            .await???
+            .expect("formal control must return a typed response"),
+    )?;
+    assert!(matches!(
+        control_response.outcome,
+        DurableSessionControlOutcome::Rejected {
+            reason: DurableSessionControlRejectionReason::StalePrecondition,
+            ..
+        }
+    ));
+
+    let after: DurableSessionReadResponse = serde_json::from_value(
+        sender
+            .request(ClientRequest::DurableSessionRead {
+                request_id: RequestId::Integer(104),
+                params: DurableSessionReadParams {
+                    session_id: root_thread_id.clone(),
+                    root_thread_id: root_thread_id.clone(),
+                },
+            })
+            .await?
+            .expect("post-race formal query must succeed"),
+    )?;
+    assert_eq!(
+        after.session.storage_status,
+        DurableSessionStorageStatus::Active
+    );
+    assert_eq!(
+        after.session.residency,
+        DurableSessionResidency::ObservedOwnerHere
+    );
+    let after_team = after.session.team.expect("post-race Team projection");
+    assert!(after_team.revision > before_revision);
+    assert!(
+        after_team
+            .events
+            .iter()
+            .any(|event| event.title == "commit after formal control preflight")
+    );
+    let loaded: ThreadLoadedListResponse = serde_json::from_value(
+        sender
+            .request(ClientRequest::ThreadLoadedList {
+                request_id: RequestId::Integer(105),
+                params: ThreadLoadedListParams::default(),
+            })
+            .await?
+            .expect("thread/loaded/list must succeed"),
+    )?;
+    assert_eq!(loaded.data, vec![root_thread_id]);
+    client.shutdown().await?;
+    model_server.shutdown().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn durable_session_query_reads_an_immediately_dropped_owner_as_cold() -> Result<()> {
     let model_server = responses::start_mock_server().await;
     let codex_home = TempDir::new()?;
@@ -647,6 +1513,16 @@ fn write_query_config(
     config.write(codex_home)
 }
 
+fn write_control_config(codex_home: &Path, model_server_uri: &str) -> std::io::Result<()> {
+    MockResponsesConfig::new(model_server_uri)
+        .enable_feature(Feature::DurableSessionQuery)
+        .enable_feature(Feature::DurableSessionControl)
+        .with_extra_config(
+            "[features.multi_agent_v2]\nenabled = true\nteam_state_enabled = true\ndurable_team_enabled = true",
+        )
+        .write(codex_home)
+}
+
 async fn start_durable_session(mcp: &mut TestAppServer) -> Result<String> {
     let ThreadStartResponse { thread, .. } = mcp
         .start_thread(ThreadStartParams {
@@ -665,6 +1541,36 @@ async fn session_read(mcp: &mut TestAppServer, id: &str) -> Result<DurableSessio
         })
         .await?;
     timeout(DEFAULT_TIMEOUT, mcp.read_response(request_id)).await?
+}
+
+async fn session_control(
+    mcp: &mut TestAppServer,
+    id: &str,
+    precondition: codex_app_server_protocol::DurableSessionControlPrecondition,
+    operation: DurableSessionControlOperation,
+) -> Result<DurableSessionControlResponse> {
+    mcp.request(|request_id| ClientRequest::DurableSessionControl {
+        request_id,
+        params: DurableSessionControlParams {
+            session_id: id.to_string(),
+            root_thread_id: id.to_string(),
+            precondition,
+            operation,
+        },
+    })
+    .await
+}
+
+fn dummy_committed_precondition() -> codex_app_server_protocol::DurableSessionControlPrecondition {
+    codex_app_server_protocol::DurableSessionControlPrecondition::CommittedTeam {
+        expected_storage_status: DurableSessionStorageStatus::Active,
+        expected_residency: DurableSessionResidency::NotObservedHere,
+        owner_incarnation: None,
+        team_instance_id: "000000000000".to_string(),
+        team_revision: 0,
+        commit_generation: 0,
+        commit_fingerprint: format!("sha256:{}", "00".repeat(32)),
+    }
 }
 
 async fn session_list(
@@ -734,6 +1640,20 @@ fn rewrite_session_meta_timestamp(path: &Path, timestamp: &str) -> Result<()> {
     let mut item: serde_json::Value = serde_json::from_slice(&original[..first_line_end])?;
     item["timestamp"] = json!(timestamp);
     item["payload"]["timestamp"] = json!(timestamp);
+    let mut rewritten = serde_json::to_vec(&item)?;
+    rewritten.extend_from_slice(&original[first_line_end..]);
+    std::fs::write(path, rewritten)?;
+    Ok(())
+}
+
+fn rewrite_parent_thread_id(path: &Path, parent_thread_id: ThreadId) -> Result<()> {
+    let original = std::fs::read(path)?;
+    let first_line_end = original
+        .iter()
+        .position(|byte| *byte == b'\n')
+        .unwrap_or(original.len());
+    let mut item: serde_json::Value = serde_json::from_slice(&original[..first_line_end])?;
+    item["payload"]["parent_thread_id"] = json!(parent_thread_id.to_string());
     let mut rewritten = serde_json::to_vec(&item)?;
     rewritten.extend_from_slice(&original[first_line_end..]);
     std::fs::write(path, rewritten)?;

@@ -200,6 +200,7 @@ pub struct DurableSessionQueryState<LA, SA, LP, SP, F> {
     projection: Option<DurableSessionQueryProjection<LP, SP>>,
     view_freshness: QueryViewFreshness,
     active_read: Option<QueryReadTicket>,
+    accepted_read: Option<QueryReadTicket>,
     recent_session_attachment: Option<SA>,
     committed_high_water_by_session: HashMap<SA, CommittedProjection<F>>,
     // Protocol-only identity axis, intentionally independent of committed Team availability.
@@ -231,6 +232,7 @@ impl<LA, SA, LP, SP, F> Default for DurableSessionQueryState<LA, SA, LP, SP, F> 
             projection: None,
             view_freshness: QueryViewFreshness::Absent,
             active_read: None,
+            accepted_read: None,
             recent_session_attachment: None,
             committed_high_water_by_session: HashMap::new(),
             canonical_root_by_session: HashMap::new(),
@@ -261,6 +263,17 @@ impl<LA, SA, LP, SP, F> DurableSessionQueryState<LA, SA, LP, SP, F> {
 
     pub fn view_freshness(&self) -> QueryViewFreshness {
         self.view_freshness
+    }
+
+    /// Returns the ticket that produced the current fresh projection.
+    ///
+    /// Control callers capture this token alongside the visible Session view
+    /// and must present it again when starting an attempt. A refresh, lag,
+    /// attachment switch, or connection replacement retires the token.
+    pub fn accepted_read_ticket(&self) -> Option<QueryReadTicket> {
+        (self.view_freshness == QueryViewFreshness::Fresh)
+            .then_some(self.accepted_read)
+            .flatten()
     }
 
     pub fn committed_high_water(&self) -> Option<&CommittedProjection<F>>
@@ -364,6 +377,7 @@ impl<LA, SA, LP, SP, F> DurableSessionQueryState<LA, SA, LP, SP, F> {
             read_generation: self.read_generation,
         };
         self.active_read = Some(ticket);
+        self.accepted_read = None;
         self.view_freshness = QueryViewFreshness::Refreshing;
         Some(ticket)
     }
@@ -429,6 +443,7 @@ impl<LA, SA, LP, SP, F> DurableSessionQueryState<LA, SA, LP, SP, F> {
 
         self.committed_high_water_by_session.extend(staged);
         self.active_read = None;
+        self.accepted_read = Some(ticket);
         self.projection = Some(DurableSessionQueryProjection::List(projection));
         self.view_freshness = QueryViewFreshness::Fresh;
         QueryReadApplyResult::Applied
@@ -489,6 +504,7 @@ impl<LA, SA, LP, SP, F> DurableSessionQueryState<LA, SA, LP, SP, F> {
         }
 
         self.active_read = None;
+        self.accepted_read = Some(ticket);
         self.projection = Some(DurableSessionQueryProjection::Session(projection));
         self.view_freshness = QueryViewFreshness::Fresh;
         QueryReadApplyResult::Applied
@@ -540,6 +556,7 @@ impl<LA, SA, LP, SP, F> DurableSessionQueryState<LA, SA, LP, SP, F> {
     fn retire_connection(&mut self) {
         self.connected = false;
         self.active_read = None;
+        self.accepted_read = None;
         self.mark_view_not_fresh();
     }
 
@@ -547,14 +564,17 @@ impl<LA, SA, LP, SP, F> DurableSessionQueryState<LA, SA, LP, SP, F> {
         self.attachment_generation = next_generation(self.attachment_generation);
         self.read_generation = next_generation(self.read_generation);
         self.active_read = None;
+        self.accepted_read = None;
     }
 
     fn finish_invalid_read(&mut self) {
         self.active_read = None;
+        self.accepted_read = None;
         self.mark_view_not_fresh();
     }
 
     fn mark_view_not_fresh(&mut self) {
+        self.accepted_read = None;
         self.view_freshness = if self.projection.is_some() {
             QueryViewFreshness::Stale
         } else {
@@ -564,6 +584,27 @@ impl<LA, SA, LP, SP, F> DurableSessionQueryState<LA, SA, LP, SP, F> {
 }
 
 impl DurableSessionQueryClientState {
+    /// Invalidates the authoritative Session projection after a control
+    /// completion, without disturbing a different attachment selected while
+    /// the attempt was in flight.
+    pub(crate) fn invalidate_after_control_completion(
+        &mut self,
+        session_id: &str,
+        root_thread_id: &str,
+    ) -> bool {
+        let matches_attachment = matches!(
+            self.attachment.as_ref(),
+            Some(DurableSessionQueryAttachment::Session(params))
+                if params.session_id == session_id && params.root_thread_id == root_thread_id
+        );
+        if !matches_attachment {
+            return false;
+        }
+        self.active_read = None;
+        self.mark_view_not_fresh();
+        true
+    }
+
     /// Applies one typed `session/list` response while sharing the per-Session committed
     /// generation and snapshot-fingerprint high-water marks used by `session/read`.
     pub fn apply_protocol_list_read_success(

@@ -4,10 +4,13 @@ use super::thread_lifecycle::PendingThreadUnloads;
 use super::turn_processor::can_accept_direct_input;
 use super::*;
 use crate::error_code::method_not_found;
+use codex_app_server_protocol::DurableSessionControlOperationKind;
 use codex_app_server_protocol::SelectedCapabilityRoot;
 use codex_app_server_protocol::ThreadSection;
 use codex_app_server_protocol::ThreadSectionMoveParams;
 use codex_app_server_protocol::ThreadSectionMoveResponse;
+use codex_core::DurableSessionControlShutdownParams;
+use codex_core::ExperimentalSessionControlError;
 use codex_extension_api::ExtensionDataInit;
 use codex_protocol::config_types::MultiAgentMode;
 use codex_protocol::error::CodexErrorDetails;
@@ -15,12 +18,45 @@ use codex_protocol::mcp::ClientMcpExtensions;
 use codex_protocol::models::BUILT_IN_PERMISSION_PROFILE_DANGER_FULL_ACCESS;
 use codex_protocol::models::BUILT_IN_PERMISSION_PROFILE_WORKSPACE;
 use codex_protocol::protocol::ThreadHistoryMode;
+use std::future::Future;
+use std::pin::Pin;
 
 pub(super) const THREAD_LIST_DEFAULT_LIMIT: usize = 25;
 pub(super) const THREAD_LIST_MAX_LIMIT: usize = 100;
 const CODEX_TUI_CLIENT_NAME: &str = "codex-tui";
 const THREAD_ROLLBACK_DEPRECATION_SUMMARY: &str =
     "thread/rollback is deprecated and will be removed soon";
+
+pub(crate) type DurableSessionControlPreflightHook = Arc<
+    dyn Fn(ThreadId, DurableSessionControlOperationKind) -> Pin<Box<dyn Future<Output = ()> + Send>>
+        + Send
+        + Sync,
+>;
+
+pub(super) enum FormalThreadRemovalError {
+    AlreadyClosing,
+    OwnerUnavailable,
+    Control(ExperimentalSessionControlError),
+    Replaced,
+}
+
+async fn remove_terminal_formal_owner_if_same<F, Fut>(
+    error: &ExperimentalSessionControlError,
+    remove_if_same: F,
+) -> bool
+where
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = bool>,
+{
+    if matches!(
+        error,
+        ExperimentalSessionControlError::ShutdownTerminatedWithError { .. }
+    ) {
+        remove_if_same().await
+    } else {
+        false
+    }
+}
 
 struct ThreadListFilters {
     model_providers: Option<Vec<String>>,
@@ -395,6 +431,7 @@ pub(crate) struct ThreadRequestProcessor {
     pub(super) background_tasks: TaskTracker,
     pub(super) skills_watcher: Arc<SkillsWatcher>,
     pub(super) initial_config_warnings: Arc<Vec<ConfigWarningNotification>>,
+    pub(super) durable_session_control_preflight_hook: Option<DurableSessionControlPreflightHook>,
 }
 
 /// Outcome of trying to satisfy a resume request from an already loaded thread.
@@ -427,6 +464,7 @@ impl ThreadRequestProcessor {
         log_db: Option<LogDbLayer>,
         skills_watcher: Arc<SkillsWatcher>,
         initial_config_warnings: Vec<ConfigWarningNotification>,
+        durable_session_control_preflight_hook: Option<DurableSessionControlPreflightHook>,
     ) -> Self {
         Self {
             auth_manager,
@@ -446,6 +484,7 @@ impl ThreadRequestProcessor {
             background_tasks: TaskTracker::new(),
             skills_watcher,
             initial_config_warnings: Arc::new(initial_config_warnings),
+            durable_session_control_preflight_hook,
         }
     }
 
@@ -981,6 +1020,68 @@ impl ThreadRequestProcessor {
                 .await
                 .finish(unload_token);
         }
+        result
+    }
+
+    /// Uses the ordinary unload token and owner bookkeeping while replacing only the core
+    /// shutdown command with the formal snapshot-bound close barrier. Core owns the complete
+    /// preparation-to-termination result, so this path intentionally does not add another timeout.
+    pub(super) async fn prepare_thread_for_removal_at_snapshot(
+        &self,
+        thread_id: ThreadId,
+        params: DurableSessionControlShutdownParams,
+    ) -> Result<(), FormalThreadRemovalError> {
+        let unload_token = {
+            let mut pending_thread_unloads = self.pending_thread_unloads.lock().await;
+            pending_thread_unloads
+                .try_begin(thread_id)
+                .ok_or(FormalThreadRemovalError::AlreadyClosing)?
+        };
+
+        let result = match self.thread_manager.get_thread(thread_id).await {
+            Ok(conversation) => {
+                info!("thread {thread_id} was active; applying snapshot-bound shutdown");
+                match conversation
+                    .durable_session_control_shutdown_and_wait(params)
+                    .await
+                {
+                    Ok(()) => {
+                        if self
+                            .thread_manager
+                            .remove_thread_if_same(&thread_id, &conversation)
+                            .await
+                        {
+                            self.finalize_thread_teardown(thread_id).await;
+                            Ok(())
+                        } else {
+                            Err(FormalThreadRemovalError::Replaced)
+                        }
+                    }
+                    Err(
+                        error @ ExperimentalSessionControlError::ShutdownTerminatedWithError {
+                            ..
+                        },
+                    ) => {
+                        let removed = remove_terminal_formal_owner_if_same(&error, || async {
+                            self.thread_manager
+                                .remove_thread_if_same(&thread_id, &conversation)
+                                .await
+                        })
+                        .await;
+                        if removed {
+                            self.finalize_thread_teardown(thread_id).await;
+                        }
+                        Err(FormalThreadRemovalError::Control(error))
+                    }
+                    Err(error) => Err(FormalThreadRemovalError::Control(error)),
+                }
+            }
+            Err(_) => Err(FormalThreadRemovalError::OwnerUnavailable),
+        };
+        self.pending_thread_unloads
+            .lock()
+            .await
+            .finish(unload_token);
         result
     }
 
@@ -1522,7 +1623,7 @@ impl ThreadRequestProcessor {
         self.thread_archive_response(params).await
     }
 
-    async fn thread_archive_response(
+    pub(super) async fn thread_archive_response(
         &self,
         params: ThreadArchiveParams,
     ) -> Result<(ThreadArchiveResponse, Vec<String>), JSONRPCErrorError> {
@@ -1846,7 +1947,7 @@ impl ThreadRequestProcessor {
         Ok((response, ThreadUnarchivedNotification { thread_id }))
     }
 
-    async fn thread_unarchive_response(
+    pub(super) async fn thread_unarchive_response(
         &self,
         params: ThreadUnarchiveParams,
     ) -> Result<(ThreadUnarchiveResponse, String), JSONRPCErrorError> {
@@ -5240,6 +5341,23 @@ fn thread_store_archive_error(operation: &str, err: ThreadStoreError) -> JSONRPC
         ThreadStoreError::Unsupported {
             operation: unsupported_operation,
         } => unsupported_thread_store_operation(unsupported_operation),
+        ThreadStoreError::Partial {
+            completed_thread_ids,
+            failed_thread_id,
+            message,
+        } => JSONRPCErrorError {
+            code: crate::error_code::INTERNAL_ERROR_CODE,
+            message: format!(
+                "failed to {operation} complete session subtree at {failed_thread_id}: {message}"
+            ),
+            data: Some(serde_json::json!({
+                "type": "partial",
+                "completedThreadIds": completed_thread_ids
+                    .into_iter()
+                    .map(|thread_id| thread_id.to_string())
+                    .collect::<Vec<_>>()
+            })),
+        },
         err => internal_error(format!("failed to {operation} session: {err}")),
     }
 }

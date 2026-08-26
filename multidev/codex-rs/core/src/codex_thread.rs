@@ -2,6 +2,8 @@ use crate::agent::AgentStatus;
 use crate::config::ConstraintResult;
 use crate::elicitation::ElicitationRegistration;
 use crate::experimental_session_control;
+use crate::experimental_session_control::DurableSessionControlSetRootStateParams;
+use crate::experimental_session_control::DurableSessionControlShutdownParams;
 use crate::experimental_session_control::ExperimentalSessionControlError;
 use crate::experimental_session_control::ExperimentalSessionControlMutationOutcome;
 use crate::experimental_session_control::ExperimentalSessionControlSetRootStateParams;
@@ -604,6 +606,46 @@ impl CodexThread {
         experimental_session_control::set_loaded_root_state(self.session.as_ref(), params).await
     }
 
+    /// Apply a formal root-attention transition only at the committed Team snapshot supplied by
+    /// the latest formal Session query.
+    pub async fn durable_session_control_set_root_state(
+        &self,
+        params: DurableSessionControlSetRootStateParams,
+    ) -> Result<ExperimentalSessionControlMutationOutcome, ExperimentalSessionControlError> {
+        experimental_session_control::set_loaded_root_state_at_snapshot(
+            self.session.as_ref(),
+            params,
+        )
+        .await
+    }
+
+    /// Returns the exact live Root writer incarnation used by formal online Session control.
+    pub async fn durable_session_control_owner_incarnation_id(
+        &self,
+    ) -> Result<String, ExperimentalSessionControlError> {
+        experimental_session_control::loaded_root_owner_incarnation_id(self.session.as_ref()).await
+    }
+
+    /// Shut down this exact loaded Root only after its owner and complete committed Team snapshot
+    /// have been revalidated at the existing M4-S2 close barrier.
+    pub async fn durable_session_control_shutdown_and_wait(
+        &self,
+        params: DurableSessionControlShutdownParams,
+    ) -> Result<(), ExperimentalSessionControlError> {
+        // Publish shutdown-in-progress before acquiring either close barrier. This removes the
+        // last online-control admission window and keeps the marker live through handoff and
+        // runtime termination (or a typed preparation failure).
+        let _shutdown_attempt = self.shutdown_attempt();
+        let prepared = experimental_session_control::prepare_loaded_root_shutdown_at_snapshot(
+            self.session.as_ref(),
+            params,
+        )
+        .await?;
+        self.io
+            .shutdown_at_snapshot_and_wait(self.session.as_ref(), prepared)
+            .await
+    }
+
     pub(crate) fn with_experimental_session_control_residency<T>(
         &self,
         operation: impl FnOnce() -> T,
@@ -619,6 +661,21 @@ impl CodexThread {
             || self
                 .session
                 .experimental_session_control_shutdown_in_progress()
+            || !self.is_running()
+        {
+            return None;
+        }
+        Some(operation())
+    }
+
+    pub(crate) fn with_formal_shutdown_residency<T>(
+        &self,
+        operation: impl FnOnce() -> T,
+    ) -> Option<T> {
+        if self
+            .experimental_session_control_shutdown_attempts
+            .load(Ordering::Acquire)
+            == 0
             || !self.is_running()
         {
             return None;

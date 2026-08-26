@@ -98,6 +98,7 @@ fn durable_session_query_is_an_independent_read_only_product_opt_in() {
 
     let mut features = Features::with_defaults();
     assert!(!features.enabled(Feature::DurableSessionQuery));
+    assert!(!features.enabled(Feature::DurableSessionControl));
     assert!(!features.enabled(Feature::ExperimentalSessionControl));
 
     features.apply_map(&BTreeMap::from([(
@@ -105,6 +106,7 @@ fn durable_session_query_is_an_independent_read_only_product_opt_in() {
         true,
     )]));
     assert!(features.enabled(Feature::DurableSessionQuery));
+    assert!(!features.enabled(Feature::DurableSessionControl));
     assert!(!features.enabled(Feature::ExperimentalSessionControl));
     assert_eq!(
         spec.stage.experimental_menu_name(),
@@ -113,6 +115,39 @@ fn durable_session_query_is_an_independent_read_only_product_opt_in() {
     assert_eq!(
         spec.stage.experimental_menu_description(),
         Some("Inspect durable Sessions through the read-only query interface.")
+    );
+    assert_eq!(spec.stage.experimental_announcement(), None);
+}
+
+#[test]
+fn durable_session_control_is_an_independent_default_off_product_opt_in() {
+    let spec = crate::FEATURES
+        .iter()
+        .find(|spec| spec.id == Feature::DurableSessionControl)
+        .expect("durable Session control feature is registered");
+    assert_eq!(spec.key, "durable_session_control");
+    assert!(matches!(spec.stage, Stage::Experimental { .. }));
+    assert!(!spec.default_enabled);
+
+    let mut features = Features::with_defaults();
+    assert!(!features.enabled(Feature::DurableSessionControl));
+    assert!(!features.enabled(Feature::DurableSessionQuery));
+    assert!(!features.enabled(Feature::ExperimentalSessionControl));
+
+    features.apply_map(&BTreeMap::from([(
+        "durable_session_control".to_string(),
+        true,
+    )]));
+    assert!(features.enabled(Feature::DurableSessionControl));
+    assert!(!features.enabled(Feature::DurableSessionQuery));
+    assert!(!features.enabled(Feature::ExperimentalSessionControl));
+    assert_eq!(
+        spec.stage.experimental_menu_name(),
+        Some("Durable Session control")
+    );
+    assert_eq!(
+        spec.stage.experimental_menu_description(),
+        Some("Control durable Sessions through the formal control interface.")
     );
     assert_eq!(spec.stage.experimental_announcement(), None);
 }

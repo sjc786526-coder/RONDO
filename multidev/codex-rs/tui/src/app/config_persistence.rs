@@ -53,6 +53,20 @@ pub(super) fn resume_model_settings_for_overrides(
 }
 
 impl App {
+    fn reconcile_durable_session_feature_state(&mut self, app_server: &AppServerSession) {
+        let pending_retired = if !self.config.features.enabled(Feature::DurableSessionQuery) {
+            app_server.durable_session_detach()
+        } else if !self.config.features.enabled(Feature::DurableSessionControl) {
+            app_server.durable_session_control_disable()
+        } else {
+            false
+        };
+        self.render_durable_session_control_sync_loss(
+            pending_retired,
+            "Durable Session control was disabled while an attempt was pending",
+        );
+    }
+
     pub(super) async fn rebuild_config_for_cwd(&self, cwd: PathBuf) -> Result<Config> {
         let mut overrides = self.harness_overrides.clone();
         overrides.cwd = Some(cwd.clone());
@@ -499,6 +513,13 @@ impl App {
                 effective_enabled,
             ));
         }
+        let durable_session_features_changed =
+            feature_updates_to_apply.iter().any(|(feature, _)| {
+                matches!(
+                    feature,
+                    Feature::DurableSessionQuery | Feature::DurableSessionControl
+                )
+            });
 
         // Persist first so the live session does not diverge from disk if the
         // config edit fails. Runtime/UI state is patched below only after the
@@ -543,8 +564,8 @@ impl App {
                     &feature_updates_to_apply,
                 )
                 .await;
-                if !self.config.features.enabled(Feature::DurableSessionQuery) {
-                    app_server.durable_session_detach();
+                if durable_session_features_changed {
+                    self.reconcile_durable_session_feature_state(app_server);
                 }
                 if windows_sandbox_changed {
                     self.propagate_windows_sandbox_turn_context();
@@ -563,8 +584,8 @@ impl App {
             self.chat_widget
                 .set_feature_enabled(feature, effective_enabled);
         }
-        if !self.config.features.enabled(Feature::DurableSessionQuery) {
-            app_server.durable_session_detach();
+        if durable_session_features_changed {
+            self.reconcile_durable_session_feature_state(app_server);
         }
         if show_memory_enable_notice {
             self.chat_widget.add_memories_enable_notice();

@@ -2013,6 +2013,30 @@
           "type": "object"
         },
         {
+          "properties": {
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "enum": [
+                "session/control"
+              ],
+              "title": "Session/controlRequestMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/DurableSessionControlParams"
+            }
+          },
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "title": "Session/controlRequest",
+          "type": "object"
+        },
+        {
           "description": "Append raw Responses API items to the thread history without starting a user turn.",
           "properties": {
             "id": {
@@ -5632,6 +5656,476 @@
       ],
       "type": "string"
     },
+    "DurableSessionControlEffect": {
+      "description": "Confirmed domain effect of an applied control operation.",
+      "oneOf": [
+        {
+          "properties": {
+            "changed": {
+              "type": "boolean"
+            },
+            "mutation_revision": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "type": {
+              "enum": [
+                "rootStateUpdated"
+              ],
+              "title": "RootStateUpdatedDurableSessionControlEffectType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "changed",
+            "mutation_revision",
+            "type"
+          ],
+          "title": "RootStateUpdatedDurableSessionControlEffect",
+          "type": "object"
+        },
+        {
+          "description": "The loaded canonical Root owner completed the close barrier and was removed. This does not invent a whole-Session lifecycle fact.",
+          "properties": {
+            "type": {
+              "enum": [
+                "ownerClosed"
+              ],
+              "title": "OwnerClosedDurableSessionControlEffectType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "OwnerClosedDurableSessionControlEffect",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "affected_thread_ids": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": {
+              "enum": [
+                "archived"
+              ],
+              "title": "ArchivedDurableSessionControlEffectType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "affected_thread_ids",
+            "type"
+          ],
+          "title": "ArchivedDurableSessionControlEffect",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "unarchived"
+              ],
+              "title": "UnarchivedDurableSessionControlEffectType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "UnarchivedDurableSessionControlEffect",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "affected_thread_ids": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": {
+              "enum": [
+                "deleted"
+              ],
+              "title": "DeletedDurableSessionControlEffectType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "affected_thread_ids",
+            "type"
+          ],
+          "title": "DeletedDurableSessionControlEffect",
+          "type": "object"
+        }
+      ]
+    },
+    "DurableSessionControlOperation": {
+      "description": "Mutation requested from the current canonical Durable Session authority.",
+      "oneOf": [
+        {
+          "properties": {
+            "expected_producer_state": {
+              "$ref": "#/definitions/DurableSessionTeamProducerState"
+            },
+            "expected_root_state": {
+              "$ref": "#/definitions/DurableSessionTeamRootState"
+            },
+            "next_root_state": {
+              "$ref": "#/definitions/DurableSessionTeamRootState"
+            },
+            "type": {
+              "enum": [
+                "setRootState"
+              ],
+              "title": "SetRootStateDurableSessionControlOperationType",
+              "type": "string"
+            },
+            "version_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "expected_producer_state",
+            "expected_root_state",
+            "next_root_state",
+            "type",
+            "version_id"
+          ],
+          "title": "SetRootStateDurableSessionControlOperation",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "close"
+              ],
+              "title": "CloseDurableSessionControlOperationType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "CloseDurableSessionControlOperation",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "archive"
+              ],
+              "title": "ArchiveDurableSessionControlOperationType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "ArchiveDurableSessionControlOperation",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "unarchive"
+              ],
+              "title": "UnarchiveDurableSessionControlOperationType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "UnarchiveDurableSessionControlOperation",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "delete"
+              ],
+              "title": "DeleteDurableSessionControlOperationType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "DeleteDurableSessionControlOperation",
+          "type": "object"
+        }
+      ]
+    },
+    "DurableSessionControlOperationKind": {
+      "description": "Field-free operation identity used in outcomes after the request payload is consumed.",
+      "enum": [
+        "setRootState",
+        "close",
+        "archive",
+        "unarchive",
+        "delete"
+      ],
+      "type": "string"
+    },
+    "DurableSessionControlOutcome": {
+      "description": "Certainty-preserving outcome returned by the control boundary.",
+      "oneOf": [
+        {
+          "properties": {
+            "effect": {
+              "$ref": "#/definitions/DurableSessionControlEffect"
+            },
+            "type": {
+              "enum": [
+                "applied"
+              ],
+              "title": "AppliedDurableSessionControlOutcomeType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect",
+            "type"
+          ],
+          "title": "AppliedDurableSessionControlOutcome",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "message": {
+              "type": "string"
+            },
+            "operation": {
+              "$ref": "#/definitions/DurableSessionControlOperationKind"
+            },
+            "reason": {
+              "$ref": "#/definitions/DurableSessionControlRejectionReason"
+            },
+            "type": {
+              "enum": [
+                "rejected"
+              ],
+              "title": "RejectedDurableSessionControlOutcomeType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "message",
+            "operation",
+            "reason",
+            "type"
+          ],
+          "title": "RejectedDurableSessionControlOutcome",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "completed_thread_ids": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "message": {
+              "type": "string"
+            },
+            "operation": {
+              "$ref": "#/definitions/DurableSessionControlOperationKind"
+            },
+            "type": {
+              "enum": [
+                "partial"
+              ],
+              "title": "PartialDurableSessionControlOutcomeType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "completed_thread_ids",
+            "message",
+            "operation",
+            "type"
+          ],
+          "title": "PartialDurableSessionControlOutcome",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "message": {
+              "type": "string"
+            },
+            "operation": {
+              "$ref": "#/definitions/DurableSessionControlOperationKind"
+            },
+            "type": {
+              "enum": [
+                "unknown"
+              ],
+              "title": "UnknownDurableSessionControlOutcomeType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "message",
+            "operation",
+            "type"
+          ],
+          "title": "UnknownDurableSessionControlOutcome",
+          "type": "object"
+        }
+      ]
+    },
+    "DurableSessionControlParams": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "description": "Parameters for one authoritative Durable Session control attempt.",
+      "properties": {
+        "operation": {
+          "$ref": "#/definitions/DurableSessionControlOperation"
+        },
+        "precondition": {
+          "$ref": "#/definitions/DurableSessionControlPrecondition"
+        },
+        "rootThreadId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "operation",
+        "precondition",
+        "rootThreadId",
+        "sessionId"
+      ],
+      "title": "DurableSessionControlParams",
+      "type": "object"
+    },
+    "DurableSessionControlPrecondition": {
+      "description": "Query proof that the server must revalidate before applying a control operation.\n\nA committed Team proof can authorize the operations exposed by its query projection. The delete-retry proof is deliberately narrower: it exists only after an earlier delete removed the Team snapshot but retained the canonical Root marker as the ThreadStore retry anchor.",
+      "oneOf": [
+        {
+          "properties": {
+            "commit_fingerprint": {
+              "type": "string"
+            },
+            "commit_generation": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "expected_residency": {
+              "$ref": "#/definitions/DurableSessionResidency"
+            },
+            "expected_storage_status": {
+              "$ref": "#/definitions/DurableSessionStorageStatus"
+            },
+            "owner_incarnation": {
+              "description": "Opaque identity of the observed loaded owner incarnation. Cold proofs carry `None`.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "team_instance_id": {
+              "type": "string"
+            },
+            "team_revision": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "type": {
+              "enum": [
+                "committedTeam"
+              ],
+              "title": "CommittedTeamDurableSessionControlPreconditionType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "commit_fingerprint",
+            "commit_generation",
+            "expected_residency",
+            "expected_storage_status",
+            "team_instance_id",
+            "team_revision",
+            "type"
+          ],
+          "title": "CommittedTeamDurableSessionControlPrecondition",
+          "type": "object"
+        },
+        {
+          "description": "Proof of a canonical cold Root marker whose committed Team snapshot is already absent. Only an explicit `Delete` attempt may consume this proof.",
+          "properties": {
+            "expected_residency": {
+              "$ref": "#/definitions/DurableSessionResidency"
+            },
+            "expected_storage_status": {
+              "$ref": "#/definitions/DurableSessionStorageStatus"
+            },
+            "root_marker_fingerprint": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "deleteRetryAnchor"
+              ],
+              "title": "DeleteRetryAnchorDurableSessionControlPreconditionType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "expected_residency",
+            "expected_storage_status",
+            "root_marker_fingerprint",
+            "type"
+          ],
+          "title": "DeleteRetryAnchorDurableSessionControlPrecondition",
+          "type": "object"
+        }
+      ]
+    },
+    "DurableSessionControlRejectionReason": {
+      "description": "Typed, side-effect-free reason why a control attempt was rejected.",
+      "enum": [
+        "stalePrecondition",
+        "wrongStorage",
+        "ownerUnavailable",
+        "notCurrentOwner",
+        "activeWriter",
+        "conflict",
+        "notFound",
+        "unsupported",
+        "invalidState"
+      ],
+      "type": "string"
+    },
+    "DurableSessionControlResponse": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "description": "Result of one Durable Session control attempt.",
+      "properties": {
+        "outcome": {
+          "$ref": "#/definitions/DurableSessionControlOutcome"
+        }
+      },
+      "required": [
+        "outcome"
+      ],
+      "title": "DurableSessionControlResponse",
+      "type": "object"
+    },
     "DurableSessionDomainLifecycle": {
       "description": "Domain lifecycle, independent of storage placement and runtime residency.",
       "enum": [
@@ -5837,6 +6331,8 @@
         "residencyUnknown",
         "ownerUnavailableHere",
         "notObservedHere",
+        "controlDisabled",
+        "alreadyLoaded",
         "alreadyArchived",
         "notArchived",
         "closing",
@@ -5862,6 +6358,9 @@
         "resume": {
           "$ref": "#/definitions/DurableSessionOperation"
         },
+        "setRootState": {
+          "$ref": "#/definitions/DurableSessionOperation"
+        },
         "unarchive": {
           "$ref": "#/definitions/DurableSessionOperation"
         }
@@ -5871,6 +6370,7 @@
         "close",
         "delete",
         "resume",
+        "setRootState",
         "unarchive"
       ],
       "type": "object"
@@ -6270,6 +6770,17 @@
     "DurableSessionView": {
       "description": "Read-only projection of one canonical durable Session.\n\nDurable identity, storage placement, domain lifecycle, server-local runtime residency, operation availability, and read completeness remain independent axes. A caller must not infer one axis from another.",
       "properties": {
+        "controlPrecondition": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/DurableSessionControlPrecondition"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Exact query proof accepted by `session/control`, when the read can prove every required identity, storage, residency, and committed Team fact."
+        },
         "domainLifecycle": {
           "$ref": "#/definitions/DurableSessionDomainLifecycle"
         },

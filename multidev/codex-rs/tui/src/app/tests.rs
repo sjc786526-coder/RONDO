@@ -55,6 +55,11 @@ use codex_app_server_protocol::AdditionalPermissionProfile;
 use codex_app_server_protocol::AgentMessageDeltaNotification;
 use codex_app_server_protocol::AskForApproval;
 use codex_app_server_protocol::CommandExecutionRequestApprovalParams;
+use codex_app_server_protocol::DurableSessionControlOperation;
+use codex_app_server_protocol::DurableSessionListParams;
+use codex_app_server_protocol::DurableSessionListResponse;
+use codex_app_server_protocol::DurableSessionReadParams;
+use codex_app_server_protocol::DurableSessionReadResponse;
 use codex_app_server_protocol::ExperimentalSessionDomainLifecycle;
 use codex_app_server_protocol::ExperimentalSessionFactProvenance;
 use codex_app_server_protocol::ExperimentalSessionIdentity;
@@ -5184,6 +5189,211 @@ async fn replace_goal_confirmation_snapshot() {
         "replace_goal_confirmation",
         render_bottom_popup(&app.chat_widget, /*width*/ 80)
     );
+}
+
+#[tokio::test]
+async fn durable_session_control_confirmation_snapshot() {
+    let mut app = make_test_app().await;
+    app.chat_widget.show_selection_view(
+        super::durable_session_control::durable_session_control_confirmation_view_params(
+            "session-080",
+            "root-080",
+            &DurableSessionControlOperation::Delete,
+            Vec::new(),
+        ),
+    );
+    assert_app_snapshot!(
+        "durable_session_control_confirmation",
+        render_bottom_popup(&app.chat_widget, /*width*/ 80)
+    );
+}
+
+#[tokio::test]
+async fn durable_session_control_does_not_confirm_from_a_list_projection() -> Result<()> {
+    let mut app = make_test_app().await;
+    for feature in [Feature::DurableSessionQuery, Feature::DurableSessionControl] {
+        app.config
+            .features
+            .set_enabled(feature, /*enabled*/ true)
+            .expect("enable formal Durable Session fixture feature");
+    }
+    let app_server = start_config_write_test_app_server(&app).await?;
+    let request = app_server
+        .durable_session_begin_list(DurableSessionListParams::default())
+        .expect("list read should start");
+    let crate::app_server_session::DurableSessionQueryRequest::List { ticket, .. } = request else {
+        unreachable!("list attachment must produce a list request")
+    };
+    assert_eq!(
+        app_server.durable_session_apply_list(
+            ticket,
+            DurableSessionListResponse {
+                data: Vec::new(),
+                next_cursor: None,
+                complete: true,
+                incomplete_reason: None,
+            },
+        ),
+        codex_app_server_client::QueryReadApplyResult::Applied
+    );
+
+    app.handle_durable_session_control_command(&app_server, "delete");
+
+    assert!(app.chat_widget.no_modal_or_popup_active());
+    app_server.shutdown().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn durable_session_late_confirm_with_control_off_preserves_query_attachment() -> Result<()> {
+    let mut app = make_test_app().await;
+    for feature in [Feature::DurableSessionQuery, Feature::DurableSessionControl] {
+        app.config
+            .features
+            .set_enabled(feature, /*enabled*/ true)
+            .expect("enable formal Durable Session fixture feature");
+    }
+    let app_server = start_config_write_test_app_server(&app).await?;
+    attach_formal_control_read(&app_server);
+    let preview = app_server
+        .durable_session_control_preview(DurableSessionControlOperation::Delete)
+        .expect("fresh query should expose delete");
+
+    app.config
+        .features
+        .set_enabled(Feature::DurableSessionControl, /*enabled*/ false)
+        .expect("disable formal control only");
+    assert!(!app_server.durable_session_control_disable());
+    app.handle_durable_session_control_confirmed(
+        &app_server,
+        crate::durable_session_control::DurableSessionControlConfirmation { preview },
+    );
+
+    assert!(matches!(
+        app_server.durable_session_attachment(),
+        Some(codex_app_server_client::DurableSessionQueryAttachment::Session(_))
+    ));
+    assert_eq!(
+        app_server.durable_session_view_freshness(),
+        codex_app_server_client::QueryViewFreshness::Stale
+    );
+    assert_eq!(
+        app_server.durable_session_control_certainty(),
+        codex_app_server_client::DurableSessionControlCertainty::None
+    );
+    app_server.shutdown().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn durable_session_completion_with_control_off_still_refreshes_query() -> Result<()> {
+    let mut app = make_test_app().await;
+    for feature in [Feature::DurableSessionQuery, Feature::DurableSessionControl] {
+        app.config
+            .features
+            .set_enabled(feature, /*enabled*/ true)
+            .expect("enable formal Durable Session fixture feature");
+    }
+    let app_server = start_config_write_test_app_server(&app).await?;
+    attach_formal_control_read(&app_server);
+    let preview = app_server
+        .durable_session_control_preview(DurableSessionControlOperation::Delete)
+        .expect("fresh query should expose delete");
+    let attempt = app_server
+        .durable_session_control_begin(preview)
+        .expect("confirmed preview should start one attempt");
+
+    // Exercise the event-ordering seam where completion wins before feature reconciliation.
+    app.config
+        .features
+        .set_enabled(Feature::DurableSessionControl, /*enabled*/ false)
+        .expect("disable formal control only");
+    app.handle_durable_session_control_completion(
+        &app_server,
+        attempt.ticket,
+        Err("response lost after submission".to_string()),
+    );
+
+    assert!(matches!(
+        app_server.durable_session_attachment(),
+        Some(codex_app_server_client::DurableSessionQueryAttachment::Session(_))
+    ));
+    assert_eq!(
+        app_server.durable_session_view_freshness(),
+        codex_app_server_client::QueryViewFreshness::Refreshing
+    );
+    app_server.shutdown().await?;
+    Ok(())
+}
+
+fn attach_formal_control_read(app_server: &AppServerSession) {
+    let request = app_server
+        .durable_session_begin_read(DurableSessionReadParams {
+            session_id: "session-a".to_string(),
+            root_thread_id: "root-a".to_string(),
+        })
+        .expect("Session read should start");
+    let crate::app_server_session::DurableSessionQueryRequest::Session { ticket, .. } = request
+    else {
+        unreachable!("Session attachment must produce a Session read")
+    };
+    let response: DurableSessionReadResponse = serde_json::from_value(serde_json::json!({
+        "session": {
+            "identity": { "sessionId": "session-a", "rootThreadId": "root-a" },
+            "storageStatus": "active",
+            "domainLifecycle": "open",
+            "residency": "observedOwnerHere",
+            "operationAvailability": {
+                "resume": available_durable_session_operation(),
+                "setRootState": available_durable_session_operation(),
+                "close": available_durable_session_operation(),
+                "archive": available_durable_session_operation(),
+                "unarchive": available_durable_session_operation(),
+                "delete": available_durable_session_operation()
+            },
+            "controlPrecondition": {
+                "type": "committedTeam",
+                "expectedStorageStatus": "active",
+                "expectedResidency": "observedOwnerHere",
+                "ownerIncarnation": "owner-a",
+                "teamInstanceId": "team-a",
+                "teamRevision": 7,
+                "commitGeneration": 4,
+                "commitFingerprint": "fingerprint-4"
+            },
+            "provenance": {
+                "identity": "sessionMeta",
+                "storageStatus": "threadStore",
+                "domainLifecycle": "committedTeamSnapshot",
+                "residency": "serverRuntimeObservation",
+                "team": "committedTeamSnapshot"
+            },
+            "readStatus": { "status": "available" },
+            "team": {
+                "teamInstanceId": "team-a",
+                "commitGeneration": 4,
+                "commitFingerprint": "fingerprint-4",
+                "revision": 7,
+                "viewer": { "threadId": "root-a", "role": "root" },
+                "participants": [],
+                "omittedParticipants": 0,
+                "events": [],
+                "omittedEvents": 0
+            }
+        }
+    }))
+    .expect("valid formal Session response");
+    assert_eq!(
+        app_server.durable_session_apply_read(ticket, response),
+        codex_app_server_client::QueryReadApplyResult::Applied
+    );
+}
+
+fn available_durable_session_operation() -> serde_json::Value {
+    serde_json::json!({
+        "availability": { "status": "available" },
+        "provenance": "derivedPolicy"
+    })
 }
 
 fn test_thread_session(thread_id: ThreadId, cwd: PathBuf) -> ThreadSessionState {

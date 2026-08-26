@@ -156,6 +156,12 @@ fn view_serializes_independent_axes_provenance_and_typed_statuses() {
                 },
                 provenance: DurableSessionFactProvenance::ServerRuntimeObservation,
             },
+            set_root_state: DurableSessionOperation {
+                availability: DurableSessionOperationAvailability::Unavailable {
+                    reason: DurableSessionOperationAvailabilityReason::ControlDisabled,
+                },
+                provenance: DurableSessionFactProvenance::DerivedPolicy,
+            },
             close: DurableSessionOperation {
                 availability: DurableSessionOperationAvailability::Unavailable {
                     reason: DurableSessionOperationAvailabilityReason::LifecycleUnknown,
@@ -179,6 +185,7 @@ fn view_serializes_independent_axes_provenance_and_typed_statuses() {
                 provenance: DurableSessionFactProvenance::DerivedPolicy,
             },
         },
+        control_precondition: None,
         provenance: DurableSessionProvenance {
             identity: DurableSessionFactProvenance::SessionMeta,
             storage_status: DurableSessionFactProvenance::ThreadStore,
@@ -210,6 +217,13 @@ fn view_serializes_independent_axes_provenance_and_typed_statuses() {
                     },
                     "provenance": "serverRuntimeObservation"
                 },
+                "setRootState": {
+                    "availability": {
+                        "status": "unavailable",
+                        "reason": "controlDisabled"
+                    },
+                    "provenance": "derivedPolicy"
+                },
                 "close": {
                     "availability": {
                         "status": "unavailable",
@@ -238,6 +252,7 @@ fn view_serializes_independent_axes_provenance_and_typed_statuses() {
                     "provenance": "derivedPolicy"
                 }
             },
+            "controlPrecondition": null,
             "provenance": {
                 "identity": "sessionMeta",
                 "storageStatus": "threadStore",

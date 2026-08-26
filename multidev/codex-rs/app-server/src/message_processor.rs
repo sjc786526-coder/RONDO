@@ -25,6 +25,7 @@ use crate::request_processors::AppsRequestProcessor;
 use crate::request_processors::CatalogRequestProcessor;
 use crate::request_processors::CommandExecRequestProcessor;
 use crate::request_processors::ConfigRequestProcessor;
+use crate::request_processors::DurableSessionControlPreflightHook;
 use crate::request_processors::EnvironmentRequestProcessor;
 use crate::request_processors::FeedbackRequestProcessor;
 use crate::request_processors::FsRequestProcessor;
@@ -217,6 +218,7 @@ pub(crate) struct MessageProcessorArgs {
     pub(crate) rpc_transport: AppServerRpcTransport,
     pub(crate) remote_control_handle: Option<RemoteControlHandle>,
     pub(crate) plugin_startup_tasks: crate::PluginStartupTasks,
+    pub(crate) durable_session_control_preflight_hook: Option<DurableSessionControlPreflightHook>,
 }
 
 impl MessageProcessor {
@@ -241,6 +243,7 @@ impl MessageProcessor {
             rpc_transport,
             remote_control_handle,
             plugin_startup_tasks,
+            durable_session_control_preflight_hook,
         } = args;
         let thread_state_manager = ThreadStateManager::new();
         // The thread store is intentionally process-scoped. Config reloads can
@@ -437,6 +440,7 @@ impl MessageProcessor {
             log_db,
             Arc::clone(&skills_watcher),
             config_warnings,
+            durable_session_control_preflight_hook,
         );
         let turn_processor = TurnRequestProcessor::new(
             auth_manager.clone(),
@@ -1190,6 +1194,9 @@ impl MessageProcessor {
             }
             ClientRequest::DurableSessionRead { params, .. } => {
                 self.thread_processor.durable_session_read(params).await
+            }
+            ClientRequest::DurableSessionControl { params, .. } => {
+                self.thread_processor.durable_session_control(params).await
             }
             ClientRequest::ExperimentalSessionList { params, .. } => {
                 self.thread_processor

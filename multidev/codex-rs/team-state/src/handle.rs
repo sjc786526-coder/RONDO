@@ -50,6 +50,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::RwLock;
 use tokio::sync::watch;
+use uuid::Uuid;
 
 pub struct TeamStateHandle {
     store: Mutex<TeamStore>,
@@ -64,6 +65,14 @@ struct DurableRuntime {
     authority: Option<Arc<dyn TeamWriteAuthority>>,
     mutation_gate: Mutex<()>,
     status: Mutex<TeamDurabilityStatus>,
+}
+
+/// Exact committed Team snapshot accepted by a control mutation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TeamMutationPrecondition {
+    pub instance: TeamInstanceId,
+    pub revision: TeamRevision,
+    pub commit_generation: u64,
 }
 
 impl Default for TeamStateHandle {
@@ -468,6 +477,87 @@ impl TeamStateHandle {
         }
     }
 
+    /// Enter the existing Root-writer close barrier only if the exact online owner and committed
+    /// Team snapshot observed by the caller are still current at that barrier.
+    ///
+    /// Root authority is closed before the mutation gate is acquired. This preserves the existing
+    /// mutation order (`mutation_gate` then `begin_write`) without deadlocking: a mutation that won
+    /// first drains before close returns, while a mutation that lost to close fails `begin_write`
+    /// and releases the gate before this comparison.
+    pub async fn begin_close_at_snapshot(
+        &self,
+        expected_owner_incarnation_id: Uuid,
+        precondition: TeamMutationPrecondition,
+    ) -> Result<Box<dyn TeamClosePermit>, TeamDurabilityError> {
+        let close = self.begin_close().await?;
+        let runtime = self.durable_runtime().ok_or_else(|| {
+            TeamDurabilityError::conflict("an in-memory Team has no durable close barrier")
+        })?;
+        let validation = {
+            let _gate = runtime
+                .mutation_gate
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            (|| {
+                let authority = runtime
+                    .authority
+                    .as_ref()
+                    .ok_or(TeamDurabilityError::ReadOnly)?;
+                if authority.owner_incarnation_id() != expected_owner_incarnation_id {
+                    return Err(TeamDurabilityError::Domain(
+                        TeamError::OwnerIncarnationConflict,
+                    ));
+                }
+                let current_commit_generation = match self.durability_status() {
+                    TeamDurabilityStatus::Writable { commit_generation } => commit_generation,
+                    TeamDurabilityStatus::ReadOnly { .. } => {
+                        return Err(TeamDurabilityError::ReadOnly);
+                    }
+                    TeamDurabilityStatus::Unknown { .. } => {
+                        return Err(TeamDurabilityError::unknown(
+                            "the previous Team commit must be reconciled",
+                        ));
+                    }
+                    TeamDurabilityStatus::Unavailable { .. } => {
+                        return Err(TeamDurabilityError::unavailable(
+                            "Team durability must be reconciled",
+                        ));
+                    }
+                    TeamDurabilityStatus::InMemory => {
+                        unreachable!("durable runtime has durable status")
+                    }
+                };
+                let current = self.with_store(|store| store.clone());
+                if current.instance() != precondition.instance
+                    || current.revision() != precondition.revision
+                    || current_commit_generation != precondition.commit_generation
+                {
+                    return Err(TeamDurabilityError::Domain(TeamError::SnapshotConflict {
+                        current_instance: current.instance(),
+                        current_revision: current.revision(),
+                        current_commit_generation,
+                    }));
+                }
+                Ok(())
+            })()
+        };
+        if let Err(error) = validation {
+            close.abort().await?;
+            return Err(error);
+        }
+        Ok(close)
+    }
+
+    /// Returns the exact live Root writer incarnation for an owner handle.
+    pub fn owner_incarnation_id(&self) -> Option<Uuid> {
+        self.durable_runtime().and_then(|runtime| {
+            runtime
+                .authority
+                .as_ref()
+                .map(|authority| authority.owner_incarnation_id())
+        })
+    }
+
     fn mark_durability_failure(
         runtime: &DurableRuntime,
         expected_generation: u64,
@@ -539,6 +629,17 @@ impl TeamStateHandle {
     fn durable_mutate<R>(
         &self,
         notify: bool,
+        precondition: Option<TeamMutationPrecondition>,
+        mutate: impl FnOnce(&mut TeamStore) -> Result<R, TeamDurabilityError>,
+    ) -> Result<R, TeamDurabilityError> {
+        self.durable_mutate_for_owner(notify, None, precondition, mutate)
+    }
+
+    fn durable_mutate_for_owner<R>(
+        &self,
+        notify: bool,
+        expected_owner_incarnation_id: Option<Uuid>,
+        precondition: Option<TeamMutationPrecondition>,
         mutate: impl FnOnce(&mut TeamStore) -> Result<R, TeamDurabilityError>,
     ) -> Result<R, TeamDurabilityError> {
         let runtime = self.durable_runtime().ok_or_else(|| {
@@ -552,6 +653,13 @@ impl TeamStateHandle {
             .mutation_gate
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if expected_owner_incarnation_id
+            .is_some_and(|expected| authority.owner_incarnation_id() != expected)
+        {
+            return Err(TeamDurabilityError::Domain(
+                TeamError::OwnerIncarnationConflict,
+            ));
+        }
         let expected_generation = match self.durability_status() {
             TeamDurabilityStatus::Writable { commit_generation } => commit_generation,
             TeamDurabilityStatus::ReadOnly { .. } => return Err(TeamDurabilityError::ReadOnly),
@@ -579,6 +687,17 @@ impl TeamStateHandle {
         };
 
         let current = self.with_store(|store| store.clone());
+        if let Some(precondition) = precondition
+            && (current.instance() != precondition.instance
+                || current.revision() != precondition.revision
+                || expected_generation != precondition.commit_generation)
+        {
+            return Err(TeamDurabilityError::Domain(TeamError::SnapshotConflict {
+                current_instance: current.instance(),
+                current_revision: current.revision(),
+                current_commit_generation: expected_generation,
+            }));
+        }
         let revision_before = current.revision();
         let mut candidate = current.clone();
         let result = mutate(&mut candidate)?;
@@ -743,7 +862,7 @@ impl TeamStateHandle {
         let identity = self.durable_identity().ok_or_else(|| {
             TeamDurabilityError::conflict("durable registration has no durable identity")
         })?;
-        self.durable_mutate(false, move |store| {
+        self.durable_mutate(false, None, move |store| {
             store.register_durable_participant(identity, thread_id, role, label)
         })
     }
@@ -770,7 +889,7 @@ impl TeamStateHandle {
     ) -> Result<PublishOutcome, TeamError> {
         if self.durable_runtime().is_some() {
             return self
-                .durable_mutate(true, |store| {
+                .durable_mutate(true, None, |store| {
                     store
                         .publish(actor, submission, request)
                         .map_err(Into::into)
@@ -824,7 +943,7 @@ impl TeamStateHandle {
     ) -> Result<LifecycleOutcome, TeamError> {
         if self.durable_runtime().is_some() {
             return self
-                .durable_mutate(true, |store| {
+                .durable_mutate(true, None, |store| {
                     store.update_lifecycle(actor, request).map_err(Into::into)
                 })
                 .map_err(TeamError::from);
@@ -836,6 +955,49 @@ impl TeamStateHandle {
             }
             Ok(outcome)
         })
+    }
+
+    /// Apply a lifecycle update only when the caller's complete committed Team proof is still
+    /// current at the durable mutation linearization point.
+    pub fn update_lifecycle_at_snapshot(
+        &self,
+        actor: ThreadId,
+        precondition: TeamMutationPrecondition,
+        request: LifecycleRequest,
+    ) -> Result<LifecycleOutcome, TeamError> {
+        if self.durable_runtime().is_none() {
+            return Err(TeamError::Durability {
+                reason: "formal Session control requires a durable Team".to_string(),
+            });
+        }
+        self.durable_mutate(true, Some(precondition), |store| {
+            store.update_lifecycle(actor, request).map_err(Into::into)
+        })
+        .map_err(TeamError::from)
+    }
+
+    /// Apply a lifecycle update only while both the exact live Root writer incarnation and the
+    /// caller's committed Team snapshot remain current at the durable mutation linearization
+    /// point.
+    pub fn update_lifecycle_at_snapshot_for_owner(
+        &self,
+        actor: ThreadId,
+        expected_owner_incarnation_id: Uuid,
+        precondition: TeamMutationPrecondition,
+        request: LifecycleRequest,
+    ) -> Result<LifecycleOutcome, TeamError> {
+        if self.durable_runtime().is_none() {
+            return Err(TeamError::Durability {
+                reason: "formal Session control requires a durable Team".to_string(),
+            });
+        }
+        self.durable_mutate_for_owner(
+            true,
+            Some(expected_owner_incarnation_id),
+            Some(precondition),
+            |store| store.update_lifecycle(actor, request).map_err(Into::into),
+        )
+        .map_err(TeamError::from)
     }
 
     /// Commit a route: the visibility grant, and the assignment when work is intended.
@@ -850,7 +1012,7 @@ impl TeamStateHandle {
     ) -> Result<RouteOutcome, TeamError> {
         if self.durable_runtime().is_some() {
             return self
-                .durable_mutate(true, |store| {
+                .durable_mutate(true, None, |store| {
                     store.route(actor, submission, request).map_err(Into::into)
                 })
                 .map_err(TeamError::from);
@@ -872,7 +1034,7 @@ impl TeamStateHandle {
     ) -> Result<DeliveryOutcome, TeamError> {
         if self.durable_runtime().is_some() {
             return self
-                .durable_mutate(true, |store| {
+                .durable_mutate(true, None, |store| {
                     store
                         .record_delivery(actor, route_id, result)
                         .map_err(Into::into)
@@ -895,7 +1057,7 @@ impl TeamStateHandle {
     ) -> Result<EndAssignmentOutcome, TeamError> {
         if self.durable_runtime().is_some() {
             return self
-                .durable_mutate(true, |store| {
+                .durable_mutate(true, None, |store| {
                     store.end_assignment(actor, route_id).map_err(Into::into)
                 })
                 .map_err(TeamError::from);
@@ -917,7 +1079,7 @@ impl TeamStateHandle {
     ) -> Result<RetireOutcome, TeamError> {
         if self.durable_runtime().is_some() {
             return self
-                .durable_mutate(true, |store| {
+                .durable_mutate(true, None, |store| {
                     store
                         .retire(actor, submission, request, availability, live_epoch())
                         .map_err(Into::into)
@@ -1042,7 +1204,7 @@ impl TeamStateHandle {
         if self.durable_runtime().is_none() {
             return Ok(self.with_store(|store| store.confirm_observation(producer, item_id)));
         }
-        self.durable_mutate(false, |store| {
+        self.durable_mutate(false, None, |store| {
             Ok(store.confirm_observation(producer, item_id))
         })
         .map_err(TeamError::from)
@@ -1130,7 +1292,7 @@ impl TeamStateHandle {
         if self.durable_runtime().is_none() {
             return Ok(self.with_store(|store| store.consume_wake(participant)));
         }
-        self.durable_mutate(false, |store| Ok(store.consume_wake(participant)))
+        self.durable_mutate(false, None, |store| Ok(store.consume_wake(participant)))
             .map_err(TeamError::from)
     }
 

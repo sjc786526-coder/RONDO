@@ -1,0 +1,260 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "DurableSessionControlEffect": {
+      "description": "Confirmed domain effect of an applied control operation.",
+      "oneOf": [
+        {
+          "properties": {
+            "changed": {
+              "type": "boolean"
+            },
+            "mutation_revision": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "type": {
+              "enum": [
+                "rootStateUpdated"
+              ],
+              "title": "RootStateUpdatedDurableSessionControlEffectType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "changed",
+            "mutation_revision",
+            "type"
+          ],
+          "title": "RootStateUpdatedDurableSessionControlEffect",
+          "type": "object"
+        },
+        {
+          "description": "The loaded canonical Root owner completed the close barrier and was removed. This does not invent a whole-Session lifecycle fact.",
+          "properties": {
+            "type": {
+              "enum": [
+                "ownerClosed"
+              ],
+              "title": "OwnerClosedDurableSessionControlEffectType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "OwnerClosedDurableSessionControlEffect",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "affected_thread_ids": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": {
+              "enum": [
+                "archived"
+              ],
+              "title": "ArchivedDurableSessionControlEffectType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "affected_thread_ids",
+            "type"
+          ],
+          "title": "ArchivedDurableSessionControlEffect",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "unarchived"
+              ],
+              "title": "UnarchivedDurableSessionControlEffectType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "UnarchivedDurableSessionControlEffect",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "affected_thread_ids": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": {
+              "enum": [
+                "deleted"
+              ],
+              "title": "DeletedDurableSessionControlEffectType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "affected_thread_ids",
+            "type"
+          ],
+          "title": "DeletedDurableSessionControlEffect",
+          "type": "object"
+        }
+      ]
+    },
+    "DurableSessionControlOperationKind": {
+      "description": "Field-free operation identity used in outcomes after the request payload is consumed.",
+      "enum": [
+        "setRootState",
+        "close",
+        "archive",
+        "unarchive",
+        "delete"
+      ],
+      "type": "string"
+    },
+    "DurableSessionControlOutcome": {
+      "description": "Certainty-preserving outcome returned by the control boundary.",
+      "oneOf": [
+        {
+          "properties": {
+            "effect": {
+              "$ref": "#/definitions/DurableSessionControlEffect"
+            },
+            "type": {
+              "enum": [
+                "applied"
+              ],
+              "title": "AppliedDurableSessionControlOutcomeType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect",
+            "type"
+          ],
+          "title": "AppliedDurableSessionControlOutcome",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "message": {
+              "type": "string"
+            },
+            "operation": {
+              "$ref": "#/definitions/DurableSessionControlOperationKind"
+            },
+            "reason": {
+              "$ref": "#/definitions/DurableSessionControlRejectionReason"
+            },
+            "type": {
+              "enum": [
+                "rejected"
+              ],
+              "title": "RejectedDurableSessionControlOutcomeType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "message",
+            "operation",
+            "reason",
+            "type"
+          ],
+          "title": "RejectedDurableSessionControlOutcome",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "completed_thread_ids": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "message": {
+              "type": "string"
+            },
+            "operation": {
+              "$ref": "#/definitions/DurableSessionControlOperationKind"
+            },
+            "type": {
+              "enum": [
+                "partial"
+              ],
+              "title": "PartialDurableSessionControlOutcomeType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "completed_thread_ids",
+            "message",
+            "operation",
+            "type"
+          ],
+          "title": "PartialDurableSessionControlOutcome",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "message": {
+              "type": "string"
+            },
+            "operation": {
+              "$ref": "#/definitions/DurableSessionControlOperationKind"
+            },
+            "type": {
+              "enum": [
+                "unknown"
+              ],
+              "title": "UnknownDurableSessionControlOutcomeType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "message",
+            "operation",
+            "type"
+          ],
+          "title": "UnknownDurableSessionControlOutcome",
+          "type": "object"
+        }
+      ]
+    },
+    "DurableSessionControlRejectionReason": {
+      "description": "Typed, side-effect-free reason why a control attempt was rejected.",
+      "enum": [
+        "stalePrecondition",
+        "wrongStorage",
+        "ownerUnavailable",
+        "notCurrentOwner",
+        "activeWriter",
+        "conflict",
+        "notFound",
+        "unsupported",
+        "invalidState"
+      ],
+      "type": "string"
+    }
+  },
+  "description": "Result of one Durable Session control attempt.",
+  "properties": {
+    "outcome": {
+      "$ref": "#/definitions/DurableSessionControlOutcome"
+    }
+  },
+  "required": [
+    "outcome"
+  ],
+  "title": "DurableSessionControlResponse",
+  "type": "object"
+}

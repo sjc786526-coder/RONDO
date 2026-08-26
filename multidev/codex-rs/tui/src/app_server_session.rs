@@ -3,6 +3,7 @@
 //! This module owns the typed JSON-RPC calls needed by the TUI and keeps
 //! request/response plumbing out of `App` and `ChatWidget`.
 
+mod durable_session_control;
 mod durable_session_query;
 mod fs;
 mod history;
@@ -149,6 +150,7 @@ use codex_utils_path_uri::PathUri;
 use color_eyre::eyre::ContextCompat;
 use color_eyre::eyre::Result;
 use color_eyre::eyre::WrapErr;
+use durable_session_control::DurableSessionControlBridge;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -327,6 +329,7 @@ pub(crate) struct AppServerSession {
     client: AppServerClient,
     next_request_id: i64,
     durable_session_query: Mutex<DurableSessionQueryClientState>,
+    durable_session_control: DurableSessionControlBridge,
     experimental_session_control:
         Mutex<ExperimentalSessionControl<ExperimentalSessionReadParams, ExperimentalSessionView>>,
     experimental_session_mutation_attempt_timeout: Duration,
@@ -409,6 +412,7 @@ impl AppServerSession {
             client,
             next_request_id: 1,
             durable_session_query: Mutex::new(durable_session_query),
+            durable_session_control: DurableSessionControlBridge::new(),
             experimental_session_control: Mutex::new(experimental_session_control),
             experimental_session_mutation_attempt_timeout:
                 EXPERIMENTAL_SESSION_MUTATION_ATTEMPT_TIMEOUT,

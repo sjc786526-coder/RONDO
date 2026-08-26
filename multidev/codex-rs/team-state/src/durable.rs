@@ -14,6 +14,7 @@ use sha2::Sha256;
 use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
+use uuid::Uuid;
 
 const SNAPSHOT_MAGIC: &[u8; 17] = b"RONDO-TEAM-STATE\0";
 const SNAPSHOT_VERSION: u32 = 1;
@@ -179,6 +180,9 @@ pub type TeamDurabilityFuture<'a, T> =
 /// close obtains a distinct barrier permit so shutdown cannot race a Team commit.
 pub trait TeamWriteAuthority: Send + Sync {
     fn identity(&self) -> DurableTeamIdentity;
+
+    /// Identifies the exact live Root writer incarnation behind this capability.
+    fn owner_incarnation_id(&self) -> Uuid;
 
     fn begin_write(&self) -> Result<Box<dyn TeamWritePermit>, TeamDurabilityError>;
 
@@ -366,6 +370,7 @@ mod tests {
     use crate::availability::ProducerAvailability;
     use crate::evidence::FactCategory;
     use crate::evidence::NotedObservation;
+    use crate::handle::TeamMutationPrecondition;
     use crate::handle::TeamStateHandle;
     use crate::ids::TeamRevision;
     use crate::model::ParticipantRole;
@@ -385,6 +390,7 @@ mod tests {
     #[derive(Clone)]
     struct FakeAuthority {
         identity: DurableTeamIdentity,
+        owner_incarnation_id: Uuid,
         snapshot: Arc<Mutex<Option<Vec<u8>>>>,
         fail_next_commit: Arc<Mutex<Option<InjectedCommitFailure>>>,
         fail_next_read: Arc<Mutex<Option<TeamDurabilityError>>>,
@@ -400,6 +406,7 @@ mod tests {
         fn new(identity: DurableTeamIdentity) -> Self {
             Self {
                 identity,
+                owner_incarnation_id: Uuid::new_v4(),
                 snapshot: Arc::new(Mutex::new(None)),
                 fail_next_commit: Arc::new(Mutex::new(None)),
                 fail_next_read: Arc::new(Mutex::new(None)),
@@ -447,6 +454,10 @@ mod tests {
     impl TeamWriteAuthority for FakeAuthority {
         fn identity(&self) -> DurableTeamIdentity {
             self.identity
+        }
+
+        fn owner_incarnation_id(&self) -> Uuid {
+            self.owner_incarnation_id
         }
 
         fn begin_write(&self) -> Result<Box<dyn TeamWritePermit>, TeamDurabilityError> {
@@ -698,6 +709,193 @@ mod tests {
             TeamDurabilityStatus::Writable {
                 commit_generation: 1
             }
+        );
+    }
+
+    #[test]
+    fn lifecycle_at_snapshot_accepts_exact_proof_and_rejects_the_consumed_snapshot() {
+        let root = ThreadId::new();
+        let identity = DurableTeamIdentity::new(SessionId::from(root), root);
+        let authority = Arc::new(FakeAuthority::new(identity));
+        let handle = TeamStateHandle::create_durable(authority.clone()).expect("create Team");
+        handle
+            .register_durable_participant(root, ParticipantRole::Root, "root".to_string())
+            .expect("register Root");
+        let published = handle
+            .publish(
+                root,
+                &Submission {
+                    based_on: handle.revision(),
+                    request_id: "snapshot-lifecycle".to_string(),
+                },
+                PublishRequest {
+                    target: PublishTarget::NewEvent {
+                        title: "snapshot lifecycle".to_string(),
+                    },
+                    summary: "state before formal mutation".to_string(),
+                    handoff: None,
+                },
+            )
+            .expect("publish version");
+        let precondition = TeamMutationPrecondition {
+            instance: handle.instance(),
+            revision: handle.revision(),
+            commit_generation: 2,
+        };
+        let request = LifecycleRequest {
+            targets: vec![LifecycleTarget {
+                version_id: published.version_id,
+                expected_producer_state: ProducerState::Open,
+                expected_root_state: RootState::Tracking,
+                change: LifecycleChange::SetRootState(RootState::Resolved),
+            }],
+        };
+
+        let outcome = handle
+            .update_lifecycle_at_snapshot_for_owner(
+                root,
+                authority.owner_incarnation_id(),
+                precondition,
+                request.clone(),
+            )
+            .expect("exact committed snapshot should mutate");
+        assert!(outcome.changed);
+        assert!(matches!(
+            handle.update_lifecycle_at_snapshot(root, precondition, request),
+            Err(TeamError::SnapshotConflict { .. })
+        ));
+    }
+
+    #[test]
+    fn lifecycle_at_snapshot_rejects_a_replaced_owner_incarnation() {
+        let root = ThreadId::new();
+        let identity = DurableTeamIdentity::new(SessionId::from(root), root);
+        let authority = Arc::new(FakeAuthority::new(identity));
+        let handle = TeamStateHandle::create_durable(authority).expect("create Team");
+        handle
+            .register_durable_participant(root, ParticipantRole::Root, "root".to_string())
+            .expect("register Root");
+        let published = handle
+            .publish(
+                root,
+                &Submission {
+                    based_on: handle.revision(),
+                    request_id: "owner-bound-lifecycle".to_string(),
+                },
+                PublishRequest {
+                    target: PublishTarget::NewEvent {
+                        title: "owner-bound lifecycle".to_string(),
+                    },
+                    summary: "reject replacement owner".to_string(),
+                    handoff: None,
+                },
+            )
+            .expect("publish version");
+        let precondition = TeamMutationPrecondition {
+            instance: handle.instance(),
+            revision: handle.revision(),
+            commit_generation: 2,
+        };
+        let request = LifecycleRequest {
+            targets: vec![LifecycleTarget {
+                version_id: published.version_id,
+                expected_producer_state: ProducerState::Open,
+                expected_root_state: RootState::Pending,
+                change: LifecycleChange::SetRootState(RootState::Tracking),
+            }],
+        };
+
+        assert_eq!(
+            handle.update_lifecycle_at_snapshot_for_owner(
+                root,
+                Uuid::new_v4(),
+                precondition,
+                request,
+            ),
+            Err(TeamError::OwnerIncarnationConflict)
+        );
+    }
+
+    #[tokio::test]
+    async fn close_at_snapshot_rejects_a_commit_that_won_after_the_proof() {
+        let root = ThreadId::new();
+        let identity = DurableTeamIdentity::new(SessionId::from(root), root);
+        let authority = Arc::new(FakeAuthority::new(identity));
+        let handle = TeamStateHandle::create_durable(authority.clone()).expect("create Team");
+        handle
+            .register_durable_participant(root, ParticipantRole::Root, "root".to_string())
+            .expect("register Root");
+        let precondition = TeamMutationPrecondition {
+            instance: handle.instance(),
+            revision: handle.revision(),
+            commit_generation: 1,
+        };
+        handle
+            .publish(
+                root,
+                &Submission {
+                    based_on: handle.revision(),
+                    request_id: "commit-before-close".to_string(),
+                },
+                PublishRequest {
+                    target: PublishTarget::NewEvent {
+                        title: "new fact".to_string(),
+                    },
+                    summary: "must survive stale close".to_string(),
+                    handoff: None,
+                },
+            )
+            .expect("new Team commit wins");
+
+        assert!(matches!(
+            handle
+                .begin_close_at_snapshot(authority.owner_incarnation_id(), precondition)
+                .await,
+            Err(TeamDurabilityError::Domain(
+                TeamError::SnapshotConflict { .. }
+            ))
+        ));
+        handle
+            .publish(
+                root,
+                &Submission {
+                    based_on: handle.revision(),
+                    request_id: "after-aborted-close".to_string(),
+                },
+                PublishRequest {
+                    target: PublishTarget::NewEvent {
+                        title: "retryable".to_string(),
+                    },
+                    summary: "owner remains writable".to_string(),
+                    handoff: None,
+                },
+            )
+            .expect("rejected close must leave the owner writable");
+    }
+
+    #[tokio::test]
+    async fn close_at_snapshot_rejects_a_replaced_owner_incarnation() {
+        let root = ThreadId::new();
+        let identity = DurableTeamIdentity::new(SessionId::from(root), root);
+        let authority = Arc::new(FakeAuthority::new(identity));
+        let handle = TeamStateHandle::create_durable(authority).expect("create Team");
+        handle
+            .register_durable_participant(root, ParticipantRole::Root, "root".to_string())
+            .expect("register Root");
+        let precondition = TeamMutationPrecondition {
+            instance: handle.instance(),
+            revision: handle.revision(),
+            commit_generation: 1,
+        };
+
+        assert_eq!(
+            handle
+                .begin_close_at_snapshot(Uuid::new_v4(), precondition)
+                .await
+                .err(),
+            Some(TeamDurabilityError::Domain(
+                TeamError::OwnerIncarnationConflict
+            ))
         );
     }
 

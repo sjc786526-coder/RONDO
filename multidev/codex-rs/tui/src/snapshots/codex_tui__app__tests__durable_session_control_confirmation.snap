@@ -1,0 +1,15 @@
+---
+source: tui/src/app/tests.rs
+assertion_line: 5205
+expression: "render_bottom_popup(&app.chat_widget, 80)"
+---
+  Confirm Durable Session permanently delete?
+  Proof rechecked at confirm. Sent once; unknown results are never retried.
+
+› 1. Confirm permanently delete
+     Session=session-080; canonical Root=root-080; target=canonical Root
+     subtree
+  2. Cancel
+     Do not submit the mutation
+
+  Press enter to confirm or esc to go back

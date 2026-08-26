@@ -12,6 +12,7 @@ use tracing::info_span;
 
 use crate::session::SteerInputError;
 use crate::session::TurnInput;
+use crate::session::session::PreparedDurableSessionShutdownCompletion;
 use crate::session::session::Session;
 use crate::session::session::SessionSettingsUpdate;
 
@@ -626,39 +627,46 @@ pub async fn shutdown(sess: &Arc<Session>, sub_id: String) -> bool {
         .is_some_and(|identity| identity.root_thread_id() == sess.thread_id());
     let mut durable_lifecycle_close = None;
     let mut durable_team_close = None;
+    let mut formal_shutdown_completion = None;
     if durable_root {
-        if let Err(error) = sess.ensure_durable_root_activation().await {
-            send_durable_close_error(sess, &sub_id, error.to_string()).await;
-            sess.finish_failed_experimental_session_control_shutdown();
-            return false;
-        }
-        let lifecycle_close = match sess
-            .services
-            .agent_control
-            .begin_durable_team_root_close(sess.thread_id())
-        {
-            Ok(close) => close,
-            Err(error) => {
+        if let Some(claimed) = sess.take_prepared_durable_session_shutdown(&sub_id) {
+            durable_lifecycle_close = Some(claimed.prepared.lifecycle_close);
+            durable_team_close = Some(claimed.prepared.team_close);
+            formal_shutdown_completion = Some(claimed.completion);
+        } else {
+            if let Err(error) = sess.ensure_durable_root_activation().await {
                 send_durable_close_error(sess, &sub_id, error.to_string()).await;
                 sess.finish_failed_experimental_session_control_shutdown();
                 return false;
             }
-        };
-        if let Err(error) = lifecycle_close.ensure_no_live_descendants().await {
-            send_durable_close_error(sess, &sub_id, error.to_string()).await;
-            sess.finish_failed_experimental_session_control_shutdown();
-            return false;
-        }
-        let team_close = match team.begin_close().await {
-            Ok(close) => close,
-            Err(error) => {
+            let lifecycle_close = match sess
+                .services
+                .agent_control
+                .begin_durable_team_root_close(sess.thread_id())
+            {
+                Ok(close) => close,
+                Err(error) => {
+                    send_durable_close_error(sess, &sub_id, error.to_string()).await;
+                    sess.finish_failed_experimental_session_control_shutdown();
+                    return false;
+                }
+            };
+            if let Err(error) = lifecycle_close.ensure_no_live_descendants().await {
                 send_durable_close_error(sess, &sub_id, error.to_string()).await;
                 sess.finish_failed_experimental_session_control_shutdown();
                 return false;
             }
-        };
-        durable_lifecycle_close = Some(lifecycle_close);
-        durable_team_close = Some(team_close);
+            let team_close = match team.begin_close().await {
+                Ok(close) => close,
+                Err(error) => {
+                    send_durable_close_error(sess, &sub_id, error.to_string()).await;
+                    sess.finish_failed_experimental_session_control_shutdown();
+                    return false;
+                }
+            };
+            durable_lifecycle_close = Some(lifecycle_close);
+            durable_team_close = Some(team_close);
+        }
     }
 
     // A durable Root must retain its fully usable runtime when persistence cannot cross the close
@@ -683,6 +691,11 @@ pub async fn shutdown(sess: &Arc<Session>, sub_id: String) -> bool {
             "Failed to shutdown thread persistence".to_string(),
         )
         .await;
+        if let Some(completion) = formal_shutdown_completion.take() {
+            let _ = completion.send(PreparedDurableSessionShutdownCompletion::RetainedError(
+                "Failed to shutdown thread persistence".to_string(),
+            ));
+        }
         sess.finish_failed_experimental_session_control_shutdown();
         return false;
     }
@@ -715,8 +728,23 @@ pub async fn shutdown(sess: &Arc<Session>, sub_id: String) -> bool {
     if let Some(team_close) = durable_team_close.take()
         && let Err(error) = team_close.complete().await
     {
-        send_durable_close_error(sess, &sub_id, error.to_string()).await;
-        return false;
+        let message = error.to_string();
+        // Persistence and runtime teardown have already crossed the rollback boundary. Keeping the
+        // submission loop alive here would expose a mapped but unusable Root. Close admission,
+        // terminate the loop, and let app-server retire only this exact owner mapping.
+        if let Some(lifecycle_close) = durable_lifecycle_close.take() {
+            lifecycle_close.complete();
+        }
+        send_durable_close_error(sess, &sub_id, message.clone()).await;
+        sess.services
+            .rollout_thread_trace
+            .record_ended(codex_rollout_trace::RolloutStatus::Failed);
+        if let Some(completion) = formal_shutdown_completion.take() {
+            let _ = completion.send(PreparedDurableSessionShutdownCompletion::TerminatedError(
+                message,
+            ));
+        }
+        return true;
     }
     if let Some(lifecycle_close) = durable_lifecycle_close.take() {
         lifecycle_close.complete();
@@ -733,6 +761,9 @@ pub async fn shutdown(sess: &Arc<Session>, sub_id: String) -> bool {
     sess.services
         .rollout_thread_trace
         .record_ended(codex_rollout_trace::RolloutStatus::Completed);
+    if let Some(completion) = formal_shutdown_completion.take() {
+        let _ = completion.send(PreparedDurableSessionShutdownCompletion::Completed);
+    }
     true
 }
 
