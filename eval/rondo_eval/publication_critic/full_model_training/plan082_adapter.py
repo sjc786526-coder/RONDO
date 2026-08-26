@@ -646,7 +646,7 @@ class TorchContinuousTrainingAdapter:
     def read_training_state(self, path: Path) -> Mapping[str, Any]:
         try:
             value = self.torch.load(
-                Path(path), map_location=self.device, weights_only=False
+                Path(path), map_location="cpu", weights_only=False
             )
         except Exception as exc:
             raise FullModelTrainingError("plan082_training_state_read_failed") from exc

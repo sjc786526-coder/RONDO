@@ -4,6 +4,7 @@ umask 077
 
 : "${RONDO_PLAN082_TASK_ROOT:?set task root}"
 : "${RONDO_PLAN082_SOURCE_ROOT:?set verified source root}"
+: "${RONDO_PLAN082_IMAGE_IDENTITY:?set the exact approved container image identity}"
 : "${RONDO_PLAN082_LAUNCH_NAME:?set unique launch name}"
 : "${RONDO_PLAN082_MAX_SECONDS:?set a finite command timeout}"
 if [ "$#" -lt 2 ] || [ "$1" != "--" ]; then exit 2; fi

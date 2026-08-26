@@ -405,36 +405,39 @@ XXX用以下内容代替：
   retained bootstrap 输出可污染正式 artifact tree。两项均已局部修复并补直接负例；付费门继续关闭，正在形成新提交并申请复验。
 - 2026-08-26：最终审查者复验两项整改及相邻合同，81/81 聚焦门禁和两路独立窄审查均通过，无遗留高/中等级
   correctness/functionality finding；阶段 A 取得 `PHASE_A_ACCEPTED`。这不构成付费授权，当前等待用户本人明确人工批准。
+- 2026-08-26：用户付费批准已由审查者正式传达，阶段 B 启动。实时查询确认 A40 当前可用 DC 均不支持网络卷，故按冻结规则选择
+  US-TX-3 单张 L40S Secure（0.99 USD/h），创建 40GB Plan 082 Standard 网络卷与唯一 Pod；exact 1.7B、无 unseen data、验收源码已完成
+  bootstrap。首次真实 commissioning 在 checkpoint 新鲜读回时暴露 source bundle 漏带 route、launcher 未显式要求 image identity，以及
+  复合训练状态被整体 map 到 CUDA 后 RNG 无法恢复三项接缝；均已作局部修复和直接回归，正在用新提交重建源码包继续 commissioning。
 
 ### 当前工作
 
-- 阶段 A 已通过最终审查；当前等待用户本人明确人工批准付费，阶段 B 尚未授权。
+- 阶段 B 已授权并进入真实 commissioning；Pod 与网络卷保留，正在从已定位的 checkpoint restore 接缝继续打通 start→resume。
 
 ### 本任务剩余步骤
 
-1. 等待用户本人明确人工批准付费；审查者通过指定队列传达已取得该批准后才进入下一步。
-2. 阶段 B：同时刷新 A40/L40S 与网络卷兼容性/费用事实，创建单 GPU 与最小实用网络卷，完成真实环境 commissioning；总累计费用首次
+1. 阶段 B：同时刷新 A40/L40S 与网络卷兼容性/费用事实，创建单 GPU 与最小实用网络卷，完成真实环境 commissioning；总累计费用首次
    达到 10 USD 时发一次非阻断告警，远端任务继续。
-3. 在 commissioning 中有界开发训练参数，完整打通后提交并冻结结果相关 source/environment/recipe/比较规则。
-4. 从 exact base 和空 namespace 运行一轮干净 formal，形成 improvement 或 valid no-improvement；若外部边界始终阻断则形成 inconclusive。
-5. 只回传小型关键证据，保留正式 Pod/网络卷；更新 `GPU_REVIEW_PENDING / POD_RETAINED`、WBS 候选事实与执行日志，提交 clean task branch
+2. 在 commissioning 中有界开发训练参数，完整打通后提交并冻结结果相关 source/environment/recipe/比较规则。
+3. 从 exact base 和空 namespace 运行一轮干净 formal，形成 improvement 或 valid no-improvement；若外部边界始终阻断则形成 inconclusive。
+4. 只回传小型关键证据，保留正式 Pod/网络卷；更新 `GPU_REVIEW_PENDING / POD_RETAINED`、WBS 候选事实与执行日志，提交 clean task branch
    并按队列请求 GPU 阶段验收。
-6. 审查者只关闭所有合理可预见且仍需 GPU/Pod 的事项；执行者按审查结论修复/补跑。审查者明确确认无需再操作 GPU 后，执行者立即释放
+5. 审查者只关闭所有合理可预见且仍需 GPU/Pod 的事项；执行者按审查结论修复/补跑。审查者明确确认无需再操作 GPU 后，执行者立即释放
    Pod、核对 0 Pod/compute 费用归零并提交资源状态；无需 GPU 的事项留给最终验收。
-7. 等待 Plan 083 不占用共享磁盘且宿主容量安全窗口；不创建 transfer Pod，通过网络卷 S3-compatible API 完成 inventory、`.part`
+6. 等待 Plan 083 不占用共享磁盘且宿主容量安全窗口；不创建 transfer Pod，通过网络卷 S3-compatible API 完成 inventory、`.part`
    Range 续传、全部必要对象 bytes/SHA-256 校验，提交 `FINAL_REVIEW_PENDING / VOLUME_RETAINED_PENDING_USER_DELETE` 并按队列申请最终验收。
-8. 最终审查者只要求无需 GPU 的修复/复验并收口最终文档；验收后转请用户本人决定是否删除网络卷。执行者仅在收到用户人工批准后删除卷，
+7. 最终审查者只要求无需 GPU 的修复/复验并收口最终文档；验收后转请用户本人决定是否删除网络卷。执行者仅在收到用户人工批准后删除卷，
    记录终态并通知；所有人继续等待用户决定合并/推送。
 
 ### 阻塞项
 
 - 阶段 A 无计划级阻塞。
-- 阶段 B 的计费授权尚未生效；最终审查者完成阶段 A 验收后，仍必须等待用户本人明确人工批准并由审查者通过队列传达。
+- 阶段 B 计费授权已生效；当前无计划级阻塞。
 - 实际 RunPod 库存、价格、旧资源终态、网络卷/S3 兼容性和本地大工件回传窗口均须在相应动作前实时复核；规划时快照不构成运行事实。
 
 ### 当前验收状态
 
-- `PHASE_A_ACCEPTED / USER_PAID_APPROVAL_PENDING`。
+- `PHASE_B_COMMISSIONING / POD_AND_VOLUME_ACTIVE`。
 
 ### 交接边界
 
@@ -475,3 +478,4 @@ XXX用以下内容代替：
 | 018 | 进程 receipt 在训练 segment 前 write-once 发布，正式 freeze 显式选择末次非终 checkpoint 作为新进程恢复边界 | 中断后仍能消费已资格化 checkpoint，并保证正式轮实际走一次恢复后继续更新 | recovery | 已采纳 |
 | 019 | recipe 显式参数化模型参数 dtype；每个 update 对当前 scope 全部非零梯度参数保留 CPU 前值，optimizer 后逐个精确比较，至少一个真实数值变化才接受，不做 GPU 全 scope clone 或全模型逐步哈希 | 消除单参数探针的 false no-op，同时把额外内存移到 CPU；commissioning 仍可调整 dtype/LR/scope | training correctness | 已采纳 |
 | 020 | 用小型实际环境 receipt、真实 retention artifact producer 与固定项目局部 boto3 launcher 分别闭合 freeze、GPU 释放前清单和 0 Pod 回传入口；retained bootstrap 只能写入 task root 内、artifact root 外的无符号链接新路径 | 直接验证真实接缝且保持职责分离，避免 producer 污染正式工件，不引入签名链、通用环境管理器或第二套工件平台 | environment/handoff | 已采纳 |
+| 021 | source bundle 纳入运行所需的 Plan 081 route；复合训练状态从 CPU 反序列化后由 optimizer 按参数设备恢复；launcher 在 detach 前要求 exact image identity | 真实 commissioning 已分别复现缺失 route、CUDA RNG state 无法恢复和子进程环境遗漏；局部修复即可闭合，不引入第二套 bundle 或 launcher | source/recovery/runtime | 已采纳 |

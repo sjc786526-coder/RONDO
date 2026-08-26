@@ -795,6 +795,13 @@ class Plan082TrainingTests(unittest.TestCase):
             )
             self.assertEqual(observed, created)
             self.assertFalse((extracted / ".git").exists())
+            self.assertEqual(
+                (
+                    extracted
+                    / "training/publication-critic-plan081/route-contract-v1.json"
+                ).read_text(encoding="utf-8"),
+                "fixture:training/publication-critic-plan081/route-contract-v1.json\n",
+            )
 
     def test_executing_source_rejects_wrong_root_and_receipt(self) -> None:
         receipt = {
@@ -1372,6 +1379,33 @@ class Plan082TrainingTests(unittest.TestCase):
         ):
             self.assertTrue(adapter._values_equal(Array((1, 2)), Array((1, 2))))
             self.assertFalse(adapter._values_equal(Array((1, 2)), Array((1, 3))))
+
+    def test_training_state_load_keeps_rng_tensors_on_cpu(self) -> None:
+        observed: dict[str, object] = {}
+
+        def load(path, *, map_location, weights_only):
+            observed.update(
+                path=path,
+                map_location=map_location,
+                weights_only=weights_only,
+            )
+            return {"optimizer": {}, "scheduler": {}, "rng": {}, "data": {}}
+
+        adapter = object.__new__(TorchContinuousTrainingAdapter)
+        adapter.torch = SimpleNamespace(load=load)
+        state_path = Path("checkpoint/training-state")
+        self.assertEqual(
+            adapter.read_training_state(state_path),
+            {"optimizer": {}, "scheduler": {}, "rng": {}, "data": {}},
+        )
+        self.assertEqual(
+            observed,
+            {
+                "path": state_path,
+                "map_location": "cpu",
+                "weights_only": False,
+            },
+        )
 
     def test_formal_freeze_precedes_namespace_and_is_only_candidate_gate(self) -> None:
         spec = _run_spec()

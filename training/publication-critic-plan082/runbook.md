@@ -137,10 +137,12 @@ least one subsequent update. The controller records the actual scope history,
 full validation observations and a complete optimizer/scheduler/RNG/data state.
 
 Use `runpod-launch.sh -- <command...>` to detach that explicit command under one
-task-root lock and write a unique status/log/PID. Set a positive finite
-`RONDO_PLAN082_MAX_SECONDS`; timeout is reported as command failure. The wrapper
-does not reinterpret arbitrary command arguments. Do not start two Plan 082
-launchers or creator monitors concurrently.
+task-root lock and write a unique status/log/PID. Set the same exact
+`RONDO_PLAN082_IMAGE_IDENTITY` used by bootstrap, plus a positive finite
+`RONDO_PLAN082_MAX_SECONDS`; both are inherited by the training process and a
+missing identity is rejected before detach. Timeout is reported as command
+failure. The wrapper does not reinterpret arbitrary command arguments. Do not
+start two Plan 082 launchers or creator monitors concurrently.
 
 Commissioning is not a formal result. Preserve verified progress while fixing
 the first broken link until exact load, update, observation, full checkpoint,

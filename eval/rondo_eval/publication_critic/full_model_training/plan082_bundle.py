@@ -76,6 +76,7 @@ SOURCE_PATHS = (
     "eval/model-locks/publication-critic/skywork-reward-v2-qwen3-1.7b-e51ea3e0.json",
     "eval/pyproject.toml",
     "eval/uv.lock",
+    "training/publication-critic-plan081/route-contract-v1.json",
     "training/publication-critic-plan082",
 )
 
@@ -375,6 +376,7 @@ def verify_source_archive(
     required = {
         "eval/rondo_eval/publication_critic/full_model_training/plan082_bundle.py",
         "eval/model-locks/publication-critic/skywork-reward-v2-qwen3-1.7b-e51ea3e0.json",
+        "training/publication-critic-plan081/route-contract-v1.json",
         "training/publication-critic-plan082/README.md",
     }
     if not required <= members:

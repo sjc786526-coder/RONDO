@@ -40,6 +40,8 @@ class Plan082ScriptTests(unittest.TestCase):
                     **os.environ,
                     "RONDO_PLAN082_TASK_ROOT": "/workspace/fixture",
                     "RONDO_PLAN082_SOURCE_ROOT": "/workspace/fixture/source",
+                    "RONDO_PLAN082_IMAGE_IDENTITY": "fixture-image@sha256:"
+                    + "f" * 64,
                     "RONDO_PLAN082_LAUNCH_NAME": "fixture",
                     "RONDO_PLAN082_MAX_SECONDS": "60",
                 },
