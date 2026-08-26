@@ -266,16 +266,27 @@ XXX用以下内容代替：
 - 2026-08-26：确认 069 shared target 存在（规划时约 197G，展示值），本次计划沿用用户指定的唯一 target、命令级 270/285/290GB
   门限与保守 incremental 清理边界；规划期间未运行 Cargo、Docker、真实 API/模型、训练或测评。
 - 2026-08-26：完成本 ExecPlan，冻结产品语义、资源、重跑、队列审查和本地提交边界；当前没有必须直接写主工作区的 ignored 业务资产。
+- 2026-08-26：以 exact patch `sha256:21f58639f92dbc86790359333fc8cf57c980afc5c29402bdaafe4fdf5cb8037b`
+  复核上游增量，并完成 live writer、bounded history、cold resume、loaded/unloaded/boundary fork、current config/requirements 与副作用顺序核对。
+- 2026-08-26：在 canonical `TurnContext` 增加向后兼容的 presence-aware active-profile identity；普通 turn 与所有共用 writer 的 compaction
+  路径都持久化三态事实。新增一条 recent-settings 投影，统一处理 policy、reviewer、identity、同一 turn 内 settings update 与 legacy
+  边界；cold resume 和顶层 fork 均在 config load 前合并，显式 typed/raw override 保持优先。
+- 2026-08-26：为 Config 增加内部 persisted-profile 来源，仍复用当前 catalog、profile compile、Plan 086 trust、workspace roots、network 与
+  requirements 链；missing/invalid/disallowed/concrete-requirement fallback 对该来源返回明确错误，合法显式权限 override 先清除该来源。
+- 2026-08-26：完成 task-owned fake/offline 正反验证：protocol 三态 serde `1/1`，core persisted-profile 聚焦 `6/6`，app-server lib
+  `279/279`，legacy/paginated cold resume 与 fork 集成 `5/5`；最终 scoped clippy fix 与统一 fmt 通过。正式批次均经共享锁/看门狗，
+  `stop=none`、`cleanup=none`，未运行 Docker、真实 API/模型、训练、测评或完整 workspace 门禁。
+- 2026-08-26：完成执行者静态自审与独立只读复核；未发现高/中等级 correctness finding。复核指出 paginated invalid-profile 和 fork
+  override 可增加直接负向集成证据，但共享 merge/config 路径、paginated 正向集成和严格 config 单测已覆盖产品语义，未扩成重复矩阵。
 
 ### 当前工作
 
-- ExecPlan 已就绪，等待执行者从 088 worktree 开始实现；本任务尚未进入代码、测试或验收阶段。
+- 执行者实现、正式验证、scoped fix/fmt、自审与实施记录已完成，候选正冻结为 088 本地提交并交给独立审查；尚未宣称
+  `M4_W_39153_ADAPTATION_PASS`。
 
 ### 本任务剩余步骤
 
-- 执行者复核 exact diff 与 live gap，完成 fail-closed 窄适配和相称 deterministic/fake 回归。
-- 在调试链稳定后从干净 task-owned 现场完成正式轮、scoped 门禁、自审、日志和本地提交。
-- 执行者按指定队列请求独立审查；范围内 finding 自主整改、复验、提交并重新通知。
+- 执行者提交 clean 候选并按指定队列请求独立审查；范围内 finding 自主整改、复验、提交并重新通知。
 - 审查通过后由审查者同步 Plan/WBS/COMPLETED 并提交，其中 WBS 只记录已验收、待整合且 M4-W1 仍锁定；随后等待用户批准是否整合
   本地 main，获批进入 main 后才把当前指针改为“另行规划 M4-W1（尚未启动）”。
 
@@ -285,7 +296,7 @@ XXX用以下内容代替：
 
 ### 当前验收状态
 
-- `NOT_STARTED / EXECPLAN_READY`；`M4_W_39153_ADAPTATION_PASS` 尚未形成，M4-W1 仍锁定且未规划。
+- `IMPLEMENTED / EXECUTOR_VERIFIED / PENDING_INDEPENDENT_REVIEW`；`M4_W_39153_ADAPTATION_PASS` 尚未形成，M4-W1 仍锁定且未规划。
 
 ### 交接边界
 
@@ -310,3 +321,7 @@ XXX用以下内容代替：
 | 008 | 聚焦/邻接门禁优先；只有 shared core 实际生产写集与风险证明需要时才执行一次相称最终完整门禁 | 保证 correctness，不重复最重矩阵或为形式扩大测试 | 测试 | 已采纳 |
 | 009 | 执行者先提交 clean 候选，再以指定队列、指定 UUID 和主动身份请求审查；普通小修/重跑自主完成 | 保持跨会话审查可靠且不给小问题设置机械停机点 | 协作/审查 | 已采纳 |
 | 010 | 最终只提交 088 worktree；本地 main 合并与远端推送均等待用户批准，087/088 文档冲突加法式整合 | 保护并行现场与用户整合决定 | Git/交付 | 已采纳 |
+| 011 | `TurnContext` 使用双层可选字段表达 legacy missing、explicit null 与 `Some(id)`，真实 turn 和 compaction 复用同一 writer | bounded canonical history 必须保留最小 identity 事实，同时不能从历史 concrete permission 猜测 | protocol/history | 已采纳 |
+| 012 | recent-settings 投影按设置域逆序解析；最近 legacy `TurnContext` 也是 identity 边界，不向前复活更老 ID，同一 turn 内的 settings update 可覆盖 stale compaction context | 同时满足 RONDO 三态硬约束和既有 compaction 时序 | app-server/history | 已采纳 |
+| 013 | persisted profile 作为 Config 内部来源进入既有当前解析链，并在 profile allowlist 与 concrete requirement 两个 fallback 点对该来源转为 error | 复用单一 config/trust/requirements 权威，阻止无效历史 identity 静默换默认 | core/config | 已采纳 |
+| 014 | 正式门禁采用 protocol serde、core 六项、app-server 全库与 legacy/paginated resume/fork 五项集成，不扩大到完整 workspace | shared core 风险已由直接配置单测、全 app-server lib 和端到端主链覆盖；完整 workspace 与本任务写集不成比例 | 测试 | 已采纳 |

@@ -11,6 +11,7 @@ use app_test_support::rollout_path;
 use app_test_support::to_response;
 use app_test_support::write_chatgpt_auth;
 use codex_app_server_protocol::ApprovalsReviewer;
+use codex_app_server_protocol::AskForApproval;
 use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::JSONRPCError;
 use codex_app_server_protocol::JSONRPCMessage;
@@ -283,16 +284,23 @@ async fn thread_fork_creates_new_thread_and_emits_started() -> Result<()> {
 }
 
 #[tokio::test]
-async fn thread_fork_preserves_persisted_approvals_reviewer() -> Result<()> {
-    assert_thread_fork_preserves_persisted_approvals_reviewer(ThreadHistoryMode::Legacy).await
+async fn thread_fork_preserves_persisted_permission_and_approval_settings() -> Result<()> {
+    assert_thread_fork_preserves_persisted_permission_and_approval_settings(
+        ThreadHistoryMode::Legacy,
+    )
+    .await
 }
 
 #[tokio::test]
-async fn paginated_thread_fork_preserves_persisted_approvals_reviewer() -> Result<()> {
-    assert_thread_fork_preserves_persisted_approvals_reviewer(ThreadHistoryMode::Paginated).await
+async fn paginated_thread_fork_preserves_persisted_permission_and_approval_settings() -> Result<()>
+{
+    assert_thread_fork_preserves_persisted_permission_and_approval_settings(
+        ThreadHistoryMode::Paginated,
+    )
+    .await
 }
 
-async fn assert_thread_fork_preserves_persisted_approvals_reviewer(
+async fn assert_thread_fork_preserves_persisted_permission_and_approval_settings(
     history_mode: ThreadHistoryMode,
 ) -> Result<()> {
     let server = create_mock_responses_server_repeating_assistant("Done").await;
@@ -308,6 +316,8 @@ async fn assert_thread_fork_preserves_persisted_approvals_reviewer(
         let start_id = mcp
             .send_thread_start_request_with_auto_env(ThreadStartParams {
                 history_mode: Some(history_mode),
+                approval_policy: Some(AskForApproval::OnRequest),
+                permissions: Some(":read-only".to_string()),
                 ..Default::default()
             })
             .await?;
@@ -371,13 +381,36 @@ async fn assert_thread_fork_preserves_persisted_approvals_reviewer(
                 })
                 .await?;
             let ThreadForkResponse {
-                approvals_reviewer, ..
+                approval_policy,
+                approvals_reviewer,
+                active_permission_profile,
+                ..
             } = timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(fork_id)).await??;
+            assert_eq!(approval_policy, AskForApproval::OnRequest);
             assert_eq!(approvals_reviewer, ApprovalsReviewer::AutoReview);
+            assert_eq!(
+                active_permission_profile.map(|profile| profile.id),
+                Some(":read-only".to_string())
+            );
         }
 
         (thread.id, turn.id)
     };
+
+    let config_path = codex_home.path().join("config.toml");
+    let config = std::fs::read_to_string(&config_path)?;
+    std::fs::write(
+        config_path,
+        config
+            .replace(
+                "approval_policy = \"never\"\n",
+                "approval_policy = \"untrusted\"\napprovals_reviewer = \"user\"\n",
+            )
+            .replace(
+                "sandbox_mode = \"read-only\"",
+                "sandbox_mode = \"danger-full-access\"",
+            ),
+    )?;
 
     let mut mcp = TestAppServer::builder()
         .with_codex_home(codex_home.path())
@@ -396,10 +429,18 @@ async fn assert_thread_fork_preserves_persisted_approvals_reviewer(
     )
     .await??;
     let ThreadForkResponse {
-        approvals_reviewer, ..
+        approval_policy,
+        approvals_reviewer,
+        active_permission_profile,
+        ..
     } = to_response(fork_resp)?;
 
+    assert_eq!(approval_policy, AskForApproval::OnRequest);
     assert_eq!(approvals_reviewer, ApprovalsReviewer::AutoReview);
+    assert_eq!(
+        active_permission_profile.map(|profile| profile.id),
+        Some(":read-only".to_string())
+    );
 
     if matches!(history_mode, ThreadHistoryMode::Paginated) {
         let fork_id = mcp
@@ -407,14 +448,148 @@ async fn assert_thread_fork_preserves_persisted_approvals_reviewer(
                 thread_id: source_thread_id,
                 last_turn_id: Some(source_turn_id),
                 approvals_reviewer: Some(ApprovalsReviewer::User),
+                permissions: Some(":danger-full-access".to_string()),
                 ..Default::default()
             })
             .await?;
         let ThreadForkResponse {
-            approvals_reviewer, ..
+            approvals_reviewer,
+            active_permission_profile,
+            ..
         } = timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(fork_id)).await??;
         assert_eq!(approvals_reviewer, ApprovalsReviewer::User);
+        assert_eq!(
+            active_permission_profile.map(|profile| profile.id),
+            Some(":danger-full-access".to_string())
+        );
     }
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn invalid_persisted_permission_profile_rejects_cold_resume_and_fork_before_override()
+-> Result<()> {
+    let server = create_mock_responses_server_repeating_assistant("Done").await;
+    let codex_home = TempDir::new()?;
+    MockResponsesConfig::new(&server.uri()).write(codex_home.path())?;
+    let config_path = codex_home.path().join("config.toml");
+    let config = std::fs::read_to_string(&config_path)?;
+    std::fs::write(
+        &config_path,
+        format!(
+            "{}\n[permissions.dev]\nextends = \":read-only\"\n",
+            config.replace(
+                "sandbox_mode = \"read-only\"",
+                "default_permissions = \"dev\"",
+            )
+        ),
+    )?;
+
+    let source_thread_id = {
+        let mut mcp = TestAppServer::builder()
+            .with_codex_home(codex_home.path())
+            .build_initialized()
+            .await?;
+        let start_id = mcp
+            .send_thread_start_request_with_auto_env(ThreadStartParams::default())
+            .await?;
+        let ThreadStartResponse {
+            thread,
+            active_permission_profile,
+            ..
+        } = timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(start_id)).await??;
+        assert_eq!(
+            active_permission_profile.map(|profile| profile.id),
+            Some("dev".to_string())
+        );
+
+        let turn_id = mcp
+            .send_turn_start_request(TurnStartParams {
+                thread_id: thread.id.clone(),
+                input: vec![UserInput::Text {
+                    text: "materialize persisted dev profile".to_string(),
+                    text_elements: Vec::new(),
+                }],
+                ..Default::default()
+            })
+            .await?;
+        timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_stream_until_response_message(RequestId::Integer(turn_id)),
+        )
+        .await??;
+        timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_stream_until_notification_message("turn/completed"),
+        )
+        .await??;
+        thread.id
+    };
+
+    // Simulate a current config in which the persisted profile has been
+    // removed. The stored concrete permissions must not be reused.
+    MockResponsesConfig::new(&server.uri()).write(codex_home.path())?;
+    let mut mcp = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized()
+        .await?;
+
+    let resume_id = mcp
+        .send_thread_resume_request(ThreadResumeParams {
+            thread_id: source_thread_id.clone(),
+            ..Default::default()
+        })
+        .await?;
+    let resume_err: JSONRPCError = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_error_message(RequestId::Integer(resume_id)),
+    )
+    .await??;
+    assert!(
+        resume_err
+            .error
+            .message
+            .contains("persisted permission profile `dev` cannot be resolved"),
+        "unexpected resume error: {}",
+        resume_err.error.message
+    );
+
+    let fork_id = mcp
+        .send_thread_fork_request(ThreadForkParams {
+            thread_id: source_thread_id.clone(),
+            ..Default::default()
+        })
+        .await?;
+    let fork_err: JSONRPCError = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_error_message(RequestId::Integer(fork_id)),
+    )
+    .await??;
+    assert!(
+        fork_err
+            .error
+            .message
+            .contains("persisted permission profile `dev` cannot be resolved"),
+        "unexpected fork error: {}",
+        fork_err.error.message
+    );
+
+    let resume_id = mcp
+        .send_thread_resume_request(ThreadResumeParams {
+            thread_id: source_thread_id,
+            permissions: Some(":read-only".to_string()),
+            ..Default::default()
+        })
+        .await?;
+    let ThreadResumeResponse {
+        active_permission_profile,
+        ..
+    } = timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(resume_id)).await??;
+    assert_eq!(
+        active_permission_profile.map(|profile| profile.id),
+        Some(":read-only".to_string())
+    );
 
     Ok(())
 }

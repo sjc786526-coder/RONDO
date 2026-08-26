@@ -536,6 +536,9 @@ mod git_processor;
 mod initialize_processor;
 mod marketplace_processor;
 mod mcp_processor;
+mod persisted_resume_settings;
+#[cfg(test)]
+mod persisted_resume_settings_tests;
 mod plugins;
 mod process_exec_processor;
 mod remote_control_processor;

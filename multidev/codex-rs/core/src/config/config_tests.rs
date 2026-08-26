@@ -3447,6 +3447,225 @@ async fn unknown_builtin_permission_profile_name_is_rejected() -> std::io::Resul
 }
 
 #[tokio::test]
+async fn persisted_permission_profile_wins_over_current_configured_default() -> std::io::Result<()>
+{
+    let codex_home = TempDir::new()?;
+    let cwd = TempDir::new()?;
+
+    let config = Config::load_from_base_config_with_overrides(
+        ConfigToml {
+            default_permissions: Some(BUILT_IN_PERMISSION_PROFILE_DANGER_FULL_ACCESS.to_string()),
+            ..Default::default()
+        },
+        ConfigOverrides {
+            cwd: Some(cwd.path().to_path_buf()),
+            persisted_permission_profile_id: Some(
+                BUILT_IN_PERMISSION_PROFILE_READ_ONLY.to_string(),
+            ),
+            ..Default::default()
+        },
+        codex_home.abs(),
+    )
+    .await?;
+
+    assert_eq!(
+        config.permissions.effective_permission_profile(),
+        PermissionProfile::read_only()
+    );
+    assert_eq!(
+        config
+            .permissions
+            .active_permission_profile()
+            .map(|profile| profile.id),
+        Some(BUILT_IN_PERMISSION_PROFILE_READ_ONLY.to_string())
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn persisted_permission_profile_uses_current_custom_profile_definition() -> std::io::Result<()>
+{
+    let codex_home = TempDir::new()?;
+    let cwd = TempDir::new()?;
+
+    let config = Config::load_from_base_config_with_overrides(
+        ConfigToml {
+            default_permissions: Some(BUILT_IN_PERMISSION_PROFILE_DANGER_FULL_ACCESS.to_string()),
+            permissions: Some(PermissionsToml {
+                entries: BTreeMap::from([(
+                    "dev".to_string(),
+                    PermissionProfileToml {
+                        extends: Some(BUILT_IN_PERMISSION_PROFILE_READ_ONLY.to_string()),
+                        ..Default::default()
+                    },
+                )]),
+            }),
+            ..Default::default()
+        },
+        ConfigOverrides {
+            cwd: Some(cwd.path().to_path_buf()),
+            persisted_permission_profile_id: Some("dev".to_string()),
+            ..Default::default()
+        },
+        codex_home.abs(),
+    )
+    .await?;
+
+    assert_eq!(
+        config.permissions.effective_permission_profile(),
+        PermissionProfile::read_only()
+    );
+    assert_eq!(
+        config.permissions.active_permission_profile(),
+        Some(ActivePermissionProfile {
+            id: "dev".to_string(),
+            extends: Some(BUILT_IN_PERMISSION_PROFILE_READ_ONLY.to_string()),
+        })
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn invalid_persisted_permission_profile_is_rejected_instead_of_falling_back()
+-> std::io::Result<()> {
+    let codex_home = TempDir::new()?;
+    let cwd = TempDir::new()?;
+
+    let err = Config::load_from_base_config_with_overrides(
+        ConfigToml {
+            default_permissions: Some(BUILT_IN_PERMISSION_PROFILE_DANGER_FULL_ACCESS.to_string()),
+            ..Default::default()
+        },
+        ConfigOverrides {
+            cwd: Some(cwd.path().to_path_buf()),
+            persisted_permission_profile_id: Some("removed-profile".to_string()),
+            ..Default::default()
+        },
+        codex_home.abs(),
+    )
+    .await
+    .expect_err("an invalid persisted identity must not use the current default");
+
+    assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+    assert!(
+        err.to_string().contains(
+            "persisted permission profile `removed-profile` cannot be resolved under current configuration"
+        ),
+        "{err}"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn explicit_permission_override_bypasses_invalid_persisted_identity() -> std::io::Result<()> {
+    let codex_home = TempDir::new()?;
+    let cwd = TempDir::new()?;
+
+    let config = Config::load_from_base_config_with_overrides(
+        ConfigToml {
+            default_permissions: Some(BUILT_IN_PERMISSION_PROFILE_DANGER_FULL_ACCESS.to_string()),
+            ..Default::default()
+        },
+        ConfigOverrides {
+            cwd: Some(cwd.path().to_path_buf()),
+            default_permissions: Some(BUILT_IN_PERMISSION_PROFILE_READ_ONLY.to_string()),
+            persisted_permission_profile_id: Some("removed-profile".to_string()),
+            ..Default::default()
+        },
+        codex_home.abs(),
+    )
+    .await?;
+
+    assert_eq!(
+        config
+            .permissions
+            .active_permission_profile()
+            .map(|profile| profile.id),
+        Some(BUILT_IN_PERMISSION_PROFILE_READ_ONLY.to_string())
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn persisted_permission_profile_disallowed_by_requirements_is_rejected() -> std::io::Result<()>
+{
+    let codex_home = TempDir::new()?;
+
+    let err = ConfigBuilder::without_managed_config_for_tests()
+        .codex_home(codex_home.path().to_path_buf())
+        .fallback_cwd(Some(codex_home.path().to_path_buf()))
+        .harness_overrides(ConfigOverrides {
+            persisted_permission_profile_id: Some(
+                BUILT_IN_PERMISSION_PROFILE_DANGER_FULL_ACCESS.to_string(),
+            ),
+            ..Default::default()
+        })
+        .cloud_config_bundle(
+            CloudConfigBundleFixture::loader_with_enterprise_requirement(
+                r#"default_permissions = ":read-only"
+
+[allowed_permission_profiles]
+":read-only" = true
+"#,
+            ),
+        )
+        .build()
+        .await
+        .expect_err("a persisted identity disallowed by current requirements must fail closed");
+
+    assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+    assert_eq!(
+        err.to_string(),
+        "persisted permission profile `:danger-full-access` is disallowed by current requirements"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn persisted_permission_profile_rejects_concrete_requirement_fallback() -> std::io::Result<()>
+{
+    let codex_home = TempDir::new()?;
+    std::fs::write(
+        codex_home.path().join(CONFIG_TOML_FILE),
+        r#"default_permissions = ":read-only"
+
+[permissions.dev.filesystem]
+":root" = "write"
+"#,
+    )?;
+
+    let err = ConfigBuilder::without_managed_config_for_tests()
+        .codex_home(codex_home.path().to_path_buf())
+        .fallback_cwd(Some(codex_home.path().to_path_buf()))
+        .harness_overrides(ConfigOverrides {
+            persisted_permission_profile_id: Some("dev".to_string()),
+            ..Default::default()
+        })
+        .cloud_config_bundle(
+            CloudConfigBundleFixture::loader_with_enterprise_requirement(
+                r#"allowed_sandbox_modes = ["read-only"]
+default_permissions = "dev"
+
+[allowed_permission_profiles]
+dev = true
+"#,
+            ),
+        )
+        .build()
+        .await
+        .expect_err("a persisted profile must not accept a concrete requirement fallback");
+
+    assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+    assert!(
+        err.to_string().contains(
+            "persisted permission profile `dev` is incompatible with current requirements"
+        ),
+        "{err}"
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn permissions_profiles_allow_direct_write_roots_outside_workspace_root()
 -> std::io::Result<()> {
     let codex_home = TempDir::new()?;

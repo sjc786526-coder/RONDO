@@ -3331,6 +3331,18 @@ pub struct TurnContextItem {
     pub sandbox_policy: SandboxPolicy,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub permission_profile: Option<PermissionProfile>,
+    /// Presence-aware identity for the named permission profile that produced
+    /// `permission_profile`. A missing field is a legacy carrier that could not
+    /// record identity; an explicit `null` records that no named identity was
+    /// active and must not revive an older selection.
+    #[serde(
+        default,
+        deserialize_with = "serde_with::rust::double_option::deserialize",
+        serialize_with = "serde_with::rust::double_option::serialize",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[ts(optional = nullable, type = "ActivePermissionProfile | null")]
+    pub active_permission_profile: Option<Option<ActivePermissionProfile>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub network: Option<TurnContextNetworkItem>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -6171,6 +6183,7 @@ mod tests {
             approvals_reviewer: None,
             sandbox_policy: SandboxPolicy::DangerFullAccess,
             permission_profile: None,
+            active_permission_profile: None,
             network: Some(TurnContextNetworkItem {
                 allowed_domains: vec!["api.example.com".to_string()],
                 denied_domains: vec!["blocked.example.com".to_string()],
@@ -6195,7 +6208,28 @@ mod tests {
             summary: ReasoningSummaryConfig::Auto,
         };
 
-        let value = serde_json::to_value(item)?;
+        let value = serde_json::to_value(&item)?;
+        assert!(value.get("active_permission_profile").is_none());
+        let legacy: TurnContextItem = serde_json::from_value(value.clone())?;
+        assert_eq!(legacy.active_permission_profile, None);
+
+        let mut explicitly_cleared = item.clone();
+        explicitly_cleared.active_permission_profile = Some(None);
+        let explicitly_cleared_value = serde_json::to_value(&explicitly_cleared)?;
+        assert_eq!(
+            explicitly_cleared_value["active_permission_profile"],
+            serde_json::Value::Null
+        );
+        let explicitly_cleared: TurnContextItem = serde_json::from_value(explicitly_cleared_value)?;
+        assert_eq!(explicitly_cleared.active_permission_profile, Some(None));
+
+        let mut selected = item;
+        selected.active_permission_profile = Some(Some(ActivePermissionProfile::new("dev")));
+        let selected: TurnContextItem = serde_json::from_value(serde_json::to_value(selected)?)?;
+        assert_eq!(
+            selected.active_permission_profile,
+            Some(Some(ActivePermissionProfile::new("dev")))
+        );
         assert_eq!(
             value["network"],
             json!({

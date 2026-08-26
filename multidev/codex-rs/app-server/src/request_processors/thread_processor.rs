@@ -1,3 +1,7 @@
+use super::persisted_resume_settings::PersistedResumeSettings;
+use super::persisted_resume_settings::has_permission_override;
+use super::persisted_resume_settings::latest_persisted_resume_settings;
+use super::persisted_resume_settings::merge_persisted_thread_settings;
 use super::thread_enrichment::enrich_loaded_threads;
 use super::thread_fork_goal::inherit_thread_goal_snapshot;
 use super::thread_lifecycle::PendingThreadUnloads;
@@ -208,26 +212,6 @@ fn merge_persisted_resume_metadata(
             serde_json::Value::String(reasoning_effort.to_string()),
         );
     }
-}
-
-fn merge_persisted_approvals_reviewer(
-    history: &[RolloutItem],
-    request_overrides: Option<&HashMap<String, serde_json::Value>>,
-    typesafe_overrides: &mut ConfigOverrides,
-) {
-    if typesafe_overrides.approvals_reviewer.is_some()
-        || request_overrides.is_some_and(|overrides| overrides.contains_key("approvals_reviewer"))
-    {
-        return;
-    }
-
-    typesafe_overrides.approvals_reviewer = history.iter().rev().find_map(|item| match item {
-        RolloutItem::TurnContext(turn_context) => turn_context.approvals_reviewer,
-        RolloutItem::EventMsg(EventMsg::ThreadSettingsApplied(event)) => {
-            Some(event.thread_settings.approvals_reviewer)
-        }
-        _ => None,
-    });
 }
 
 fn normalize_thread_list_cwd_filters(
@@ -3630,11 +3614,14 @@ impl ThreadRequestProcessor {
         let InitialHistory::Resumed(resumed_history) = thread_history else {
             return None;
         };
-        merge_persisted_approvals_reviewer(
-            &resumed_history.history,
-            request_overrides.as_ref(),
-            typesafe_overrides,
-        );
+        if let Some(persisted_settings) = latest_persisted_resume_settings(&resumed_history.history)
+        {
+            merge_persisted_thread_settings(
+                persisted_settings,
+                request_overrides.as_ref(),
+                typesafe_overrides,
+            );
+        }
         let state_db_ctx = self.state_db.clone()?;
         let persisted_metadata = state_db_ctx
             .get_thread(resumed_history.conversation_id)
@@ -4376,40 +4363,61 @@ impl ThreadRequestProcessor {
             /*personality*/ None,
         );
         typesafe_overrides.ephemeral = ephemeral.then_some(true);
-        let latest_context = if paginated_source
-            && typesafe_overrides.approvals_reviewer.is_none()
+        let restore_approval_policy = typesafe_overrides.approval_policy.is_none()
             && !request_overrides
                 .as_ref()
-                .is_some_and(|overrides| overrides.contains_key("approvals_reviewer"))
-        {
+                .is_some_and(|overrides| overrides.contains_key("approval_policy"));
+        let restore_approvals_reviewer = typesafe_overrides.approvals_reviewer.is_none()
+            && !request_overrides
+                .as_ref()
+                .is_some_and(|overrides| overrides.contains_key("approvals_reviewer"));
+        let restore_permission_profile =
+            !has_permission_override(request_overrides.as_ref(), &typesafe_overrides);
+        let needs_latest_settings =
+            restore_approval_policy || restore_approvals_reviewer || restore_permission_profile;
+        let loaded_parent_settings = if paginated_source && needs_latest_settings {
             if let Ok(parent) = self.thread_manager.get_thread(source_thread_id).await {
-                typesafe_overrides.approvals_reviewer =
-                    Some(parent.config_snapshot().await.approvals_reviewer);
-                None
-            } else if last_turn_id.is_some() || before_turn_id.is_some() {
-                Some(
-                    self.thread_store
-                        .load_latest_model_context(StoreLoadThreadHistoryParams {
-                            thread_id: source_thread_id,
-                            include_archived: true,
-                        })
-                        .await
-                        .map_err(thread_store_resume_read_error)?
-                        .items,
-                )
+                Some(PersistedResumeSettings::from(
+                    parent.config_snapshot().await,
+                ))
             } else {
                 None
             }
         } else {
             None
         };
-        merge_persisted_approvals_reviewer(
-            latest_context
-                .as_deref()
-                .unwrap_or_else(|| source_history_items.as_ref()),
-            request_overrides.as_ref(),
-            &mut typesafe_overrides,
-        );
+        let latest_context = if paginated_source
+            && needs_latest_settings
+            && loaded_parent_settings.is_none()
+            && (last_turn_id.is_some() || before_turn_id.is_some())
+        {
+            Some(
+                self.thread_store
+                    .load_latest_model_context(StoreLoadThreadHistoryParams {
+                        thread_id: source_thread_id,
+                        include_archived: true,
+                    })
+                    .await
+                    .map_err(thread_store_resume_read_error)?
+                    .items,
+            )
+        } else {
+            None
+        };
+        let persisted_settings = loaded_parent_settings.or_else(|| {
+            latest_persisted_resume_settings(
+                latest_context
+                    .as_deref()
+                    .unwrap_or_else(|| source_history_items.as_ref()),
+            )
+        });
+        if let Some(persisted_settings) = persisted_settings {
+            merge_persisted_thread_settings(
+                persisted_settings,
+                request_overrides.as_ref(),
+                &mut typesafe_overrides,
+            );
+        }
         // Derive a Config using the same logic as new conversation, honoring overrides if provided.
         let config = self
             .config_manager

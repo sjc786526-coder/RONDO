@@ -639,7 +639,25 @@ async fn turn_start_updates_runtime_workspace_roots_for_loaded_thread() -> Resul
 }
 
 #[tokio::test]
-async fn thread_resume_preserves_persisted_approvals_reviewer() -> Result<()> {
+async fn thread_resume_preserves_persisted_permission_and_approval_settings() -> Result<()> {
+    assert_thread_resume_preserves_persisted_permission_and_approval_settings(
+        ThreadHistoryMode::Legacy,
+    )
+    .await
+}
+
+#[tokio::test]
+async fn paginated_thread_resume_preserves_persisted_permission_and_approval_settings() -> Result<()>
+{
+    assert_thread_resume_preserves_persisted_permission_and_approval_settings(
+        ThreadHistoryMode::Paginated,
+    )
+    .await
+}
+
+async fn assert_thread_resume_preserves_persisted_permission_and_approval_settings(
+    history_mode: ThreadHistoryMode,
+) -> Result<()> {
     let server = create_mock_responses_server_repeating_assistant("Done").await;
     let codex_home = TempDir::new()?;
     mock_responses_config(&server.uri()).write(codex_home.path())?;
@@ -654,7 +672,10 @@ async fn thread_resume_preserves_persisted_approvals_reviewer() -> Result<()> {
         let start_id = mcp
             .send_thread_start_request(ThreadStartParams {
                 model: Some("gpt-5.4".to_string()),
+                approval_policy: Some(AskForApproval::OnRequest),
                 approvals_reviewer: Some(ApprovalsReviewer::AutoReview),
+                permissions: Some(":read-only".to_string()),
+                history_mode: Some(history_mode),
                 ..Default::default()
             })
             .await?;
@@ -690,10 +711,15 @@ async fn thread_resume_preserves_persisted_approvals_reviewer() -> Result<()> {
     let config = std::fs::read_to_string(&config_path)?;
     std::fs::write(
         config_path,
-        config.replace(
-            "approval_policy = \"never\"\n",
-            "approval_policy = \"never\"\napprovals_reviewer = \"user\"\n",
-        ),
+        config
+            .replace(
+                "approval_policy = \"never\"\n",
+                "approval_policy = \"untrusted\"\napprovals_reviewer = \"user\"\n",
+            )
+            .replace(
+                "sandbox_mode = \"read-only\"",
+                "sandbox_mode = \"danger-full-access\"",
+            ),
     )?;
 
     let mut mcp = TestAppServer::builder()
@@ -708,10 +734,18 @@ async fn thread_resume_preserves_persisted_approvals_reviewer() -> Result<()> {
         })
         .await?;
     let ThreadResumeResponse {
-        approvals_reviewer, ..
+        approval_policy,
+        approvals_reviewer,
+        active_permission_profile,
+        ..
     } = timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(resume_id)).await??;
 
+    assert_eq!(approval_policy, AskForApproval::OnRequest);
     assert_eq!(approvals_reviewer, ApprovalsReviewer::AutoReview);
+    assert_eq!(
+        active_permission_profile.map(|profile| profile.id),
+        Some(":read-only".to_string())
+    );
 
     Ok(())
 }

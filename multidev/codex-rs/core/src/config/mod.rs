@@ -2559,6 +2559,7 @@ struct PermissionSelectionToml {
 struct EffectivePermissionSelection<'a> {
     profiles: Option<PermissionsToml>,
     selected_profile_id: Option<&'a str>,
+    restored_profile_id: Option<&'a str>,
     requirements_force_profile_selection: bool,
 }
 
@@ -2576,6 +2577,7 @@ impl EffectivePermissionSelection<'_> {
     ) -> bool {
         self.requirements_force_profile_selection
             || default_permissions_override.is_some()
+            || self.restored_profile_id.is_some()
             || matches!(
                 permission_config_syntax,
                 Some(PermissionConfigSyntax::Profiles)
@@ -2677,6 +2679,10 @@ pub struct ConfigOverrides {
     pub sandbox_mode: Option<SandboxMode>,
     pub permission_profile: Option<PermissionProfile>,
     pub default_permissions: Option<String>,
+    /// Internal-only permission profile identity restored from canonical
+    /// thread history. Explicit permission overrides clear this source. When
+    /// present, invalid current resolution or requirement conflicts are fatal.
+    pub persisted_permission_profile_id: Option<String>,
     pub model_provider: Option<String>,
     pub service_tier: Option<Option<String>>,
     pub codex_self_exe: Option<PathBuf>,
@@ -3445,6 +3451,7 @@ impl Config {
             sandbox_mode,
             permission_profile,
             default_permissions: default_permissions_override,
+            persisted_permission_profile_id,
             model_provider,
             service_tier: service_tier_override,
             codex_self_exe,
@@ -3490,6 +3497,14 @@ impl Config {
                 "`permission_profile` and `default_permissions` overrides cannot both be set",
             ));
         }
+        let persisted_permission_profile_id = if sandbox_mode.is_some()
+            || permission_profile.is_some()
+            || default_permissions_override.is_some()
+        {
+            None
+        } else {
+            persisted_permission_profile_id
+        };
         if let Some(profile) = cfg.profile.as_deref() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
@@ -3597,6 +3612,7 @@ impl Config {
         let effective_permission_selection = resolve_effective_permission_selection(
             cfg.permissions.as_ref(),
             default_permissions_override.as_deref(),
+            persisted_permission_profile_id.as_deref(),
             cfg.default_permissions.as_deref(),
             requirements_toml,
             &mut startup_warnings,
@@ -3628,6 +3644,7 @@ impl Config {
             permission_config_syntax,
         );
         let explicit_permission_profile_mode = default_permissions_override.is_some()
+            || effective_permission_selection.restored_profile_id.is_some()
             || matches!(
                 permission_config_syntax,
                 Some(PermissionConfigSyntax::Profiles)
@@ -3640,7 +3657,8 @@ impl Config {
         .filter(|profile| !is_builtin_permission_profile_name(&profile.id))
         .collect();
         let using_implicit_builtin_profile = permission_config_syntax.is_none()
-            && effective_permission_selection.selected_profile_id.is_none();
+            && effective_permission_selection.selected_profile_id.is_none()
+            && effective_permission_selection.restored_profile_id.is_none();
         let should_seed_legacy_workspace_roots = effective_permission_selection
             .selected_profile_id
             .is_none()
@@ -3724,19 +3742,40 @@ impl Config {
             let configured_network_proxy_config = network_proxy_config_for_profile_selection(
                 effective_permission_selection.profiles.as_ref(),
                 default_permissions,
-            )?;
+            )
+            .map_err(|err| {
+                contextualize_persisted_permission_profile_error(
+                    effective_permission_selection.restored_profile_id,
+                    default_permissions,
+                    err,
+                )
+            })?;
             let (mut file_system_sandbox_policy, network_sandbox_policy) =
                 compile_permission_profile_selection(
                     effective_permission_selection.profiles.as_ref(),
                     default_permissions,
                     builtin_workspace_write_settings,
                     &mut startup_warnings,
-                )?;
+                )
+                .map_err(|err| {
+                    contextualize_persisted_permission_profile_error(
+                        effective_permission_selection.restored_profile_id,
+                        default_permissions,
+                        err,
+                    )
+                })?;
             let mut configured_workspace_roots = compile_permission_profile_workspace_roots(
                 effective_permission_selection.profiles.as_ref(),
                 default_permissions,
                 resolved_cwd.as_path(),
-            )?;
+            )
+            .map_err(|err| {
+                contextualize_persisted_permission_profile_error(
+                    effective_permission_selection.restored_profile_id,
+                    default_permissions,
+                    err,
+                )
+            })?;
             if using_implicit_builtin_profile
                 && default_permissions == BUILT_IN_WORKSPACE_PROFILE
                 && let Some(sandbox_workspace_write) = cfg.sandbox_workspace_write.as_ref()
@@ -4209,12 +4248,27 @@ impl Config {
             &mut constrained_approvals_reviewer,
             &mut startup_warnings,
         )?;
-        let permission_profile_was_constrained = apply_requirement_constrained_value(
-            "permission_profile",
-            permission_profile,
-            &mut constrained_permission_profile,
-            &mut startup_warnings,
-        )?;
+        let permission_profile_was_constrained =
+            if let Some(restored_profile_id) = effective_permission_selection.restored_profile_id {
+                constrained_permission_profile
+                    .set(permission_profile)
+                    .map_err(|err| {
+                        std::io::Error::new(
+                            std::io::ErrorKind::InvalidInput,
+                            format!(
+                                "persisted permission profile `{restored_profile_id}` is incompatible with current requirements: {err}"
+                            ),
+                        )
+                    })?;
+                false
+            } else {
+                apply_requirement_constrained_value(
+                    "permission_profile",
+                    permission_profile,
+                    &mut constrained_permission_profile,
+                    &mut startup_warnings,
+                )?
+            };
         if permission_profile_was_constrained
             && sandbox_mode_requirement_for_permission_profile(&original_permission_profile)
                 == SandboxModeRequirement::DangerFullAccess
@@ -4717,6 +4771,7 @@ fn merge_managed_permission_profiles(
 fn resolve_effective_permission_selection<'a>(
     configured_permissions: Option<&PermissionsToml>,
     default_permissions_override: Option<&'a str>,
+    persisted_permission_profile_id: Option<&'a str>,
     configured_default_permissions: Option<&'a str>,
     requirements_toml: &'a ConfigRequirementsToml,
     startup_warnings: &mut Vec<String>,
@@ -4726,6 +4781,7 @@ fn resolve_effective_permission_selection<'a>(
     validate_required_permission_profile_catalog(requirements_toml, profiles.as_ref())?;
     let selected_profile_id = resolve_default_permissions(
         default_permissions_override,
+        persisted_permission_profile_id,
         configured_default_permissions,
         requirements_toml,
         startup_warnings,
@@ -4734,19 +4790,47 @@ fn resolve_effective_permission_selection<'a>(
     Ok(EffectivePermissionSelection {
         profiles,
         selected_profile_id,
+        restored_profile_id: default_permissions_override
+            .is_none()
+            .then_some(persisted_permission_profile_id)
+            .flatten(),
         requirements_force_profile_selection: requirements_toml
             .allowed_permission_profiles
             .is_some(),
     })
 }
 
+fn contextualize_persisted_permission_profile_error(
+    restored_profile_id: Option<&str>,
+    selected_profile_id: &str,
+    err: std::io::Error,
+) -> std::io::Error {
+    if restored_profile_id == Some(selected_profile_id) {
+        std::io::Error::new(
+            ErrorKind::InvalidInput,
+            format!(
+                "persisted permission profile `{selected_profile_id}` cannot be resolved under current configuration: {err}"
+            ),
+        )
+    } else {
+        err
+    }
+}
+
 fn resolve_default_permissions<'a>(
     default_permissions_override: Option<&'a str>,
+    persisted_permission_profile_id: Option<&'a str>,
     configured_default_permissions: Option<&'a str>,
     requirements_toml: &'a ConfigRequirementsToml,
     startup_warnings: &mut Vec<String>,
 ) -> std::io::Result<Option<&'a str>> {
-    let selected_permissions = default_permissions_override.or(configured_default_permissions);
+    let restored_profile_id = default_permissions_override
+        .is_none()
+        .then_some(persisted_permission_profile_id)
+        .flatten();
+    let selected_permissions = default_permissions_override
+        .or(restored_profile_id)
+        .or(configured_default_permissions);
     let Some(allowed_permission_profiles) = requirements_toml.allowed_permission_profiles.as_ref()
     else {
         return Ok(selected_permissions);
@@ -4770,6 +4854,14 @@ fn resolve_default_permissions<'a>(
             Ok(Some(selected_permissions))
         }
         Some(selected_permissions) => {
+            if restored_profile_id == Some(selected_permissions) {
+                return Err(std::io::Error::new(
+                    ErrorKind::InvalidInput,
+                    format!(
+                        "persisted permission profile `{selected_permissions}` is disallowed by current requirements"
+                    ),
+                ));
+            }
             startup_warnings.push(format!(
                 "Configured value for `permission_profile` is disallowed by requirements; falling back from `{selected_permissions}` to required value `{fallback_permissions}`."
             ));
