@@ -25,7 +25,7 @@ Plan 083 / M4-Z(core) 已通过最终独立验收并取得 `M4_Z_CORE_PASS`；Pl
 | 0：量化测评基准 | 既有设施与首次 schema v7 正式 canary 已完成，当前无 active campaign | 保留设施；历史结果见 COMPLETED，新 campaign 须重新立项与授权 |
 | 1：Harness 优化 | **正式收口；当前无 active 工作包** | 当前不继续新增观测或内核/热路径优化；既有实现、设施与历史结果保留。未来可由用户另行决定是否重新立项，本次收口不作永久禁止 |
 | 2：本地审批模型 | **已收口，今后不再开启** | 最终结论为“保留为实验”；不改生产默认，不再规划后续工作包 |
-| 3：RONDO Multi | 第一、二期及其收口案例、**三期 M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、M3-C2、Plan 064、Plan 071、Plan 073、Plan 075、Plan 079、Plan 081 与四期 M4-A、M4-C0、M4-S1、M4-C1、M4-S2、M4-C2、M4-Z(core)、Plan 074、Plan 083、Plan 084 已完成**；M4-W0 终态为 `BINDING_ONLY_GO` | Plan 081 已以 exact 1.7B、冻结 pair/input/v8、非 LoRA 和可动态扩大部分参数直接更新的路线取得本地训练就绪；Plan 082 是下一三期工作包，但真实模型、GPU、云端、费用与训练仍须另行立项授权。研究目标仍是形成同口径优于 base 的候选，不要求直接产品 GO；Critic 保持 default-off，M3-D 保持锁定。四期 S/C 必成子线已完成 Durable Team 核心全链并取得 `M4_Z_CORE_PASS`；W0 支持 binding、不支持新增 structured handoff。正式 W1 在 `#39616` 与 `#39153` 完成 RONDO 窄适配后另行立项，实现稳定 primary write binding、显式有界的绑定外辅助写授权与独立 replacement binding，不新增读取隔离或第二套权限体系 |
+| 3：RONDO Multi | 第一、二期及其收口案例、**三期 M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、M3-C2、Plan 064、Plan 071、Plan 073、Plan 075、Plan 079、Plan 081 与四期 M4-A、M4-C0、M4-S1、M4-C1、M4-S2、M4-C2、M4-Z(core)、Plan 074、Plan 083、Plan 084 已完成**；M4-W0 终态为 `BINDING_ONLY_GO` | Plan 081 已以 exact 1.7B、冻结 pair/input/v8、非 LoRA 和可动态扩大部分参数直接更新的路线取得本地训练就绪；Plan 082 是下一三期工作包，但真实模型、GPU、云端、费用与训练仍须另行立项授权。研究目标仍是形成同口径优于 base 的候选，不要求直接产品 GO；Critic 保持 default-off，M3-D 保持锁定。四期 S/C 必成子线已完成 Durable Team 核心全链并取得 `M4_Z_CORE_PASS`；W0 支持 binding、不支持新增 structured handoff。正式路线固定为 `#39616` RONDO 窄适配 → `#39153` fail-closed 窄适配 → 另行立项并实现 M4-W1；W1 收口稳定 primary write binding、显式有界的绑定外辅助写授权与独立 replacement binding，不新增读取隔离或第二套权限体系 |
 
 ### 方向命名口径
 
@@ -45,8 +45,8 @@ Plan 083 / M4-Z(core) 已通过最终独立验收并取得 `M4_Z_CORE_PASS`；Pl
 方向 3 是当前唯一仍在推进的产品线。Plan 081 已取得 `LOCAL_TRAINING_READINESS_PASS`；三期下一工作包是另行立项授权的
 Plan 082 真实云端 commissioning/训练参数开发。四期 Plan 080 / M4-C2 已取得 `M4_C2_CONTROL_PASS`；Plan 083 / M4-Z(core)
 已完成 fresh 正式全链、两轮独立审查整改与最终验收，并取得 `M4_Z_CORE_PASS`。Plan 084 / M4-W0 已通过最终独立验收并取得
-`BINDING_ONLY_GO`；下一步先完成 `#39616` linked-worktree trust 与 `#39153` permission restore 的 RONDO 窄适配，再另行立项并
-实现正式 M4-W1。
+`BINDING_ONLY_GO`；下一步依次完成 `#39616` linked-worktree trust RONDO 窄适配、`#39153` permission restore fail-closed
+窄适配，再另行立项并实现正式 M4-W1。
 方向 1 已正式收口，不作为方向 3 的前置或旁支。
 
 ### 方向 3：Publication Critic 三期
@@ -110,8 +110,9 @@ Plan 082 真实云端 commissioning/训练参数开发。四期 Plan 080 / M4-C2
   fresh store/真实进程替换正式轮与相称门禁，并完成两轮独立审查整改；participant activation cleanup 以 exact owner lease 保证
   任一 teardown/owner/graph 失败仍保留 Root close barrier，最终独立验收无未关闭的高/中等级 correctness finding，结论为
   `M4_Z_CORE_PASS`。Plan 084 / M4-W0 的 test-only 原型经首次验收整改与最终独立复验取得 `BINDING_ONLY_GO`：binding 具有
-  产品价值，现有 Git branch/HEAD/status/diff 与合理自然语言足以交接，不新增 structured handoff。正式 W1 尚未立项；其实现前先完成
-  `#39616` 与 `#39153` 的 RONDO 窄适配，W1 本身再收口 primary binding、scoped out-of-binding write authorization、
+  产品价值，现有 Git branch/HEAD/status/diff 与合理自然语言足以交接，不新增 structured handoff。正式 W1 尚未立项；其实现前依次完成
+  `#39616` linked-worktree trust 与 `#39153` permission restore 的 RONDO 窄适配，W1 本身再收口 primary binding、
+  scoped out-of-binding write authorization、
   reload/resume 重验与 replacement binding。
 - 四期不依赖 Publication Critic 训练、真实模型、真实 API 或性能测评，可以与三期模型链并行；它保持 shared workspace
   为默认，不建设通用 scheduler、自动路由、自动 merge/push、第二套 Team State/trace 或审计/可信平台。
