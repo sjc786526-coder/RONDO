@@ -65,55 +65,55 @@ Plan 082 明确分为两个授权阶段：
 
 ### 完成/验收标准
 
-- [ ] 阶段 A 从 `main@90e905168039effbea796753d0f29148830a243f` 创建的 Plan 082 专用 worktree 实施；所有 tracked 改动、
+- [x] 阶段 A 从 `main@90e905168039effbea796753d0f29148830a243f` 创建的 Plan 082 专用 worktree 实施；所有 tracked 改动、
       轻量测试、runbook 和小型合同均在 task branch 中完成并提交，主工作区无 tracked 修改。
-- [ ] 真实训练入口消费 Plan 081 的 route、typed train/validation identity、连续 observation、checkpoint/retention/resume 等中性能力；
+- [x] 真实训练入口消费 Plan 081 的 route、typed train/validation identity、连续 observation、checkpoint/retention/resume 等中性能力；
       Plan 081 当前 `fixture_fake` controller/候选声明不得仅靠翻转字段冒充真实训练。不得放松或改写 Plan 060/066/081 的历史 validator，
       职责不契合时可提取中性 seam 或新增小而明确的 Plan 082 controller/adapter/入口。
-- [ ] source bundle 只包含必要的已提交源码与轻量合同；data bundle 从 canonical v8 投影构造并在物理上只含 train+validation，
+- [x] source bundle 只包含必要的已提交源码与轻量合同；data bundle 从 canonical v8 投影构造并在物理上只含 train+validation，
       云端环境拿不到 unseen-test。两类 bundle 均有可复核身份和最小解包/入口测试，不包含密钥、模型权重或无关项目文件。
-- [ ] exact 模型保持为
+- [x] exact 模型保持为
       `Skywork/Skywork-Reward-V2-Qwen3-1.7B@e51ea3e08fb81326c3b812a7ff0cb9cee83e59cc`，冻结 v8、pair/input/label、
       Binary/Pair objective/loss、preferred-minus-dispreferred 方向、`logits[:,0]`、higher-is-better 和现有投影语义不漂移；禁止 LoRA、
       QLoRA、其它 PEFT、量化训练和更换模型。若实测认为必须改变 objective/loss 或其组件权重，应作为原则性扩围请示，不静默混入 recipe。
-- [ ] 阶段 A 的 pure/fake/focused tests 至少覆盖真实运行能力与 Plan 081 中性 seam 的接缝、实际 trainable inventory 记录、
+- [x] 阶段 A 的 pure/fake/focused tests 至少覆盖真实运行能力与 Plan 081 中性 seam 的接缝、实际 trainable inventory 记录、
       validation 不进梯度、bundle 无 unseen、checkpoint 新进程恢复入口、正式 freeze/终态判定，以及 Plan 082 参数化的无 Pod S3
       inventory/manifest/续传/校验/拒绝覆盖接缝；只运行直接受影响的轻量 Python 门禁，不访问真实云资源。
-- [ ] 最终审查者对阶段 A 无遗留高/中等级 correctness/functionality finding；随后取得用户本人明确人工付费批准并由审查者通过指定队列
+- [x] 最终审查者对阶段 A 无遗留高/中等级 correctness/functionality finding；随后取得用户本人明确人工付费批准并由审查者通过指定队列
       传达后，执行者才创建任何计费资源。阶段 A 验收通过本身不构成付费批准。
-- [ ] 正式创建/启动 Pod 前，通过 RunPod 实时控制面同时刷新 A40 48GB 与 L40S 48GB 的库存状态、价格、数据中心/网络卷兼容性和账户
+- [x] 正式创建/启动 Pod 前，通过 RunPod 实时控制面同时刷新 A40 48GB 与 L40S 48GB 的库存状态、价格、数据中心/网络卷兼容性和账户
       费用基线；首选 A40，A40 不可及时获得或实测不适合时可切换 L40S，同时最多一个计费 GPU 实例，不扩展到第三种 GPU、多 GPU
       或多模型竞赛。
-- [ ] commissioning 从最小真实链路逐步打通 exact 模型核验与加载、一次有效更新、连续 observation、完整 checkpoint、
+- [x] commissioning 从最小真实链路逐步打通 exact 模型核验与加载、一次有效更新、连续 observation、完整 checkpoint、
       新 OS 进程恢复继续更新、best/latest/turning-point 归档和安全回传。调试期可保留已验证进度并从首个未打通处继续，
       其权重和指标不得冒充正式候选。
-- [ ] 参数开发使用冻结 train 和 validation 语义；初始从部分原模型参数直接更新，具体范围、扩大时机、优化器、学习率、batch、
+- [x] 参数开发使用冻结 train 和 validation 语义；初始从部分原模型参数直接更新，具体范围、扩大时机、优化器、学习率、batch、
       更新数、scheduler、观测频率与停止条件由真实实测决定并完整记录，不开展无边界搜索或论文式消融。
-- [ ] freeze 在观察任何正式训练结果前完成并记录：已提交 source identity、exact model/data/environment、实际 recipe、完整参数 inventory/
+- [x] freeze 在观察任何正式训练结果前完成并记录：已提交 source identity、exact model/data/environment、实际 recipe、完整参数 inventory/
       scope 序列、seed、观测/checkpoint 点、同 cohort base 比较规则与容差、保留规则。任何结果相关条件改变都必须回到相称 commissioning
       后重新 freeze，不得把改变后的运行续接到旧正式结果。
-- [ ] 干净正式轮使用新的空 namespace 和 exact base 从头开始；先在冻结 validation cohort 上形成正式 base anchor，再按冻结 recipe
+- [x] 干净正式轮使用新的空 namespace 和 exact base 从头开始；先在冻结 validation cohort 上形成正式 base anchor，再按冻结 recipe
       完整训练和观察。只有该轮的 checkpoint 可形成 `TRAINING_IMPROVEMENT_FOUND` 或 `VALID_NO_IMPROVEMENT`。
-- [ ] base、previous、training-best、latest 与 better-than-base candidate 语义保持分离；所有 observation 永久保留小型聚合指标、
+- [x] base、previous、training-best、latest 与 better-than-base candidate 语义保持分离；所有 observation 永久保留小型聚合指标、
       逐 pair 方向和 signed margin。better-than-base 规则不得在看到正式结果后改选有利指标或容差。
-- [ ] 至少一个完整 checkpoint 通过另一新进程的实际 load/restore/继续更新验证；正式 best/latest、必要关键转折点和至少一个经恢复验证的
+- [x] 至少一个完整 checkpoint 通过另一新进程的实际 load/restore/继续更新验证；正式 best/latest、必要关键转折点和至少一个经恢复验证的
       完整 checkpoint 在网络卷中由 manifest 精确列出。角色重合时允许同一工件承担多个角色，不要求复制权重或保留每个 observation 的完整模型。
-- [ ] 全部 commissioning、参数开发、formal 和审查整改的实际训练活动累计不超过 12 小时、对应外部费用累计不超过 15 USD；从首次
+- [x] 全部 commissioning、参数开发、formal 和审查整改的实际训练活动累计不超过 12 小时、对应外部费用累计不超过 15 USD；从首次
       计费资源创建到第一次训练完成验收请求的非等待期全部计入，审查要求修复后恢复的活动继续累计。训练完成后的强制审查等待、0 Pod
       大型回传和等待用户批准删卷的必要保留费用不占用这两个训练上限，但必须另行持续记录和报告。账户余额不足不构成充值授权。
-- [ ] 从任务费用基线起，训练与保留/回传费用合并的累计实际或保守上界首次达到 10 USD 时，只发送一次非阻断告警给用户；不停止远端
+- [x] 从任务费用基线起，训练与保留/回传费用合并的累计实际或保守上界首次达到 10 USD 时，只发送一次非阻断告警给用户；不停止远端
       训练、Pod 或当前有效流程。告警不扩大预算，也不替代后续资源状态报告。
-- [ ] 正式训练完成后的第一次 GPU 阶段验收只回传小型关键信息：源码/recipe/freeze 身份、指标与逐 pair margin、checkpoint
+- [x] 正式训练完成后的第一次 GPU 阶段验收只回传小型关键信息：源码/recipe/freeze 身份、指标与逐 pair margin、checkpoint
       inventory/path/size/SHA-256、新进程恢复 receipt、费用和资源状态；不回传或本地复验大型 checkpoint。此时保持正式 Pod/网络卷，
       审查者明确确认无需继续操作 GPU 后立即停止/删除/释放 Pod并核对 compute 费用归零。
-- [ ] 大型资产在 Plan 083 不占用共享磁盘且宿主容量安全的窗口回传到 task-owned ignored namespace；优先使用实时 region/endpoint 的
+- [x] 大型资产在 Plan 083 不占用共享磁盘且宿主容量安全的窗口回传到 task-owned ignored namespace；优先使用实时 region/endpoint 的
       0 Pod S3-compatible API。因本轮 US-TX-3 卷不受该 API 支持，按上述一次性例外使用至多一个临时 transfer Pod 以可续传路径读取
       bootstrap 精确列出的 39 对象；继续执行逐对象 size/SHA-256 校验、原子发布和拒绝覆盖。全部必要资产下载并验证后立即删除 transfer
       Pod、确认 0 Pod/compute 止费并申请最终任务验收；网络卷继续保留，只有用户本人另行明确人工批准才可删除，并如实报告其持续费率、
       累计费用和状态。
-- [ ] 相关轻量 Python/云端专项门禁、改动 shell 的 `bash -n`、必要 compile/format 检查与 `git diff --check` 通过；不运行 Cargo、
+- [x] 相关轻量 Python/云端专项门禁、改动 shell 的 `bash -n`、必要 compile/format 检查与 `git diff --check` 通过；不运行 Cargo、
       Docker、全 workspace、本地真实模型或 CI。fake、commissioning、formal、skip 和未运行项分别如实记录。
-- [ ] 执行者依次维护 `GPU_REVIEW_PENDING / POD_RETAINED`、`GPU_REVIEW_PASS / ZERO_POD / HANDOFF_PENDING` 和
+- [x] 执行者依次维护 `GPU_REVIEW_PENDING / POD_RETAINED`、`GPU_REVIEW_PASS / ZERO_POD / HANDOFF_PENDING` 和
       `FINAL_REVIEW_PENDING / VOLUME_RETAINED_PENDING_USER_DELETE`，每次先提交 task branch 再发队列消息；不提前写最终完成结论。
       最终审查者关闭高/中等级 correctness/functionality finding 后收口 WBS、`doc/WBS-COMPLETED.md` 与验收日志并提交。网络卷随后按用户
       人工决定处理；资源尾项可继续窄更新本计划当前状态和日志。任何一方都不合并、不推送、不归档分支、不删除 worktree。
@@ -443,29 +443,33 @@ XXX用以下内容代替：
   共 `13,797,142,360` bytes，加 bootstrap 后 `13,797,156,884` bytes。transfer Pod 已删除，控制面确认 0 Pod/compute 费率为 0，40GB
   卷 `mwemzrn33y` 继续保留。provider 当前记录 transfer Pod 费用约 0.239 USD，按完整墙钟保守上界约 0.961 USD；任务保守累计约
   1.729 USD（含当前卷费），未触发 10 USD 告警。
+- 2026-08-26：最终审查复核正式结果、freeze/recovery/retention 闭合关系及本地 40/40 文件 exact-tree，未发现遗留高/中等级
+  correctness/functionality finding，任务以 `VALID_NO_IMPROVEMENT` 完成。11:54Z 实时控制面确认 0 Pod、唯一 40GB 网络卷仍保留；
+  provider 可见入账至少 1.720537 USD，当前小时仍可能延迟追记。按已知训练/transfer Pod 完整墙钟、transfer container disk 与已见卷费
+  计算的资源口径约 2.32 USD，另有约 0.003889 USD/h 的持续卷费；该口径取代上一条 1.729 USD“保守累计”表述，仍远低于 10 USD
+  告警和 15 USD 边界。
 
 ### 当前工作
 
-- 正式训练、GPU 专项验收和最终大型资产交接均已完成，当前为
-  `FINAL_REVIEW_PENDING / ZERO_POD / VOLUME_RETAINED_PENDING_USER_DELETE`。冻结 39 对象与 bootstrap 已在本地逐对象验证，唯一 transfer
-  Pod 已删除并确认 compute 止费；40GB 网络卷继续保留，等待最终验收后由用户本人决定是否删除。
+- Plan 082 实现、真实训练、GPU 专项验收、大型资产交接和最终验收均已完成并冻结，终态为
+  `FINAL_REVIEW_ACCEPTED / ZERO_POD / VOLUME_RETAINED_AWAITING_USER_DECISION`，研究结论为 `VALID_NO_IMPROVEMENT`。40GB 网络卷继续
+  保留；保留或删除由用户本人另行决定，不影响 Plan 082 任务完成结论。
 
 ### 本任务剩余步骤
 
-1. 执行者提交 `FINAL_REVIEW_PENDING / VOLUME_RETAINED_PENDING_USER_DELETE` 并按队列申请最终验收。
-2. 最终审查者只要求无需 GPU 的修复/复验并收口最终文档；验收后转请用户本人决定是否删除网络卷。执行者仅在收到用户人工批准后删除卷，
-   记录终态并通知；所有人继续等待用户决定合并/推送。
+- 无剩余实现或验收步骤。资源尾项仅为用户决定是否删除网络卷；若明确批准，执行者只删除 exact 卷 `mwemzrn33y` 并复核 0 Pod/0 volume，
+  否则继续保留并承担持续卷费。工作树合并和推送仍等待用户决定。
 
 ### 阻塞项
 
 - 阶段 A 无计划级阻塞。
 - 阶段 B 正式轮、GPU 专项验收和大型资产交接均已完成；当前 0 Pod、卷保留，无计划级阻塞。
-- 网络卷删除仍等待用户本人在最终验收后的独立人工决定。
+- 网络卷删除仍等待用户本人独立人工决定；这是资源尾项，不是任务完成阻塞。
 
 ### 当前验收状态
 
-- `FINAL_REVIEW_PENDING / ZERO_POD / VOLUME_RETAINED_PENDING_USER_DELETE`；研究终态为 `VALID_NO_IMPROVEMENT`，大型资产交接已完成，
-  总体任务等待最终验收。
+- `FINAL_REVIEW_ACCEPTED / ZERO_POD / VOLUME_RETAINED_AWAITING_USER_DECISION`；验收通过、任务目标完成，研究终态为
+  `VALID_NO_IMPROVEMENT`。Publication Critic 保持 default-off，M3-D 保持锁定。
 
 ### 交接边界
 

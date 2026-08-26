@@ -1,7 +1,7 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
 最后更新：2026-08-26 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
-状态：**第一期、第二期、M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、M3-C2、Plan 064、Plan 071、Plan 073、Plan 075、Plan 079、Plan 081 与四期 M4-A、M4-C0、M4-S1、M4-C1、M4-S2、M4-C2 已完成；Plan 060 技术 GO、Plan 064 DATA_GO、Plan 066 正式训练 GO；Plan 071 为 `BASE_COMPARABILITY_GO`，Plan 073 / M3-C2 为 `NO-GO`，Plan 079 为 `4B_BASE_QUALITY_NO_GO`，Plan 081 为 `LOCAL_TRAINING_READINESS_PASS`；Plan 082 已完成有效正式训练并取得 `VALID_NO_IMPROVEMENT`，GPU 专项验收和大型资产交接均已闭合执行门禁，训练/transfer Pod 均已释放，当前等待最终验收，M3-D 保持锁定；M4-A 为 `M4_A_GO`，M4-C0 为 `M4_C0_PROTOTYPE_PASS`，M4-S1 为 `M4_S1_PASS`，M4-C1 为 `M4_C1_QUERY_PASS`，M4-S2 为 `M4_S2_PASS`，M4-C2 为 `M4_C2_CONTROL_PASS`；下一四期必成工作包为须另行立项授权的 M4-Z(core)**
+状态：**第一期、第二期、M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、M3-C2、Plan 064、Plan 071、Plan 073、Plan 075、Plan 079、Plan 081、Plan 082 与四期 M4-A、M4-C0、M4-S1、M4-C1、M4-S2、M4-C2 已完成；Plan 060 技术 GO、Plan 064 DATA_GO、Plan 066 正式训练 GO；Plan 071 为 `BASE_COMPARABILITY_GO`，Plan 073 / M3-C2 为 `NO-GO`，Plan 079 为 `4B_BASE_QUALITY_NO_GO`，Plan 081 为 `LOCAL_TRAINING_READINESS_PASS`；Plan 082 最终验收通过，研究终态为 `VALID_NO_IMPROVEMENT`，训练/transfer Pod 均已释放，网络卷保留等待用户本人删除决定，M3-D 保持锁定；M4-A 为 `M4_A_GO`，M4-C0 为 `M4_C0_PROTOTYPE_PASS`，M4-S1 为 `M4_S1_PASS`，M4-C1 为 `M4_C1_QUERY_PASS`，M4-S2 为 `M4_S2_PASS`，M4-C2 为 `M4_C2_CONTROL_PASS`；下一四期必成工作包为须另行立项授权的 M4-Z(core)**
 
 ## 当前定位
 
@@ -99,7 +99,7 @@ M3-B1c 正式分阶段训练与工件回收          │
                        ↓
         Plan 081 exact 1.7B 非 LoRA 本地训练就绪（已完成）
                        ↓ `LOCAL_TRAINING_READINESS_PASS` 已成立
-        Plan 082 云端连续训练与候选形成（正式轮 `VALID_NO_IMPROVEMENT`；GPU 验收通过，0 Pod 交接 pending）
+        Plan 082 云端连续训练与候选形成（已完成；`VALID_NO_IMPROVEMENT`，0 Pod，卷保留待用户决定）
                        ╳
                  M3-D 端到端收口（未解锁）
 ```
@@ -332,7 +332,7 @@ A40 48GB 首选、L40S 48GB 备选，实际训练活动不超过 12 小时/15 US
 同口径优于 exact 1.7B base 的候选，不要求直接达到产品 GO。Plan 079 旧卷不是前置；Plan 082 先执行不付费阶段 A，最终审查者验收
 阶段 A 后仍须用户本人明确人工批准才进入付费阶段。
 
-#### Plan 082：exact 1.7B 云端连续训练与候选形成（已立项）
+#### Plan 082：exact 1.7B 云端连续训练与候选形成（已完成）
 
 **任务合同**：[`Plan 082 ExecPlan`](../../plan/082-publication-critic-cloud-continuous-training-execplan.md)。
 
@@ -340,8 +340,8 @@ A40 48GB 首选、L40S 48GB 备选，实际训练活动不超过 12 小时/15 US
 空 namespace 开始的四步 score-head 干净正式轮和 step 2 新进程恢复，终态为 `VALID_NO_IMPROVEMENT`。GPU 专项小型证据验收无遗留
 需要 GPU/Pod 才能关闭的高/中等级 correctness/functionality finding；唯一 Pod 已释放并确认 0 Pod、持续 compute 费率为 0，40GB 网络卷
 继续保留。`US-TX-3` 不在 provider 当前 S3 API 支持列表，故按用户一次性授权使用一个 Secure RTX 4090 transfer Pod 只读回传；冻结
-bootstrap 的 39 对象已在本地完成逐对象 bytes/SHA-256、exact-tree 与权限校验。transfer Pod 随后删除并确认 0 Pod/compute 止费，当前为
-`FINAL_REVIEW_PENDING / VOLUME_RETAINED_PENDING_USER_DELETE`；网络卷删除仍须用户本人另行人工批准。
+bootstrap 的 39 对象已在本地完成逐对象 bytes/SHA-256、exact-tree 与权限校验。transfer Pod 随后删除并确认 0 Pod/compute 止费；
+最终验收通过，当前为 `FINAL_REVIEW_ACCEPTED / VOLUME_RETAINED_AWAITING_USER_DECISION`。网络卷删除仍须用户本人另行人工批准。
 
 **目标与边界**：付费阶段在正式创建/启动前同时刷新 A40 48GB 与 L40S 48GB 的库存、价格和网络卷兼容性；使用一张 A40（首选）
 或 L40S（备选）及任务网络卷，完成 commissioning、训练参数开发和一轮从 exact base/空 namespace 开始的干净正式轮。累计 GPU 计费
@@ -384,7 +384,7 @@ S3-compatible API manifest 驱动续传并校验；本轮因 US-TX-3 不受支�
   资源槽；Pod 已止费，完成时保留的网络卷按用户提供的最新查询已返回 404、当前不再作为可用或持续计费资源。
 - Plan 081 已在独立 worktree 内完成 Publication Critic Python/训练合同与三期 WBS，不运行 Cargo、Docker、真实模型/GPU或云计算，
   不写/清理 Plan 069 target，也不以 Plan 079 卷为前置。Plan 082 已完成真实正式轮、GPU 专项验收和大型资产交接，训练 Pod 与一次性
-  transfer Pod 均已释放并确认 compute 止费；网络卷继续保留，等待用户在最终验收后的独立删除决定。
+  transfer Pod 均已释放并确认 compute 止费；最终验收已通过，网络卷继续保留，等待用户本人独立决定是否删除。
 - RunPod 云端 smoke/训练不占本地 Cargo build lock，可与产品代码、数据整理和四期非冲突开发并行；真实本地模型、
   Docker 与重型 Cargo 仍按根 `AGENTS.md` 全局串行。
 - 三期与已经正式收口的方向 1 没有产品依赖。如果未来重新启动方向 1，普通工作仍可并行安排，但共享 API 预算、
