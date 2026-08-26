@@ -534,6 +534,13 @@ async fn invalid_persisted_permission_profile_rejects_cold_resume_and_fork_befor
         .with_codex_home(codex_home.path())
         .build_initialized()
         .await?;
+    let thread_ids_before_rejection = list_threads(&mut mcp)
+        .await?
+        .data
+        .into_iter()
+        .map(|thread| thread.id)
+        .collect::<Vec<_>>();
+    assert_eq!(thread_ids_before_rejection, vec![source_thread_id.clone()]);
 
     let resume_id = mcp
         .send_thread_resume_request(ThreadResumeParams {
@@ -573,6 +580,19 @@ async fn invalid_persisted_permission_profile_rejects_cold_resume_and_fork_befor
             .contains("persisted permission profile `dev` cannot be resolved"),
         "unexpected fork error: {}",
         fork_err.error.message
+    );
+    let thread_ids_after_rejection = list_threads(&mut mcp)
+        .await?
+        .data
+        .into_iter()
+        .map(|thread| thread.id)
+        .collect::<Vec<_>>();
+    assert_eq!(thread_ids_after_rejection, thread_ids_before_rejection);
+    assert!(
+        !mcp.pending_notification_methods()
+            .iter()
+            .any(|method| method == "thread/started"),
+        "invalid persisted profile must not emit thread/started"
     );
 
     let resume_id = mcp

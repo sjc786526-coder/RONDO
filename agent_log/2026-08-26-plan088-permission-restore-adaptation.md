@@ -53,3 +53,13 @@
   seam、严格 config 反例和 legacy 负向端到端已组合覆盖，未扩成重复矩阵。
 - 本分支不修改 WBS/COMPLETED，不宣称 `M4_W_39153_ADAPTATION_PASS`；等待指定审查者独立验收。不合并、不推送、不关闭 worktree，
   不启动 M4-W1。
+
+## 验收后测试加固
+
+- 独立验收提交 `4fc5dc7` 接受 `M4_W_39153_ADAPTATION_PASS`，同时记录 invalid-profile 集成未直接断言 child/started 不存在这一低风险
+  测试余项。用户随后要求窄修关闭该余项。
+- 仅修改既有负向 app-server 场景：失败前后通过现有 `thread/list` 比较完整 thread ID 集合，并在 list 响应已冲刷消息流后检查现有
+  `pending_notification_methods()` 不含 `thread/started`。没有修改生产代码、增加 helper 或建设副作用审计设施。
+- 首轮单项测试 run `20260826-083848-1000-3145407` 未触达断言，两次均在 app-server initialize 基线超时并由看门狗清理残留进程，
+  `final_rc=100`，不记为产品失败。确认锁、残留进程和容量后，热目标 run `20260826-084312-1000-3172734` 为 `1/1` 通过、
+  `887` skipped、`stop=none`、`cleanup=none`；随后 `UV_CACHE_DIR=.uv-cache just fmt` 通过，未再运行测试。
