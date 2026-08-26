@@ -418,29 +418,34 @@ XXX用以下内容代替：
   GPU/Pod 才能关闭的高/中等级 correctness/functionality finding。结论为 `GPU_REVIEW_PASS / POD_RELEASE_AUTHORIZED`；
   审查提交后通过指定队列通知执行者立即释放唯一 Pod，网络卷继续保留。尚未落盘的参数化 handoff binding、0 Pod inventory/download
   和大型对象 bytes/SHA-256 校验均不需要 GPU，留给后续大型资产交接和最终验收。
+- 2026-08-26：执行者收到许可后删除唯一 Pod `91e9o2l0im1ay2`，控制面确认 0 Pod、持续 compute 费率为 0，唯一 40GB 网络卷
+  `mwemzrn33y` 仍在 US-TX-3。Plan 083 已完成且本地窗口为项目 `254,426,943,488` bytes、Windows C: 可用
+  `75,188,027,392` bytes、无重型 owner；参数化 binding 和双离线 preflight 通过。真实 inventory 在 bootstrap HEAD 前的 TLS 建连失败；
+  provider 当前 S3 API 支持数据中心列表不含 US-TX-3，卷 update 仅允许 name/size，故不能以猜测跨 region endpoint、关闭 TLS 或卷迁移
+  冒充 0 Pod handoff。替代方案需要计划外资源授权，按队列请示前保持 0 Pod 和网络卷。
 
 ### 当前工作
 
-- 正式训练与 GPU 专项验收已完成，当前为 `GPU_REVIEW_PASS / POD_RELEASE_AUTHORIZED`。执行者收到指定队列通知后立即释放唯一
-  L40S Pod、复核 0 Pod/compute 止费并提交资源状态；40GB 网络卷继续保留，未经用户本人另行人工批准不得删除。
+- 正式训练与 GPU 专项验收已完成，当前为 `GPU_REVIEW_PASS / ZERO_POD / HANDOFF_EXTERNAL_BLOCKED`。唯一 L40S Pod 已释放且
+  compute 止费；40GB 网络卷完整保留。US-TX-3 当前无 provider S3 API，等待队列传达最小替代交接授权。
 
 ### 本任务剩余步骤
 
-1. 执行者收到审查者队列通知后立即释放唯一 Pod、核对 0 Pod/compute 费用归零并提交资源状态；网络卷继续保留。
-2. 等待 Plan 083 不占用共享磁盘且宿主容量安全窗口；不创建 transfer Pod，通过网络卷 S3-compatible API 完成 inventory、`.part`
-   Range 续传、全部必要对象 bytes/SHA-256 校验，提交 `FINAL_REVIEW_PENDING / VOLUME_RETAINED_PENDING_USER_DELETE` 并按队列申请最终验收。
+1. 通过指定队列报告 US-TX-3 S3 不可用事实并请示最小替代交接授权；未获授权前保持 0 Pod 和网络卷，不跨 region 猜 endpoint、不关闭 TLS。
+2. 获得明确授权后，以批准的最小方式回传 bootstrap 精确列出的 39 对象，完成 `.part` 续传、全部 bytes/SHA-256 校验，提交
+   `FINAL_REVIEW_PENDING / VOLUME_RETAINED_PENDING_USER_DELETE` 并按队列申请最终验收。
 3. 最终审查者只要求无需 GPU 的修复/复验并收口最终文档；验收后转请用户本人决定是否删除网络卷。执行者仅在收到用户人工批准后删除卷，
    记录终态并通知；所有人继续等待用户决定合并/推送。
 
 ### 阻塞项
 
 - 阶段 A 无计划级阻塞。
-- 阶段 B 正式轮和 GPU 专项验收已完成；当前无计划级阻塞，Pod 已获释放许可，等待执行者执行并回报 0 Pod 事实。
+- 阶段 B 正式轮和 GPU 专项验收已完成，Pod 已释放并止费；大型 handoff 被 provider 的 US-TX-3 S3 不支持边界阻断，替代方式需要计划外授权。
 - 实际 RunPod 库存、价格、旧资源终态、网络卷/S3 兼容性和本地大工件回传窗口均须在相应动作前实时复核；规划时快照不构成运行事实。
 
 ### 当前验收状态
 
-- `GPU_REVIEW_PASS / POD_RELEASE_AUTHORIZED`；研究终态为 `VALID_NO_IMPROVEMENT`，最终大型资产交接与任务验收尚未完成。
+- `GPU_REVIEW_PASS / ZERO_POD / HANDOFF_EXTERNAL_BLOCKED`；研究终态为 `VALID_NO_IMPROVEMENT`，最终大型资产交接与任务验收尚未完成。
 
 ### 交接边界
 
@@ -483,3 +488,4 @@ XXX用以下内容代替：
 | 020 | 用小型实际环境 receipt、真实 retention artifact producer 与固定项目局部 boto3 launcher 分别闭合 freeze、GPU 释放前清单和 0 Pod 回传入口；retained bootstrap 只能写入 task root 内、artifact root 外的无符号链接新路径 | 直接验证真实接缝且保持职责分离，避免 producer 污染正式工件，不引入签名链、通用环境管理器或第二套工件平台 | environment/handoff | 已采纳 |
 | 021 | source bundle 纳入运行所需的 Plan 081 route；复合训练状态从 CPU 反序列化后由 optimizer 按参数设备恢复；launcher 在 detach 前要求 exact image identity | 真实 commissioning 已分别复现缺失 route、CUDA RNG state 无法恢复和子进程环境遗漏；局部修复即可闭合，不引入第二套 bundle 或 launcher | source/recovery/runtime | 已采纳 |
 | 022 | 保留完整原始输入、正式/commissioning observations、日志以及所有任务自有大 checkpoint；若网络卷容量确实逼近上限，先报告并按用户已给授权优先扩容，不以清理 checkpoint 腾挪 | 保留轻量摘要之外的真实失败复盘材料；网络卷成本低于丢失可分析证据的代价，且当前 31.21GB/40GB 尚无需扩容 | retention/capacity | 已采纳 |
+| 023 | US-TX-3 S3 endpoint 不可建立且 provider 支持列表不含该 DC 时，保持 TLS 校验、live region 与 0 Pod/保留卷，不尝试跨 region endpoint 或虚构迁移；替代交接先走队列授权 | 官方可用性边界与无凭据 TLS 诊断一致，卷 update 也不支持迁移数据中心；任何有效替代都需要重新创建外部资源 | handoff/safety | 已采纳 |
