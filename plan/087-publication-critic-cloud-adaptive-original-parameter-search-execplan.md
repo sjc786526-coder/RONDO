@@ -300,26 +300,39 @@ XXX用以下内容代替：
   非整数、JSON boolean 和其它数值；不增加 v1 兼容或通用 provider 层。
 - 2026-08-26：默认 count 窄修后 Plan 081/082/087 相邻聚焦回归 93 项通过（另有 59 个 subtests），其中 create/terminal 定向 12 项（25 个
   subtests）；定向 Ruff/format、15 文件 AST、shell/CLI syntax、diff check 与 WBS untouched 门禁通过。
+- 2026-08-26：审查者以 High 0、Medium 0 验收阶段 A，并明确回复“阶段 A 验收通过，批准进入付费阶段”。执行者随后刷新 live 基线：
+  账户 0 Pod、余额 9.1252646939 USD，固定任务总额 8.9852646939 USD；既有卷 `mwemzrn33y` 在 US-TX-3 可挂载 L40S。
+- 2026-08-26：阶段 B 以已提交 `6dd27d8` source archive、物理无 unseen 的 v8 train+validation bundle 和 exact
+  `Skywork/Skywork-Reward-V2-Qwen3-1.7B@e51ea3e08fb81326c3b812a7ff0cb9cee83e59cc` 打通真实 L40S 链路。
+  根据 live FUSE mount 语义窄修容量观测说明，并在 debug 全链闭合后从 clean exact base 启动正式搜索。
+- 2026-08-26：正式搜索完成 A–O 共 15 条 hash-linked 路线。A–N 在完整观测后诚实收口；Route O 的末块内部输入变换/归一化九张量范围
+  以一次 full-cohort 更新取得 raw boundary margin +0.00390625、projected boundary +0.00086113、projected within-PASS +0.00013894
+  和 ROC AUC +0.00140056，严格胜数、阈值错误和 best operating balanced accuracy 未退化，形成分布式而非统一 offset 的研究候选。
+- 2026-08-26：Route O 精确候选 checkpoint 已由新 OS 进程执行 no-update 恢复验证，模型/优化器/调度器/RNG/数据/路线状态一致。
+  18 个小型回传文件共 573701 bytes 通过 exact-tree 校验；完整 checkpoint、model snapshot 与训练环境仅留在网络卷。
+- 2026-08-26：终态为 `PROMISING_CANDIDATE_RETAINED`。任务 Pod 已精确 stop/delete，并复核账户 0 Pod、compute 费率 0；
+  `mwemzrn33y` 保留且未删除，容量 57GB、持续卷费 0.006 USD/h。终态余额 6.2192572691 USD，保守任务费用 3.009 USD，
+  剩余任务授权 5.9762646939 USD。终态 receipt 观察到的累计 task-window Pod billing 1.9811751181 USD 已由追加成本快照 40 纠正记录。
+- 2026-08-26：最终七个相邻聚焦 unittest 93 项通过；15 文件 AST、三个 shell syntax、CLI help、source/data/handoff exact-tree、
+  terminal/result JSON 不变量、diff check 与 WBS untouched 门禁通过。获批后未修改 Python 实现，阶段 A 已验收的 Ruff 结果保持有效。
 
 ### 当前工作
 
-- 阶段 A MCP v2 默认 GPU count 窄整改已实现，正在完成回归、clean task-branch 提交与复审交接；付费门仍关闭。
+- 阶段 B/C 研究执行、候选保留、小型回传、云端归零、tracked 结果摘要与轻量门禁已完成；等待最终整体验收。
 
 ### 本任务剩余步骤
 
-1. 执行者提交阶段 A 后用指定队列申请验收；审查者关闭高/中等级 correctness/functionality finding，并明确决定是否批准进入阶段 B。
-2. 获批后刷新 live 资源/费用/余额，选择单张 A40/L40S 与卷策略，打通真实链路并从 clean exact base 开始预算内自适应搜索。
-3. 形成三个终态之一，保留相称资产、释放全部 Pod、确认 compute 止费，回传小型结果，更新任务状态/WBS/结果/精炼日志并提交。
-4. 执行者用指定队列请求最终验收；审查者完成相称独立复核与必要整改，验收通过后收口完成历史。
+1. 执行者提交 Plan 087 worktree 后用指定队列请求最终验收；审查者完成相称独立复核与必要整改。
+2. 整体验收通过后按审查者既定决定统一更新 WBS/WBS-COMPLETED；此前保持两份权威 WBS untouched。
 
 ### 阻塞项
 
-- 当前无计划级基础设施阻塞；付费阶段有意由阶段 A 审查门阻塞，审查者明确批准前不得进入。
-- GPU 库存、价格、余额与卷兼容性是阶段 B 启动时的 live 事实，不以规划时快照冻结。
+- 当前无计划级或基础设施阻塞；研究终态等待最终整体验收。
+- 网络卷持续费用为终态后的保留成本，不属于 Plan 087 已关闭的任务总账；卷不得删除。
 
 ### 当前验收状态
 
-- `STAGE_A_IMPLEMENTED / REVIEW_PENDING / PAID_GATE_CLOSED`；只有本地 fake/fixture/bundle 证据，尚无真实训练、费用或候选证据。
+- `PROMISING_CANDIDATE_RETAINED / FINAL_REVIEW_PENDING / ZERO_POD`；有真实 L40S 训练、候选恢复、费用和资源终态证据，不含 unseen/product GO。
 
 ### 交接边界
 
@@ -351,3 +364,7 @@ XXX用以下内容代替：
 | 016 | 所有云端写路径约束在显式 Plan 087 task root；Pod create/stop/delete 对不确定 API 响应先按唯一身份重查；本地回传只接受显式小文件 allowlist | 避免污染 Plan 082 roots、盲目重复计费实例或回传大权重树 | cloud lifecycle | 已采纳 |
 | 017 | 冻结 `runpodctl` 无法回读全部止费字段且会剥离卷 attachment，禁止跨调用复用同名 Pod；空账户后单次 create 只形成 pending receipt，最终成功必须由既有 RunPod MCP v2 safe entry 的原始 REST v2 Pod 明确观察到精确 `mounts.network[].volumeId/path` | 直接 CLI 轮询真实成功路径不可达；显式 v2 接缝的两阶段窄确认既保护 checkpoint 持久化和避免盲目二次 create，也不新建凭据/通用编排入口 | cloud lifecycle | 已采纳 |
 | 018 | 路线收口与 checkpoint 恢复分责：完整观测/checkpoint 可提前 `not_promising`，无恢复时明确记录 `none`；只有 promising 或明确必要恢复点承担 fresh-process 恢复 | 避免弱路线机械跑满和重复候选级恢复，同时保留候选可复用证据 | search/recovery | 已采纳 |
+| 019 | live FUSE mount 的 `df` 报共享后端容量时，以 provider decimal GB 配额减 task-root `du` 作为门禁余量，并保留原始观测 | 真实挂载不暴露任务卷 quota；该窄口径继续满足 60GB 上限和 checkpoint atomic staging 约束 | capacity | 已采纳 |
+| 020 | 成本终态采用余额差、provider task-window billing 与累计 wall-clock ledger 三者最大值；发现终态 billing receipt 晚于快照投影时，只追加 hash-linked 快照 40，不改写历史 | 覆盖延迟计费并保持累计账本不可改写；本次最大值仍为 ledger 3.009 USD | cost lineage | 已采纳 |
+| 021 | Route O 出现分布式 boundary 改善、projected within-PASS/ROC 伴随改善且关键 operating 指标未退化后立即停搜，不使用剩余预算做冗余 clean replay | ExecPlan 的终点是恢复合格的研究候选；正式复现属于后续独立工作，继续付费不会提高本任务结论必要性 | research terminal | 已采纳 |
+| 022 | 只保留 Route O recovery-qualified checkpoint/model snapshot；清理已确认非候选的大型路线工件，保留 57GB 既有卷且删除全部 Pod | 满足后续复用、小型本地交接、Plan 082 只读和终态零 compute 边界 | retention | 已采纳 |

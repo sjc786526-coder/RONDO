@@ -110,11 +110,15 @@ read-only. The only remote write root is a fresh
 Before a checkpoint, collect actual volume use and a conservative replacement
 checkpoint estimate. Validate a capacity-preflight JSON with
 `plan087_cli capacity-preflight --input <json>`. Record provider `size_gb` in
-decimal GB plus filesystem-observed `capacity_bytes` and `available_bytes`;
-never convert the provider size as GiB. Atomic publication needs the actual
-used bytes plus checkpoint staging and reserve space. Every `start`, `resume`
-or `verify-recovery` command requires this latest preflight, and refuses to
-enter a checkpoint-producing segment unless `checkpoint_write_ready=true`.
+decimal GB; never convert it as GiB. When the network-volume FUSE mount reports
+the shared backend through `df` rather than the task volume quota, derive
+`capacity_bytes = size_gb * 1000000000`, collect exact used bytes with
+`du -s -B1 --one-file-system /workspace`, and set `available_bytes` to the
+nonnegative difference. Preserve the raw `df`, `du` and provider observations.
+Atomic publication needs the actual used bytes plus checkpoint staging and
+reserve space. Every `start`, `resume` or `verify-recovery` command requires
+this latest preflight, and refuses to enter a checkpoint-producing segment
+unless `checkpoint_write_ready=true`.
 If not ready,
 extend by the smallest practical increment that satisfies the returned
 `recommended_size_gb`, never above 60GB:
@@ -217,9 +221,12 @@ Pod and confirm zero first. Do not connect, upload or bootstrap until
 Bind the confirmed exact ID and name in the task log. Use `runpodctl ssh info
 <pod-id>` after every start/restart to refresh the SSH endpoint. Before upload,
 create the fresh `/workspace/rondo-plan087-<run>/incoming` tree through that
-endpoint with the task root and incoming directory both mode `0700`. Upload only
-the two verified archives into `incoming/` with `scp`; do not upload the
-worktree, ignored history, secrets, unseen data or a local model.
+endpoint and request mode `0700` for both directories. A provider FUSE mount
+may normalize the observed mode (the live Plan 087 mount reported `0777` with
+`allow_other`); record the actual `stat` and mount options rather than claiming
+the requested mode was enforced. Upload only the two verified archives into
+`incoming/` with `scp`; do not upload the worktree, ignored history, secrets,
+unseen data or a local model.
 
 ## 4. Bootstrap the exact source, data, environment and model
 
@@ -240,15 +247,18 @@ retried in the same debug namespace when already verified inputs remain valid.
 
 First use a task-owned `debug/` artifact namespace. Generate the real parameter
 inventory, materialize one route candidate against a route-context JSON, and
-validate the resulting run spec:
+validate the resulting run spec. `PLAN087_RECIPE` below is the candidate's
+inner `.recipe` object, not the outer route-candidate document:
 
 ```bash
-env PYTHONPATH="$PLAN087_SOURCE_ROOT/eval" "$PLAN087_TASK_ROOT/venv/bin/python" \
+env RONDO_PLAN087_IMAGE_IDENTITY="$PLAN087_IMAGE" \
+  PYTHONPATH="$PLAN087_SOURCE_ROOT/eval" "$PLAN087_TASK_ROOT/venv/bin/python" \
   -B -P -m rondo_eval.publication_critic.full_model_training.plan087_cli \
   parameter-inventory --snapshot "$PLAN087_MODEL_ROOT" \
   --model-lock "$PLAN087_MODEL_LOCK" --recipe "$PLAN087_RECIPE" \
   > "$PLAN087_INVENTORY"
-env PYTHONPATH="$PLAN087_SOURCE_ROOT/eval" "$PLAN087_TASK_ROOT/venv/bin/python" \
+env RONDO_PLAN087_TASK_ROOT="$PLAN087_TASK_ROOT" \
+  PYTHONPATH="$PLAN087_SOURCE_ROOT/eval" "$PLAN087_TASK_ROOT/venv/bin/python" \
   -B -P -m rondo_eval.publication_critic.full_model_training.plan087_cli \
   materialize-run-spec --candidate "$PLAN087_ROUTE_CANDIDATE" \
   --route-context "$PLAN087_ROUTE_CONTEXT" --inventory "$PLAN087_INVENTORY" \

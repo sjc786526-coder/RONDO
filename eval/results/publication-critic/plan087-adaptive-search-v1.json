@@ -1,0 +1,477 @@
+{
+  "schema": "rondo-publication-critic-plan087-adaptive-search-summary-v1",
+  "captured_at": "2026-08-26T19:50:58Z",
+  "outcome": "PROMISING_CANDIDATE_RETAINED",
+  "search_id": "plan087-formal-20260826-01",
+  "selected_route_id": "route-o-internal-transformations",
+  "source": {
+    "commit": "6dd27d8cd7cc6447c2f6762a3054c55d64dc3237",
+    "archive_sha256": "8b59f28d55c69c51fc95997ee82a66b8d964ff978f8b9f2fbd5b101be4e24ccb",
+    "source_content_sha256": "583cf26dcb067e68d56a29dbe350eb24d1cda27236bae21088fa8fb0a5dbe0e1"
+  },
+  "data": {
+    "content_sha256": "2247dd09c168900a47d37a50ecd6511d66d62d3f2ec8056ea3bc829c93de8b46",
+    "bundle_manifest_sha256": "cbcd96792bd1fd69d8b99f39ca9194787276a10a23b006854636898f181be5b1",
+    "train_candidate_count": 128,
+    "train_pair_count": 58,
+    "validation_candidate_count": 55,
+    "validation_pair_count": 26,
+    "unseen_test_rows": 0
+  },
+  "model": {
+    "repository": "Skywork/Skywork-Reward-V2-Qwen3-1.7B",
+    "revision": "e51ea3e08fb81326c3b812a7ff0cb9cee83e59cc",
+    "snapshot_content_sha256": "18d9edf7132d9c5e13bb0e59e3c2c6a42f82007fa17de464e20783755a171360",
+    "parameter_elements": 1720577024
+  },
+  "environment": {
+    "container_image": "runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404",
+    "gpu_count": 1,
+    "gpu_names": [
+      "NVIDIA L40S"
+    ],
+    "torch_version": "2.8.0+cu128",
+    "transformers_version": "4.52.3"
+  },
+  "candidate": {
+    "route_id": "route-o-internal-transformations",
+    "route_generation": 15,
+    "scope": {
+      "parameter_names": [
+        "model.layers.27.self_attn.q_proj.weight",
+        "model.layers.27.self_attn.k_proj.weight",
+        "model.layers.27.self_attn.v_proj.weight",
+        "model.layers.27.self_attn.q_norm.weight",
+        "model.layers.27.self_attn.k_norm.weight",
+        "model.layers.27.mlp.gate_proj.weight",
+        "model.layers.27.mlp.up_proj.weight",
+        "model.layers.27.input_layernorm.weight",
+        "model.layers.27.post_attention_layernorm.weight"
+      ],
+      "reason": "inventory-resolved explicit module-prefix original-parameter scope",
+      "scope_id": "plan087-module_prefixes-066f15481c18",
+      "trainable_parameter_elements": 33558784,
+      "update_method": "direct_original_parameter_update"
+    },
+    "recipe": {
+      "activation_checkpointing": true,
+      "attention_backend": "sdpa",
+      "binary_micro_batch_size": 1,
+      "gradient_clip_norm": 1.0,
+      "macro_update": "one_full_v8_train_cohort",
+      "objective": {
+        "binary_loss": "softplus(-signed_target*logits[:,0])",
+        "component_weights": {
+          "binary": 0.05,
+          "boundary": 0.25,
+          "within_pass": 0.7
+        },
+        "direction": "preferred_minus_dispreferred",
+        "pair_loss": "softplus(dispreferred-preferred)",
+        "pair_margin": 0.0,
+        "pair_temperature": 1.0,
+        "scalar": "logits[:,0]"
+      },
+      "optimizer": {
+        "betas": [
+          0.9,
+          0.999
+        ],
+        "epsilon": 1E-8,
+        "fused": true,
+        "learning_rate": 0.000005,
+        "name": "torch.optim.AdamW",
+        "weight_decay": 0.0
+      },
+      "pair_micro_batch_size": 1,
+      "parameter_dtype": "bfloat16",
+      "scheduler": {
+        "name": "constant"
+      },
+      "schema": "rondo-publication-critic-plan087-training-recipe-v1",
+      "seed": 20260901
+    },
+    "checkpoint": {
+      "bytes": 3591448949,
+      "checkpoint_id": "checkpoint-attempt-000-step-000001",
+      "content_sha256": "d08ff2566d719b3aef4dd58158e86b1c374faf2021cc96a140d878b79857c923",
+      "fresh_process_recovery": true,
+      "qualified_restore_probe": true,
+      "recovery_role": "promising_candidate",
+      "remote_only": true
+    },
+    "checkpoint_volume_id": "mwemzrn33y",
+    "checkpoint_relative_path": "formal-search/route-o-artifacts/recovery-checkpoints/checkpoint-attempt-000-step-000001",
+    "model_snapshot_relative_path": "formal-search/route-o-artifacts/model-snapshots/snapshot-attempt-000-step-000001",
+    "recovery_verified": true,
+    "route_result_content_sha256": "bcc69fffa6ffc571e8445c7653498a709313dbb35169c577040b82a4d08f691a",
+    "operator_reason": "Route O isolates the final-block input transformations and internal norms: boundary raw margin improved 0.003906 across 7 improved versus 3 worsened pairs, projected boundary improved 0.000861 across 13 improved pairs, projected within-pass and ROC also improved, and the small raw within-pass regression did not change strict wins, threshold errors or best operating metrics. The signal is distributed, not a uniform offset, and the exact selected checkpoint passed no-update fresh-process recovery.",
+    "metrics": {
+      "base": {
+        "boundary_raw_pair_mean_margin": 0.8104440789473685,
+        "boundary_projected_pair_mean_margin": 0.08355612723605446,
+        "within_pass_raw_pair_mean_margin": 0.375,
+        "within_pass_projected_pair_mean_margin": 0.015236882517573793,
+        "boundary_strict_wins": 15,
+        "within_pass_strict_wins": 6,
+        "balanced_accuracy": 0.5714285714285714,
+        "best_operating_balanced_accuracy": 0.6659663865546219,
+        "false_pass_rate": 0.8571428571428571,
+        "roc_auc": 0.6204481792717087
+      },
+      "selected": {
+        "boundary_raw_pair_mean_margin": 0.8143503289473685,
+        "boundary_projected_pair_mean_margin": 0.08441725969000985,
+        "within_pass_raw_pair_mean_margin": 0.3716517857142857,
+        "within_pass_projected_pair_mean_margin": 0.015375825117683681,
+        "boundary_strict_wins": 15,
+        "within_pass_strict_wins": 6,
+        "balanced_accuracy": 0.5714285714285714,
+        "best_operating_balanced_accuracy": 0.6659663865546219,
+        "false_pass_rate": 0.8571428571428571,
+        "roc_auc": 0.6218487394957983
+      },
+      "delta": {
+        "boundary_raw_pair_mean_margin": 0.00390625,
+        "boundary_projected_pair_mean_margin": 0.0008611324539553877,
+        "within_pass_raw_pair_mean_margin": -0.0033482142857143016,
+        "within_pass_projected_pair_mean_margin": 0.0001389426001098884,
+        "roc_auc": 0.0014005602240896309
+      },
+      "pair_delta_distribution": {
+        "boundary": {
+          "raw_improved": 7,
+          "raw_unchanged": 9,
+          "raw_worse": 3,
+          "projected_improved": 13,
+          "projected_unchanged": 1,
+          "projected_worse": 5
+        },
+        "within_pass": {
+          "raw_improved": 1,
+          "raw_unchanged": 4,
+          "raw_worse": 2,
+          "projected_improved": 4,
+          "projected_unchanged": 2,
+          "projected_worse": 1
+        }
+      }
+    }
+  },
+  "routes": [
+    {
+      "generation": 1,
+      "route_id": "route-a-terminal-pair",
+      "disposition": "not_promising",
+      "updates": 1,
+      "scope_id": "plan087-terminal_backbone-f141921e534b",
+      "trainable_parameter_elements": 50340096,
+      "learning_rate": 0.000005,
+      "component_weights": {
+        "binary": 0.2,
+        "boundary": 0.5,
+        "within_pass": 0.3
+      },
+      "boundary_raw_delta": -0.005962171052631637,
+      "within_pass_raw_delta": -0.004464285714285698,
+      "roc_auc_delta": -0.0007002801120448154,
+      "reason": "Formal Route A deterministically reproduced the debug regression at the first complete observation: boundary and within-pass pair margins plus ROC AUC all decreased, while threshold metrics did not improve; further updates on this route are not justified."
+    },
+    {
+      "generation": 2,
+      "route_id": "route-b-wider-decay",
+      "disposition": "not_promising",
+      "updates": 1,
+      "scope_id": "plan087-terminal_backbone-ea73bdf98148",
+      "trainable_parameter_elements": 100676096,
+      "learning_rate": 0.000003,
+      "component_weights": {
+        "binary": 0.4,
+        "boundary": 0.35,
+        "within_pass": 0.25
+      },
+      "boundary_raw_delta": -0.0037006578947369473,
+      "within_pass_raw_delta": -0.006696428571428548,
+      "roc_auc_delta": 0.0028011204481792618,
+      "reason": "Route B regressed both raw boundary and within-pass pair margins at the first complete observation; balanced accuracy, false-pass rate, and strict wins were unchanged, while only tiny projected-margin and ROC changes accompanied a downward logit shift, so the evidence is not a clear ranking improvement."
+    },
+    {
+      "generation": 3,
+      "route_id": "route-c-head-norm-pair",
+      "disposition": "not_promising",
+      "updates": 1,
+      "scope_id": "plan087-terminal_backbone-d66dc0e05f4f",
+      "trainable_parameter_elements": 4096,
+      "learning_rate": 0.00002,
+      "component_weights": {
+        "binary": 0.1,
+        "boundary": 0.5,
+        "within_pass": 0.4
+      },
+      "boundary_raw_delta": -0.006167763157894801,
+      "within_pass_raw_delta": -0.005580357142857151,
+      "roc_auc_delta": 0.0007002801120448154,
+      "reason": "Route C proved the intended 4,096-parameter head/final-norm scope changed, but both raw boundary and within-pass pair margins regressed; strict wins, balanced accuracy, and false-pass rate were unchanged, with only tiny projected/ROC movement, so it is not a credible candidate."
+    },
+    {
+      "generation": 4,
+      "route_id": "route-d-score-only-low-rate",
+      "disposition": "not_promising",
+      "updates": 1,
+      "scope_id": "plan087-terminal_backbone-c9abc8af2e96",
+      "trainable_parameter_elements": 2048,
+      "learning_rate": 0.00001,
+      "component_weights": {
+        "binary": 0.1,
+        "boundary": 0.5,
+        "within_pass": 0.4
+      },
+      "boundary_raw_delta": -0.003083881578947456,
+      "within_pass_raw_delta": -0.0033482142857143016,
+      "roc_auc_delta": 0.0007002801120448154,
+      "reason": "Score-only Route D halved the raw pair-margin regression relative to Route C but still decreased boundary and within-pass margins; strict wins, balanced accuracy, and false-pass rate were unchanged, while the same tiny ROC movement remained insufficient for a candidate."
+    },
+    {
+      "generation": 5,
+      "route_id": "route-e-binary-last-block",
+      "disposition": "not_promising",
+      "updates": 1,
+      "scope_id": "plan087-terminal_backbone-eb264f00c5c1",
+      "trainable_parameter_elements": 50338048,
+      "learning_rate": 0.000003,
+      "component_weights": {
+        "binary": 0.7,
+        "boundary": 0.15,
+        "within_pass": 0.15
+      },
+      "boundary_raw_delta": -0.0010279605263158187,
+      "within_pass_raw_delta": -0.006696428571428548,
+      "roc_auc_delta": 0.0007002801120448154,
+      "reason": "Route E produced only a tiny ROC and projected-boundary increase while raw boundary and within-pass margins both decreased, projected within-pass also decreased, and strict wins, balanced accuracy, and false-pass rate were unchanged; the second planned update is not justified."
+    },
+    {
+      "generation": 6,
+      "route_id": "route-f-within-last-block",
+      "disposition": "not_promising",
+      "updates": 2,
+      "scope_id": "plan087-terminal_backbone-ee130eaeb85e",
+      "trainable_parameter_elements": 50336000,
+      "learning_rate": 0.000005,
+      "component_weights": {
+        "binary": 0.05,
+        "boundary": 0.25,
+        "within_pass": 0.7
+      },
+      "boundary_raw_delta": -0.009662828947368474,
+      "within_pass_raw_delta": -0.006696428571428548,
+      "roc_auc_delta": 0.0007002801120448154,
+      "reason": "Route F step 1 briefly improved raw and projected boundary margins, but step 2 reversed raw boundary below base and further regressed raw within-pass; only projected margins and a tiny ROC delta remained positive while strict wins, balanced accuracy, and false-pass rate were unchanged."
+    },
+    {
+      "generation": 7,
+      "route_id": "route-g-output-projections",
+      "disposition": "not_promising",
+      "updates": 1,
+      "scope_id": "plan087-module_prefixes-dd091bc7d00d",
+      "trainable_parameter_elements": 16777216,
+      "learning_rate": 0.000005,
+      "component_weights": {
+        "binary": 0.05,
+        "boundary": 0.45,
+        "within_pass": 0.5
+      },
+      "boundary_raw_delta": -0.0026726973684211286,
+      "within_pass_raw_delta": -0.0033482142857143016,
+      "roc_auc_delta": 0.0007002801120448154,
+      "reason": "Route G isolated the final-block residual output projections, but raw boundary and within-pass margins both regressed while strict wins, balanced accuracy, and false-pass rate were unchanged; the only increases were tiny projected margins and the recurring 0.0007 ROC movement, so a second update is not justified."
+    },
+    {
+      "generation": 8,
+      "route_id": "route-h-attention-output",
+      "disposition": "not_promising",
+      "updates": 1,
+      "scope_id": "plan087-module_prefixes-af463452902e",
+      "trainable_parameter_elements": 4194304,
+      "learning_rate": 0.000005,
+      "component_weights": {
+        "binary": 0.05,
+        "boundary": 0.6,
+        "within_pass": 0.35
+      },
+      "boundary_raw_delta": -0.0012335526315789824,
+      "within_pass_raw_delta": -0.006696428571428548,
+      "roc_auc_delta": 0,
+      "reason": "Route H attention-output-only ablation regressed raw boundary and within-pass margins, left strict wins, threshold metrics and ROC unchanged, and produced only a tiny projected-boundary increase; it is not a candidate."
+    },
+    {
+      "generation": 9,
+      "route_id": "route-i-mlp-output",
+      "disposition": "not_promising",
+      "updates": 1,
+      "scope_id": "plan087-module_prefixes-a1dff3300bcf",
+      "trainable_parameter_elements": 12582912,
+      "learning_rate": 0.000005,
+      "component_weights": {
+        "binary": 0.05,
+        "boundary": 0.3,
+        "within_pass": 0.65
+      },
+      "boundary_raw_delta": -0.0028782894736842923,
+      "within_pass_raw_delta": -0.004464285714285698,
+      "roc_auc_delta": 0,
+      "reason": "Route I MLP-down-only ablation regressed both raw boundary and within-pass margins, left strict wins, threshold metrics and ROC unchanged, and produced only tiny projected-margin changes; the output-projection ablation family is closed without a candidate."
+    },
+    {
+      "generation": 10,
+      "route_id": "route-j-boundary-last-block-low-rate",
+      "disposition": "not_promising",
+      "updates": 1,
+      "scope_id": "plan087-terminal_backbone-ee130eaeb85e",
+      "trainable_parameter_elements": 50336000,
+      "learning_rate": 0.000003,
+      "component_weights": {
+        "binary": 0.05,
+        "boundary": 0.7,
+        "within_pass": 0.25
+      },
+      "boundary_raw_delta": -0.0043174342105263275,
+      "within_pass_raw_delta": 0,
+      "roc_auc_delta": 0,
+      "reason": "Route J eliminated the raw within-pass regression but regressed raw boundary margin, with strict wins, threshold metrics and ROC unchanged and only tiny projected-margin movement; it is not a candidate."
+    },
+    {
+      "generation": 11,
+      "route_id": "route-k-within-last-block-low-rate",
+      "disposition": "not_promising",
+      "updates": 1,
+      "scope_id": "plan087-terminal_backbone-ee130eaeb85e",
+      "trainable_parameter_elements": 50336000,
+      "learning_rate": 0.000003,
+      "component_weights": {
+        "binary": 0.05,
+        "boundary": 0.25,
+        "within_pass": 0.7
+      },
+      "boundary_raw_delta": 0.0008223684210525439,
+      "within_pass_raw_delta": -0.006696428571428548,
+      "roc_auc_delta": 0.0014005602240896309,
+      "reason": "Route K isolated the lower learning rate against Route F: raw boundary improved only 0.000822 while raw within-pass regressed 0.006696; strict wins and threshold metrics were unchanged, and the tiny projected and ROC movements are insufficient for a candidate."
+    },
+    {
+      "generation": 12,
+      "route_id": "route-l-four-block-low-rate",
+      "disposition": "not_promising",
+      "updates": 1,
+      "scope_id": "plan087-terminal_backbone-1a81759e162a",
+      "trainable_parameter_elements": 201344000,
+      "learning_rate": 0.000001,
+      "component_weights": {
+        "binary": 0.05,
+        "boundary": 0.25,
+        "within_pass": 0.7
+      },
+      "boundary_raw_delta": -0.006578947368421129,
+      "within_pass_raw_delta": -0.02120535714285715,
+      "roc_auc_delta": 0,
+      "reason": "Route L widened the trainable representation to four final blocks, but raw boundary regressed 0.006579 and raw within-pass regressed 0.021205; strict wins, threshold metrics and ROC were unchanged, so wider scope amplified rather than resolved the tradeoff."
+    },
+    {
+      "generation": 13,
+      "route_id": "route-m-pair-only-within",
+      "disposition": "not_promising",
+      "updates": 1,
+      "scope_id": "plan087-terminal_backbone-ee130eaeb85e",
+      "trainable_parameter_elements": 50336000,
+      "learning_rate": 0.000003,
+      "component_weights": {
+        "binary": 0.0,
+        "boundary": 0.01,
+        "within_pass": 0.99
+      },
+      "boundary_raw_delta": -0.006990131578947456,
+      "within_pass_raw_delta": -0.012276785714285698,
+      "roc_auc_delta": 0.0014005602240896309,
+      "reason": "Route M removed binary supervision and assigned 99% of pair loss to within-pass, yet raw within-pass regressed 0.012277 and raw boundary regressed 0.006990; strict wins and threshold metrics stayed unchanged, so objective interference did not explain or fix the tradeoff."
+    },
+    {
+      "generation": 14,
+      "route_id": "route-n-pair-only-boundary",
+      "disposition": "not_promising",
+      "updates": 1,
+      "scope_id": "plan087-terminal_backbone-ee130eaeb85e",
+      "trainable_parameter_elements": 50336000,
+      "learning_rate": 0.000003,
+      "component_weights": {
+        "binary": 0.0,
+        "boundary": 0.99,
+        "within_pass": 0.01
+      },
+      "boundary_raw_delta": -0.0004111842105263275,
+      "within_pass_raw_delta": -0.01004464285714285,
+      "roc_auc_delta": 0,
+      "reason": "Route N removed binary supervision and assigned 99% of pair loss to boundary, yet raw boundary regressed 0.000411 and raw within-pass regressed 0.010045; strict wins, threshold metrics and ROC were unchanged, closing the objective-only family without a candidate."
+    },
+    {
+      "generation": 15,
+      "route_id": "route-o-internal-transformations",
+      "disposition": "promising",
+      "updates": 1,
+      "scope_id": "plan087-module_prefixes-066f15481c18",
+      "trainable_parameter_elements": 33558784,
+      "learning_rate": 0.000005,
+      "component_weights": {
+        "binary": 0.05,
+        "boundary": 0.25,
+        "within_pass": 0.7
+      },
+      "boundary_raw_delta": 0.00390625,
+      "within_pass_raw_delta": -0.0033482142857143016,
+      "roc_auc_delta": 0.0014005602240896309,
+      "reason": "Route O isolates the final-block input transformations and internal norms: boundary raw margin improved 0.003906 across 7 improved versus 3 worsened pairs, projected boundary improved 0.000861 across 13 improved pairs, projected within-pass and ROC also improved, and the small raw within-pass regression did not change strict wins, threshold errors or best operating metrics. The signal is distributed, not a uniform offset, and the exact selected checkpoint passed no-update fresh-process recovery."
+    }
+  ],
+  "cost": {
+    "baseline_balance_usd": 9.1252646939,
+    "initial_available_usd": 8.9852646939,
+    "current_balance_usd": 6.2192572691,
+    "balance_delta_usd": 2.9060074248000003,
+    "provider_task_billing_usd": 1.9811751181259751,
+    "conservative_task_cost_usd": 3.009,
+    "task_remaining_usd": 5.976264693899999,
+    "terminal_snapshot_index": 40,
+    "terminal_snapshot_content_sha256": "36b03c4f1566a8d9d8bc2dcff11a2b77b452e1010c9b4575dd9c0c0b839c9b1e"
+  },
+  "resources": {
+    "captured_at": "2026-08-26T19:50:58Z",
+    "compute_rate_usd_per_hour": 0,
+    "pod_count": 0,
+    "volumes": [
+      {
+        "continuing_rate_usd_per_hour": 0.006,
+        "deleted": false,
+        "id": "mwemzrn33y",
+        "region": "US-TX-3",
+        "role": "Plan 087 recovery-verified Route O candidate checkpoint retention; Plan 082 roots remain read-only",
+        "size_gb": 57
+      }
+    ]
+  },
+  "handoff": {
+    "manifest_content_sha256": "35b06de1729c7f845630d7c8bf727ea0d3f83723ea3115569b2c17f6bd9a2a39",
+    "file_count": 18,
+    "total_bytes": 573701,
+    "local_ignored_root": "/home/sjc/desktop/RONDO/eval-data/publication-critic/plan087/stage-b/live-20260826/handoff"
+  },
+  "terminal_result_content_sha256": "b88aef24d004789ea836305b151df8c4276aa56ca8ca281426327776fa74587c",
+  "terminal_result_file_sha256": "f142b3823dfbbdfebc30c4c2b5d46d6d001e9c769a6b9905681e8e3421304e47",
+  "claims": {
+    "budget_search_no_candidate": false,
+    "clean_formal_reproduction": false,
+    "infrastructure_inconclusive": false,
+    "m3_c2_evidence": false,
+    "model_route_failed": false,
+    "product_go": false,
+    "research_task_completed": true,
+    "unseen_evidence": false
+  }
+}
