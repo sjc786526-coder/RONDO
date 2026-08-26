@@ -103,8 +103,8 @@ Plan 082 真实云端 commissioning/训练参数开发。四期 Plan 080 / M4-C2
   并完成独立审查发现的 owner incarnation、最终 lifecycle revalidation、Delete retry、parent/TUI/gate 缺口、teardown 后
   Team completion 失败，以及复验追加的 residency availability、accepted handoff terminal unknown、direct race/exact cleanup 与错误分类整改；
   最终独立验收无剩余 correctness finding，结论为 `M4_C2_CONTROL_PASS`。Plan 083 / M4-Z(core) 执行者候选已闭合公开 S/C 全链、
-  fresh store/真实进程替换正式轮与相称门禁；首轮独立审查的 V2 `close_agent` Team 边界和 graph 失败后 phantom participant
-  两项 correctness 缺口已整改，并从新的 fresh store 重跑正式全链，当前为 `AWAITING_REVIEW`。M4-W0 仍是独立价值原型，
+  fresh store/真实进程替换正式轮与相称门禁；首轮独立审查的两项 finding 主体已整改，但复审确认 participant activation 失败
+  cleanup 会先关闭 edge、再 teardown runtime，失败时可能隐藏 owner，当前为 `REVIEW_CHANGES_REQUESTED`。M4-W0 仍是独立价值原型，
   正式 W 实现须先获得 binding GO。
 - 四期不依赖 Publication Critic 训练、真实模型、真实 API 或性能测评，可以与三期模型链并行；它保持 shared workspace
   为默认，不建设通用 scheduler、自动路由、自动 merge/push、第二套 Team State/trace 或审计/可信平台。

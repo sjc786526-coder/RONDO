@@ -253,11 +253,12 @@ UUID替换为 `01a03c53-7cf4-78e0-bea3-c1eb7c4015da`，安全处理消息正文�
 
 ### 当前工作
 
-- `AWAITING_REVIEW`：首轮两项 correctness finding 已整改、复验并形成新 fresh 正式轮，等待指定审查者复审。
+- `REVIEW_CHANGES_REQUESTED`：复审确认 participant activation 失败 cleanup 先关闭 graph edge、后 teardown runtime，失败时可能隐藏
+  仍被跟踪或已替换的 owner；详见 `agent_log/2026-08-26-010256-plan083-independent-review-round2.md`。
 
 ### 本任务剩余步骤
 
-- 审查者复审新候选；若仍有 finding，执行者在同一 worktree 窄修、复验并重新提交后再次通知。
+- 执行者在现有 exact-owner/graph cleanup seam 窄修复审 finding，运行相称聚焦回归并从 fresh store 重跑正式全链；提交后再次通知审查者。
 - 只有审查通过后，才由审查者同步最终 Plan/WBS/COMPLETED、验收日志与收口提交。
 
 ### 阻塞项
@@ -267,7 +268,8 @@ UUID替换为 `01a03c53-7cf4-78e0-bea3-c1eb7c4015da`，安全处理消息正文�
 
 ### 当前验收状态
 
-- `AWAITING_REVIEW`：首轮 finding 已关闭且新正式轮与相称门禁通过，但 `M4_Z_CORE_PASS` 尚未成立；最终结论只由指定审查者给出。
+- `REVIEW_CHANGES_REQUESTED`：首轮 finding 主体与新正式轮证据有效，但复审仍有一项中等级 teardown correctness finding，
+  `M4_Z_CORE_PASS` 尚未成立。
 
 ### 交接边界
 

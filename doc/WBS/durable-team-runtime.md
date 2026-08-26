@@ -314,9 +314,9 @@ handoff 时投影其状态。该扩展不扩张为通用 workspace dashboard，�
 
 ### M4-Z(core)：Durable Team 全链收口
 
-**当前状态：`AWAITING_REVIEW`。** Plan 083 首轮独立审查确认的 V2 `close_agent` foreign UUID Team 边界与 graph persist 失败后
-committed phantom participant 两项 correctness 缺口已在既有 owner seam 整改；命名 participant/foreign target 聚焦回归、受影响
-邻接面、scoped clippy 和新的 fresh Session/store 真实进程替换正式轮均通过。`M4_Z_CORE_PASS` 与完成历史仍等待指定审查者终审。
+**当前状态：`REVIEW_CHANGES_REQUESTED`。** Plan 083 首轮两项 finding 的主体与相称复验已经关闭；复审确认 participant activation
+失败 cleanup 先关闭 graph edge、后 teardown runtime，teardown/exact-owner 失败时可能把仍被跟踪或已替换的 owner 隐藏于 Root close
+barrier。该失败时序整改与复验完成前不形成 `M4_Z_CORE_PASS` 或完成历史。
 
 **目标**：完整打通 Team Session 创建、Team/Agent 状态推进、进程或连接中断、恢复、继续控制和显式生命周期操作，确认 S/C 主线
 形成独立可用的 Durable Team Runtime。
