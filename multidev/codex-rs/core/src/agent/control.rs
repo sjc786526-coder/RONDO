@@ -895,6 +895,74 @@ impl AgentControl {
         }
     }
 
+    async fn discard_persisted_unpublished_thread(
+        &self,
+        state: &Arc<ThreadManagerState>,
+        thread_id: ThreadId,
+        thread: &Arc<crate::CodexThread>,
+        session_source: Option<&SessionSource>,
+    ) -> CodexResult<()> {
+        let graph_cleanup = if session_source
+            .and_then(SessionSource::parent_thread_id)
+            .is_some()
+        {
+            match state.agent_graph_store() {
+                Some(agent_graph_store) => agent_graph_store
+                    .set_thread_spawn_edge_status(
+                        thread_id,
+                        codex_agent_graph_store::ThreadSpawnEdgeStatus::Closed,
+                    )
+                    .await
+                    .map_err(|err| {
+                        CodexErr::Fatal(format!(
+                            "failed to retire unpublished durable thread-spawn edge for {thread_id}: {err}"
+                        ))
+                    }),
+                None => Err(CodexErr::Fatal(
+                    "durable Team child cleanup requires an available agent graph store"
+                        .to_string(),
+                )),
+            }
+        } else {
+            Ok(())
+        };
+        let runtime_cleanup = self
+            .discard_unpublished_thread(state, thread_id, thread)
+            .await;
+        match (graph_cleanup, runtime_cleanup) {
+            (Ok(()), Ok(())) => Ok(()),
+            (Err(graph_err), Ok(())) => Err(graph_err),
+            (Ok(()), Err(runtime_err)) => Err(runtime_err),
+            (Err(graph_err), Err(runtime_err)) => Err(CodexErr::Fatal(format!(
+                "{graph_err}; runtime cleanup also failed: {runtime_err}"
+            ))),
+        }
+    }
+
+    async fn activate_persisted_thread_spawn_participant(
+        &self,
+        state: &Arc<ThreadManagerState>,
+        thread_id: ThreadId,
+        thread: &Arc<crate::CodexThread>,
+        session_source: Option<&SessionSource>,
+    ) -> CodexResult<()> {
+        let Err(activation_err) = thread.session.activate_durable_team_participant() else {
+            return Ok(());
+        };
+        let activation_err = CodexErr::Fatal(format!(
+            "failed to activate durable Team participant for {thread_id}: {activation_err}"
+        ));
+        match self
+            .discard_persisted_unpublished_thread(state, thread_id, thread, session_source)
+            .await
+        {
+            Ok(()) => Err(activation_err),
+            Err(cleanup_err) => Err(CodexErr::Fatal(format!(
+                "{activation_err}; cleanup also failed: {cleanup_err}"
+            ))),
+        }
+    }
+
     async fn live_thread_spawn_descendants(
         &self,
         root_thread_id: ThreadId,

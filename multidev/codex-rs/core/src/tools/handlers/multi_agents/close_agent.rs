@@ -1,5 +1,6 @@
 use super::*;
 use crate::tools::handlers::multi_agents_spec::create_close_agent_tool_v1;
+use codex_protocol::AgentPath;
 use codex_protocol::error::CodexErrorDetails;
 use codex_tools::ToolSpec;
 
@@ -48,7 +49,31 @@ pub(crate) async fn handle_close_agent(
     } else {
         parse_agent_id_target(&args.target)?
     };
-    let receiver_agent = session.services.agent_control.get_agent_metadata(agent_id);
+    let receiver_agent = if resolve_v2_target {
+        let receiver_agent = session
+            .services
+            .agent_control
+            .ensure_agent_known(agent_id)
+            .map_err(|err| collab_agent_error(agent_id, err))?;
+        if receiver_agent
+            .agent_path
+            .as_ref()
+            .is_some_and(AgentPath::is_root)
+        {
+            return Err(FunctionCallError::RespondToModel(
+                "root is not a spawned agent".to_string(),
+            ));
+        }
+        if agent_id == session.thread_id {
+            return Err(FunctionCallError::RespondToModel(
+                "an agent cannot close itself; return your result and let the parent close you if needed"
+                    .to_string(),
+            ));
+        }
+        Some(receiver_agent)
+    } else {
+        session.services.agent_control.get_agent_metadata(agent_id)
+    };
     let known_agent = receiver_agent.is_some();
     let receiver_agent = receiver_agent.unwrap_or_default();
     session

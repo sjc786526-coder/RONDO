@@ -341,6 +341,12 @@ async fn durable_child_spawn_requires_graph_store_and_discards_unpublished_runti
         AgentControlHarness::new_durable_with_graph_store(/*agent_graph_store*/ None).await;
     let (root_thread_id, root_thread) = harness.start_thread().await;
     let root_control = root_thread.session.services.agent_control.clone();
+    let participants_before = root_control.team().participants();
+    let projection_before = root_control
+        .team()
+        .snapshot_for(root_thread_id)
+        .expect("Root projection should be readable before failed spawn");
+    let residency_before = root_control.v2_residency.counts();
 
     let err = root_control
         .spawn_agent_with_metadata(
@@ -349,7 +355,10 @@ async fn durable_child_spawn_requires_graph_store_and_discards_unpublished_runti
             Some(SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
                 parent_thread_id: root_thread_id,
                 depth: 1,
-                agent_path: None,
+                agent_path: Some(
+                    AgentPath::try_from("/root/missing_graph")
+                        .expect("test child path should be valid"),
+                ),
                 agent_nickname: None,
                 agent_role: None,
             })),
@@ -370,6 +379,15 @@ async fn durable_child_spawn_requires_graph_store_and_discards_unpublished_runti
         root_control.state.live_agents().is_empty(),
         "failed durable spawn must not publish child registry metadata"
     );
+    assert_eq!(root_control.team().participants(), participants_before);
+    assert_eq!(
+        root_control
+            .team()
+            .snapshot_for(root_thread_id)
+            .expect("Root projection should remain readable after failed spawn"),
+        projection_before
+    );
+    assert_eq!(root_control.v2_residency.counts(), residency_before);
 
     let removed = harness.manager.remove_thread(&root_thread_id).await;
     assert!(
@@ -385,6 +403,12 @@ async fn durable_graph_write_and_restore_fail_closed() {
             .await;
     let (root_thread_id, root_thread) = harness.start_thread().await;
     let root_control = root_thread.session.services.agent_control.clone();
+    let participants_before = root_control.team().participants();
+    let projection_before = root_control
+        .team()
+        .snapshot_for(root_thread_id)
+        .expect("Root projection should be readable before failed spawn");
+    let residency_before = root_control.v2_residency.counts();
 
     let spawn_err = root_control
         .spawn_agent_with_metadata(
@@ -393,7 +417,10 @@ async fn durable_graph_write_and_restore_fail_closed() {
             Some(SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
                 parent_thread_id: root_thread_id,
                 depth: 1,
-                agent_path: None,
+                agent_path: Some(
+                    AgentPath::try_from("/root/failing_graph")
+                        .expect("test child path should be valid"),
+                ),
                 agent_nickname: None,
                 agent_role: None,
             })),
@@ -410,6 +437,16 @@ async fn durable_graph_write_and_restore_fail_closed() {
         harness.manager.list_thread_ids().await,
         vec![root_thread_id]
     );
+    assert!(root_control.state.live_agents().is_empty());
+    assert_eq!(root_control.team().participants(), participants_before);
+    assert_eq!(
+        root_control
+            .team()
+            .snapshot_for(root_thread_id)
+            .expect("Root projection should remain readable after failed spawn"),
+        projection_before
+    );
+    assert_eq!(root_control.v2_residency.counts(), residency_before);
 
     let restore_err = root_control
         .restore_v2_agent_metadata(&harness.config, root_thread_id)
@@ -1313,6 +1350,7 @@ async fn ensure_v2_agent_loaded_reloads_registered_unloaded_agent() {
             /*inherited_environments*/ None,
             /*inherited_exec_policy*/ None,
             /*environments*/ None,
+            /*defer_durable_team_participant_registration*/ false,
         )
         .await
         .expect("spawn replacement resident");

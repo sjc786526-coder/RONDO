@@ -687,6 +687,43 @@ impl Session {
         Ok(())
     }
 
+    /// Commit this child to its canonical Team after the owner has published its graph edge.
+    pub(crate) fn activate_durable_team_participant(&self) -> Result<(), TeamDurabilityError> {
+        let Some((role, label)) = self.team_participant_identity.as_ref() else {
+            return Ok(());
+        };
+        let team = self.services.agent_control.team();
+        let register = || {
+            team.register_durable_participant_checked(self.thread_id, *role, label.clone())
+                .map(|_| ())
+        };
+        if let Err(first_error) = register() {
+            if !matches!(
+                first_error,
+                TeamDurabilityError::Unknown { .. } | TeamDurabilityError::Unavailable { .. }
+            ) {
+                return Err(first_error);
+            }
+            let recovered = team
+                .ensure_readable_or_reconcile()
+                .and_then(|()| register());
+            if let Err(recovery_error) = recovered {
+                if !matches!(
+                    recovery_error,
+                    TeamDurabilityError::Unknown { .. } | TeamDurabilityError::Unavailable { .. }
+                ) {
+                    return Err(recovery_error);
+                }
+                tracing::warn!(
+                    first_error = %first_error,
+                    recovery_error = %recovery_error,
+                    "durable Team participant registration remains indeterminate; retaining degraded Session owner"
+                );
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) async fn originator(&self) -> String {
         let state = self.state.lock().await;
         state.session_configuration.originator.clone()
@@ -723,6 +760,7 @@ impl Session {
         attestation_provider: Option<Arc<dyn AttestationProvider>>,
         external_time_provider: Option<Arc<dyn TimeProvider>>,
         multi_agent_version: Option<MultiAgentVersion>,
+        defer_durable_team_participant_registration: bool,
         git_enrichment_policy: GitEnrichmentPolicy,
         windows_sandbox_proxy_settings_mode: codex_sandboxing::WindowsSandboxProxySettingsMode,
     ) -> anyhow::Result<Arc<Self>> {
@@ -1654,48 +1692,8 @@ impl Session {
                             "fresh durable Root activation remains indeterminate; retaining degraded Session owner"
                         );
                     }
-                } else {
-                    let registration = sess
-                        .services
-                        .agent_control
-                        .try_register_team_participant(
-                            thread_id,
-                            &session_configuration.session_source,
-                        );
-                    if let Err(first_error) = registration {
-                        if !matches!(
-                            first_error,
-                            TeamDurabilityError::Unknown { .. }
-                                | TeamDurabilityError::Unavailable { .. }
-                        ) {
-                            return Err(first_error.into());
-                        }
-                        let recovered = sess
-                            .services
-                            .agent_control
-                            .team()
-                            .ensure_readable_or_reconcile()
-                            .and_then(|()| {
-                                sess.services.agent_control.try_register_team_participant(
-                                    thread_id,
-                                    &session_configuration.session_source,
-                                )
-                            });
-                        if let Err(recovery_error) = recovered {
-                            if !matches!(
-                                recovery_error,
-                                TeamDurabilityError::Unknown { .. }
-                                    | TeamDurabilityError::Unavailable { .. }
-                            ) {
-                                return Err(recovery_error.into());
-                            }
-                            tracing::warn!(
-                                first_error = %first_error,
-                                recovery_error = %recovery_error,
-                                "durable Team participant registration remains indeterminate; retaining degraded Session owner"
-                            );
-                        }
-                    }
+                } else if !defer_durable_team_participant_registration {
+                    sess.activate_durable_team_participant()?;
                 }
             } else {
                 sess.services.agent_control.register_team_participant(

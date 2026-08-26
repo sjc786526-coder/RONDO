@@ -500,6 +500,7 @@ impl AgentControl {
                 parent_thread_id,
                 inherited_environments,
                 inherited_exec_policy,
+                defer_durable_team_participant_registration: false,
             })
             .await
         {
@@ -636,6 +637,7 @@ impl AgentControl {
                     inheritance.environments,
                     inheritance.exec_policy,
                     options.environments.clone(),
+                    /*defer_durable_team_participant_registration*/ true,
                 ))
                 .await?
             }
@@ -660,6 +662,13 @@ impl AgentControl {
                 ))),
             };
         }
+        self.activate_persisted_thread_spawn_participant(
+            &state,
+            new_thread.thread_id,
+            &new_thread.thread,
+            notification_source.as_ref(),
+        )
+        .await?;
         agent_metadata.agent_id = Some(new_thread.thread_id);
         reservation.commit(agent_metadata.clone());
         if let Some(residency_slot) = residency_slot {
@@ -1002,6 +1011,7 @@ impl AgentControl {
                 inherited_exec_policy,
                 options.environments.clone(),
                 thread_extension_init,
+                /*defer_durable_team_participant_registration*/ true,
             )
             .await
     }
@@ -1162,6 +1172,7 @@ impl AgentControl {
                 parent_thread_id,
                 inherited_environments,
                 inherited_exec_policy,
+                defer_durable_team_participant_registration: true,
             })
             .await?;
         if let Err(edge_err) = self
@@ -1187,6 +1198,13 @@ impl AgentControl {
                 ))),
             };
         }
+        self.activate_persisted_thread_spawn_participant(
+            &state,
+            resumed_thread.thread_id,
+            &resumed_thread.thread,
+            Some(&notification_source),
+        )
+        .await?;
         let mut agent_metadata = agent_metadata;
         agent_metadata.agent_id = Some(resumed_thread.thread_id);
         reservation.commit(agent_metadata.clone());

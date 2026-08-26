@@ -244,15 +244,20 @@ UUID替换为 `01a03c53-7cf4-78e0-bea3-c1eb7c4015da`，安全处理消息正文�
   `just fmt` 和 diff 自审均通过，无 `*.snap.new` 或临时 fixture。
 - 冻结候选从新的 TempDir、Session/store 完成正式全链：Nextest run `b0d0eadc-5c49-46d8-9e97-310cf35691ea`，`1/1` 通过；
   watchdog `20260825-235546-1000-2079406` 为 `stop=none / cleanup=none`。
+- 首轮审查的两项 finding 已在既有 owner seam 关闭：V2 `close_agent` 先证明当前 AgentControl 成员并拒绝 Root/self；durable child
+  participant commit 延后到 Open graph edge 成功之后，确定性 activation 失败复用 Closed edge 与 exact runtime cleanup。
+- 命名 participant graph-failure 回归 `2/2`、V2 foreign/Root/self close 回归 `1/1`、fork/resume/crash/V1 close 邻接回归 `7/7`
+  和冻结后的 `codex-core` scoped clippy 均通过；既有 30/30、schema 与 client/TUI 证据经首轮审查确认继续有效。
+- 新冻结候选从新的 TempDir、Session/store 重跑正式全链：Nextest run `8a93166f-a605-40c5-965d-d69ffa3fa999`，`1/1` 通过；
+  watchdog `20260826-004938-1000-2191687` 为 `stop=none / cleanup=none`，退出后无残留任务进程。
 
 ### 当前工作
 
-- `REVIEW_CHANGES_REQUESTED`：首轮独立审查确认 V2 `close_agent` Team target 隔离与 durable graph 失败后 phantom participant
-  两项中等级 correctness finding；详见 `agent_log/2026-08-26-001603-plan083-independent-review-round1.md`。
+- `AWAITING_REVIEW`：首轮两项 correctness finding 已整改、复验并形成新 fresh 正式轮，等待指定审查者复审。
 
 ### 本任务剩余步骤
 
-- 执行者在同一 worktree 窄修两项 finding，运行相称聚焦回归并从 fresh store 重跑正式全链；提交后再次通知审查者。
+- 审查者复审新候选；若仍有 finding，执行者在同一 worktree 窄修、复验并重新提交后再次通知。
 - 只有审查通过后，才由审查者同步最终 Plan/WBS/COMPLETED、验收日志与收口提交。
 
 ### 阻塞项
@@ -262,8 +267,7 @@ UUID替换为 `01a03c53-7cf4-78e0-bea3-c1eb7c4015da`，安全处理消息正文�
 
 ### 当前验收状态
 
-- `REVIEW_CHANGES_REQUESTED`：既有正式轮与相称门禁证据有效，但候选仍有两项中等级 correctness finding，`M4_Z_CORE_PASS`
-  尚未成立。
+- `AWAITING_REVIEW`：首轮 finding 已关闭且新正式轮与相称门禁通过，但 `M4_Z_CORE_PASS` 尚未成立；最终结论只由指定审查者给出。
 
 ### 交接边界
 
@@ -290,3 +294,5 @@ UUID替换为 `01a03c53-7cf4-78e0-bea3-c1eb7c4015da`，安全处理消息正文�
 | 011 | Root close barrier 合并 persisted Open descendants 与 loaded running descendants；公开 Control 映射为 typed `ActiveWriter` | 卸载不等于关闭，Root 终态必须覆盖 cold 可恢复 writer | lifecycle/control | 已采纳 |
 | 012 | V2 `close_agent` 复用既有 AgentControl subtree close 与 graph Closed edge，不新增第二套生命周期设施 | 恢复后的 unloaded member 必须有公开、正式、descendant-first 的终态入口 | tools/lifecycle | 已采纳 |
 | 013 | 公开 schema 对 enum payload 字段显式使用 serde wire 的 camelCase，并同步 stable/experimental 生成物 | 既有 TypeScript/JSON wire 已是 camelCase，schema 不得给出错误调用合同 | protocol/schema | 已采纳 |
+| 014 | V2 `close_agent` 在工具边界以当前 AgentControl registry 证明 target membership，并拒绝 Root/self；V1 显式 ID 合同保持不变 | UUID 解析不是 Team authority，shared manager 中 foreign Session teardown 不可补偿 | tools/ownership | 已采纳 |
+| 015 | Durable child Session 可延后 participant activation；owner 先持久化 Open edge，再 commit participant，确定性 activation 失败用既有 Closed edge 与 exact runtime cleanup 收口 | graph 确定失败不得留下不可恢复的 committed phantom participant，也不另建事务或状态源 | core/team/graph | 已采纳 |
