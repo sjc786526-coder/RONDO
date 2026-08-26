@@ -637,6 +637,7 @@ impl AgentControl {
                     inheritance.environments,
                     inheritance.exec_policy,
                     options.environments.clone(),
+                    options.writer_workspace_binding.clone(),
                     /*defer_durable_team_participant_registration*/ true,
                 ))
                 .await?
@@ -1010,6 +1011,7 @@ impl AgentControl {
                 inherited_environments,
                 inherited_exec_policy,
                 options.environments.clone(),
+                options.writer_workspace_binding.clone(),
                 thread_extension_init,
                 /*defer_durable_team_participant_registration*/ true,
             )

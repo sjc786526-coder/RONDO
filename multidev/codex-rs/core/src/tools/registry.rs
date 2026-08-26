@@ -599,6 +599,12 @@ impl ToolRegistry {
             return Err(err);
         }
 
+        invocation
+            .session
+            .validate_writer_workspace_binding()
+            .await
+            .map_err(|err| FunctionCallError::RespondToModel(err.to_string()))?;
+
         notify_tool_start(&invocation).await;
 
         if let Some(pre_tool_use_payload) = tool.pre_tool_use_payload(&invocation) {
@@ -646,6 +652,12 @@ impl ToolRegistry {
                 } => {}
             }
         }
+
+        invocation
+            .session
+            .validate_writer_workspace_binding()
+            .await
+            .map_err(|err| FunctionCallError::RespondToModel(err.to_string()))?;
 
         if let Some(command) = shell_script_for_invocation(&invocation) {
             let parsed = parse_shell_script(&command);

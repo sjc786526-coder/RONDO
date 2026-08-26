@@ -2039,6 +2039,33 @@ pub struct ThreadSettingsAppliedEvent {
     pub thread_settings: ThreadSettingsSnapshot,
 }
 
+/// Stable identity of a caller-prepared local Git linked worktree used as a
+/// writer thread's primary execution and write boundary.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, JsonSchema, TS)]
+pub struct WriterWorkspaceBinding {
+    pub generation: u64,
+    pub worktree_root: AbsolutePathBuf,
+    pub git_dir: AbsolutePathBuf,
+    pub common_dir: AbsolutePathBuf,
+    pub repository_root: AbsolutePathBuf,
+    pub environment_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, JsonSchema, TS)]
+#[serde(tag = "status", rename_all = "snake_case")]
+#[ts(tag = "status", rename_all = "snake_case")]
+pub enum WriterWorkspaceBindingAvailability {
+    Available,
+    Unavailable { reason: String },
+}
+
+/// Current live projection of a persisted writer workspace binding.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, JsonSchema, TS)]
+pub struct WriterWorkspaceBindingSnapshot {
+    pub binding: WriterWorkspaceBinding,
+    pub availability: WriterWorkspaceBindingAvailability,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema, TS)]
 pub struct ThreadSettingsSnapshot {
     pub model: String,
@@ -2059,6 +2086,15 @@ pub struct ThreadSettingsSnapshot {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub personality: Option<Personality>,
     pub collaboration_mode: CollaborationMode,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub writer_workspace_binding: Option<WriterWorkspaceBinding>,
+    /// The caller-authorized roots used to revalidate and replace a durable writer binding.
+    /// These roots are not the writer's execution projection and grant nothing without the
+    /// currently resolved permission profile and binding validation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub writer_workspace_authority_roots: Option<Vec<AbsolutePathBuf>>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default, PartialEq, Eq, JsonSchema, TS)]
@@ -2577,6 +2613,20 @@ pub enum InitialHistory {
 }
 
 impl InitialHistory {
+    /// Return the newest persisted writer binding only for an exact resume.
+    /// Forked and cleared histories intentionally never inherit write authority.
+    pub fn get_resumed_writer_workspace_binding(&self) -> Option<WriterWorkspaceBinding> {
+        let InitialHistory::Resumed(resumed) = self else {
+            return None;
+        };
+        resumed.history.iter().rev().find_map(|item| match item {
+            RolloutItem::EventMsg(EventMsg::ThreadSettingsApplied(event)) => {
+                event.thread_settings.writer_workspace_binding.clone()
+            }
+            _ => None,
+        })
+    }
+
     pub fn scan_rollout_items(&self, mut predicate: impl FnMut(&RolloutItem) -> bool) -> bool {
         match self {
             InitialHistory::New | InitialHistory::Cleared => false,

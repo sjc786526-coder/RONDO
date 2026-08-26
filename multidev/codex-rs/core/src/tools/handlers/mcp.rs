@@ -165,6 +165,21 @@ impl McpHandler {
         } = invocation;
         let turn = Arc::clone(&step_context.turn);
 
+        if session.writer_workspace_binding_snapshot().await.is_some()
+            && !self
+                .tool_info
+                .tool
+                .annotations
+                .as_ref()
+                .and_then(|annotations| annotations.read_only_hint)
+                .unwrap_or(false)
+        {
+            return Err(FunctionCallError::RespondToModel(
+                "MCP tools must explicitly declare `readOnlyHint: true` while a writer workspace binding is active because MCP execution cannot enforce the local workspace write boundary"
+                    .to_string(),
+            ));
+        }
+
         let payload = match payload {
             ToolPayload::Function { arguments } => arguments,
             _ => {

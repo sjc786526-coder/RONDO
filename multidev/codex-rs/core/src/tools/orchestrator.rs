@@ -222,13 +222,16 @@ impl ToolOrchestrator {
         );
         let managed_network_active = turn_ctx.network.is_some();
         let sandbox_preference = tool.sandbox_preference();
+        let writer_binding_active = tool_ctx
+            .session
+            .writer_workspace_binding_snapshot()
+            .await
+            .is_some();
         let sandbox_requested = match sandbox_override {
-            SandboxOverride::BypassSandboxFirstAttempt => false,
-            SandboxOverride::NoOverride => self.sandbox.should_sandbox(
-                &permissions,
-                sandbox_preference,
-                managed_network_active,
-            ),
+            SandboxOverride::BypassSandboxFirstAttempt if !writer_binding_active => false,
+            SandboxOverride::BypassSandboxFirstAttempt | SandboxOverride::NoOverride => self
+                .sandbox
+                .should_sandbox(&permissions, sandbox_preference, managed_network_active),
         };
         let initial_sandbox = if sandbox_requested {
             self.sandbox.select_initial(
@@ -330,8 +333,8 @@ impl ToolOrchestrator {
                     );
                     return Err(ToolError::Codex(err));
                 }
-                let unsandboxed_allowed =
-                    unsandboxed_execution_allowed(&file_system_sandbox_policy);
+                let unsandboxed_allowed = !writer_binding_active
+                    && unsandboxed_execution_allowed(&file_system_sandbox_policy);
                 // Under `Never` or `OnRequest`, do not retry without sandbox;
                 // surface a concise sandbox denial that preserves the
                 // original output.

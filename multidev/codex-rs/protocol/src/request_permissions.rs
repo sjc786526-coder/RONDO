@@ -59,6 +59,10 @@ pub struct RequestPermissionsArgs {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
     pub permissions: RequestPermissionProfile,
+    /// Marks this request as the bound writer's explicit, turn-scoped second
+    /// gate for writes outside its primary workspace.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub writer_workspace_binding_external_write: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, JsonSchema, TS)]

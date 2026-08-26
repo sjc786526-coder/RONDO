@@ -91,8 +91,15 @@ impl RequestPermissionsHandler {
                 "request_permissions requires at least one permission".to_string(),
             ));
         }
+        let binding_external_write = args.writer_workspace_binding_external_write;
+        if binding_external_write && session.writer_workspace_binding_snapshot().await.is_none() {
+            return Err(FunctionCallError::RespondToModel(
+                "writer_workspace_binding_external_write requires an active writer workspace binding"
+                    .to_string(),
+            ));
+        }
 
-        let response = session
+        let mut response = session
             .request_permissions_for_environment(
                 &turn,
                 call_id,
@@ -106,6 +113,19 @@ impl RequestPermissionsHandler {
                     "request_permissions was cancelled before receiving a response".to_string(),
                 )
             })?;
+
+        if binding_external_write {
+            session
+                .record_writer_binding_external_write_grant(
+                    &turn,
+                    &turn_environment.environment_id,
+                    response.permissions.clone().into(),
+                )
+                .await?;
+            // The W1 authority is intentionally never session-durable even if
+            // the underlying reviewer granted the ordinary permission longer.
+            response.scope = codex_protocol::request_permissions::PermissionGrantScope::Turn;
+        }
 
         let content = serde_json::to_string(&response).map_err(|err| {
             FunctionCallError::Fatal(format!(

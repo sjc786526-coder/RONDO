@@ -298,6 +298,24 @@
         "environmentId"
       ],
       "type": "object"
+    },
+    "WriterWorkspaceBindingParams": {
+      "description": "Caller-prepared local linked worktree to bind as a writer's primary workspace.",
+      "properties": {
+        "environmentId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "worktreeRoot": {
+          "$ref": "#/definitions/AbsolutePathBuf"
+        }
+      },
+      "required": [
+        "worktreeRoot"
+      ],
+      "type": "object"
     }
   },
   "properties": {
@@ -417,6 +435,17 @@
         }
       ],
       "description": "Optional client-supplied analytics source classification for this thread."
+    },
+    "writerWorkspaceBinding": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/WriterWorkspaceBindingParams"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Optional local linked-worktree binding established before the first model or tool action."
     }
   },
   "title": "ThreadStartParams",

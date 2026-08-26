@@ -802,6 +802,86 @@ impl ThreadRequestProcessor {
             .map(|response| Some(response.into()))
     }
 
+    pub(crate) async fn writer_workspace_binding_read(
+        &self,
+        params: WriterWorkspaceBindingReadParams,
+    ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
+        let thread_id = ThreadId::from_string(&params.thread_id)
+            .map_err(|err| invalid_request(format!("invalid thread id: {err}")))?;
+        let binding = if let Ok(thread) = self.thread_manager.get_thread(thread_id).await {
+            thread.writer_workspace_binding().await.map(Into::into)
+        } else {
+            let stored_thread = self
+                .thread_store
+                .read_thread(StoreReadThreadParams {
+                    thread_id,
+                    include_archived: true,
+                    include_history: true,
+                })
+                .await
+                .map_err(thread_store_resume_read_error)?;
+            stored_thread.history.and_then(|history| {
+                InitialHistory::Resumed(ResumedHistory {
+                    conversation_id: thread_id,
+                    history: Arc::new(history.items),
+                    rollout_path: stored_thread.rollout_path,
+                })
+                .get_resumed_writer_workspace_binding()
+                .map(|binding| {
+                    codex_protocol::protocol::WriterWorkspaceBindingSnapshot {
+                        binding,
+                        availability: codex_protocol::protocol::WriterWorkspaceBindingAvailability::Unavailable {
+                            reason: "thread is not loaded; resume it to revalidate the writer workspace binding"
+                                .to_string(),
+                        },
+                    }
+                    .into()
+                })
+            })
+        };
+        Ok(Some(WriterWorkspaceBindingReadResponse { binding }.into()))
+    }
+
+    pub(crate) async fn writer_workspace_binding_replace(
+        &self,
+        params: WriterWorkspaceBindingReplaceParams,
+    ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
+        let thread_id = ThreadId::from_string(&params.thread_id)
+            .map_err(|err| invalid_request(format!("invalid thread id: {err}")))?;
+        let thread = self
+            .thread_manager
+            .get_thread(thread_id)
+            .await
+            .map_err(|_| invalid_request(format!("thread not loaded: {thread_id}")))?;
+        let request = codex_core::WriterWorkspaceBindingRequest {
+            worktree_root: params.binding.worktree_root,
+            environment_id: params.binding.environment_id,
+        };
+        let outcome = thread
+            .replace_writer_workspace_binding(request, params.expected_generation)
+            .await
+            .map_err(|err| match err.details() {
+                CodexErrorDetails::InvalidRequest(message) => invalid_request(message.clone()),
+                _ => internal_error(format!("error replacing writer workspace binding: {err}")),
+            })?;
+        let outcome = match outcome {
+            codex_core::WriterWorkspaceBindingReplaceOutcome::Applied(binding) => {
+                WriterWorkspaceBindingReplaceOutcome::Applied {
+                    binding: binding.into(),
+                }
+            }
+            codex_core::WriterWorkspaceBindingReplaceOutcome::Unknown { snapshot, message } => {
+                WriterWorkspaceBindingReplaceOutcome::Unknown {
+                    binding: snapshot.into(),
+                    message,
+                }
+            }
+        };
+        Ok(Some(
+            WriterWorkspaceBindingReplaceResponse { outcome }.into(),
+        ))
+    }
+
     pub(crate) async fn thread_turns_list(
         &self,
         params: ThreadTurnsListParams,
@@ -1148,6 +1228,7 @@ impl ThreadRequestProcessor {
             session_start_source,
             thread_source,
             environments,
+            writer_workspace_binding,
         } = params;
         if matches!(
             history_mode,
@@ -1213,6 +1294,7 @@ impl ThreadRequestProcessor {
                 session_start_source,
                 thread_source.map(Into::into),
                 environments,
+                writer_workspace_binding,
                 service_name,
                 allow_provider_model_fallback,
                 experimental_raw_events,
@@ -1293,6 +1375,7 @@ impl ThreadRequestProcessor {
         session_start_source: Option<codex_app_server_protocol::ThreadStartSource>,
         thread_source: Option<codex_protocol::protocol::ThreadSource>,
         environment_selections: Option<Vec<TurnEnvironmentSelection>>,
+        writer_workspace_binding: Option<codex_app_server_protocol::WriterWorkspaceBindingParams>,
         service_name: Option<String>,
         allow_provider_model_fallback: bool,
         experimental_raw_events: bool,
@@ -1390,6 +1473,11 @@ impl ThreadRequestProcessor {
                 .thread_manager
                 .default_environment_selections(&config.cwd, &config.workspace_roots)
         });
+        let writer_workspace_binding =
+            writer_workspace_binding.map(|binding| codex_core::WriterWorkspaceBindingRequest {
+                worktree_root: binding.worktree_root,
+                environment_id: binding.environment_id,
+            });
         let dynamic_tools = dynamic_tools.unwrap_or_default();
         if !dynamic_tools.is_empty() {
             validate_dynamic_tools(&dynamic_tools).map_err(invalid_request)?;
@@ -1428,6 +1516,7 @@ impl ThreadRequestProcessor {
                 metrics_service_name: service_name,
                 parent_trace: request_trace,
                 environments: Some(environments),
+                writer_workspace_binding,
                 thread_extension_init,
                 client_mcp_extensions,
                 ..StartThreadOptions::new(config)

@@ -4127,6 +4127,7 @@ async fn set_rate_limits_retains_previous_credits() {
         permission_profile_state: config.permissions.permission_profile_state().clone(),
         windows_sandbox_level: WindowsSandboxLevel::from_config(&config),
         environments: TurnEnvironmentSelections::new(config.cwd.clone(), Vec::new()),
+        writer_workspace_binding: None,
         codex_home: config.codex_home.clone(),
         thread_name: None,
         original_config_do_not_use: Arc::clone(&config),
@@ -4236,6 +4237,7 @@ async fn set_rate_limits_updates_plan_type_when_present() {
         permission_profile_state: config.permissions.permission_profile_state().clone(),
         windows_sandbox_level: WindowsSandboxLevel::from_config(&config),
         environments: TurnEnvironmentSelections::new(config.cwd.clone(), Vec::new()),
+        writer_workspace_binding: None,
         codex_home: config.codex_home.clone(),
         thread_name: None,
         original_config_do_not_use: Arc::clone(&config),
@@ -4783,6 +4785,7 @@ pub(crate) async fn make_session_configuration_for_tests() -> SessionConfigurati
         permission_profile_state: config.permissions.permission_profile_state().clone(),
         windows_sandbox_level: WindowsSandboxLevel::from_config(&config),
         environments: TurnEnvironmentSelections::new(config.cwd.clone(), Vec::new()),
+        writer_workspace_binding: None,
         codex_home: config.codex_home.clone(),
         thread_name: None,
         original_config_do_not_use: Arc::clone(&config),
@@ -5436,6 +5439,60 @@ async fn permission_profile_updates_apply_to_next_turn_environment() {
 }
 
 #[tokio::test]
+async fn explicit_child_writer_spawn_uses_session_authority_not_parent_turn_projection() {
+    let (session, turn_context) = make_session_and_context().await;
+    let authority_root = turn_context.config.cwd.join("authorized-sibling");
+    let authority_profile = PermissionProfile::workspace_write();
+    let authority_environment = TurnEnvironmentSelection {
+        environment_id: codex_exec_server::LOCAL_ENVIRONMENT_ID.to_string(),
+        cwd: PathUri::from_abs_path(&turn_context.config.cwd),
+        workspace_roots: vec![
+            PathUri::from_abs_path(&turn_context.config.cwd),
+            PathUri::from_abs_path(&authority_root),
+        ],
+    };
+    {
+        let mut state = session.state.lock().await;
+        state.session_configuration.environments = TurnEnvironmentSelections::new(
+            turn_context.config.cwd.clone(),
+            vec![authority_environment.clone()],
+        );
+        state
+            .session_configuration
+            .permission_profile_state
+            .set_legacy_permission_profile(authority_profile.clone())
+            .expect("install authority profile");
+    }
+
+    let mut child_config = (*turn_context.config).clone();
+    child_config
+        .permissions
+        .replace_permission_profile_from_session_snapshot(PermissionProfileSnapshot::legacy(
+            PermissionProfile::read_only(),
+        ))
+        .expect("install narrow parent projection");
+    child_config
+        .permissions
+        .set_workspace_roots(vec![turn_context.config.cwd.clone()]);
+
+    let environments = session
+        .prepare_explicit_child_writer_spawn(&mut child_config)
+        .await;
+
+    assert_eq!(environments, vec![authority_environment]);
+    assert_eq!(
+        child_config.permissions.permission_profile(),
+        &authority_profile
+    );
+    assert!(
+        child_config
+            .permissions
+            .workspace_roots()
+            .contains(&authority_root)
+    );
+}
+
+#[tokio::test]
 async fn relative_cwd_update_without_environments_resolves_under_session_cwd() {
     let (session, _turn_context) = make_session_and_context().await;
     let original_cwd = {
@@ -5578,6 +5635,7 @@ async fn session_new_fails_when_zsh_fork_enabled_without_packaged_zsh() {
         permission_profile_state: config.permissions.permission_profile_state().clone(),
         windows_sandbox_level: WindowsSandboxLevel::from_config(&config),
         environments: TurnEnvironmentSelections::new(config.cwd.clone(), Vec::new()),
+        writer_workspace_binding: None,
         codex_home: config.codex_home.clone(),
         thread_name: None,
         original_config_do_not_use: Arc::clone(&config),
@@ -5719,6 +5777,7 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
         permission_profile_state: config.permissions.permission_profile_state().clone(),
         windows_sandbox_level: WindowsSandboxLevel::from_config(&config),
         environments: TurnEnvironmentSelections::new(config.cwd.clone(), default_environments),
+        writer_workspace_binding: None,
         codex_home: config.codex_home.clone(),
         thread_name: None,
         original_config_do_not_use: Arc::clone(&config),
@@ -5920,6 +5979,7 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
         mcp_prewarm_task: std::sync::Mutex::new(None),
         conversation: Arc::new(RealtimeConversationManager::new()),
         active_turn: Mutex::new(None),
+        writer_workspace_binding_mutation: Mutex::new(()),
         experimental_session_control_shutdown_submissions: Arc::new(AtomicUsize::new(0)),
         pending_durable_session_shutdown: std::sync::Mutex::new(None),
         pending_user_message_admissions: Default::default(),
@@ -5997,6 +6057,7 @@ async fn make_session_with_config_and_rx(
         permission_profile_state: config.permissions.permission_profile_state().clone(),
         windows_sandbox_level: WindowsSandboxLevel::from_config(&config),
         environments: TurnEnvironmentSelections::new(config.cwd.clone(), default_environments),
+        writer_workspace_binding: None,
         codex_home: config.codex_home.clone(),
         thread_name: None,
         original_config_do_not_use: Arc::clone(&config),
@@ -6111,6 +6172,7 @@ async fn make_session_with_history_source_and_agent_control_and_rx(
         permission_profile_state: config.permissions.permission_profile_state().clone(),
         windows_sandbox_level: WindowsSandboxLevel::from_config(&config),
         environments: TurnEnvironmentSelections::new(config.cwd.clone(), default_environments),
+        writer_workspace_binding: None,
         codex_home: config.codex_home.clone(),
         thread_name: None,
         original_config_do_not_use: Arc::clone(&config),
@@ -6503,6 +6565,7 @@ async fn request_permissions_emits_event_when_granular_policy_allows_requests() 
                             }),
                             ..RequestPermissionProfile::default()
                         },
+                        writer_workspace_binding_external_write: false,
                     },
                     environment,
                     CancellationToken::new(),
@@ -6750,6 +6813,7 @@ async fn request_permissions_response_materializes_session_cwd_grants_before_rec
                         environment_id: None,
                         reason: Some("need cwd write".to_string()),
                         permissions: requested_permissions,
+                        writer_workspace_binding_external_write: false,
                     },
                     environment,
                     CancellationToken::new(),
@@ -6847,6 +6911,7 @@ async fn request_permissions_is_auto_denied_when_granular_policy_blocks_tool_req
                     }),
                     ..RequestPermissionProfile::default()
                 },
+                writer_workspace_binding_external_write: false,
             },
             environment,
             CancellationToken::new(),
@@ -8246,6 +8311,7 @@ where
         permission_profile_state: config.permissions.permission_profile_state().clone(),
         windows_sandbox_level: WindowsSandboxLevel::from_config(&config),
         environments: TurnEnvironmentSelections::new(config.cwd.clone(), default_environments),
+        writer_workspace_binding: None,
         codex_home: config.codex_home.clone(),
         thread_name: None,
         original_config_do_not_use: Arc::clone(&config),
@@ -8446,6 +8512,7 @@ where
         mcp_prewarm_task: std::sync::Mutex::new(None),
         conversation: Arc::new(RealtimeConversationManager::new()),
         active_turn: Mutex::new(None),
+        writer_workspace_binding_mutation: Mutex::new(()),
         experimental_session_control_shutdown_submissions: Arc::new(AtomicUsize::new(0)),
         pending_durable_session_shutdown: std::sync::Mutex::new(None),
         pending_user_message_admissions: Default::default(),

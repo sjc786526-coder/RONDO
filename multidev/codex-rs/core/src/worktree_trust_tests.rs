@@ -2,6 +2,7 @@ use super::MetadataOverrideFileSystem;
 use super::create_test_git_repo;
 use super::write_linked_worktree_metadata;
 use codex_exec_server::LOCAL_FS;
+use codex_git_utils::resolve_linked_worktree_identity;
 use codex_git_utils::resolve_root_git_project_for_trust;
 use codex_utils_path::normalize_for_path_comparison;
 use codex_utils_path_uri::PathUri;
@@ -10,6 +11,35 @@ use pretty_assertions::assert_eq;
 use std::fs;
 use tempfile::TempDir;
 use tokio::process::Command;
+
+#[tokio::test]
+async fn resolve_linked_worktree_identity_returns_exact_verified_paths() {
+    let tmp = TempDir::new().unwrap();
+    let repo = tmp.path().join("repo");
+    let checkout = tmp.path().join("checkout");
+    let admin = write_linked_worktree_metadata(&repo, &checkout);
+
+    let identity = resolve_linked_worktree_identity(LOCAL_FS.as_ref(), &checkout.abs())
+        .await
+        .expect("exact linked worktree should resolve");
+    assert_eq!(identity.worktree_root, checkout.abs());
+    assert_eq!(identity.git_dir, admin.abs());
+    assert_eq!(identity.common_dir, repo.join(".git").abs());
+    assert_eq!(identity.repository_root, repo.abs());
+
+    let nested = checkout.join("nested");
+    fs::create_dir(&nested).unwrap();
+    assert_eq!(
+        resolve_linked_worktree_identity(LOCAL_FS.as_ref(), &nested.abs()).await,
+        None,
+        "a nested cwd is not the exact linked-worktree root"
+    );
+    assert_eq!(
+        resolve_linked_worktree_identity(LOCAL_FS.as_ref(), &repo.abs()).await,
+        None,
+        "the main checkout is deliberately not a writer linked worktree"
+    );
+}
 
 #[tokio::test]
 async fn resolve_root_git_project_for_trust_rejects_missing_registration() {

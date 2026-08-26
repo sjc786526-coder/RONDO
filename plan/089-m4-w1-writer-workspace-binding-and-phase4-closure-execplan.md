@@ -314,25 +314,32 @@ XXX用以下内容代替：
 - Plan 087 在独立 worktree，未进入 089 基线；089 不消费其成果，最终 WBS 冲突由后整合者加法处理。
 - W0=`BINDING_ONLY_GO`、M4-S2=`M4_S2_PASS`、M4-C1=`M4_C1_QUERY_PASS`、M4-C2=`M4_C2_CONTROL_PASS`、
   M4-Z(core)=`M4_Z_CORE_PASS` 均已进入当前主线，可作为兼容前置而不返工其权威体系。
+- 已完成 live seam census 与生产实现：caller-prepared exact local linked worktree binding 成为单一执行投影；初始 admission、写前重验、
+  durable exact resume、显式 generation replacement、nested writer、现有 permission/reviewer 上的 turn-only W1 双门以及 app-server
+  `writerWorkspaceBinding/read|replace` 均已接入。W0 test-only 平行原型已删除。
+- 已完成 stable/experimental schema 生成和 changed-crate `1008/1008`、相邻回归、Critic process `7/7`、scoped clippy、fmt/diff 门禁。
+  最终 fresh 真实 app-server 进程替换全链 `1/1` 通过；canonical full workspace `just test` 已按约尝试一次，但在测试前被
+  rusty-v8 v150.4.0 默认 prebuilt archive URL 的 HTTP 404 阻断，未冒充通过。
+- 代码与正式配置已冻结，当前没有未关闭的 W1 correctness finding。实施证据与资源事件见 Plan 089 实施日志。
 
 ### 当前工作
 
-- ExecPlan 已制定，等待执行者在 089 worktree 内开始 live seam census 与生产实现。
+- 收口计划状态、实施日志与本地提交，然后按指定 queue 请求独立终审。
 
 ### 本任务剩余步骤
 
-- 按 A–F 完成生产实现、分层门禁、fresh 正式全链、一次 full workspace 尝试、执行者提交与独立终审。
-- 独立验收接受后保持 clean 089 worktree，并等待用户明确批准 merge/push。
+- 完成本地提交并请求独立终审；范围内 finding 在同一 089 worktree 整改、相称复验并补充提交。
+- 独立验收接受后保持 clean 089 worktree，记录 `ACCEPTED / PENDING_INTEGRATION`，并等待用户明确批准 merge/push。
 - 获批后按 G 完成最新主线整合、文档最终收口、推送和完成分支归档，形成唯一 `M4_W1_PASS / PHASE_4_COMPLETE`。
 
 ### 阻塞项
 
-- 当前无产品前置或实施阻塞。
+- 当前无产品实现阻塞；canonical full workspace 的 V8 404 是已保存的基础设施阻断，不影响已通过的 W1 分层与正式全链证据。
 - 最终 merge/push 尚未授权；这不阻塞工作树实现与独立审查，但阻止提前宣告最终 PASS。
 
 ### 当前验收状态
 
-- `PLANNED / IMPLEMENTATION_NOT_STARTED / REVIEW_NOT_STARTED / INTEGRATION_NOT_AUTHORIZED / M4_W1_PASS_NOT_YET_ESTABLISHED`。
+- `IMPLEMENTATION_COMPLETE / FORMAL_CHAIN_PASS / REVIEW_PENDING / INTEGRATION_NOT_AUTHORIZED / M4_W1_PASS_NOT_YET_ESTABLISHED`。
 
 ### 交接边界
 
@@ -350,3 +357,6 @@ XXX用以下内容代替：
 | 005 | 最终 PASS 必须等待用户批准后进入并推送 main | 用户要求工作树只自觉提交，merge/push 单独批准；最终出口又要求 integrated/pushed | Git、文档、结论 | 已采纳 |
 | 006 | 首次 50GB C: 停止后允许命令级 35GB 临时底线，但快速趋近 35GB 时立即停止增长 | 用户针对当前 56GB 紧张空间的明确例外；不修改长期默认 | 重型构建/测试 | 已采纳 |
 | 007 | 执行者与本会话审查者只通过指定 Codex queue 沟通，并主动表明身份 | 用户指定跨会话审查与批示流程 | 请示、终审、整改 | 已采纳 |
+| 008 | 复用 hardened trust、permission/reviewer 与 Session/thread persistence，但新建单一窄 writer binding owner | 现有设施分别拥有 trust、权限与生命周期职责，强行让其中任一兼任 binding 会扭曲语义 | core、protocol、app-server | 已采纳 |
+| 009 | W1 绑定外授权只保留 active turn/environment/generation，底层普通 grant 即使为 Session scope 也不能替代 W1 双门 | 满足有界辅助写入并避免新增持久授权体系；resume/replacement 自动失效 | permission、turn state | 已采纳 |
+| 010 | durable binding 只持久化 identity 与当前重验所需 authority roots；冷读统一显示 unavailable，恢复后用当前 profile/trust/roots 重验 | 不持久化 concrete permission snapshot，不复制第三份 workspace authority | persistence、resume、query | 已采纳 |

@@ -1107,6 +1107,7 @@ async fn stage_persisted_unpublished_child(
             /*inherited_environments*/ None,
             /*inherited_exec_policy*/ None,
             /*environments*/ None,
+            /*writer_workspace_binding*/ None,
             /*defer_durable_team_participant_registration*/ true,
         )
         .await
@@ -1594,6 +1595,7 @@ async fn ensure_v2_agent_loaded_reloads_registered_unloaded_agent() {
             /*inherited_environments*/ None,
             /*inherited_exec_policy*/ None,
             /*environments*/ None,
+            /*writer_workspace_binding*/ None,
             /*defer_durable_team_participant_registration*/ false,
         )
         .await
@@ -2330,6 +2332,8 @@ async fn spawn_agent_fork_from_paginated_parent_uses_model_context_prefix() {
                                 developer_instructions: None,
                             },
                         },
+                        writer_workspace_binding: None,
+                        writer_workspace_authority_roots: None,
                     },
                 },
             )),

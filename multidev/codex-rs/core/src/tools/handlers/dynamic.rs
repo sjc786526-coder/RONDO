@@ -123,6 +123,13 @@ impl DynamicToolHandler {
             ..
         } = invocation;
 
+        if session.writer_workspace_binding_snapshot().await.is_some() {
+            return Err(FunctionCallError::RespondToModel(
+                "dynamic client tools are unavailable while a writer workspace binding is active because their filesystem effects cannot be constrained to the bound workspace"
+                    .to_string(),
+            ));
+        }
+
         let arguments = match payload {
             ToolPayload::Function { arguments } => arguments,
             _ => {

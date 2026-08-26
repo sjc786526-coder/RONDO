@@ -25,6 +25,7 @@ use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::protocol::InterAgentCommunication;
 use codex_protocol::protocol::SubAgentActivityKind;
 use codex_tools::ToolName;
+use codex_utils_absolute_path::AbsolutePathBuf;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value as JsonValue;

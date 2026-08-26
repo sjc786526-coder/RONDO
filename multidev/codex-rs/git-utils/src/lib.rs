@@ -48,4 +48,6 @@ pub use info::local_git_branches;
 pub use info::recent_commits;
 pub use platform::create_symlink;
 pub use status::get_has_changes_in_repo;
+pub use trust::LinkedWorktreeIdentity;
+pub use trust::resolve_linked_worktree_identity;
 pub use trust::resolve_root_git_project_for_trust;

@@ -11,6 +11,7 @@ use super::ThreadSource;
 use super::Turn;
 use super::TurnEnvironmentParams;
 use super::TurnItemsView;
+use super::WriterWorkspaceBindingParams;
 use super::shared::v2_enum_from_core;
 use crate::JsonSchema;
 use crate::TS;
@@ -125,6 +126,9 @@ pub struct ThreadStartParams {
     #[experimental("thread/start.environments")]
     #[ts(optional = nullable)]
     pub environments: Option<Vec<TurnEnvironmentParams>>,
+    /// Optional local linked-worktree binding established before the first model or tool action.
+    #[ts(optional = nullable)]
+    pub writer_workspace_binding: Option<WriterWorkspaceBindingParams>,
     #[experimental("thread/start.dynamicTools")]
     #[serde(
         default,

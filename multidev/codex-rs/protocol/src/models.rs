@@ -375,6 +375,29 @@ impl Default for PermissionProfile {
 }
 
 impl PermissionProfile {
+    /// Reduce managed filesystem writes to the verified writer workspace while
+    /// preserving the profile's reads, denies, and network policy.
+    pub fn restrict_writes_to_workspace_root(
+        self,
+        root: AbsolutePathBuf,
+    ) -> Option<PermissionProfile> {
+        match self {
+            Self::Managed {
+                file_system,
+                network,
+            } => {
+                let file_system = file_system
+                    .to_sandbox_policy()
+                    .restrict_writes_to_workspace_root(root);
+                Some(Self::Managed {
+                    file_system: ManagedFileSystemPermissions::from_sandbox_policy(&file_system),
+                    network,
+                })
+            }
+            Self::Disabled | Self::External { .. } => None,
+        }
+    }
+
     /// Managed read-only filesystem access with restricted network access.
     pub fn read_only() -> Self {
         let file_system = FileSystemSandboxPolicy::read_only();

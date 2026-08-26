@@ -1,4 +1,5 @@
 use super::*;
+use crate::WriterWorkspaceBindingReplaceOutcome;
 use crate::config::test_config;
 use crate::init_state_db;
 use crate::installation_id::INSTALLATION_ID_FILENAME;
@@ -38,11 +39,253 @@ use core_test_support::PathExt;
 use core_test_support::responses::mount_models_once;
 use core_test_support::responses::strip_response_item_ids_from_json;
 use pretty_assertions::assert_eq;
+use std::path::Path;
+use std::process::Command as StdCommand;
 use std::time::Duration;
 use tempfile::tempdir;
 use wiremock::MockServer;
 
 const TEST_INSTALLATION_ID: &str = "11111111-1111-4111-8111-111111111111";
+
+fn run_writer_binding_git(repo: &Path, args: &[&str]) {
+    let output = StdCommand::new("git")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .args(args)
+        .current_dir(repo)
+        .output()
+        .expect("run git");
+    assert!(
+        output.status.success(),
+        "git {args:?} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+fn create_writer_binding_repository(
+    temp: &tempfile::TempDir,
+) -> (AbsolutePathBuf, AbsolutePathBuf, AbsolutePathBuf) {
+    let repository = temp.path().join("repository");
+    let writer_a = temp.path().join("writer-a");
+    let writer_b = temp.path().join("writer-b");
+    std::fs::create_dir(&repository).expect("create repository");
+    run_writer_binding_git(&repository, &["init"]);
+    run_writer_binding_git(&repository, &["config", "user.name", "Writer Binding Test"]);
+    run_writer_binding_git(
+        &repository,
+        &["config", "user.email", "writer-binding@example.invalid"],
+    );
+    std::fs::write(repository.join("README.md"), "seed\n").expect("write seed");
+    run_writer_binding_git(&repository, &["add", "README.md"]);
+    run_writer_binding_git(&repository, &["commit", "-m", "seed"]);
+    run_writer_binding_git(
+        &repository,
+        &[
+            "worktree",
+            "add",
+            "-b",
+            "writer-a",
+            writer_a.to_str().unwrap(),
+        ],
+    );
+    run_writer_binding_git(
+        &repository,
+        &[
+            "worktree",
+            "add",
+            "-b",
+            "writer-b",
+            writer_b.to_str().unwrap(),
+        ],
+    );
+    let absolute = |path: &Path| {
+        AbsolutePathBuf::from_absolute_path(
+            std::fs::canonicalize(path).expect("canonicalize test path"),
+        )
+        .expect("absolute test path")
+    };
+    (
+        absolute(&repository),
+        absolute(&writer_a),
+        absolute(&writer_b),
+    )
+}
+
+fn writer_binding_environment(
+    repository: &AbsolutePathBuf,
+    writer_a: &AbsolutePathBuf,
+    writer_b: &AbsolutePathBuf,
+) -> TurnEnvironmentSelection {
+    TurnEnvironmentSelection {
+        environment_id: codex_exec_server::LOCAL_ENVIRONMENT_ID.to_string(),
+        cwd: PathUri::from_abs_path(repository),
+        workspace_roots: vec![
+            PathUri::from_abs_path(repository),
+            PathUri::from_abs_path(writer_a),
+            PathUri::from_abs_path(writer_b),
+        ],
+    }
+}
+
+#[tokio::test]
+async fn writer_binding_lifecycle_isolated_replaced_resumed_and_not_forked() {
+    let temp = tempdir().expect("tempdir");
+    let (repository, writer_a, writer_b) = create_writer_binding_repository(&temp);
+    let codex_home = temp.path().join("codex-home").abs();
+    std::fs::create_dir_all(&codex_home).expect("create codex home");
+    let mut config = test_config().await;
+    config.codex_home = codex_home.clone();
+    config.cwd = repository.clone();
+    config.workspace_roots = vec![repository.clone(), writer_a.clone(), writer_b.clone()];
+    config.workspace_roots_explicit = true;
+    config.ephemeral = false;
+    config
+        .permissions
+        .replace_permission_profile_from_session_snapshot(
+            crate::config::PermissionProfileSnapshot::active(
+                codex_protocol::models::PermissionProfile::workspace_write(),
+                codex_protocol::models::ActivePermissionProfile::new(":workspace"),
+            ),
+        )
+        .expect("install managed workspace profile");
+    let manager = ThreadManager::with_models_provider_and_home_for_tests(
+        CodexAuth::from_api_key("dummy"),
+        config.model_provider.clone(),
+        config.codex_home.to_path_buf(),
+        Arc::new(codex_exec_server::EnvironmentManager::default_for_tests()),
+    );
+    let environment = writer_binding_environment(&repository, &writer_a, &writer_b);
+    let start_writer = |root: AbsolutePathBuf| StartThreadOptions {
+        environments: Some(vec![environment.clone()]),
+        writer_workspace_binding: Some(WriterWorkspaceBindingRequest {
+            worktree_root: root,
+            environment_id: Some(codex_exec_server::LOCAL_ENVIRONMENT_ID.to_string()),
+        }),
+        ..StartThreadOptions::new(config.clone())
+    };
+
+    let first = manager
+        .start_thread(start_writer(writer_a.clone()))
+        .await
+        .expect("start writer A");
+    let second = manager
+        .start_thread(start_writer(writer_b.clone()))
+        .await
+        .expect("start writer B");
+    let first_snapshot = first.thread.config_snapshot().await;
+    let second_snapshot = second.thread.config_snapshot().await;
+    assert_eq!(first_snapshot.cwd(), &writer_a);
+    assert_eq!(second_snapshot.cwd(), &writer_b);
+    let first_policy = first_snapshot
+        .permission_profile
+        .file_system_sandbox_policy();
+    assert!(first_policy.can_write_path_with_cwd(writer_a.as_path(), writer_a.as_path()));
+    assert!(!first_policy.can_write_path_with_cwd(writer_b.as_path(), writer_a.as_path()));
+    let second_policy = second_snapshot
+        .permission_profile
+        .file_system_sandbox_policy();
+    assert!(second_policy.can_write_path_with_cwd(writer_b.as_path(), writer_b.as_path()));
+    assert!(!second_policy.can_write_path_with_cwd(writer_a.as_path(), writer_b.as_path()));
+
+    let first_rollout = first
+        .thread
+        .rollout_path()
+        .expect("writer A binding must be durable before start returns");
+    let replacement = first
+        .thread
+        .replace_writer_workspace_binding(
+            WriterWorkspaceBindingRequest {
+                worktree_root: writer_b.clone(),
+                environment_id: None,
+            },
+            Some(1),
+        )
+        .await
+        .expect("replace writer A binding");
+    let WriterWorkspaceBindingReplaceOutcome::Applied(replacement) = replacement else {
+        panic!("local rollout replacement should be durably applied");
+    };
+    assert_eq!(replacement.binding.generation, 2);
+    assert_eq!(replacement.binding.worktree_root, writer_b);
+
+    let unrelated = tempfile::tempdir().expect("unrelated repository");
+    run_writer_binding_git(unrelated.path(), &["init"]);
+    let failed = first
+        .thread
+        .replace_writer_workspace_binding(
+            WriterWorkspaceBindingRequest {
+                worktree_root: unrelated.path().abs(),
+                environment_id: None,
+            },
+            Some(2),
+        )
+        .await;
+    assert!(failed.is_err());
+    let after_failed = first
+        .thread
+        .writer_workspace_binding()
+        .await
+        .expect("old binding remains after failed replacement");
+    assert_eq!(after_failed.binding.generation, 2);
+    assert_eq!(after_failed.binding.worktree_root, writer_b);
+
+    first
+        .thread
+        .shutdown_and_wait()
+        .await
+        .expect("shutdown writer before cold resume");
+    let _ = manager.remove_thread(&first.thread_id).await;
+    let auth_manager =
+        AuthManager::from_auth_for_testing(CodexAuth::create_dummy_chatgpt_auth_for_testing());
+    let resumed = manager
+        .resume_thread_from_rollout(
+            config.clone(),
+            first_rollout.clone(),
+            auth_manager,
+            /*parent_trace*/ None,
+            ClientMcpExtensions::default(),
+        )
+        .await
+        .expect("cold resume writer");
+    assert_eq!(resumed.thread_id, first.thread_id);
+    let resumed_binding = resumed
+        .thread
+        .writer_workspace_binding()
+        .await
+        .expect("resume restores exact binding");
+    assert_eq!(resumed_binding.binding.generation, 2);
+    assert_eq!(resumed_binding.binding.worktree_root, writer_b);
+
+    let forked = manager
+        .fork_thread(
+            ForkSnapshot::Interrupted,
+            config.clone(),
+            first_rollout,
+            /*thread_source*/ None,
+            /*parent_trace*/ None,
+        )
+        .await
+        .expect("fork writer history");
+    assert_eq!(forked.thread.writer_workspace_binding().await, None);
+
+    std::fs::remove_file(writer_b.join(".git")).expect("invalidate resumed binding identity");
+    let unavailable = resumed
+        .thread
+        .writer_workspace_binding()
+        .await
+        .expect("invalidated binding remains queryable");
+    assert!(matches!(
+        unavailable.availability,
+        codex_protocol::protocol::WriterWorkspaceBindingAvailability::Unavailable { .. }
+    ));
+
+    for thread in [second.thread, resumed.thread, forked.thread] {
+        thread
+            .shutdown_and_wait()
+            .await
+            .expect("shutdown test thread");
+    }
+}
 
 #[tokio::test]
 async fn child_session_inherits_client_mcp_extensions() {

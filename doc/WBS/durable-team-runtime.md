@@ -1,6 +1,6 @@
 # 方向 3 四期：RONDO Multi Durable Team Runtime
 
-最后更新：2026-08-26 ｜ 产品线：RONDO Multi（`multidev/`）｜ 状态：**M4-A、M4-C0、M4-S1、M4-C1、M4-S2、M4-C2、M4-Z(core)、M4-W0、Plan 086 / `#39616` 与 Plan 088 / `#39153` 已完成；M4-C1 / M4-S2 / M4-C2 / M4-Z(core) / M4-W0 / Plan 086 / Plan 088 分别为 `M4_C1_QUERY_PASS` / `M4_S2_PASS` / `M4_C2_CONTROL_PASS` / `M4_Z_CORE_PASS` / `BINDING_ONLY_GO` / `M4_W_39616_ADAPTATION_PASS` / `M4_W_39153_ADAPTATION_PASS`；两项适配已依次进入本地 `main`，下一工作包为另行规划 M4-W1，尚未启动**
+最后更新：2026-08-26 ｜ 产品线：RONDO Multi（`multidev/`）｜ 状态：**M4-A、M4-C0、M4-S1、M4-C1、M4-S2、M4-C2、M4-Z(core)、M4-W0、Plan 086 / `#39616` 与 Plan 088 / `#39153` 已完成；Plan 089 / M4-W1 工作树实现与 fresh 正式全链完成，待独立终审及用户批准后的整合；当前不得宣告 `M4_W1_PASS / PHASE_4_COMPLETE`**
 
 ## 1. 阶段定位
 
@@ -145,7 +145,7 @@ binding/replacement/handoff 价值，经首次验收整改与最终独立复验�
 **W-only 当前交接**：Plan 086 已闭合 linked-worktree trust 的注册与 repository ownership 验证、消费者一致性及正反行为回归，取得
 `M4_W_39616_ADAPTATION_PASS` 并进入本地 `main`。Plan 088 已闭合 cold resume/fork 的 policy、reviewer 与 active-profile identity
 连续性、当前重解析和 invalid persisted profile 的副作用前 fail-closed，取得 `M4_W_39153_ADAPTATION_PASS` 并进入本地 `main`。
-两项 W-only 前置已经闭合；M4-W1 只获得另行规划资格，尚未启动。
+两项 W-only 前置已经闭合；Plan 089 / M4-W1 已完成工作树实现和 fresh 正式全链，正在等待独立终审与整合。
 
 ### 子线 S：Durable Team Session（必成主线）
 
@@ -354,14 +354,14 @@ M4-S1（M4_S1_PASS）+ M4-C0（M4_C0_PROTOTYPE_PASS）
 M4-C1 + M4-S2 → M4-C2 / Plan 080（M4_C2_CONTROL_PASS）→ Plan 083 / M4-Z(core)（M4_Z_CORE_PASS）
 
 M4-A → M4-W0（BINDING_ONLY_GO）
-M4-W0 BINDING_ONLY_GO + M4-S1 → #39616 RONDO 窄适配（M4_W_39616_ADAPTATION_PASS，已进入 main）→ #39153 fail-closed 窄适配（M4_W_39153_ADAPTATION_PASS，已进入 main）→ 另行规划 M4-W1
+M4-W0 BINDING_ONLY_GO + M4-S1 → #39616 RONDO 窄适配（M4_W_39616_ADAPTATION_PASS，已进入 main）→ #39153 fail-closed 窄适配（M4_W_39153_ADAPTATION_PASS，已进入 main）→ Plan 089 / M4-W1（实现完成、待终审与整合）
 M4-W1 实现 + M4-S2 → M4-W1 PASS → 可选 Workspace 控制面扩展
 M4-W0 NO_GO/INCONCLUSIVE_DEFER ────────────────→ 不阻塞 M4-Z(core)
 
 上游增量边：
 #37198 RONDO 窄回移（Plan 074 已完成）→ M4-S1 阶段 E（已完成）→ M4_S1_PASS
 #37847 RONDO 窄回移（Plan 078 独立前置已进入 main）→ M4-S2（M4_S2_PASS）
-#39616 linked-worktree trust RONDO 窄适配（Plan 086 已进入 main）→ #39153 permission restore fail-closed 窄适配（Plan 088 已进入 main）→ 另行规划 M4-W1（尚未启动）
+#39616 linked-worktree trust RONDO 窄适配（Plan 086 已进入 main）→ #39153 permission restore fail-closed 窄适配（Plan 088 已进入 main）→ Plan 089 / M4-W1（实现完成、待终审与整合）
 W-only delta ─/→ S/C
 ```
 
@@ -492,7 +492,8 @@ Plan 078 已消费 `#37847` 与 M4-C1 最新主线，完成 shared query/lifecyc
 随后完成合并树 query×lifecycle 回归、正式 Session Control/TUI、两轮独立审查整改与最终复验，并取得 `M4_C2_CONTROL_PASS`。
 Plan 083 / M4-Z(core) 又完成公开 S/C 全链与最终独立验收并取得 `M4_Z_CORE_PASS`。Plan 086 / `#39616` 已完成独立窄适配并取得
 `M4_W_39616_ADAPTATION_PASS` 并进入本地 `main`；Plan 088 / `#39153` 也已完成独立验收并取得
-`M4_W_39153_ADAPTATION_PASS` 并进入本地 `main`。正式 M4-W1 现在可以另行规划，但尚未启动。
+`M4_W_39153_ADAPTATION_PASS` 并进入本地 `main`。Plan 089 / M4-W1 已完成工作树实现和 fresh 正式全链，当前等待独立终审；未经用户
+批准不得整合或推送，也不得提前宣告最终 PASS。
 M4-W1 只有在 M4-W0 形成 binding GO、
 两项适配顺序完成且 M4-S1 接缝成立后才可实现，宣告 PASS 时再消费已完成的 M4-S2。可选 Workspace 控制面扩展再等待 M4-W1 PASS，
 完整基线升级仍是独立方向。

@@ -653,6 +653,25 @@ fn spawn_agent_common_properties_v1(agent_type_description: &str) -> BTreeMap<St
 }
 
 fn spawn_agent_common_properties_v2(agent_type_description: &str) -> BTreeMap<String, JsonSchema> {
+    let writer_workspace_binding = JsonSchema::object(
+        BTreeMap::from([
+            (
+                "worktree_root".to_string(),
+                JsonSchema::string(Some(
+                    "Absolute canonical root of a caller-prepared local Git linked worktree."
+                        .to_string(),
+                )),
+            ),
+            (
+                "environment_id".to_string(),
+                JsonSchema::string(Some(
+                    "Selected local environment that owns the worktree.".to_string(),
+                )),
+            ),
+        ]),
+        Some(vec!["worktree_root".to_string()]),
+        Some(false.into()),
+    );
     BTreeMap::from([
         (
             "message".to_string(),
@@ -692,6 +711,10 @@ fn spawn_agent_common_properties_v2(agent_type_description: &str) -> BTreeMap<St
             JsonSchema::string(Some(
                 SPAWN_AGENT_SERVICE_TIER_OVERRIDE_DESCRIPTION.to_string(),
             )),
+        ),
+        (
+            "writer_workspace_binding".to_string(),
+            writer_workspace_binding,
         ),
     ])
 }

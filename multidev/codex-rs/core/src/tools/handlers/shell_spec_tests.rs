@@ -182,6 +182,13 @@ fn request_permissions_tool_includes_full_permission_schema() {
                     .to_string(),
             )),
         ),
+        (
+            "writer_workspace_binding_external_write".to_string(),
+            JsonSchema::boolean(Some(
+                "For a bound writer, make this an explicit turn-scoped request to write outside the primary workspace. Ordinary permission or sandbox escalation does not grant this authority."
+                    .to_string(),
+            )),
+        ),
         ("permissions".to_string(), permission_profile_schema()),
     ]);
 

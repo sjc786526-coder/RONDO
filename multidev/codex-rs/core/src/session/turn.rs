@@ -154,6 +154,7 @@ pub(crate) async fn run_turn(
     prewarmed_client_session: Option<ModelClientSession>,
     cancellation_token: CancellationToken,
 ) -> CodexResult<Option<String>> {
+    sess.validate_writer_workspace_binding().await?;
     let mut client_session =
         prewarmed_client_session.unwrap_or_else(|| sess.services.model_client.new_session());
     // TODO(ccunningham): Pre-turn compaction runs before context updates and the
@@ -2274,6 +2275,7 @@ async fn try_run_sampling_request(
     prompt: &Prompt,
     cancellation_token: CancellationToken,
 ) -> CodexResult<SamplingRequestResult> {
+    sess.validate_writer_workspace_binding().await?;
     feedback_tags!(
         model = turn_context.model_info.slug.clone(),
         approval_policy = turn_context.approval_policy(),

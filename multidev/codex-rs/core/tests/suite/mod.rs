@@ -168,3 +168,5 @@ mod window_headers;
 mod windows_sandbox;
 mod workspace_roots;
 mod worktree_trust;
+#[cfg(target_os = "linux")]
+mod writer_workspace_binding;

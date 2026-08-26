@@ -71,8 +71,6 @@ mod legacy;
 mod lifecycle;
 mod residency;
 mod spawn;
-#[cfg(test)]
-mod workspace_binding_w0;
 
 pub(crate) use self::lifecycle::DurableTeamRootCloseGuard;
 use self::lifecycle::DurableTeamSubtreeCloseGuard;
@@ -90,6 +88,7 @@ pub(crate) struct SpawnAgentOptions {
     pub(crate) parent_thread_id: Option<ThreadId>,
     pub(crate) parent_turn_id: Option<String>,
     pub(crate) environments: Option<Vec<TurnEnvironmentSelection>>,
+    pub(crate) writer_workspace_binding: Option<crate::WriterWorkspaceBindingRequest>,
 }
 
 #[derive(Clone, Debug)]

@@ -811,6 +811,54 @@
             },
             "method": {
               "enum": [
+                "writerWorkspaceBinding/read"
+              ],
+              "title": "WriterWorkspaceBinding/readRequestMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/v2/WriterWorkspaceBindingReadParams"
+            }
+          },
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "title": "WriterWorkspaceBinding/readRequest",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "id": {
+              "$ref": "#/definitions/v2/RequestId"
+            },
+            "method": {
+              "enum": [
+                "writerWorkspaceBinding/replace"
+              ],
+              "title": "WriterWorkspaceBinding/replaceRequestMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/v2/WriterWorkspaceBindingReplaceParams"
+            }
+          },
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "title": "WriterWorkspaceBinding/replaceRequest",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "id": {
+              "$ref": "#/definitions/v2/RequestId"
+            },
+            "method": {
+              "enum": [
                 "session/list"
               ],
               "title": "Session/listRequestMethod",
@@ -22438,6 +22486,17 @@
               }
             ],
             "description": "Optional client-supplied analytics source classification for this thread."
+          },
+          "writerWorkspaceBinding": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/v2/WriterWorkspaceBindingParams"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional local linked-worktree binding established before the first model or tool action."
           }
         },
         "title": "ThreadStartParams",
@@ -23891,6 +23950,217 @@
           "okOverridden"
         ],
         "type": "string"
+      },
+      "WriterWorkspaceBinding": {
+        "properties": {
+          "availability": {
+            "$ref": "#/definitions/v2/WriterWorkspaceBindingAvailability"
+          },
+          "commonDir": {
+            "$ref": "#/definitions/v2/AbsolutePathBuf"
+          },
+          "environmentId": {
+            "type": "string"
+          },
+          "generation": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "gitDir": {
+            "$ref": "#/definitions/v2/AbsolutePathBuf"
+          },
+          "repositoryRoot": {
+            "$ref": "#/definitions/v2/AbsolutePathBuf"
+          },
+          "worktreeRoot": {
+            "$ref": "#/definitions/v2/AbsolutePathBuf"
+          }
+        },
+        "required": [
+          "availability",
+          "commonDir",
+          "environmentId",
+          "generation",
+          "gitDir",
+          "repositoryRoot",
+          "worktreeRoot"
+        ],
+        "type": "object"
+      },
+      "WriterWorkspaceBindingAvailability": {
+        "oneOf": [
+          {
+            "properties": {
+              "type": {
+                "enum": [
+                  "available"
+                ],
+                "title": "AvailableWriterWorkspaceBindingAvailabilityType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "title": "AvailableWriterWorkspaceBindingAvailability",
+            "type": "object"
+          },
+          {
+            "properties": {
+              "reason": {
+                "type": "string"
+              },
+              "type": {
+                "enum": [
+                  "unavailable"
+                ],
+                "title": "UnavailableWriterWorkspaceBindingAvailabilityType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "reason",
+              "type"
+            ],
+            "title": "UnavailableWriterWorkspaceBindingAvailability",
+            "type": "object"
+          }
+        ]
+      },
+      "WriterWorkspaceBindingParams": {
+        "description": "Caller-prepared local linked worktree to bind as a writer's primary workspace.",
+        "properties": {
+          "environmentId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "worktreeRoot": {
+            "$ref": "#/definitions/v2/AbsolutePathBuf"
+          }
+        },
+        "required": [
+          "worktreeRoot"
+        ],
+        "type": "object"
+      },
+      "WriterWorkspaceBindingReadParams": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "threadId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "threadId"
+        ],
+        "title": "WriterWorkspaceBindingReadParams",
+        "type": "object"
+      },
+      "WriterWorkspaceBindingReadResponse": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "binding": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/v2/WriterWorkspaceBinding"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "title": "WriterWorkspaceBindingReadResponse",
+        "type": "object"
+      },
+      "WriterWorkspaceBindingReplaceOutcome": {
+        "oneOf": [
+          {
+            "properties": {
+              "binding": {
+                "$ref": "#/definitions/v2/WriterWorkspaceBinding"
+              },
+              "type": {
+                "enum": [
+                  "applied"
+                ],
+                "title": "AppliedWriterWorkspaceBindingReplaceOutcomeType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "binding",
+              "type"
+            ],
+            "title": "AppliedWriterWorkspaceBindingReplaceOutcome",
+            "type": "object"
+          },
+          {
+            "properties": {
+              "binding": {
+                "$ref": "#/definitions/v2/WriterWorkspaceBinding"
+              },
+              "message": {
+                "type": "string"
+              },
+              "type": {
+                "enum": [
+                  "unknown"
+                ],
+                "title": "UnknownWriterWorkspaceBindingReplaceOutcomeType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "binding",
+              "message",
+              "type"
+            ],
+            "title": "UnknownWriterWorkspaceBindingReplaceOutcome",
+            "type": "object"
+          }
+        ]
+      },
+      "WriterWorkspaceBindingReplaceParams": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "binding": {
+            "$ref": "#/definitions/v2/WriterWorkspaceBindingParams"
+          },
+          "expectedGeneration": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "threadId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "binding",
+          "threadId"
+        ],
+        "title": "WriterWorkspaceBindingReplaceParams",
+        "type": "object"
+      },
+      "WriterWorkspaceBindingReplaceResponse": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "outcome": {
+            "$ref": "#/definitions/v2/WriterWorkspaceBindingReplaceOutcome"
+          }
+        },
+        "required": [
+          "outcome"
+        ],
+        "title": "WriterWorkspaceBindingReplaceResponse",
+        "type": "object"
       }
     }
   },

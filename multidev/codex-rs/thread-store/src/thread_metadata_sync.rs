@@ -622,6 +622,8 @@ mod tests {
                             developer_instructions: None,
                         },
                     },
+                    writer_workspace_binding: None,
+                    writer_workspace_authority_roots: None,
                 },
             },
         ));

@@ -95,6 +95,13 @@ async fn handle_spawn_agent(
         turn.as_ref(),
         step_context.environments.primary(),
     )?;
+    let spawn_environments = if args.writer_workspace_binding.is_some() {
+        session
+            .prepare_explicit_child_writer_spawn(&mut config)
+            .await
+    } else {
+        step_context.environments.to_selections()
+    };
 
     let spawn_source = thread_spawn_source(
         session.thread_id,
@@ -134,7 +141,13 @@ async fn handle_spawn_agent(
                     fork_mode,
                     parent_thread_id: Some(session.thread_id),
                     parent_turn_id: Some(turn.sub_id.clone()),
-                    environments: Some(step_context.environments.to_selections()),
+                    environments: Some(spawn_environments),
+                    writer_workspace_binding: args.writer_workspace_binding.map(|binding| {
+                        crate::WriterWorkspaceBindingRequest {
+                            worktree_root: binding.worktree_root,
+                            environment_id: binding.environment_id,
+                        }
+                    }),
                 },
             ),
     )
@@ -197,6 +210,14 @@ struct SpawnAgentArgs {
     service_tier: Option<String>,
     fork_turns: Option<String>,
     fork_context: Option<bool>,
+    writer_workspace_binding: Option<SpawnWriterWorkspaceBindingArgs>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SpawnWriterWorkspaceBindingArgs {
+    worktree_root: AbsolutePathBuf,
+    environment_id: Option<String>,
 }
 
 impl SpawnAgentArgs {
