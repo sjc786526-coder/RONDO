@@ -1,6 +1,6 @@
 # 方向 3 四期：RONDO Multi Durable Team Runtime
 
-最后更新：2026-08-26 ｜ 产品线：RONDO Multi（`multidev/`）｜ 状态：**M4-A、M4-C0、M4-S1、M4-C1、M4-S2、M4-C2、M4-Z(core)、M4-W0、Plan 086 / `#39616` 与 Plan 088 / `#39153` 已完成；Plan 089 / M4-W1 工作树实现与 fresh 正式全链完成，待独立终审及用户批准后的整合；当前不得宣告 `M4_W1_PASS / PHASE_4_COMPLETE`**
+最后更新：2026-08-26 ｜ 产品线：RONDO Multi（`multidev/`）｜ 状态：**M4-A、M4-C0、M4-S1、M4-C1、M4-S2、M4-C2、M4-Z(core)、M4-W0、Plan 086 / `#39616`、Plan 088 / `#39153` 与 Plan 089 / M4-W1 均已完成；结论为 `M4_W1_PASS / PHASE_4_COMPLETE`**
 
 ## 1. 阶段定位
 
@@ -8,12 +8,13 @@
 
 1. **Durable Team Session**：必成主线，使 Team Session 可以跨进程持久化和恢复；
 2. **Session Control Surface**：必成主线，通过 app-server v2 与 TUI 查询、恢复和显式控制持久 Session；
-3. **Writer Workspace Binding**：可选增强，把显式 writer 的 primary write binding 绑定到调用者已准备且授权的 Git worktree，
-   并允许通过显式、有界授权使用必要的绑定外辅助写入位置；binding 不建立读取隔离，W0 已判定不新增 structured handoff。
+3. **Writer Workspace Binding**：原先经过价值门保持条件可选；W0 形成 `BINDING_ONLY_GO` 后，用户将 W1 指定为第四期最后一个必需
+   工作包。它把显式 writer 的 primary write binding 绑定到调用者已准备且授权的 Git worktree，并允许通过显式、有界授权使用必要的
+   绑定外辅助写入位置；binding 不建立读取隔离，W0 已判定不新增 structured handoff。
 
 worktree 是按需使用的执行隔离能力，不负责 Team 协调、任务拆分、正确性判断或成果整合。shared workspace 继续是默认行为；
-W0 已证明 binding 的独立价值并排除新增 structured handoff，后续 W-only 适配与 W1 仍不阻塞 Durable Team Session、
-Session 控制面或第四期核心收口。
+W0 已证明 binding 的独立价值并排除新增 structured handoff。W-only 适配与 W1 没有阻塞先行完成的 Durable Team Session、
+Session 控制面或 M4-Z(core) 历史收口；Plan 089 随后作为第四期最终必需工作包完成组合兼容与阶段关闭。
 
 第四期与 Publication Critic 三期没有产品依赖，可以有界并行。第四期的正确性开发和验收不调用真实 API 或模型，不进行
 训练或性能测评；开发用 Codex 的额度消耗与 RONDO 产品运行时完全分离。
@@ -115,8 +116,8 @@ dashboard 或 `/cd`，也不建设第二套 Team State、writer authority、Sess
 **结论：`M4_A_GO`。** 当前架构存在一条不重复建设权威体系的合理路线：直接复用 lineage 与 canonical Team State，架构内扩展
 Root active-writer、V2 reload、控制面和 gates，并为 canonical Team 增加窄的 durability/read 能力。M4-C0 已完成实验性纵向原型；
 M4-S1 已完成阶段 E 并取得 `M4_S1_PASS`；M4-C1 已完成正式只读查询并取得 `M4_C1_QUERY_PASS`；Plan 078 / M4-S2 已完成并取得
-`M4_S2_PASS`；Plan 084 / M4-W0 已通过最终独立验收并取得 `BINDING_ONLY_GO`；正式 W1 仍未立项，且可复用现已成立的
-M4-S1 持久接缝。
+`M4_S2_PASS`；Plan 084 / M4-W0 已通过最终独立验收并取得 `BINDING_ONLY_GO`；Plan 089 / M4-W1 已消费 M4-S1 持久接缝和
+M4-S2/S/C 生命周期，取得 `M4_W1_PASS`。
 
 **上游候选决定**（均不在 M4-A 实施；除下表明确归入消费包独立前置阶段的 `#37847` 外，仍建立独立回移任务）：
 
@@ -125,7 +126,7 @@ M4-S1 持久接缝。
 | `#37847` reload environment | **采用窄回移**；修复 V2 member eviction/reload 丢失 inherited environment 的当前缺口，保留显式 override 优先，不承担 Team durability、W binding 或新环境管理体系 | Plan 078 独立前置已完成聚焦验收并进入本地 `main`，M4-S2 已消费并取得 `M4_S2_PASS`；不阻塞 S1/C0/C1/W0 |
 | `#37198` persisted cwd read consistency | **Plan 074 已完成窄回移，Plan 069 阶段 E 已完成消费与正式复验**；ThreadStore 按已持久事实投影 cwd，不替代 live binding 重验 | M4-S1 与 M4-C1 已消费该持久读取事实；W 后续只按自身边界消费 |
 | `#39616` linked-worktree trust | **Plan 086 已完成 RONDO 窄适配、进入本地 `main` 并取得 `M4_W_39616_ADAPTATION_PASS`**；只有 registered 且 ownership 可证明的 linked worktree 才继承主仓 trust，不扩张为通用 workspace trust/registry | Plan 088 / `#39153` 已随后进入本地 `main`，永不阻塞 S/C |
-| `#39153` permission restore | **Plan 088 已完成 RONDO fail-closed 窄适配、进入本地 `main` 并取得 `M4_W_39153_ADAPTATION_PASS`**；恢复 policy/reviewer/active-profile identity 时保留显式 override 优先，持久 identity 通过当前 config/trust/requirements 重解析，失效或不兼容不得静默回退默认权限 | 只解锁 M4-W1 的另行规划资格；不自动启动 W1，不预建 scoped write authorization 的字段、持久格式或恢复规则，永不阻塞 S/C |
+| `#39153` permission restore | **Plan 088 已完成 RONDO fail-closed 窄适配、进入本地 `main` 并取得 `M4_W_39153_ADAPTATION_PASS`**；恢复 policy/reviewer/active-profile identity 时保留显式 override 优先，持久 identity 通过当前 config/trust/requirements 重解析，失效或不兼容不得静默回退默认权限 | 当时只解锁 M4-W1 的另行规划资格且不预建 W1 字段；Plan 089 已在自身任务内消费并完成 scoped authorization、恢复重验和 lifecycle 收口，始终不阻塞 S/C |
 
 **M4-S1 当前交接**：Plan 069 以第 2 节的三类身份、Root authority、durable success、自洽读取、关闭/失败与在线/冷态责任为输入，
 已经实现 canonical Team durability/read 专用能力及 Root writer 的架构内扩展，并覆盖 Root/child 双进程竞争、authority 丢失、损坏
@@ -145,7 +146,8 @@ binding/replacement/handoff 价值，经首次验收整改与最终独立复验�
 **W-only 当前交接**：Plan 086 已闭合 linked-worktree trust 的注册与 repository ownership 验证、消费者一致性及正反行为回归，取得
 `M4_W_39616_ADAPTATION_PASS` 并进入本地 `main`。Plan 088 已闭合 cold resume/fork 的 policy、reviewer 与 active-profile identity
 连续性、当前重解析和 invalid persisted profile 的副作用前 fail-closed，取得 `M4_W_39153_ADAPTATION_PASS` 并进入本地 `main`。
-两项 W-only 前置已经闭合；Plan 089 / M4-W1 已完成工作树实现和 fresh 正式全链，正在等待独立终审与整合。
+两项 W-only 前置已经闭合；Plan 089 / M4-W1 已完成生产实现、fresh 正式全链、四轮独立审查整改、最终验收与主线整合，取得
+`M4_W1_PASS / PHASE_4_COMPLETE`。
 
 ### 子线 S：Durable Team Session（必成主线）
 
@@ -291,6 +293,10 @@ two-linked-worktree fixture 证明，首次动作前 binding、cold reload 重�
 
 #### M4-W1：Primary Write Binding 与 Scoped Write Authorization
 
+**当前结果：验收通过，任务目标完成，结论为 `M4_W1_PASS`。** Plan 089 已完成 exact local linked-worktree primary binding、
+turn-only scoped authorization、恢复重验、失效隔离、事务式 replacement、全部代表 bound writer 的本地写入路径约束，以及
+M4-S2/S/C、真实 app-server 进程替换和唯一 offline Critic 组合兼容；最终独立验收无未关闭的高/中等级 finding。
+
 **开始前置**：M4-W0 已形成 `BINDING_ONLY_GO`，M4-S1 已提供可复用的持久 Session/thread 接缝，且已按照 `#39616`
 linked-worktree trust → `#39153` permission restore 的顺序完成 RONDO 窄适配并进入主线。
 
@@ -298,8 +304,8 @@ linked-worktree trust → `#39153` permission restore 的顺序完成 RONDO 窄�
 默认写入范围；同时提供显式、有界且不改变 primary binding 的绑定外辅助写授权。首次模型或工具动作及每次 reload/resume 前均须
 通过原生 cwd、workspace roots、permission、sandbox 与 thread 生命周期建立或重新验证有效执行上下文。
 
-**PASS 前置**：M4-S2 已提供正式恢复行为，M4-W1 的 reload/resume、失效隔离、scoped authorization 生命周期和 replacement
-binding 已在该行为上完成收口。M4-W1 可以在开始前置成立后开发，但不得在满足本门前宣告 PASS。
+**PASS 前置已满足**：M4-S2 已提供正式恢复行为，M4-W1 的 reload/resume、失效隔离、scoped authorization 生命周期和 replacement
+binding 已在该行为上完成收口；Plan 089 的最终验收与整合完成后才形成上述 PASS。
 
 **边界**：
 
@@ -324,8 +330,8 @@ binding 已在该行为上完成收口。M4-W1 可以在开始前置成立后开
   任务已明确授权的辅助输出位置及现有工具链确需的共享构建/缓存现场可以成为 scoped authorization 目标；密钥禁区和既有构建锁、
   Docker/模型互斥及资源门禁保持不变。
 
-**可选控制面扩展**：M4-W1 PASS 后，可以另行建立窄的 binding 状态、失效展示和 replacement binding 操作包。该扩展不扩张为
-通用 workspace dashboard，也不阻塞 Session 控制面或 M4-Z(core)。
+**可选控制面扩展**：M4-W1 PASS 后，可以另行建立窄的 binding 状态、失效展示和 replacement TUI 操作包。该扩展不扩张为
+通用 workspace dashboard，也不是第四期遗留必需包。
 
 **子线出口**：两个 writer 可以分别建立两个预置 worktree 的 primary binding，默认写入互不污染；显式批准的绑定外辅助写入只覆盖
 批准范围且不改变 primary binding。首次模型/工具动作和基于 M4-S2 的 reload/resume 均建立并重新验证正确执行上下文；失效只使对应
@@ -354,14 +360,14 @@ M4-S1（M4_S1_PASS）+ M4-C0（M4_C0_PROTOTYPE_PASS）
 M4-C1 + M4-S2 → M4-C2 / Plan 080（M4_C2_CONTROL_PASS）→ Plan 083 / M4-Z(core)（M4_Z_CORE_PASS）
 
 M4-A → M4-W0（BINDING_ONLY_GO）
-M4-W0 BINDING_ONLY_GO + M4-S1 → #39616 RONDO 窄适配（M4_W_39616_ADAPTATION_PASS，已进入 main）→ #39153 fail-closed 窄适配（M4_W_39153_ADAPTATION_PASS，已进入 main）→ Plan 089 / M4-W1（实现完成、待终审与整合）
-M4-W1 实现 + M4-S2 → M4-W1 PASS → 可选 Workspace 控制面扩展
+M4-W0 BINDING_ONLY_GO + M4-S1 → #39616 RONDO 窄适配（M4_W_39616_ADAPTATION_PASS）→ #39153 fail-closed 窄适配（M4_W_39153_ADAPTATION_PASS）→ Plan 089 / M4-W1（M4_W1_PASS）
+M4-W1 + M4-S2/S/C 组合收口 → PHASE_4_COMPLETE → 可选 Workspace 控制面扩展
 M4-W0 NO_GO/INCONCLUSIVE_DEFER ────────────────→ 不阻塞 M4-Z(core)
 
 上游增量边：
 #37198 RONDO 窄回移（Plan 074 已完成）→ M4-S1 阶段 E（已完成）→ M4_S1_PASS
 #37847 RONDO 窄回移（Plan 078 独立前置已进入 main）→ M4-S2（M4_S2_PASS）
-#39616 linked-worktree trust RONDO 窄适配（Plan 086 已进入 main）→ #39153 permission restore fail-closed 窄适配（Plan 088 已进入 main）→ Plan 089 / M4-W1（实现完成、待终审与整合）
+#39616 linked-worktree trust RONDO 窄适配（Plan 086 已进入 main）→ #39153 permission restore fail-closed 窄适配（Plan 088 已进入 main）→ Plan 089 / M4-W1（M4_W1_PASS）
 W-only delta ─/→ S/C
 ```
 
@@ -370,9 +376,10 @@ W-only delta ─/→ S/C
   基线、完成正式控制链和 fresh store/restart 场景，并收口两轮独立审查整改与最终复验；Plan 083 / M4-Z(core) 随后完成 S/C
   全链、两轮独立审查整改与最终复验并取得 `M4_Z_CORE_PASS`。Plan 084 / M4-W0 已完成首次验收整改与最终独立复验并取得
   `BINDING_ONLY_GO`。Plan 086 / `#39616` 已通过最终独立验收、进入本地 `main` 并取得 `M4_W_39616_ADAPTATION_PASS`；Plan 088 /
-  `#39153` 已通过独立验收、进入本地 `main` 并取得 `M4_W_39153_ADAPTATION_PASS`；正式 W1 获得另行规划资格，但仍尚未立项。
-- M4-W1 只在 binding GO、M4-S1 接缝及 `#39616` → `#39153` 两项 RONDO 窄适配依次进入主线后开始实现；最终 PASS 必须消费
-  已完成的 M4-S2，并把 reload/resume、scoped authorization 与 replacement binding 收口纳入自身出口，不存在无编号的后置收口包。
+  `#39153` 已通过独立验收、进入本地 `main` 并取得 `M4_W_39153_ADAPTATION_PASS`；Plan 089 / M4-W1 随后完成并取得
+  `M4_W1_PASS / PHASE_4_COMPLETE`。
+- M4-W1 已在 binding GO、M4-S1 接缝及 `#39616` → `#39153` 两项窄适配成立后实现，并消费 M4-S2，把 reload/resume、scoped
+  authorization、replacement binding 与 S/C 生命周期兼容全部纳入自身出口；不存在无编号的后置收口包。
 - M4-Z(core) 只依赖 S/C 主线。W 若已经进入主线，由后完成者拥有一次兼容验收；W 未进入主线时不制造空实现或占位平台。
 - 各工作包内部的模块、测试和审查并行度由对应 ExecPlan 根据当时源码决定。Plan 078 已完成 core/thread/session 的 reload、
   resume、close 与冷态生命周期并收敛 shared read/write 接缝；后续任务只消费其已验收领域能力，不复制第二套生命周期设施。
@@ -448,7 +455,7 @@ Rust target 的命令不得由执行者自行排队：执行者先报告准确�
 - 正确性验收不使用真实 API、真实模型、训练、Docker 或性能测评。
 - W 线无论 GO、延期或停止，都不影响以上 S/C 核心能力达到 PASS。
 
-### 7.2 可选 W 线 PASS
+### 7.2 W 线 PASS（价值门后成为第四期最终必需出口）
 
 - 两个 writer 可以绑定两个调用者预置并授权的 worktree，首个模型/工具动作从正确 primary cwd 开始，默认写入互不污染。
 - 未授权的 main、其它 worktree 与绑定外路径写入在目标副作用前被拒绝；显式批准的绑定外写入只覆盖批准范围，不改变 primary cwd
@@ -484,19 +491,17 @@ Rust target 的命令不得由执行者自行排队：执行者先报告准确�
 
 ## 9. 实施与授权边界
 
-本文只是长程 WBS，不是实施授权。M4-A、M4-C0、Plan 074 / `#37198`、M4-S1、M4-C1、M4-S2、M4-C2 与 M4-Z(core) 已完成，
-结论分别见本节和 `doc/WBS-COMPLETED.md`。Plan 083 的历史授权与精确边界由对应 ExecPlan 和用户指令记录；M4-W0、M4-W1
-继续服从本 WBS 的条件边。每项新实施仍须确认当时主线、并行 worktree 与授权范围。
+本文只是长程 WBS，不是实施授权。M4-A、M4-C0、Plan 074 / `#37198`、M4-S1、M4-C1、M4-S2、M4-C2、M4-Z(core)、M4-W0 与
+M4-W1 均已完成，结论分别见本节和 `doc/WBS-COMPLETED.md`。各任务的历史授权与精确边界由对应 ExecPlan 和用户指令记录；任何未来
+可选增强仍须重新确认届时主线、并行 worktree 与授权范围。
 
 Plan 078 已消费 `#37847` 与 M4-C1 最新主线，完成 shared query/lifecycle 接缝收敛并取得 `M4_S2_PASS`。Plan 080 / M4-C2
 随后完成合并树 query×lifecycle 回归、正式 Session Control/TUI、两轮独立审查整改与最终复验，并取得 `M4_C2_CONTROL_PASS`。
 Plan 083 / M4-Z(core) 又完成公开 S/C 全链与最终独立验收并取得 `M4_Z_CORE_PASS`。Plan 086 / `#39616` 已完成独立窄适配并取得
 `M4_W_39616_ADAPTATION_PASS` 并进入本地 `main`；Plan 088 / `#39153` 也已完成独立验收并取得
-`M4_W_39153_ADAPTATION_PASS` 并进入本地 `main`。Plan 089 / M4-W1 已完成工作树实现和 fresh 正式全链，当前等待独立终审；未经用户
-批准不得整合或推送，也不得提前宣告最终 PASS。
-M4-W1 只有在 M4-W0 形成 binding GO、
-两项适配顺序完成且 M4-S1 接缝成立后才可实现，宣告 PASS 时再消费已完成的 M4-S2。可选 Workspace 控制面扩展再等待 M4-W1 PASS，
-完整基线升级仍是独立方向。
+`M4_W_39153_ADAPTATION_PASS` 并进入本地 `main`。Plan 089 / M4-W1 随后完成生产实现、M4-S2/S/C 兼容、fresh 正式组合链、四轮
+独立审查整改与最终复验，已进入且推送 `main`，结论为 `M4_W1_PASS / PHASE_4_COMPLETE`。第四期没有遗留必需工作包；可选
+Workspace 控制面增强和完整基线升级仍须分别另行立项。
 
 普通第四期实现不需要外部或付费行为；如果具体任务扩展到真实 API、模型、训练、Docker、上传或其他外部状态，必须单独说明
 范围并重新授权。
