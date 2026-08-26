@@ -53,7 +53,15 @@ Plan 082 明确分为两个授权阶段：
 3. 在 0 Pod 状态下完成大型资产回传和字节身份校验后申请最终任务验收；最终验收后再转请用户本人决定是否删除网络卷。
 
 普通整改仍在相应阶段授权内自主完成。第 2 项审查要求继续 GPU 操作时，Pod 保持原状，修复后的实际训练/验证活动继续累计到训练预算；
-第 3 项之前等待 Plan 083 与宿主容量安全窗口不需要重新创建 transfer Pod。
+第 3 项之前等待 Plan 083 与宿主容量安全窗口原则上不需要重新创建 transfer Pod。
+
+**一次性回传例外（2026-08-26 用户本人明确人工批准）：** 由于现有 US-TX-3 网络卷不在 provider S3-compatible API 支持数据中心内，
+允许创建一个能挂载现有卷 `mwemzrn33y` 的临时 transfer Pod。实时兼容且可用时优先最低费用 CPU Pod；否则可选费用合理的任意单卡 GPU，
+不受训练阶段 A40/L40S 型号限制。同一时刻最多一个 transfer Pod，只能读取现有卷并续传/校验冻结 bootstrap 的 39 个正式对象及必要小型
+证据；禁止训练、加载模型到 GPU、改变正式结果、创建第二卷或删除/修改远端 checkpoint、原始数据和其它工件。普通连接/依赖/续传问题可
+自主修复；实例失效时先确认旧 Pod 已不存在再替换一个兼容实例。创建前记录实例、费率和费用基线，完成逐对象 bytes/SHA-256 校验后立即
+删除并确认 0 Pod/compute 止费；卷继续保留且删除仍需用户本人另行批准。无法挂载现有卷、需要第二卷/并行 Pod 或预计突破既有费用边界时
+必须重新请示。本例外只覆盖大型资产回传，不恢复训练授权，也不改变正式结果、研究终态或其它安全边界。
 
 ### 完成/验收标准
 
@@ -98,10 +106,11 @@ Plan 082 明确分为两个授权阶段：
 - [ ] 正式训练完成后的第一次 GPU 阶段验收只回传小型关键信息：源码/recipe/freeze 身份、指标与逐 pair margin、checkpoint
       inventory/path/size/SHA-256、新进程恢复 receipt、费用和资源状态；不回传或本地复验大型 checkpoint。此时保持正式 Pod/网络卷，
       审查者明确确认无需继续操作 GPU 后立即停止/删除/释放 Pod并核对 compute 费用归零。
-- [ ] 大型资产只在 0 Pod、Plan 083 不占用共享磁盘且宿主容量安全的窗口，通过 Plan 082 网络卷实时 region/endpoint 对应的 S3-compatible
-      API manifest 驱动回传到 task-owned ignored namespace；支持 `.part` Range 续传、逐对象 size/SHA-256 校验、原子发布和拒绝覆盖。
-      无安全窗口时保留网络卷等待，不重建 transfer Pod。全部必要资产下载并验证后申请最终任务验收；网络卷继续保留，只有用户本人
-      另行明确人工批准才可删除，并如实报告其持续费率、累计费用和状态。
+- [ ] 大型资产在 Plan 083 不占用共享磁盘且宿主容量安全的窗口回传到 task-owned ignored namespace；优先使用实时 region/endpoint 的
+      0 Pod S3-compatible API。因本轮 US-TX-3 卷不受该 API 支持，按上述一次性例外使用至多一个临时 transfer Pod 以可续传路径读取
+      bootstrap 精确列出的 39 对象；继续执行逐对象 size/SHA-256 校验、原子发布和拒绝覆盖。全部必要资产下载并验证后立即删除 transfer
+      Pod、确认 0 Pod/compute 止费并申请最终任务验收；网络卷继续保留，只有用户本人另行明确人工批准才可删除，并如实报告其持续费率、
+      累计费用和状态。
 - [ ] 相关轻量 Python/云端专项门禁、改动 shell 的 `bash -n`、必要 compile/format 检查与 `git diff --check` 通过；不运行 Cargo、
       Docker、全 workspace、本地真实模型或 CI。fake、commissioning、formal、skip 和未运行项分别如实记录。
 - [ ] 执行者依次维护 `GPU_REVIEW_PENDING / POD_RETAINED`、`GPU_REVIEW_PASS / ZERO_POD / HANDOFF_PENDING` 和
@@ -133,15 +142,15 @@ Plan 082 明确分为两个授权阶段：
   创建并挂载满足任务所需的最小实用任务网络卷，上传必要源码和物理无 unseen 的 train+validation bundle并回传任务工件。
   commissioning 中失效/不可用 Pod 可在单实例边界内替换；正式训练 Pod 只有审查者明确确认不再需要后才可释放。网络卷删除始终需要
   用户本人另行明确人工批准。
-- 审查者批准释放正式 Pod 后，通过 RunPod 控制面确认 0 Pod，并通过网络卷实时 S3-compatible endpoint 对任务 manifest 做 inventory、
-  续传下载和字节身份校验；该数据面动作无需、也不得为传输重新创建 Pod。
+- 审查者批准释放正式 Pod 后，通过 RunPod 控制面确认 0 Pod，并优先通过网络卷实时 S3-compatible endpoint 对任务 manifest 做 inventory、
+  续传下载和字节身份校验；本轮 endpoint 因 US-TX-3 不受支持而不可用，故只可按一次性回传例外创建一个挂载现有卷的临时 transfer Pod。
 
 ### 不允许修改或执行
 
 - `training/publication-critic-v8/` 及其继承数据的正文、label、pair、split、review、manifest、objective/loss 语义或冻结身份；Plan 054/060/064/066/068/
   071/073/075/079/081 的冻结结果、正式 receipt、历史报告和计划终态。
 - Publication Critic 产品默认、`multidev/` 产品行为、threshold、selection lock、M3-C2/unseen 流程、M3-D、本地部署资格或产品启用。
-- LoRA、QLoRA、其它 PEFT、量化训练、模型转换作为训练对象、换模型、第三种 GPU、多 GPU、并行计费 Pod、真实 API、Judge、
+- LoRA、QLoRA、其它 PEFT、量化训练、模型转换作为训练对象、换模型、训练使用第三种 GPU、多 GPU、并行计费 Pod、真实 API、Judge、
   unseen-test、HF 远端写入、发布、CI/PR 或上游基线升级。
 - Plan 082 本地 Docker、Cargo、真实模型加载/推理、全 workspace 测试或第二个 Cargo target；除硬约束 12 明确授权的精确
   `debug/incremental` 清理外，不得写入、删除或改动 Plan 083 构建产物。
@@ -213,9 +222,10 @@ Plan 082 计划编制阶段没有创建上述 ignored namespace，也没有必�
    云端工件完整性、是否需要补跑及 Pod/卷事实。无需 GPU 的代码整理、S3 回传、本地字节校验、文档和相邻回归留到最终验收，不在此扩成总终审。
    审查者只有确认这些 GPU 事项闭合且无需继续操作 GPU 后才批准释放；执行者收到确认后立即停止/删除/释放 Pod并核对 compute 费用归零。
    释放后若意外发现原则性 P1/P2 确实必须重建 GPU，不得自行新开 Pod，按计划外变数通过队列请示。
-10. **网络卷承接无 Pod 回传。** Plan 082 必须新建并挂载满足任务所需的最小实用网络卷，不使用临时本地盘代替持久任务存储，也不恢复或
-    依赖 Plan 079 旧卷。Pod 释放并由控制面确认 0 Pod 后，使用网络卷实时 region/endpoint 的 S3-compatible API 读取 Plan 082 task root；
-    不为 inventory/download 重建 transfer Pod。窄复用 Plan 068 严格 loader、manifest 驱动的 bounded download、`.part` Range 续传、
+10. **网络卷承接回传。** Plan 082 必须新建并挂载满足任务所需的最小实用网络卷，不使用临时本地盘代替持久任务存储，也不恢复或
+    依赖 Plan 079 旧卷。正式 Pod 释放并由控制面确认 0 Pod 后，优先使用网络卷实时 region/endpoint 的 S3-compatible API 读取 Plan 082
+    task root；本轮 US-TX-3 不受该 API 支持时，只按一次性回传例外创建至多一个临时 transfer Pod。继续窄复用 Plan 068 严格 loader、
+    manifest 驱动的 bounded download、`.part` Range 续传、
     size/SHA-256 校验和安全发布语义：正确既有文件可幂等跳过，任何身份不符既有文件拒绝覆盖。volume ID、region/endpoint、task root、允许
     前缀、ignored destination 与 bootstrap manifest key/bytes/hash 必须绑定 Plan 082 本轮 freeze/receipt，禁止使用 Plan 068 的
     `hi3iaz8rsr`、US-KS-2 endpoint、旧 root 或旧 artifact manifest。网络卷只有用户本人另行明确人工批准才可删除。
@@ -423,16 +433,22 @@ XXX用以下内容代替：
   `75,188,027,392` bytes、无重型 owner；参数化 binding 和双离线 preflight 通过。真实 inventory 在 bootstrap HEAD 前的 TLS 建连失败；
   provider 当前 S3 API 支持数据中心列表不含 US-TX-3，卷 update 仅允许 name/size，故不能以猜测跨 region endpoint、关闭 TLS 或卷迁移
   冒充 0 Pod handoff。替代方案需要计划外资源授权，按队列请示前保持 0 Pod 和网络卷。
+- 2026-08-26：用户本人明确批准 `TRANSFER_POD_EXCEPTION_GRANTED`：允许至多一个挂载现有卷 `mwemzrn33y` 的临时 transfer Pod，
+  实时可用且兼容时优先最低费用 CPU，否则可用费用合理的任意单卡 GPU；只读回传/续传/校验冻结 39 对象，禁止训练、GPU 模型加载、
+  第二卷和远端工件修改。完成后立即删除并确认 0 Pod；卷继续保留。审查者在批准前只读确认当前 0 Pod、US-TX-3 40GB 卷仍存在、L40S
+  库存 `LOW` 且当前 Secure/Community 费率为 0.99/0.79 USD/h，provider 已入账的 Plan 082 Pod 费用约 0.594 USD，未触发 10 USD 告警。
 
 ### 当前工作
 
-- 正式训练与 GPU 专项验收已完成，当前为 `GPU_REVIEW_PASS / ZERO_POD / HANDOFF_EXTERNAL_BLOCKED`。唯一 L40S Pod 已释放且
-  compute 止费；40GB 网络卷完整保留。US-TX-3 当前无 provider S3 API，等待队列传达最小替代交接授权。
+- 正式训练与 GPU 专项验收已完成，当前为 `GPU_REVIEW_PASS / ZERO_POD / TRANSFER_POD_EXCEPTION_GRANTED`。唯一训练 Pod 已释放且
+  compute 止费；40GB 网络卷完整保留。审查提交后通过指定队列传达一次性 transfer Pod 授权，执行者随后按最小边界完成回传。
 
 ### 本任务剩余步骤
 
-1. 通过指定队列报告 US-TX-3 S3 不可用事实并请示最小替代交接授权；未获授权前保持 0 Pod 和网络卷，不跨 region 猜 endpoint、不关闭 TLS。
-2. 获得明确授权后，以批准的最小方式回传 bootstrap 精确列出的 39 对象，完成 `.part` 续传、全部 bytes/SHA-256 校验，提交
+1. 审查者通过指定队列正式传达 `TRANSFER_POD_EXCEPTION_GRANTED`；执行者创建前刷新兼容 CPU/单卡 GPU、费率和费用基线，同时只保留
+   一个 transfer Pod。
+2. 以批准的最小方式回传 bootstrap 精确列出的 39 对象，完成 `.part` 续传、全部 bytes/SHA-256 校验，立即删除 transfer Pod并确认
+   0 Pod/compute 止费，提交
    `FINAL_REVIEW_PENDING / VOLUME_RETAINED_PENDING_USER_DELETE` 并按队列申请最终验收。
 3. 最终审查者只要求无需 GPU 的修复/复验并收口最终文档；验收后转请用户本人决定是否删除网络卷。执行者仅在收到用户人工批准后删除卷，
    记录终态并通知；所有人继续等待用户决定合并/推送。
@@ -440,12 +456,12 @@ XXX用以下内容代替：
 ### 阻塞项
 
 - 阶段 A 无计划级阻塞。
-- 阶段 B 正式轮和 GPU 专项验收已完成，Pod 已释放并止费；大型 handoff 被 provider 的 US-TX-3 S3 不支持边界阻断，替代方式需要计划外授权。
+- 阶段 B 正式轮和 GPU 专项验收已完成，训练 Pod 已释放并止费；US-TX-3 S3 阻断已有一次性 transfer Pod 授权，无计划级阻塞。
 - 实际 RunPod 库存、价格、旧资源终态、网络卷/S3 兼容性和本地大工件回传窗口均须在相应动作前实时复核；规划时快照不构成运行事实。
 
 ### 当前验收状态
 
-- `GPU_REVIEW_PASS / ZERO_POD / HANDOFF_EXTERNAL_BLOCKED`；研究终态为 `VALID_NO_IMPROVEMENT`，最终大型资产交接与任务验收尚未完成。
+- `GPU_REVIEW_PASS / ZERO_POD / TRANSFER_POD_EXCEPTION_GRANTED`；研究终态为 `VALID_NO_IMPROVEMENT`，最终大型资产交接与任务验收尚未完成。
 
 ### 交接边界
 
@@ -489,3 +505,4 @@ XXX用以下内容代替：
 | 021 | source bundle 纳入运行所需的 Plan 081 route；复合训练状态从 CPU 反序列化后由 optimizer 按参数设备恢复；launcher 在 detach 前要求 exact image identity | 真实 commissioning 已分别复现缺失 route、CUDA RNG state 无法恢复和子进程环境遗漏；局部修复即可闭合，不引入第二套 bundle 或 launcher | source/recovery/runtime | 已采纳 |
 | 022 | 保留完整原始输入、正式/commissioning observations、日志以及所有任务自有大 checkpoint；若网络卷容量确实逼近上限，先报告并按用户已给授权优先扩容，不以清理 checkpoint 腾挪 | 保留轻量摘要之外的真实失败复盘材料；网络卷成本低于丢失可分析证据的代价，且当前 31.21GB/40GB 尚无需扩容 | retention/capacity | 已采纳 |
 | 023 | US-TX-3 S3 endpoint 不可建立且 provider 支持列表不含该 DC 时，保持 TLS 校验、live region 与 0 Pod/保留卷，不尝试跨 region endpoint 或虚构迁移；替代交接先走队列授权 | 官方可用性边界与无凭据 TLS 诊断一致，卷 update 也不支持迁移数据中心；任何有效替代都需要重新创建外部资源 | handoff/safety | 已采纳 |
+| 024 | 用户批准一次性 transfer Pod 回传例外：兼容可用时最低费用 CPU 优先，否则费用合理的任意单卡 GPU；同时至多一个，只读现有卷的冻结 39 对象，完成即删，卷继续保留 | US-TX-3 不受 S3 API 支持，现有卷也不能迁移；该边界用最小临时 compute 恢复既定交接目标，不恢复训练或扩大工件范围 | handoff/authorization | 已采纳 |

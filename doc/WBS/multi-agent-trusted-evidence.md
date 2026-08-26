@@ -1,7 +1,7 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
 最后更新：2026-08-26 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
-状态：**第一期、第二期、M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、M3-C2、Plan 064、Plan 071、Plan 073、Plan 075、Plan 079、Plan 081 与四期 M4-A、M4-C0、M4-S1、M4-C1、M4-S2、M4-C2 已完成；Plan 060 技术 GO、Plan 064 DATA_GO、Plan 066 正式训练 GO；Plan 071 为 `BASE_COMPARABILITY_GO`，Plan 073 / M3-C2 为 `NO-GO`，Plan 079 为 `4B_BASE_QUALITY_NO_GO`，Plan 081 为 `LOCAL_TRAINING_READINESS_PASS`；Plan 082 已完成有效正式训练并取得 `VALID_NO_IMPROVEMENT`，GPU 专项验收通过且 0 Pod/compute 止费，保留卷所在 US-TX-3 不支持 provider S3 API，当前等待最小替代交接授权，M3-D 保持锁定；M4-A 为 `M4_A_GO`，M4-C0 为 `M4_C0_PROTOTYPE_PASS`，M4-S1 为 `M4_S1_PASS`，M4-C1 为 `M4_C1_QUERY_PASS`，M4-S2 为 `M4_S2_PASS`，M4-C2 为 `M4_C2_CONTROL_PASS`；下一四期必成工作包为须另行立项授权的 M4-Z(core)**
+状态：**第一期、第二期、M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、M3-C2、Plan 064、Plan 071、Plan 073、Plan 075、Plan 079、Plan 081 与四期 M4-A、M4-C0、M4-S1、M4-C1、M4-S2、M4-C2 已完成；Plan 060 技术 GO、Plan 064 DATA_GO、Plan 066 正式训练 GO；Plan 071 为 `BASE_COMPARABILITY_GO`，Plan 073 / M3-C2 为 `NO-GO`，Plan 079 为 `4B_BASE_QUALITY_NO_GO`，Plan 081 为 `LOCAL_TRAINING_READINESS_PASS`；Plan 082 已完成有效正式训练并取得 `VALID_NO_IMPROVEMENT`，GPU 专项验收通过且训练 Pod 已释放，US-TX-3 S3 阻断已有一次性 transfer Pod 人工授权，等待回传与最终验收，M3-D 保持锁定；M4-A 为 `M4_A_GO`，M4-C0 为 `M4_C0_PROTOTYPE_PASS`，M4-S1 为 `M4_S1_PASS`，M4-C1 为 `M4_C1_QUERY_PASS`，M4-S2 为 `M4_S2_PASS`，M4-C2 为 `M4_C2_CONTROL_PASS`；下一四期必成工作包为须另行立项授权的 M4-Z(core)**
 
 ## 当前定位
 
@@ -340,14 +340,16 @@ A40 48GB 首选、L40S 48GB 备选，实际训练活动不超过 12 小时/15 US
 空 namespace 开始的四步 score-head 干净正式轮和 step 2 新进程恢复，终态为 `VALID_NO_IMPROVEMENT`。GPU 专项小型证据验收无遗留
 需要 GPU/Pod 才能关闭的高/中等级 correctness/functionality finding；唯一 Pod 已释放并确认 0 Pod、持续 compute 费率为 0，40GB 网络卷
 继续保留。参数化 handoff binding 与离线 preflight 已通过，但 `US-TX-3` 不在 provider 当前 S3 API 支持列表，真实 inventory 在 TLS
-建连阶段失败；当前保持 0 Pod/保留卷并通过 ExecPlan 队列请示最小替代交接授权。网络卷删除仍须用户本人另行人工批准。
+建连阶段失败；用户已人工批准一次性 transfer Pod 例外，兼容可用时优先最低费用 CPU，否则可用费用合理的任意单卡 GPU，同时至多一个，
+只读回传/校验冻结 39 对象并在完成后立即删除。网络卷删除仍须用户本人另行人工批准。
 
 **目标与边界**：付费阶段在正式创建/启动前同时刷新 A40 48GB 与 L40S 48GB 的库存、价格和网络卷兼容性；使用一张 A40（首选）
 或 L40S（备选）及任务网络卷，完成 commissioning、训练参数开发和一轮从 exact base/空 namespace 开始的干净正式轮。累计 GPU 计费
 训练活动不超过 12 小时、对应外部费用不超过 15 USD；训练完成后的 GPU 审查等待、无 Pod 回传和删卷等待费用分开持续报告，任务总累计
 费用首次达到 10 USD 时非阻断告警。正式 Pod 保留到 GPU 专项审查关闭所有合理可预见的 Pod 依赖后立即释放；无需 GPU 的代码/交接/文档
-问题留到最终验收。大型资产不在 GPU 审查期回传，而在 0 Pod、Plan 083 不占用共享磁盘和宿主容量安全窗口，通过任务网络卷
-S3-compatible API manifest 驱动续传并校验；不重建 transfer Pod。网络卷继续保留，删除须用户本人另行明确人工批准。正式终态为
+问题留到最终验收。大型资产不在 GPU 审查期回传，优先在 0 Pod、Plan 083 不占用共享磁盘和宿主容量安全窗口通过任务网络卷
+S3-compatible API manifest 驱动续传并校验；本轮因 US-TX-3 不受支持，按用户一次性授权使用最小 transfer Pod。网络卷继续保留，
+删除须用户本人另行明确人工批准。正式终态为
 `TRAINING_IMPROVEMENT_FOUND`、`VALID_NO_IMPROVEMENT`
 或诚实的 `INCONCLUSIVE`；前两个都完成研究目标，均不直接授予产品资格或解锁 M3-D。
 
@@ -382,14 +384,15 @@ S3-compatible API manifest 驱动续传并校验；不重建 transfer Pod。网�
   资源槽；Pod 已止费，完成时保留的网络卷按用户提供的最新查询已返回 404、当前不再作为可用或持续计费资源。
 - Plan 081 已在独立 worktree 内完成 Publication Critic Python/训练合同与三期 WBS，不运行 Cargo、Docker、真实模型/GPU或云计算，
   不写/清理 Plan 069 target，也不以 Plan 079 卷为前置。Plan 082 已完成真实正式轮并通过 GPU 专项验收，唯一 Pod 已释放且 compute 止费；
-  网络卷继续保留，因 US-TX-3 不支持 provider S3 API，替代大型资产交接须先取得计划外授权。
+  网络卷继续保留；因 US-TX-3 不支持 provider S3 API，大型资产交接按用户已批准的一次性最小 transfer Pod 例外执行。
 - RunPod 云端 smoke/训练不占本地 Cargo build lock，可与产品代码、数据整理和四期非冲突开发并行；真实本地模型、
   Docker 与重型 Cargo 仍按根 `AGENTS.md` 全局串行。
 - 三期与已经正式收口的方向 1 没有产品依赖。如果未来重新启动方向 1，普通工作仍可并行安排，但共享 API 预算、
   本地 GPU、Docker、构建锁和磁盘时必须显式错峰。
 - 四期与三期没有固定产品依赖；Plan 080 与 Plan 081 的并行文档已在主线整合时按三期/四期职责加法收敛。Plan 082 阶段 A 与
   M4-Z(core) 可有界并行；Plan 082 付费阶段经最终审查者验收并取得用户人工批准后，其云 GPU 也不占 Cargo build lock。大型工件留在
-  网络卷，正式 Pod 经 GPU 专项验收后已释放；Plan 083 与宿主容量窗口当前安全，但 US-TX-3 无 provider S3 API，替代交接须另行授权。其它跨期网络/磁盘协调
+  网络卷，正式 Pod 经 GPU 专项验收后已释放；Plan 083 与宿主容量窗口当前安全，US-TX-3 无 provider S3 API 的阻断已有一次性 transfer
+  Pod 人工授权。其它跨期网络/磁盘协调
   继续按各自计划执行，不在本页复制完整关系图或资源表。
 - M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、M3-C2、M3-D 各自对应一个任务级 plan；
   阶段叙事不单独创建总 plan，长程 WBS 也不替执行者冻结模块布局、API schema、训练超参数或部署技术路线。
