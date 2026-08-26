@@ -289,6 +289,7 @@ fn map_team_error(error: TeamError) -> DurableSessionReadError {
     match error {
         TeamError::Durability { .. }
         | TeamError::SnapshotConflict { .. }
+        | TeamError::OwnerIncarnationConflict
         | TeamError::UnknownParticipant
         | TeamError::InstanceReset { .. }
         | TeamError::UnknownReference { .. }

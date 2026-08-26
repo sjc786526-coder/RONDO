@@ -254,6 +254,18 @@ impl AgentControl {
             .await
     }
 
+    pub(crate) async fn with_current_running_session_for_formal_shutdown<T>(
+        &self,
+        thread_id: ThreadId,
+        expected: &crate::session::session::Session,
+        operation: impl FnOnce() -> T,
+    ) -> Option<T> {
+        let state = self.upgrade().ok()?;
+        state
+            .with_current_running_session_for_formal_shutdown(thread_id, expected, operation)
+            .await
+    }
+
     /// Send rich user input items to an existing agent thread.
     pub(crate) async fn send_input(
         &self,

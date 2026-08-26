@@ -210,6 +210,7 @@ pub use exec_policy::check_execpolicy_for_warnings;
 pub use exec_policy::format_exec_policy_error_with_source;
 pub use exec_policy::load_exec_policy;
 pub use experimental_session_control::DurableSessionControlSetRootStateParams;
+pub use experimental_session_control::DurableSessionControlShutdownParams;
 pub use experimental_session_control::ExperimentalSessionControlError;
 pub use experimental_session_control::ExperimentalSessionControlEvent;
 pub use experimental_session_control::ExperimentalSessionControlLifecycle;

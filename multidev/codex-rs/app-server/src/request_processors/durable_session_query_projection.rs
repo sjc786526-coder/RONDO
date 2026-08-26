@@ -30,6 +30,8 @@ use codex_core::DurableSessionTeamProjection as CoreTeamProjection;
 use codex_core::DurableSessionTeamRole as CoreTeamRole;
 use codex_protocol::SessionId;
 use codex_protocol::protocol::SessionMeta;
+use sha2::Digest;
+use sha2::Sha256;
 
 pub(super) fn authenticated_view(
     meta: &SessionMeta,
@@ -38,15 +40,22 @@ pub(super) fn authenticated_view(
     residency: DurableSessionResidency,
     team: Option<DurableSessionTeamProjection>,
     control_enabled: bool,
+    owner_incarnation: Option<String>,
 ) -> DurableSessionView {
     let read_available = matches!(&read_status, DurableSessionReadStatus::Available);
     let team_available = team.is_some();
     let control_precondition = (control_enabled && read_available)
         .then(|| {
             let team = team.as_ref()?;
-            Some(DurableSessionControlPrecondition {
+            if residency == DurableSessionResidency::ObservedOwnerHere
+                && owner_incarnation.is_none()
+            {
+                return None;
+            }
+            Some(DurableSessionControlPrecondition::CommittedTeam {
                 expected_storage_status: scope.status(),
                 expected_residency: residency,
+                owner_incarnation,
                 team_instance_id: team.team_instance_id.clone(),
                 team_revision: team.revision,
                 commit_generation: team.commit_generation,
@@ -78,6 +87,78 @@ pub(super) fn authenticated_view(
         read_status,
         team,
     }
+}
+
+/// Project the one intentional incomplete-read recovery case: an earlier delete proved the
+/// canonical durable Root marker but already removed its Team snapshot. The marker remains the
+/// existing ThreadStore retry anchor; no lifecycle state is inferred or persisted here.
+pub(super) fn authenticated_delete_retry_view(
+    meta: &SessionMeta,
+    scope: StorageScope,
+    residency: DurableSessionResidency,
+    control_enabled: bool,
+) -> DurableSessionView {
+    let delete_retry_available = control_enabled
+        && residency == DurableSessionResidency::NotObservedHere
+        && meta.parent_thread_id.is_none();
+    let control_precondition =
+        delete_retry_available.then(|| DurableSessionControlPrecondition::DeleteRetryAnchor {
+            expected_storage_status: scope.status(),
+            expected_residency: residency,
+            root_marker_fingerprint: root_marker_fingerprint(meta),
+        });
+    let mut operation_availability = if control_enabled {
+        unknown_operations(DurableSessionOperationAvailabilityReason::ReadIncomplete)
+    } else {
+        unavailable_operations(DurableSessionOperationAvailabilityReason::ControlDisabled)
+    };
+    if delete_retry_available {
+        operation_availability.delete = operation(
+            DurableSessionOperationAvailability::Available,
+            DurableSessionFactProvenance::ThreadStore,
+        );
+    }
+    DurableSessionView {
+        identity: DurableSessionIdentity {
+            session_id: meta.session_id.to_string(),
+            root_thread_id: Some(meta.id.to_string()),
+        },
+        storage_status: scope.status(),
+        domain_lifecycle: DurableSessionDomainLifecycle::Unknown,
+        residency,
+        operation_availability,
+        control_precondition,
+        provenance: DurableSessionProvenance {
+            identity: DurableSessionFactProvenance::SessionMeta,
+            storage_status: DurableSessionFactProvenance::ThreadStore,
+            domain_lifecycle: DurableSessionFactProvenance::Unavailable,
+            residency: DurableSessionFactProvenance::ServerRuntimeObservation,
+            team: DurableSessionFactProvenance::Unavailable,
+        },
+        read_status: DurableSessionReadStatus::Incomplete {
+            issue: DurableSessionReadIssue::TeamSnapshotMissing,
+        },
+        team: None,
+    }
+}
+
+fn root_marker_fingerprint(meta: &SessionMeta) -> String {
+    let mut digest = Sha256::new();
+    digest.update(b"RONDO-DURABLE-ROOT-MARKER\0v1\0");
+    update_fingerprint_component(&mut digest, meta.session_id.to_string().as_bytes());
+    update_fingerprint_component(&mut digest, meta.id.to_string().as_bytes());
+    update_fingerprint_component(&mut digest, meta.timestamp.as_bytes());
+    if let Some(intent) = meta.durable_team {
+        digest.update(intent.version.to_be_bytes());
+        update_fingerprint_component(&mut digest, intent.session_id.to_string().as_bytes());
+        update_fingerprint_component(&mut digest, intent.root_thread_id.to_string().as_bytes());
+    }
+    format!("sha256:{:x}", digest.finalize())
+}
+
+fn update_fingerprint_component(digest: &mut Sha256, value: &[u8]) {
+    digest.update(u64::try_from(value.len()).unwrap_or(u64::MAX).to_be_bytes());
+    digest.update(value);
 }
 
 pub(super) fn unavailable_view(

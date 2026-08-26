@@ -33,10 +33,13 @@ use crate::environment_selection::TurnEnvironmentSnapshot;
 use crate::exec_policy::BANNED_PREFIX_SUGGESTIONS;
 use crate::exec_policy::ExecPolicyManager;
 use crate::exec_policy::default_policy_path;
+use crate::experimental_session_control::ExperimentalSessionControlError;
+use crate::experimental_session_control::PreparedDurableSessionShutdown;
 use crate::image_preparation::ImageResizeNoticeMode;
 use crate::image_preparation::prepare_response_items as prepare_image_response_items;
 use crate::parse_turn_item;
 use crate::realtime_conversation::RealtimeConversationManager;
+use crate::session::session::PreparedDurableSessionShutdownCompletion;
 use crate::session::step_context::StepContext;
 use crate::session::turn_context::TurnEnvironment;
 use crate::session_prefix::format_inter_agent_completion_message;
@@ -429,6 +432,30 @@ impl Drop for ShutdownSubmissionGuard {
         if !self.committed {
             let previous = self.submissions.fetch_sub(1, Ordering::AcqRel);
             debug_assert!(previous > 0);
+        }
+    }
+}
+
+/// Owns a formal shutdown handoff until its exact submission has been accepted by the Session
+/// loop. Cancellation before acceptance removes the handoff and drops its close permits, while
+/// cancellation after acceptance deliberately leaves ownership with the queued submission.
+struct PreparedShutdownRegistration<'a> {
+    session: &'a Session,
+    submission_id: String,
+    committed: bool,
+}
+
+impl PreparedShutdownRegistration<'_> {
+    fn commit(&mut self) {
+        self.committed = true;
+    }
+}
+
+impl Drop for PreparedShutdownRegistration<'_> {
+    fn drop(&mut self) {
+        if !self.committed {
+            self.session
+                .cancel_prepared_durable_session_shutdown(&self.submission_id);
         }
     }
 }
@@ -892,6 +919,73 @@ impl SessionIo {
             Ok(_) => {}
             Err(err) if matches!(err.details(), CodexErrorDetails::InternalAgentDied) => {}
             Err(err) => return Err(err),
+        }
+        session_loop_termination.await;
+        Ok(())
+    }
+
+    pub(crate) async fn shutdown_at_snapshot_and_wait(
+        &self,
+        session: &Session,
+        prepared: PreparedDurableSessionShutdown,
+    ) -> Result<(), ExperimentalSessionControlError> {
+        let submission_id = new_submission_id();
+        let (completion_tx, mut completion_rx) = oneshot::channel();
+        session
+            .install_prepared_durable_session_shutdown(
+                submission_id.clone(),
+                prepared,
+                completion_tx,
+            )
+            .map_err(
+                |_prepared| ExperimentalSessionControlError::ShutdownHandoff {
+                    message: "another formal Session shutdown handoff is already pending"
+                        .to_string(),
+                },
+            )?;
+        let mut registration = PreparedShutdownRegistration {
+            session,
+            submission_id: submission_id.clone(),
+            committed: false,
+        };
+        self.submit_with_id(Submission {
+            id: submission_id,
+            op: Op::Shutdown,
+            client_user_message_id: None,
+            trace: None,
+            parent_turn_id: None,
+        })
+        .await
+        .map_err(|error| ExperimentalSessionControlError::ShutdownHandoff {
+            message: error.to_string(),
+        })?;
+        registration.commit();
+
+        let session_loop_termination = self.session_loop_termination.clone();
+        let completion = tokio::select! {
+            biased;
+            completion = &mut completion_rx => {
+                completion.map_err(|_| ExperimentalSessionControlError::ShutdownHandoff {
+                    message: CodexErr::InternalAgentDied.to_string(),
+                })?
+            }
+            () = session_loop_termination.clone() => {
+                return Err(ExperimentalSessionControlError::ShutdownHandoff {
+                    message: CodexErr::InternalAgentDied.to_string(),
+                });
+            }
+        };
+        match completion {
+            PreparedDurableSessionShutdownCompletion::RetainedError(message) => {
+                return Err(ExperimentalSessionControlError::ShutdownHandoff { message });
+            }
+            PreparedDurableSessionShutdownCompletion::Completed => {}
+            PreparedDurableSessionShutdownCompletion::TerminatedError(message) => {
+                session_loop_termination.await;
+                return Err(
+                    ExperimentalSessionControlError::ShutdownTerminatedWithError { message },
+                );
+            }
         }
         session_loop_termination.await;
         Ok(())

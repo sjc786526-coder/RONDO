@@ -8,6 +8,8 @@ use codex_app_server_protocol::SelectedCapabilityRoot;
 use codex_app_server_protocol::ThreadSection;
 use codex_app_server_protocol::ThreadSectionMoveParams;
 use codex_app_server_protocol::ThreadSectionMoveResponse;
+use codex_core::DurableSessionControlShutdownParams;
+use codex_core::ExperimentalSessionControlError;
 use codex_extension_api::ExtensionDataInit;
 use codex_protocol::config_types::MultiAgentMode;
 use codex_protocol::error::CodexErrorDetails;
@@ -21,6 +23,13 @@ pub(super) const THREAD_LIST_MAX_LIMIT: usize = 100;
 const CODEX_TUI_CLIENT_NAME: &str = "codex-tui";
 const THREAD_ROLLBACK_DEPRECATION_SUMMARY: &str =
     "thread/rollback is deprecated and will be removed soon";
+
+pub(super) enum FormalThreadRemovalError {
+    AlreadyClosing,
+    OwnerUnavailable,
+    Control(ExperimentalSessionControlError),
+    Replaced,
+}
 
 struct ThreadListFilters {
     model_providers: Option<Vec<String>>,
@@ -981,6 +990,66 @@ impl ThreadRequestProcessor {
                 .await
                 .finish(unload_token);
         }
+        result
+    }
+
+    /// Uses the ordinary unload token and owner bookkeeping while replacing only the core
+    /// shutdown command with the formal snapshot-bound close barrier. Core owns the complete
+    /// preparation-to-termination result, so this path intentionally does not add another timeout.
+    pub(super) async fn prepare_thread_for_removal_at_snapshot(
+        &self,
+        thread_id: ThreadId,
+        params: DurableSessionControlShutdownParams,
+    ) -> Result<(), FormalThreadRemovalError> {
+        let unload_token = {
+            let mut pending_thread_unloads = self.pending_thread_unloads.lock().await;
+            pending_thread_unloads
+                .try_begin(thread_id)
+                .ok_or(FormalThreadRemovalError::AlreadyClosing)?
+        };
+
+        let result = match self.thread_manager.get_thread(thread_id).await {
+            Ok(conversation) => {
+                info!("thread {thread_id} was active; applying snapshot-bound shutdown");
+                match conversation
+                    .durable_session_control_shutdown_and_wait(params)
+                    .await
+                {
+                    Ok(()) => {
+                        if self
+                            .thread_manager
+                            .remove_thread_if_same(&thread_id, &conversation)
+                            .await
+                        {
+                            self.finalize_thread_teardown(thread_id).await;
+                            Ok(())
+                        } else {
+                            Err(FormalThreadRemovalError::Replaced)
+                        }
+                    }
+                    Err(
+                        error @ ExperimentalSessionControlError::ShutdownTerminatedWithError {
+                            ..
+                        },
+                    ) => {
+                        if self
+                            .thread_manager
+                            .remove_thread_if_same(&thread_id, &conversation)
+                            .await
+                        {
+                            self.finalize_thread_teardown(thread_id).await;
+                        }
+                        Err(FormalThreadRemovalError::Control(error))
+                    }
+                    Err(error) => Err(FormalThreadRemovalError::Control(error)),
+                }
+            }
+            Err(_) => Err(FormalThreadRemovalError::OwnerUnavailable),
+        };
+        self.pending_thread_unloads
+            .lock()
+            .await
+            .finish(unload_token);
         result
     }
 

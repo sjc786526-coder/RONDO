@@ -16,6 +16,7 @@ use codex_app_server_protocol::DurableSessionControlOperation;
 use codex_app_server_protocol::DurableSessionControlOperationKind;
 use codex_app_server_protocol::DurableSessionControlOutcome;
 use codex_app_server_protocol::DurableSessionControlParams;
+use codex_app_server_protocol::DurableSessionControlPrecondition;
 use codex_app_server_protocol::DurableSessionControlRejectionReason;
 use codex_app_server_protocol::DurableSessionControlResponse;
 use codex_app_server_protocol::DurableSessionOperationAvailability;
@@ -41,6 +42,31 @@ impl DurableSessionControlAttemptTicket {
 pub struct DurableSessionControlAttempt {
     pub ticket: DurableSessionControlAttemptTicket,
     pub params: DurableSessionControlParams,
+}
+
+/// Confirmation-time capture of one fresh formal Session control target.
+///
+/// A preview is not a sendable request and does not put the attempt state into
+/// `Pending`. [`DurableSessionControlAttemptState::begin_attempt`] consumes it
+/// and revalidates the captured query read before producing request params.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DurableSessionControlPreview {
+    accepted_read_ticket: QueryReadTicket,
+    params: DurableSessionControlParams,
+}
+
+impl DurableSessionControlPreview {
+    pub fn session_id(&self) -> &str {
+        &self.params.session_id
+    }
+
+    pub fn root_thread_id(&self) -> &str {
+        &self.params.root_thread_id
+    }
+
+    pub fn operation(&self) -> &DurableSessionControlOperation {
+        &self.params.operation
+    }
 }
 
 /// Why a control attempt could not be captured from the query attachment.
@@ -143,94 +169,50 @@ impl DurableSessionControlAttemptState {
         self.pending.as_ref().map(|pending| pending.ticket)
     }
 
-    /// Captures one fresh `session/read` proof and creates one send-once request.
+    /// Captures one fresh `session/read` target for a confirmation surface.
     ///
-    /// `accepted_read_ticket` should be captured with the confirmation view and
-    /// presented again when the user confirms. Any intervening refresh, lag,
-    /// attachment change, or reconnect retires it.
+    /// This performs no mutation-state transition. Any intervening refresh,
+    /// lag, attachment change, or reconnect retires the returned preview.
+    pub fn preview_attempt(
+        &self,
+        query: &DurableSessionQueryClientState,
+        operation: DurableSessionControlOperation,
+    ) -> Result<DurableSessionControlPreview, DurableSessionControlCaptureError> {
+        if self.pending.is_some() {
+            return Err(DurableSessionControlCaptureError::AttemptPending);
+        }
+        let captured = capture_query(query, None, operation)?;
+        Ok(DurableSessionControlPreview {
+            accepted_read_ticket: captured.accepted_read_ticket,
+            params: captured.params,
+        })
+    }
+
+    /// Revalidates and consumes a preview, then creates one send-once request.
+    ///
+    /// Pending is installed only after the preview's read ticket, attachment,
+    /// identity, operation availability, and proof all still match the current
+    /// authoritative query view.
     pub fn begin_attempt(
         &mut self,
         query: &DurableSessionQueryClientState,
-        accepted_read_ticket: QueryReadTicket,
-        operation: DurableSessionControlOperation,
+        preview: DurableSessionControlPreview,
     ) -> Result<DurableSessionControlAttempt, DurableSessionControlCaptureError> {
         if self.pending.is_some() {
             return Err(DurableSessionControlCaptureError::AttemptPending);
         }
-        if !query.is_connected() {
-            return Err(DurableSessionControlCaptureError::QueryDisconnected);
-        }
-        if query.view_freshness() != QueryViewFreshness::Fresh {
-            return Err(DurableSessionControlCaptureError::QueryViewNotFresh);
-        }
-        if query.accepted_read_ticket() != Some(accepted_read_ticket) {
+        let captured = capture_query(
+            query,
+            Some(preview.accepted_read_ticket),
+            preview.params.operation.clone(),
+        )?;
+        if captured.params != preview.params {
             return Err(DurableSessionControlCaptureError::ReadTicketRetired);
         }
-
-        let attachment = match query.attachment() {
-            Some(DurableSessionQueryAttachment::Session(attachment)) => attachment,
-            _ => return Err(DurableSessionControlCaptureError::NotSessionAttachment),
-        };
-        let response = match query.projection() {
-            Some(DurableSessionQueryProjection::Session(response)) => response,
-            _ => return Err(DurableSessionControlCaptureError::SessionProjectionMissing),
-        };
-        if response.session.identity.session_id != attachment.session_id {
-            return Err(DurableSessionControlCaptureError::SessionProjectionMismatch);
-        }
-        let root_thread_id = response
-            .session
-            .identity
-            .root_thread_id
-            .as_deref()
-            .ok_or(DurableSessionControlCaptureError::RootIdentityUnavailable)?;
-        if root_thread_id != attachment.root_thread_id {
-            return Err(DurableSessionControlCaptureError::SessionProjectionMismatch);
-        }
-
-        let operation_kind = operation.kind();
-        let availability = match operation_kind {
-            DurableSessionControlOperationKind::SetRootState => {
-                &response
-                    .session
-                    .operation_availability
-                    .set_root_state
-                    .availability
-            }
-            DurableSessionControlOperationKind::Close => {
-                &response.session.operation_availability.close.availability
-            }
-            DurableSessionControlOperationKind::Archive => {
-                &response.session.operation_availability.archive.availability
-            }
-            DurableSessionControlOperationKind::Unarchive => {
-                &response
-                    .session
-                    .operation_availability
-                    .unarchive
-                    .availability
-            }
-            DurableSessionControlOperationKind::Delete => {
-                &response.session.operation_availability.delete.availability
-            }
-        };
-        if !matches!(availability, DurableSessionOperationAvailability::Available) {
-            return Err(DurableSessionControlCaptureError::OperationUnavailable);
-        }
-
-        let precondition = response
-            .session
-            .control_precondition
-            .clone()
-            .ok_or(DurableSessionControlCaptureError::ControlProofUnavailable)?;
+        let operation_kind = captured.params.operation.kind();
         self.attempt_generation = next_generation(self.attempt_generation);
         let ticket = DurableSessionControlAttemptTicket(self.attempt_generation);
-        let params = DurableSessionControlParams {
-            session_id: attachment.session_id.clone(),
-            root_thread_id: attachment.root_thread_id.clone(),
-            precondition,
-            operation,
-        };
+        let params = captured.params;
         self.pending = Some(PendingAttempt {
             ticket,
             session_id: params.session_id.clone(),
@@ -323,6 +305,139 @@ impl DurableSessionControlAttemptState {
         }
         self.pending.take()
     }
+}
+
+struct CapturedQueryControl {
+    accepted_read_ticket: QueryReadTicket,
+    params: DurableSessionControlParams,
+}
+
+fn capture_query(
+    query: &DurableSessionQueryClientState,
+    expected_read_ticket: Option<QueryReadTicket>,
+    operation: DurableSessionControlOperation,
+) -> Result<CapturedQueryControl, DurableSessionControlCaptureError> {
+    if !query.is_connected() {
+        return Err(DurableSessionControlCaptureError::QueryDisconnected);
+    }
+    if query.view_freshness() != QueryViewFreshness::Fresh {
+        return Err(DurableSessionControlCaptureError::QueryViewNotFresh);
+    }
+    let accepted_read_ticket = query
+        .accepted_read_ticket()
+        .ok_or(DurableSessionControlCaptureError::ReadTicketRetired)?;
+    if expected_read_ticket.is_some_and(|expected| expected != accepted_read_ticket) {
+        return Err(DurableSessionControlCaptureError::ReadTicketRetired);
+    }
+
+    let attachment = match query.attachment() {
+        Some(DurableSessionQueryAttachment::Session(attachment)) => attachment,
+        _ => return Err(DurableSessionControlCaptureError::NotSessionAttachment),
+    };
+    let response = match query.projection() {
+        Some(DurableSessionQueryProjection::Session(response)) => response,
+        _ => return Err(DurableSessionControlCaptureError::SessionProjectionMissing),
+    };
+    if response.session.identity.session_id != attachment.session_id {
+        return Err(DurableSessionControlCaptureError::SessionProjectionMismatch);
+    }
+    let root_thread_id = response
+        .session
+        .identity
+        .root_thread_id
+        .as_deref()
+        .ok_or(DurableSessionControlCaptureError::RootIdentityUnavailable)?;
+    if root_thread_id != attachment.root_thread_id {
+        return Err(DurableSessionControlCaptureError::SessionProjectionMismatch);
+    }
+
+    let operation_kind = operation.kind();
+    let availability = match operation_kind {
+        DurableSessionControlOperationKind::SetRootState => {
+            &response
+                .session
+                .operation_availability
+                .set_root_state
+                .availability
+        }
+        DurableSessionControlOperationKind::Close => {
+            &response.session.operation_availability.close.availability
+        }
+        DurableSessionControlOperationKind::Archive => {
+            &response.session.operation_availability.archive.availability
+        }
+        DurableSessionControlOperationKind::Unarchive => {
+            &response
+                .session
+                .operation_availability
+                .unarchive
+                .availability
+        }
+        DurableSessionControlOperationKind::Delete => {
+            &response.session.operation_availability.delete.availability
+        }
+    };
+    if !matches!(availability, DurableSessionOperationAvailability::Available) {
+        return Err(DurableSessionControlCaptureError::OperationUnavailable);
+    }
+
+    let precondition = response
+        .session
+        .control_precondition
+        .clone()
+        .ok_or(DurableSessionControlCaptureError::ControlProofUnavailable)?;
+    let proof_matches_projection = match &precondition {
+        DurableSessionControlPrecondition::CommittedTeam {
+            expected_storage_status,
+            expected_residency,
+            owner_incarnation,
+            team_instance_id,
+            team_revision,
+            commit_generation,
+            commit_fingerprint,
+        } => {
+            let owner_proof_is_consistent = match response.session.residency {
+                codex_app_server_protocol::DurableSessionResidency::ObservedOwnerHere => {
+                    owner_incarnation.is_some()
+                }
+                _ => owner_incarnation.is_none(),
+            };
+            response.session.team.as_ref().is_some_and(|team| {
+                expected_storage_status == &response.session.storage_status
+                    && expected_residency == &response.session.residency
+                    && owner_proof_is_consistent
+                    && team_instance_id == &team.team_instance_id
+                    && team_revision == &team.revision
+                    && commit_generation == &team.commit_generation
+                    && commit_fingerprint == &team.commit_fingerprint
+            })
+        }
+        DurableSessionControlPrecondition::DeleteRetryAnchor {
+            expected_storage_status,
+            expected_residency,
+            root_marker_fingerprint,
+        } => {
+            operation_kind == DurableSessionControlOperationKind::Delete
+                && expected_storage_status == &response.session.storage_status
+                && expected_residency == &response.session.residency
+                && *expected_residency
+                    == codex_app_server_protocol::DurableSessionResidency::NotObservedHere
+                && !root_marker_fingerprint.is_empty()
+                && response.session.team.is_none()
+        }
+    };
+    if !proof_matches_projection {
+        return Err(DurableSessionControlCaptureError::ControlProofUnavailable);
+    }
+    Ok(CapturedQueryControl {
+        accepted_read_ticket,
+        params: DurableSessionControlParams {
+            session_id: attachment.session_id.clone(),
+            root_thread_id: attachment.root_thread_id.clone(),
+            precondition,
+            operation,
+        },
+    })
 }
 
 fn next_generation(current: u64) -> u64 {

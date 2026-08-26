@@ -1,6 +1,6 @@
 # Plan 080 / M4-C2 执行记录
 
-时间：2026-08-25 ｜ 分支：`worktree-080-m4-c2-session-control-tui` ｜ 结论：`M4_C2_CONTROL_PASS`
+时间：2026-08-25 ｜ 分支：`worktree-080-m4-c2-session-control-tui` ｜ 当时结论：`M4_C2_CONTROL_PASS` 候选，随后被独立验收拒绝
 
 ## 实质修改
 
@@ -34,8 +34,10 @@
 - stable schema `20260825-145358-1000-1004251`、experimental schema `20260825-145506-1000-1008778`、config schema
   `20260825-145538-1000-1010754` 均通过。scoped fix 通过；修正一处 TUI large-enum warning 后，scoped clippy
   `20260825-150732-1000-1056632` 零警告通过；`just fmt`、`just fmt-check`、`git diff --check` 通过，无 `*.snap.new`。
-- 未参与主体实现的独立只读终审覆盖 authority/proof、Unknown/Partial/no-replay、OwnerClosed、cold lifecycle、TUI ticket/late
-  completion/gate 与 fresh restart 场景，结论为无 high/medium correctness finding。
+- 未参与主体实现的执行期只读自审当时未发现 high/medium finding；随后正式独立验收在 `aadddf4` 发现 2 High、5 Medium、1 Low，
+  因而本日志最初的候选结论不构成验收接受。审查报告与整改结果分别见
+  `agent_log/2026-08-25-154410-plan080-independent-review.md`、
+  `agent_log/2026-08-25-170351-plan080-review-remediation.md`。
 
 ## 资源与未运行项
 

@@ -10,8 +10,8 @@ use codex_app_server_client::DurableSessionControlAttemptState;
 use codex_app_server_client::DurableSessionControlAttemptTicket;
 use codex_app_server_client::DurableSessionControlCaptureError;
 use codex_app_server_client::DurableSessionControlCertainty;
+use codex_app_server_client::DurableSessionControlPreview;
 use codex_app_server_client::DurableSessionQueryClientState;
-use codex_app_server_client::QueryReadTicket;
 use codex_app_server_protocol::DurableSessionControlOperation;
 use codex_app_server_protocol::DurableSessionControlResponse;
 use std::sync::Mutex;
@@ -47,27 +47,26 @@ impl DurableSessionControlBridge {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    fn accepted_read_ticket(
+    fn preview(
         &self,
         query: &Mutex<DurableSessionQueryClientState>,
-    ) -> Option<QueryReadTicket> {
-        query
+        operation: DurableSessionControlOperation,
+    ) -> Result<DurableSessionControlPreview, DurableSessionControlCaptureError> {
+        let query = query
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .accepted_read_ticket()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.attempt().preview_attempt(&query, operation)
     }
 
     fn begin(
         &self,
         query: &Mutex<DurableSessionQueryClientState>,
-        accepted_read_ticket: QueryReadTicket,
-        operation: DurableSessionControlOperation,
+        preview: DurableSessionControlPreview,
     ) -> Result<DurableSessionControlAttempt, DurableSessionControlCaptureError> {
         let query = query
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        self.attempt()
-            .begin_attempt(&query, accepted_read_ticket, operation)
+        self.attempt().begin_attempt(&query, preview)
     }
 
     fn apply_response(
@@ -108,23 +107,22 @@ impl DurableSessionControlBridge {
 }
 
 impl AppServerSession {
-    /// Captures the accepted authoritative read token shown by a confirmation view.
-    pub(crate) fn durable_session_control_accepted_read_ticket(&self) -> Option<QueryReadTicket> {
+    /// Captures one currently available authoritative operation for confirmation.
+    pub(crate) fn durable_session_control_preview(
+        &self,
+        operation: DurableSessionControlOperation,
+    ) -> Result<DurableSessionControlPreview, DurableSessionControlCaptureError> {
         self.durable_session_control
-            .accepted_read_ticket(&self.durable_session_query)
+            .preview(&self.durable_session_query, operation)
     }
 
     /// Revalidates a captured read and creates one send-once formal control request.
     pub(crate) fn durable_session_control_begin(
         &self,
-        accepted_read_ticket: QueryReadTicket,
-        operation: DurableSessionControlOperation,
+        preview: DurableSessionControlPreview,
     ) -> Result<DurableSessionControlAttempt, DurableSessionControlCaptureError> {
-        self.durable_session_control.begin(
-            &self.durable_session_query,
-            accepted_read_ticket,
-            operation,
-        )
+        self.durable_session_control
+            .begin(&self.durable_session_query, preview)
     }
 
     pub(crate) fn durable_session_control_apply_response(

@@ -7,9 +7,10 @@ use pretty_assertions::assert_eq;
 use serde_json::json;
 
 fn precondition() -> DurableSessionControlPrecondition {
-    DurableSessionControlPrecondition {
+    DurableSessionControlPrecondition::CommittedTeam {
         expected_storage_status: DurableSessionStorageStatus::Active,
         expected_residency: DurableSessionResidency::ObservedOwnerHere,
+        owner_incarnation: Some("019d2a93-2865-7e31-96af-ab81ab5c65af".to_string()),
         team_instance_id: "0123456789ab".to_string(),
         team_revision: 4,
         commit_generation: 9,
@@ -51,8 +52,10 @@ fn control_request_is_stable_typed_and_serialized_by_root() {
                 "sessionId": "session-1",
                 "rootThreadId": "root-1",
                 "precondition": {
+                    "type": "committedTeam",
                     "expectedStorageStatus": "active",
                     "expectedResidency": "observedOwnerHere",
+                    "ownerIncarnation": "019d2a93-2865-7e31-96af-ab81ab5c65af",
                     "teamInstanceId": "0123456789ab",
                     "teamRevision": 4,
                     "commitGeneration": 9,
@@ -67,6 +70,31 @@ fn control_request_is_stable_typed_and_serialized_by_root() {
                 }
             }
         })
+    );
+}
+
+#[test]
+fn delete_retry_anchor_is_a_distinct_narrow_proof() {
+    let proof = DurableSessionControlPrecondition::DeleteRetryAnchor {
+        expected_storage_status: DurableSessionStorageStatus::Archived,
+        expected_residency: DurableSessionResidency::NotObservedHere,
+        root_marker_fingerprint: "sha256:0123456789abcdef".to_string(),
+    };
+
+    let wire = json!({
+        "type": "deleteRetryAnchor",
+        "expectedStorageStatus": "archived",
+        "expectedResidency": "notObservedHere",
+        "rootMarkerFingerprint": "sha256:0123456789abcdef"
+    });
+    assert_eq!(
+        serde_json::to_value(&proof).expect("delete retry proof should serialize"),
+        wire
+    );
+    assert_eq!(
+        serde_json::from_value::<DurableSessionControlPrecondition>(wire)
+            .expect("delete retry proof should deserialize"),
+        proof
     );
 }
 

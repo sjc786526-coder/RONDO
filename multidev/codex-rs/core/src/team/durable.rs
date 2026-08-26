@@ -149,6 +149,10 @@ impl TeamWriteAuthority for LocalTeamWriteAuthority {
         self.identity
     }
 
+    fn owner_incarnation_id(&self) -> uuid::Uuid {
+        self.root_authority.incarnation_id()
+    }
+
     fn begin_write(&self) -> Result<Box<dyn TeamWritePermit>, TeamDurabilityError> {
         let root_permit = self
             .root_authority

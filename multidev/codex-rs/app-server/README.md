@@ -554,9 +554,17 @@ must be enabled. The method is not experimental API and does not use the
 Each request identifies the canonical Session and Root, carries the complete `controlPrecondition`
 from a fresh `session/read`, and selects exactly one operation: `setRootState`, `close`, `archive`,
 `unarchive`, or `delete`. The server rereads canonical metadata and the committed Team projection,
-compares storage, residency, Team instance/revision, commit generation, and fingerprint, and then
-revalidates the loaded Root owner again at the online Team mutation boundary. Stale or mismatched
-proofs return a typed rejection without being reported as applied.
+compares storage, residency, Team instance/revision, commit generation, and fingerprint, and binds
+online operations to the exact loaded Root writer incarnation. Close and active destructive
+lifecycle operations revalidate the owner and Team snapshot after the close barrier stops new Team
+writes. Stale or mismatched proofs return a typed rejection without being reported as applied.
+
+The normal proof has type `committedTeam`; `ownerIncarnation` is an opaque string for an observed
+loaded owner and `null` for a cold Session. One intentionally narrower proof,
+`deleteRetryAnchor`, can appear after an earlier delete removed the Team snapshot but retained the
+canonical cold Root marker. A fresh authoritative read exposes only `delete` for that recovery
+view, and only a new user-confirmed `delete` request can consume it. The server never automatically
+replays the earlier mutation.
 
 `setRootState` routes only to the currently loaded canonical Root owner. `close` runs the existing
 owner close barrier and reports `ownerClosed` only after that owner is removed; it does not invent
@@ -575,8 +583,10 @@ retry the mutation. A typed response is not a replacement Session projection; is
     "sessionId": "019c...",
     "rootThreadId": "019c...",
     "precondition": {
+        "type": "committedTeam",
         "expectedStorageStatus": "active",
         "expectedResidency": "notObservedHere",
+        "ownerIncarnation": null,
         "teamInstanceId": "019c...",
         "teamRevision": 3,
         "commitGeneration": 4,

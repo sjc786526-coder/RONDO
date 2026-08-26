@@ -5,6 +5,7 @@
 //! and only then reads or mutates that root tree's canonical in-process Team state.
 
 use crate::agent::AgentControl;
+use crate::agent::control::DurableTeamRootCloseGuard;
 use crate::session::session::Session;
 use codex_protocol::SessionId;
 use codex_protocol::ThreadId;
@@ -16,6 +17,7 @@ use codex_team_state::LifecycleTarget;
 use codex_team_state::ParticipantRole;
 use codex_team_state::ProducerState;
 use codex_team_state::RootState;
+use codex_team_state::TeamClosePermit;
 use codex_team_state::TeamError;
 use codex_team_state::TeamInstanceId;
 use codex_team_state::TeamMutationPrecondition;
@@ -25,6 +27,7 @@ use codex_team_state::TeamStateHandle;
 use codex_team_state::VersionId;
 use std::str::FromStr;
 use std::sync::Arc;
+use uuid::Uuid;
 
 const MAX_PROJECTED_PARTICIPANTS: usize = 64;
 const MAX_PROJECTED_EVENTS: usize = 32;
@@ -116,6 +119,7 @@ pub struct ExperimentalSessionControlSetRootStateParams {
 /// Formal control parameters that bind a lifecycle update to one committed Team snapshot.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DurableSessionControlSetRootStateParams {
+    pub owner_incarnation_id: String,
     pub team_instance_id: String,
     pub team_revision: u64,
     pub commit_generation: u64,
@@ -123,6 +127,20 @@ pub struct DurableSessionControlSetRootStateParams {
     pub expected_producer_state: ExperimentalSessionControlProducerState,
     pub expected_root_state: ExperimentalSessionControlRootState,
     pub next_root_state: ExperimentalSessionControlRootState,
+}
+
+/// Formal shutdown parameters bound to one loaded Root writer and committed Team snapshot.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DurableSessionControlShutdownParams {
+    pub owner_incarnation_id: String,
+    pub team_instance_id: String,
+    pub team_revision: u64,
+    pub commit_generation: u64,
+}
+
+pub(crate) struct PreparedDurableSessionShutdown {
+    pub(crate) lifecycle_close: DurableTeamRootCloseGuard,
+    pub(crate) team_close: Box<dyn TeamClosePermit>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -195,19 +213,115 @@ pub enum ExperimentalSessionControlError {
     UnexpectedTeamError { message: String },
     #[error("the committed Team snapshot changed after it was read")]
     SnapshotConflict,
+    #[error("the loaded Root writer incarnation changed after it was read")]
+    OwnerIncarnationConflict,
+    #[error("formal Session shutdown handoff failed: {message}")]
+    ShutdownHandoff { message: String },
+    #[error("formal Session shutdown terminated the owner with an unknown close result: {message}")]
+    ShutdownTerminatedWithError { message: String },
 }
 
 pub(crate) async fn project_loaded_root(
     session: &Session,
 ) -> Result<ExperimentalSessionControlTeamProjection, ExperimentalSessionControlError> {
-    with_canonical_loaded_root(session, project_team).await
+    with_canonical_loaded_root(session, false, project_team).await
+}
+
+pub(crate) async fn loaded_root_owner_incarnation_id(
+    session: &Session,
+) -> Result<String, ExperimentalSessionControlError> {
+    with_canonical_loaded_root(session, false, |team, thread_id| {
+        team.owner_incarnation_id()
+            .map(|incarnation_id| incarnation_id.to_string())
+            .ok_or(ExperimentalSessionControlError::OwnerIdentityUnavailable { thread_id })
+    })
+    .await
+}
+
+pub(crate) async fn prepare_loaded_root_shutdown_at_snapshot(
+    session: &Session,
+    params: DurableSessionControlShutdownParams,
+) -> Result<PreparedDurableSessionShutdown, ExperimentalSessionControlError> {
+    let expected_owner_incarnation_id = Uuid::parse_str(&params.owner_incarnation_id)
+        .map_err(|_| ExperimentalSessionControlError::OwnerIncarnationConflict)?;
+    let instance = TeamInstanceId::from_str(&params.team_instance_id)
+        .map_err(|_| ExperimentalSessionControlError::SnapshotConflict)?;
+    let precondition = TeamMutationPrecondition {
+        instance,
+        revision: TeamRevision::from_raw(params.team_revision),
+        commit_generation: params.commit_generation,
+    };
+
+    with_canonical_loaded_root(session, true, |team, thread_id| {
+        if team.owner_incarnation_id() != Some(expected_owner_incarnation_id) {
+            return Err(ExperimentalSessionControlError::OwnerIncarnationConflict);
+        }
+        Ok(thread_id)
+    })
+    .await?;
+    session
+        .ensure_durable_root_activation()
+        .await
+        .map_err(
+            |error| ExperimentalSessionControlError::UnexpectedTeamError {
+                message: error.to_string(),
+            },
+        )?;
+    let agent_control = &session.services.agent_control;
+    let lifecycle_close = agent_control
+        .begin_durable_team_root_close(session.thread_id())
+        .map_err(
+            |error| ExperimentalSessionControlError::UnexpectedTeamError {
+                message: error.to_string(),
+            },
+        )?;
+    lifecycle_close
+        .ensure_no_live_descendants()
+        .await
+        .map_err(
+            |error| ExperimentalSessionControlError::UnexpectedTeamError {
+                message: error.to_string(),
+            },
+        )?;
+    let team_close = agent_control
+        .team()
+        .begin_close_at_snapshot(expected_owner_incarnation_id, precondition)
+        .await
+        .map_err(|error| match error {
+            codex_team_state::TeamDurabilityError::Domain(error) => {
+                map_team_error(session.thread_id(), error)
+            }
+            error => ExperimentalSessionControlError::UnexpectedTeamError {
+                message: error.to_string(),
+            },
+        })?;
+
+    let current = agent_control
+        .with_current_running_session_for_formal_shutdown(session.thread_id(), session, || ())
+        .await;
+    if current.is_none() {
+        team_close.abort().await.map_err(|error| {
+            ExperimentalSessionControlError::UnexpectedTeamError {
+                message: error.to_string(),
+            }
+        })?;
+        lifecycle_close.abort();
+        return Err(ExperimentalSessionControlError::OwnerUnavailable {
+            thread_id: session.thread_id(),
+        });
+    }
+
+    Ok(PreparedDurableSessionShutdown {
+        lifecycle_close,
+        team_close,
+    })
 }
 
 pub(crate) async fn set_loaded_root_state(
     session: &Session,
     params: ExperimentalSessionControlSetRootStateParams,
 ) -> Result<ExperimentalSessionControlMutationOutcome, ExperimentalSessionControlError> {
-    with_canonical_loaded_root(session, move |team, root_thread_id| {
+    with_canonical_loaded_root(session, false, move |team, root_thread_id| {
         set_root_state_on_team(team, root_thread_id, params, None)
     })
     .await
@@ -217,6 +331,8 @@ pub(crate) async fn set_loaded_root_state_at_snapshot(
     session: &Session,
     params: DurableSessionControlSetRootStateParams,
 ) -> Result<ExperimentalSessionControlMutationOutcome, ExperimentalSessionControlError> {
+    let expected_owner_incarnation_id = Uuid::parse_str(&params.owner_incarnation_id)
+        .map_err(|_| ExperimentalSessionControlError::OwnerIncarnationConflict)?;
     let instance = TeamInstanceId::from_str(&params.team_instance_id)
         .map_err(|_| ExperimentalSessionControlError::SnapshotConflict)?;
     let precondition = TeamMutationPrecondition {
@@ -230,8 +346,13 @@ pub(crate) async fn set_loaded_root_state_at_snapshot(
         expected_root_state: params.expected_root_state,
         next_root_state: params.next_root_state,
     };
-    with_canonical_loaded_root(session, move |team, root_thread_id| {
-        set_root_state_on_team(team, root_thread_id, lifecycle, Some(precondition))
+    with_canonical_loaded_root(session, false, move |team, root_thread_id| {
+        set_root_state_on_team(
+            team,
+            root_thread_id,
+            lifecycle,
+            Some((expected_owner_incarnation_id, precondition)),
+        )
     })
     .await
 }
@@ -240,7 +361,7 @@ fn set_root_state_on_team(
     team: &TeamStateHandle,
     root_thread_id: ThreadId,
     params: ExperimentalSessionControlSetRootStateParams,
-    precondition: Option<TeamMutationPrecondition>,
+    formal_precondition: Option<(Uuid, TeamMutationPrecondition)>,
 ) -> Result<ExperimentalSessionControlMutationOutcome, ExperimentalSessionControlError> {
     let version_id = VersionId::from_str(&params.version_id).map_err(|_| {
         ExperimentalSessionControlError::InvalidVersionId {
@@ -262,10 +383,14 @@ fn set_root_state_on_team(
             change: LifecycleChange::SetRootState(params.next_root_state.into()),
         }],
     };
-    let outcome = match precondition {
-        Some(precondition) => {
-            team.update_lifecycle_at_snapshot(root_thread_id, precondition, request)
-        }
+    let outcome = match formal_precondition {
+        Some((expected_owner_incarnation_id, precondition)) => team
+            .update_lifecycle_at_snapshot_for_owner(
+                root_thread_id,
+                expected_owner_incarnation_id,
+                precondition,
+                request,
+            ),
         None => team.update_lifecycle(root_thread_id, request),
     }
     .map_err(|error| map_team_error(root_thread_id, error))?;
@@ -302,6 +427,7 @@ fn set_root_state_on_team(
 
 async fn with_canonical_loaded_root<T>(
     session: &Session,
+    formal_shutdown: bool,
     operation: impl FnOnce(&TeamStateHandle, ThreadId) -> Result<T, ExperimentalSessionControlError>,
 ) -> Result<T, ExperimentalSessionControlError> {
     let thread_id = session.thread_id();
@@ -329,20 +455,27 @@ async fn with_canonical_loaded_root<T>(
     // explicit shutdown cannot begin between this proof and the operation.
     let agent_control: &AgentControl = &session.services.agent_control;
     let team = Arc::clone(agent_control.team());
-    agent_control
-        .with_current_running_session(thread_id, session, move || {
-            let participant = team
-                .participant(thread_id)
-                .ok_or(ExperimentalSessionControlError::OwnerIdentityUnavailable { thread_id })?;
-            if participant.role != ParticipantRole::Root {
-                return Err(ExperimentalSessionControlError::NotRootParticipant { thread_id });
-            }
-            operation(team.as_ref(), thread_id)
-        })
-        .await
-        .unwrap_or(Err(ExperimentalSessionControlError::OwnerUnavailable {
-            thread_id,
-        }))
+    let operation = move || {
+        let participant = team
+            .participant(thread_id)
+            .ok_or(ExperimentalSessionControlError::OwnerIdentityUnavailable { thread_id })?;
+        if participant.role != ParticipantRole::Root {
+            return Err(ExperimentalSessionControlError::NotRootParticipant { thread_id });
+        }
+        operation(team.as_ref(), thread_id)
+    };
+    let result = if formal_shutdown {
+        agent_control
+            .with_current_running_session_for_formal_shutdown(thread_id, session, operation)
+            .await
+    } else {
+        agent_control
+            .with_current_running_session(thread_id, session, operation)
+            .await
+    };
+    result.unwrap_or(Err(ExperimentalSessionControlError::OwnerUnavailable {
+        thread_id,
+    }))
 }
 
 fn project_team(
@@ -445,6 +578,9 @@ fn map_team_error(root_thread_id: ThreadId, error: TeamError) -> ExperimentalSes
             current_instance: current_instance.to_string(),
         },
         TeamError::SnapshotConflict { .. } => ExperimentalSessionControlError::SnapshotConflict,
+        TeamError::OwnerIncarnationConflict => {
+            ExperimentalSessionControlError::OwnerIncarnationConflict
+        }
         TeamError::UnknownReference { reference } => {
             ExperimentalSessionControlError::UnknownReference { reference }
         }

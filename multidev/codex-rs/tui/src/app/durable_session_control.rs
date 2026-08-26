@@ -1,9 +1,11 @@
 //! Non-blocking App wiring for proof-bound, send-once Durable Session control.
 
 use super::*;
+use crate::bottom_pane::SelectionDescriptionLayout;
 use crate::durable_session_control::DURABLE_SESSION_CONTROL_USAGE;
 use crate::durable_session_control::DurableSessionControlCommand;
 use crate::durable_session_control::DurableSessionControlConfirmation;
+use crate::durable_session_control::confirmation_target;
 use crate::durable_session_control::operation_label;
 use crate::durable_session_control::render_completion;
 use crate::durable_session_control::render_detached;
@@ -20,9 +22,12 @@ const DURABLE_SESSION_CONTROL_CONFIRMATION_VIEW_ID: &str = "durable-session-cont
 const DURABLE_SESSION_CONTROL_TIMEOUT: Duration = Duration::from_secs(/*secs*/ 15);
 
 pub(super) fn durable_session_control_confirmation_view_params(
-    label: &str,
+    session_id: &str,
+    root_thread_id: &str,
+    operation: &DurableSessionControlOperation,
     confirm_actions: Vec<SelectionAction>,
 ) -> SelectionViewParams {
+    let label = operation_label(operation);
     SelectionViewParams {
         view_id: Some(DURABLE_SESSION_CONTROL_CONFIRMATION_VIEW_ID),
         title: Some(format!("Confirm Durable Session {label}?")),
@@ -33,7 +38,7 @@ pub(super) fn durable_session_control_confirmation_view_params(
         items: vec![
             SelectionItem {
                 name: format!("Confirm {label}"),
-                description: Some("Submit this mutation once".to_string()),
+                description: Some(confirmation_target(session_id, root_thread_id, operation)),
                 actions: confirm_actions,
                 dismiss_on_select: true,
                 ..Default::default()
@@ -45,6 +50,9 @@ pub(super) fn durable_session_control_confirmation_view_params(
                 ..Default::default()
             },
         ],
+        description_layout: SelectionDescriptionLayout::StackBelowWhenNarrow {
+            min_description_width: 48,
+        },
         ..Default::default()
     }
 }
@@ -106,21 +114,17 @@ impl App {
         app_server: &AppServerSession,
         operation: DurableSessionControlOperation,
     ) {
-        let Some(accepted_query_read_ticket) =
-            app_server.durable_session_control_accepted_read_ticket()
-        else {
-            self.chat_widget.add_error_message(
-                "control requires a fresh attached session/read result; use /session-control read or refresh"
-                    .to_string(),
-            );
-            return;
+        let preview = match app_server.durable_session_control_preview(operation) {
+            Ok(preview) => preview,
+            Err(error) => {
+                self.chat_widget.add_error_message(format!(
+                    "control requires an available operation from a fresh attached session/read result; use /session-control read or refresh: {error}"
+                ));
+                return;
+            }
         };
-        let confirmation = DurableSessionControlConfirmation {
-            accepted_query_read_ticket,
-            operation,
-        };
+        let confirmation = DurableSessionControlConfirmation { preview };
         let action_confirmation = confirmation.clone();
-        let label = operation_label(&confirmation.operation);
         let confirm_actions: Vec<SelectionAction> = vec![Box::new(move |tx| {
             tx.send(AppEvent::DurableSessionControlConfirmed(
                 action_confirmation.clone(),
@@ -128,7 +132,9 @@ impl App {
         })];
         self.chat_widget
             .show_selection_view(durable_session_control_confirmation_view_params(
-                label,
+                confirmation.preview.session_id(),
+                confirmation.preview.root_thread_id(),
+                confirmation.preview.operation(),
                 confirm_actions,
             ));
     }
@@ -142,13 +148,12 @@ impl App {
             self.chat_widget.add_error_message(
                 "Durable Session control was disabled before confirmation".to_string(),
             );
-            app_server.durable_session_detach();
+            if !self.config.features.enabled(Feature::DurableSessionQuery) {
+                app_server.durable_session_detach();
+            }
             return;
         }
-        let attempt = match app_server.durable_session_control_begin(
-            confirmation.accepted_query_read_ticket,
-            confirmation.operation,
-        ) {
+        let attempt = match app_server.durable_session_control_begin(confirmation.preview) {
             Ok(attempt) => attempt,
             Err(error) => {
                 self.chat_widget.add_error_message(format!(
@@ -212,7 +217,7 @@ impl App {
             Ok(response) => self.add_durable_session_output(render_completion(&response)),
             Err(message) => self.add_durable_session_output(render_transport_unknown(&message)),
         }
-        if self.formal_durable_session_control_enabled() {
+        if self.config.features.enabled(Feature::DurableSessionQuery) {
             match app_server.durable_session_begin_refresh() {
                 Ok(request) => {
                     self.add_durable_session_output(render_refreshing());

@@ -1,6 +1,6 @@
 # 方向 3 四期：RONDO Multi Durable Team Runtime
 
-最后更新：2026-08-25 ｜ 产品线：RONDO Multi（`multidev/`）｜ 状态：**M4-A、M4-C0、M4-S1、M4-C1、M4-S2 与 M4-C2 已完成；M4-C1 / M4-S2 / M4-C2 分别为 `M4_C1_QUERY_PASS` / `M4_S2_PASS` / `M4_C2_CONTROL_PASS`；下一必成工作包为 M4-Z(core)，M4-W0 继续按条件推进**
+最后更新：2026-08-25 ｜ 产品线：RONDO Multi（`multidev/`）｜ 状态：**M4-A、M4-C0、M4-S1、M4-C1 与 M4-S2 已完成；M4-C1 / M4-S2 分别为 `M4_C1_QUERY_PASS` / `M4_S2_PASS`；M4-C2 整改实现已收口并等待独立复验，M4-Z(core) 尚未解锁，M4-W0 继续按条件推进**
 
 ## 1. 阶段定位
 
@@ -229,17 +229,19 @@ source change、损坏、不完整和 backend unavailable 均保守降级，不�
 与 lifecycle write 两侧语义、收敛 shared 接缝。Plan 080 / M4-C2 已消费该交接，并在改产品代码前完成合并树 query×lifecycle
 基线 `45/45`，最终候选的同组邻接回归为 `47/47`。
 
-#### M4-C2：正式 Session Control / TUI（Plan 080，已完成）
+#### M4-C2：正式 Session Control / TUI（Plan 080，整改待复验）
 
-**结果：`M4_C2_CONTROL_PASS`。** 默认关闭的稳定 app-server v2 `session/control`→client→TUI 正式链已闭合。控制请求绑定正式
-query proof；server 逐请求重投影并精确比较 proof，online Team mutation 又在 durable mutation 线性化点复验 instance/revision/
-commit generation。loaded Root close 复用 M4-S2 barrier 并只承诺 `OwnerClosed`；cold archive/unarchive/delete 复用 ThreadStore
-原生生命周期，不加载 Agent 或启动 turn/模型/API。
+**当前结果：整改实现完成，等待独立复验重判。** 默认关闭的稳定 app-server v2 `session/control`→client→TUI 正式链已闭合。
+committed online proof 绑定 live Root owner incarnation；Team mutation gate 与 M4-S2 close barrier 在线性化点复验 exact owner、
+instance/revision/commit generation。loaded Root close 只承诺 `OwnerClosed`；cold archive/unarchive/delete 复用 ThreadStore 原生生命周期，
+Delete partial 只允许用户在权威重读后显式消费 canonical Root retry anchor，不加载 Agent 或启动 turn/模型/API。
 
 client/TUI 使用 send-once attempt、accepted-read ticket、确认与 typed Applied/Rejected/Partial/Unknown；response loss、timeout、
 disconnect、lag、detach、attachment replacement 或 late completion 不自动重放或覆盖新视图，操作后只用正式 query 重建。query/control
-gate 独立默认关闭，C0 prototype 保持隔离。fresh Session/store 正式轮覆盖 owner close、cold archive/unarchive、进程重启重建与 delete；
-最终独立终审无 high/medium correctness finding。
+gate 独立默认关闭，C0 prototype 保持隔离。TUI 在确认前校验 authority/target 并显示 Session/Root/目标范围，只关闭 control 不 detach
+query。fresh Session/store 正式轮覆盖 owner close、cold archive/unarchive、进程重启重建与 delete；首次独立审查发现的 2 High、
+5 Medium、1 Low 已完成整改。整改收口复核追加发现的 teardown 后 Team completion 故障也已闭合：不可回滚分支终止 Session loop，
+app-server 只移除 exact owner mapping 并保留 replacement，结果保持 typed Unknown。当前等待复验确认没有剩余 correctness finding。
 
 **目标**：消费 M4-C1 的权威 Session Query 与 M4-S2 的正式 lifecycle，通过 app-server v2→client→TUI 公开允许的在线 owner 和冷态
 Session 控制；操作后、断线、重启、冲突或结果未知时只用正式 query 重建视图，不维护第三份控制状态。
@@ -323,7 +325,7 @@ M4-S1（M4_S1_PASS）+ M4-C0（M4_C0_PROTOTYPE_PASS）
 ├─ M4-C1（M4_C1_QUERY_PASS）
 └─ M4-S2（M4_S2_PASS）
 
-M4-C1 + M4-S2 → M4-C2 / Plan 080（M4_C2_CONTROL_PASS）→ M4-Z(core)（下一必成工作包）
+M4-C1 + M4-S2 → M4-C2 / Plan 080（整改实现完成，等待独立复验）→ M4-Z(core)（验收后下一必成工作包）
 
 M4-A → M4-W0（原型/价值门）
 M4-W0 binding GO + M4-S1 → M4-W1 开始
@@ -339,9 +341,9 @@ W-only delta ─/→ S/C
 ```
 
 - M4-A 已以 `M4_A_GO` 串行完成，S/C/W 共同采用第 2 节身份、生命周期、authority 与启用合同。
-- M4-C0 已完成并提供拆包输入；Plan 074 / `#37198`、M4-S1、M4-C1、M4-S2 与 M4-C2 均已完成。Plan 080 已在合并树补跑
-  query×lifecycle 基线并完成正式控制链、fresh store/restart 场景和独立终审；S/C 必成子线下一步进入另行立项的 M4-Z(core)。
-  M4-W0 继续按自身条件推进。
+- M4-C0 已完成并提供拆包输入；Plan 074 / `#37198`、M4-S1、M4-C1 与 M4-S2 已完成。Plan 080 已在合并树补跑 query×lifecycle
+  基线、完成正式控制链和 fresh store/restart 场景，并收口首次独立审查整改；当前等待复验，接受后 S/C 必成子线才进入另行立项的
+  M4-Z(core)。M4-W0 继续按自身条件推进。
 - M4-W1 只在 binding GO 后开始，并等待 M4-S1 以复用持久接缝；最终 PASS 必须消费已完成的 M4-S2 并把
   resume/replacement binding 收口纳入自身出口，不存在无编号的后置收口包。
 - M4-Z(core) 只依赖 S/C 主线。W 若已经进入主线，由后完成者拥有一次兼容验收；W 未进入主线时不制造空实现或占位平台。
@@ -450,13 +452,14 @@ W-only delta ─/→ S/C
 
 ## 9. 实施与授权边界
 
-本文只是长程 WBS，不是实施授权。M4-A、M4-C0、Plan 074 / `#37198`、M4-S1、M4-C1、M4-S2 与 M4-C2 已完成，结论分别见本节和
-`doc/WBS-COMPLETED.md`。M4-W0、M4-W1 与 M4-Z(core) 继续服从本 WBS 的条件边；每项实施仍须确认当时主线、并行 worktree 与授权范围。
+本文只是长程 WBS，不是实施授权。M4-A、M4-C0、Plan 074 / `#37198`、M4-S1、M4-C1 与 M4-S2 已完成；M4-C2 整改实现已收口并等待
+独立复验，结论分别见本节和 `doc/WBS-COMPLETED.md`。M4-W0、M4-W1 与 M4-Z(core) 继续服从本 WBS 的条件边；每项实施仍须确认
+当时主线、并行 worktree 与授权范围。
 
 Plan 078 已消费 `#37847` 与 M4-C1 最新主线，完成 shared query/lifecycle 接缝收敛并取得 `M4_S2_PASS`。Plan 080 / M4-C2
-随后完成合并树 query×lifecycle 回归和正式 Session Control/TUI，取得 `M4_C2_CONTROL_PASS`。其它上游窄回移仍各自建立独立任务合同，并按第 3 节条件
-消费边进入主线；M4-W1 只有在 M4-W0 形成 binding GO 且 M4-S1/M4-S2 接缝成立后才可立项；可选 Workspace 控制面扩展再等待
-M4-W1 PASS，完整基线升级仍是独立方向。
+随后完成合并树 query×lifecycle 回归和正式 Session Control/TUI，并完成首次独立审查及收口复核整改；当前等待复验重判。其它上游窄回移仍各自
+建立独立任务合同，并按第 3 节条件消费边进入主线；M4-W1 只有在 M4-W0 形成 binding GO 且 M4-S1/M4-S2 接缝成立后才可立项；
+可选 Workspace 控制面扩展再等待 M4-W1 PASS，完整基线升级仍是独立方向。
 
 普通第四期实现不需要外部或付费行为；如果具体任务扩展到真实 API、模型、训练、Docker、上传或其他外部状态，必须单独说明
 范围并重新授权。

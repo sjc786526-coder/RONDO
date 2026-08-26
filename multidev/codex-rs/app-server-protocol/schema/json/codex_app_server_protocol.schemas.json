@@ -9848,40 +9848,89 @@
         "type": "object"
       },
       "DurableSessionControlPrecondition": {
-        "description": "Query proof that the server must revalidate before applying a control operation.",
-        "properties": {
-          "commitFingerprint": {
-            "type": "string"
+        "description": "Query proof that the server must revalidate before applying a control operation.\n\nA committed Team proof can authorize the operations exposed by its query projection. The delete-retry proof is deliberately narrower: it exists only after an earlier delete removed the Team snapshot but retained the canonical Root marker as the ThreadStore retry anchor.",
+        "oneOf": [
+          {
+            "properties": {
+              "commit_fingerprint": {
+                "type": "string"
+              },
+              "commit_generation": {
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "expected_residency": {
+                "$ref": "#/definitions/v2/DurableSessionResidency"
+              },
+              "expected_storage_status": {
+                "$ref": "#/definitions/v2/DurableSessionStorageStatus"
+              },
+              "owner_incarnation": {
+                "description": "Opaque identity of the observed loaded owner incarnation. Cold proofs carry `None`.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "team_instance_id": {
+                "type": "string"
+              },
+              "team_revision": {
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "type": {
+                "enum": [
+                  "committedTeam"
+                ],
+                "title": "CommittedTeamDurableSessionControlPreconditionType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "commit_fingerprint",
+              "commit_generation",
+              "expected_residency",
+              "expected_storage_status",
+              "team_instance_id",
+              "team_revision",
+              "type"
+            ],
+            "title": "CommittedTeamDurableSessionControlPrecondition",
+            "type": "object"
           },
-          "commitGeneration": {
-            "format": "uint64",
-            "minimum": 0.0,
-            "type": "integer"
-          },
-          "expectedResidency": {
-            "$ref": "#/definitions/v2/DurableSessionResidency"
-          },
-          "expectedStorageStatus": {
-            "$ref": "#/definitions/v2/DurableSessionStorageStatus"
-          },
-          "teamInstanceId": {
-            "type": "string"
-          },
-          "teamRevision": {
-            "format": "uint64",
-            "minimum": 0.0,
-            "type": "integer"
+          {
+            "description": "Proof of a canonical cold Root marker whose committed Team snapshot is already absent. Only an explicit `Delete` attempt may consume this proof.",
+            "properties": {
+              "expected_residency": {
+                "$ref": "#/definitions/v2/DurableSessionResidency"
+              },
+              "expected_storage_status": {
+                "$ref": "#/definitions/v2/DurableSessionStorageStatus"
+              },
+              "root_marker_fingerprint": {
+                "type": "string"
+              },
+              "type": {
+                "enum": [
+                  "deleteRetryAnchor"
+                ],
+                "title": "DeleteRetryAnchorDurableSessionControlPreconditionType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "expected_residency",
+              "expected_storage_status",
+              "root_marker_fingerprint",
+              "type"
+            ],
+            "title": "DeleteRetryAnchorDurableSessionControlPrecondition",
+            "type": "object"
           }
-        },
-        "required": [
-          "commitFingerprint",
-          "commitGeneration",
-          "expectedResidency",
-          "expectedStorageStatus",
-          "teamInstanceId",
-          "teamRevision"
-        ],
-        "type": "object"
+        ]
       },
       "DurableSessionControlRejectionReason": {
         "description": "Typed, side-effect-free reason why a control attempt was rejected.",

@@ -290,15 +290,38 @@ codex queue --thread UUID --message 'XXX'
   high/medium correctness finding。
 - 最终重型轮后的项目/069 target 为 `251,315,224,576 / 176,363,339,776 B`，未触及 270GB 告警线；未运行 Docker、真实 API/模型、
   训练、测评、benchmark、CI/PR 或 full-workspace 门禁。
+- 首次实现提交 `aadddf4` 的独立验收报告
+  `agent_log/2026-08-25-154410-plan080-independent-review.md` 复核出 2 个 High、5 个 Medium 和 1 个 Low；既有 45/45、17/17、
+  47/47、fresh、schema 与 snapshot 证据在原覆盖范围继续有效，但该提交不接受合并。执行者逐项核对后确认 findings 均真实存在，已在
+  原授权和同一工作树内完成整改。
+- online committed proof 现绑定当前 Root writer authority 的 owner incarnation；SetRootState 在 Team mutation gate 内复验 exact owner，
+  Close/active Archive/Delete 经同一 prepared shutdown handoff 在 M4-S2 close 线性化点复验 owner 与 Team snapshot。先赢的 Team commit
+  返回 conflict，保留 replacement owner 和新事实，不建立第二套 lifecycle manager。
+- 正式 control 显式拒绝 parented child；Delete 对“snapshot 已删、canonical Root marker 尚存”的 M4-S2 retry anchor 只提供用户在权威
+  重读后的显式 retry proof，仍不自动重放。TUI 在展示确认前完成权威 preview，并显示 Session、canonical Root 和目标范围；只关闭
+  control 不再 detach query attachment。
+- 整改收口前的独立只读复核又发现一项 Medium：持久化与 runtime 已关闭后若 Team close completion 失败，旧逻辑仍让 submission loop
+  存活，可能留下 mapped 但不可用的半关闭 Root。现按真实 rollback boundary 区分 retained/terminated completion；后者关闭 lifecycle、
+  终止 Session loop，app-server 只退休 exact owner mapping，保留 replacement，并继续返回 typed Unknown 供用户显式恢复。
+- 整改窄回归共 34 项：首轮 29 项中 27 项通过，修正真实发布后生命周期测试期望和受控 TUI snapshot 后余下 2/2 通过；随后补齐
+  default-off、query-only/control-off 与 removal token 邻接面 3/3。stable/experimental schema generator、七 crate scoped fix/clippy、
+  新增 post-persistence Team completion 故障注入 1/1、app-server exact-owner 清理邻接编译/测试 1/1，并完成 core/app-server scoped
+  fix/clippy；fmt/fmt-check 与 diff 检查均通过。所有重型命令经 canonical lock/watchdog、069 target 和 Plan 080 临时资源门执行。
+- 270GB 告警后没有扩大测试范围；确认无重型 owner、realpath/归属/非符号链接无误后，仅再次清空已获授权的 069
+  `debug/incremental`，项目/target 从 `276,932,814,938 / 203,243,122,156 B` 降至
+  `196,336,300,056 / 122,646,607,274 B`，`debug/deps` 保留。最终只读值为项目/target/incremental/deps
+  `232,965,910,785 / 159,275,684,252 / 30,800,000,843 / 127,745,879,278 B`，Windows `C:` 可用
+  `75,184,451,584 B`；所有完成的 watchdog 均 `stop=none / cleanup=none`。
 
 ### 当前工作
 
-- 产品实现、生成物、fresh 正式轮、聚焦回归和独立终审均已完成；正在同步权威文档、执行日志并形成 080 clean 本地任务提交。
+- Plan 080 产品代码、测试、生成物、权威文档与整改记录均已收口，本节随整改任务提交冻结；实现侧无已知未关闭的 high/medium
+  correctness finding。最终结论仍由整改提交后的独立复验判定，不以执行者自审冒充验收。
 
 ### 本任务剩余步骤
 
-- 完成精确写集/资源/worktree 元数据复核，在 080 分支形成 clean 本地任务提交。
-- 把最终 TUI 汇报原样嵌入用户指定模板，以声明“我是 Plan 080 / M4-C2 执行者”开头发送唯一跨会话验收消息，然后立即停止会话。
+- 无剩余 tracked 实现步骤。整改提交形成后，执行者按决策 009/010 发送一次跨会话独立验收交接并立即停止；该外部判定不通过继续改写
+  已冻结的任务合同，若返回范围内 finding，则另以新的整改批次更新“当前状态”。
 
 ### 阻塞项
 
@@ -307,7 +330,8 @@ codex queue --thread UUID --message 'XXX'
 
 ### 当前验收状态
 
-- `M4_C2_CONTROL_PASS`：阶段 A--E、fresh 正式轮和独立终审均已完成，无未关闭的高/中 correctness finding。
+- 首次实现提交 `aadddf4` 的“不通过”结论保持为历史事实；整改实现与规定的窄复验已完成，当前为 `M4_C2_CONTROL_PASS` 候选，等待
+  独立复验重判。在复验接受前不把候选状态写成最终验收通过。
 
 ### 交接边界
 
@@ -334,3 +358,5 @@ codex queue --thread UUID --message 'XXX'
 | 010 | 执行者发送的每一条审查者跨会话队列消息都在开头明确声明“我是 Plan 080 / M4-C2 执行者” | 避免跨会话沟通中身份混淆；该要求同样适用于最终验收消息 | coordination/handoff | 已采纳 |
 | 011 | 正式控制采用单一稳定 v2 `session/control`；online Root state/close 与 cold archive/unarchive/delete 共用 query proof 和 typed certainty，resume 复用正式 `thread/resume` | 避免复制 C0 多 RPC/projection，也不为已有 resume 重建一套协议；一个入口便于 server final revalidation 与 client no-replay | protocol/control | 已采纳 |
 | 012 | `Close` 的成功 effect 命名为 `OwnerClosed`，后续正式 query 的 whole-Session lifecycle 仍可为 `Unknown` | M4-S2 能权威证明 loaded canonical Root owner 已经过 barrier 并移除，但没有 whole-Session lifecycle registry；避免为 UI 虚构更强终态或另建状态轴 | lifecycle/UI | 已采纳 |
+| 013 | committed online proof 增加 Root owner incarnation；破坏性 loaded lifecycle 通过 exact submission handoff 在既有 M4-S2 close barrier 内复验 owner/Team snapshot；Delete partial 只投影显式 retry-anchor proof | Team generation 不能区分 replacement owner，请求入口复验也不能覆盖随后获胜的 Team commit；M4-S2 已保留可恢复 Root marker，不需要新 registry 或自动 retry | authority/lifecycle/delete | 已采纳 |
+| 014 | formal close 在 persistence/runtime teardown 后跨过 rollback boundary；此后 Team completion 失败必须终止 owner，并由 app-server 仅移除 exact mapping，同时保留 typed Unknown | teardown 后已无法恢复可用 runtime；继续保留映射会产生不可查询控制、不可重试的半关闭 Root，而删除 replacement 或宣称成功同样不正确 | lifecycle/failure/removal | 已采纳 |

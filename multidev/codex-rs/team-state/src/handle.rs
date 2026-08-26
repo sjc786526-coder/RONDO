@@ -50,6 +50,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::RwLock;
 use tokio::sync::watch;
+use uuid::Uuid;
 
 pub struct TeamStateHandle {
     store: Mutex<TeamStore>,
@@ -476,6 +477,87 @@ impl TeamStateHandle {
         }
     }
 
+    /// Enter the existing Root-writer close barrier only if the exact online owner and committed
+    /// Team snapshot observed by the caller are still current at that barrier.
+    ///
+    /// Root authority is closed before the mutation gate is acquired. This preserves the existing
+    /// mutation order (`mutation_gate` then `begin_write`) without deadlocking: a mutation that won
+    /// first drains before close returns, while a mutation that lost to close fails `begin_write`
+    /// and releases the gate before this comparison.
+    pub async fn begin_close_at_snapshot(
+        &self,
+        expected_owner_incarnation_id: Uuid,
+        precondition: TeamMutationPrecondition,
+    ) -> Result<Box<dyn TeamClosePermit>, TeamDurabilityError> {
+        let close = self.begin_close().await?;
+        let runtime = self.durable_runtime().ok_or_else(|| {
+            TeamDurabilityError::conflict("an in-memory Team has no durable close barrier")
+        })?;
+        let validation = {
+            let _gate = runtime
+                .mutation_gate
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            (|| {
+                let authority = runtime
+                    .authority
+                    .as_ref()
+                    .ok_or(TeamDurabilityError::ReadOnly)?;
+                if authority.owner_incarnation_id() != expected_owner_incarnation_id {
+                    return Err(TeamDurabilityError::Domain(
+                        TeamError::OwnerIncarnationConflict,
+                    ));
+                }
+                let current_commit_generation = match self.durability_status() {
+                    TeamDurabilityStatus::Writable { commit_generation } => commit_generation,
+                    TeamDurabilityStatus::ReadOnly { .. } => {
+                        return Err(TeamDurabilityError::ReadOnly);
+                    }
+                    TeamDurabilityStatus::Unknown { .. } => {
+                        return Err(TeamDurabilityError::unknown(
+                            "the previous Team commit must be reconciled",
+                        ));
+                    }
+                    TeamDurabilityStatus::Unavailable { .. } => {
+                        return Err(TeamDurabilityError::unavailable(
+                            "Team durability must be reconciled",
+                        ));
+                    }
+                    TeamDurabilityStatus::InMemory => {
+                        unreachable!("durable runtime has durable status")
+                    }
+                };
+                let current = self.with_store(|store| store.clone());
+                if current.instance() != precondition.instance
+                    || current.revision() != precondition.revision
+                    || current_commit_generation != precondition.commit_generation
+                {
+                    return Err(TeamDurabilityError::Domain(TeamError::SnapshotConflict {
+                        current_instance: current.instance(),
+                        current_revision: current.revision(),
+                        current_commit_generation,
+                    }));
+                }
+                Ok(())
+            })()
+        };
+        if let Err(error) = validation {
+            close.abort().await?;
+            return Err(error);
+        }
+        Ok(close)
+    }
+
+    /// Returns the exact live Root writer incarnation for an owner handle.
+    pub fn owner_incarnation_id(&self) -> Option<Uuid> {
+        self.durable_runtime().and_then(|runtime| {
+            runtime
+                .authority
+                .as_ref()
+                .map(|authority| authority.owner_incarnation_id())
+        })
+    }
+
     fn mark_durability_failure(
         runtime: &DurableRuntime,
         expected_generation: u64,
@@ -550,6 +632,16 @@ impl TeamStateHandle {
         precondition: Option<TeamMutationPrecondition>,
         mutate: impl FnOnce(&mut TeamStore) -> Result<R, TeamDurabilityError>,
     ) -> Result<R, TeamDurabilityError> {
+        self.durable_mutate_for_owner(notify, None, precondition, mutate)
+    }
+
+    fn durable_mutate_for_owner<R>(
+        &self,
+        notify: bool,
+        expected_owner_incarnation_id: Option<Uuid>,
+        precondition: Option<TeamMutationPrecondition>,
+        mutate: impl FnOnce(&mut TeamStore) -> Result<R, TeamDurabilityError>,
+    ) -> Result<R, TeamDurabilityError> {
         let runtime = self.durable_runtime().ok_or_else(|| {
             TeamDurabilityError::conflict("this Team uses the in-memory mutation path")
         })?;
@@ -561,6 +653,13 @@ impl TeamStateHandle {
             .mutation_gate
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if expected_owner_incarnation_id
+            .is_some_and(|expected| authority.owner_incarnation_id() != expected)
+        {
+            return Err(TeamDurabilityError::Domain(
+                TeamError::OwnerIncarnationConflict,
+            ));
+        }
         let expected_generation = match self.durability_status() {
             TeamDurabilityStatus::Writable { commit_generation } => commit_generation,
             TeamDurabilityStatus::ReadOnly { .. } => return Err(TeamDurabilityError::ReadOnly),
@@ -874,6 +973,30 @@ impl TeamStateHandle {
         self.durable_mutate(true, Some(precondition), |store| {
             store.update_lifecycle(actor, request).map_err(Into::into)
         })
+        .map_err(TeamError::from)
+    }
+
+    /// Apply a lifecycle update only while both the exact live Root writer incarnation and the
+    /// caller's committed Team snapshot remain current at the durable mutation linearization
+    /// point.
+    pub fn update_lifecycle_at_snapshot_for_owner(
+        &self,
+        actor: ThreadId,
+        expected_owner_incarnation_id: Uuid,
+        precondition: TeamMutationPrecondition,
+        request: LifecycleRequest,
+    ) -> Result<LifecycleOutcome, TeamError> {
+        if self.durable_runtime().is_none() {
+            return Err(TeamError::Durability {
+                reason: "formal Session control requires a durable Team".to_string(),
+            });
+        }
+        self.durable_mutate_for_owner(
+            true,
+            Some(expected_owner_incarnation_id),
+            Some(precondition),
+            |store| store.update_lifecycle(actor, request).map_err(Into::into),
+        )
         .map_err(TeamError::from)
     }
 

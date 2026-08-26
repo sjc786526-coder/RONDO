@@ -13,11 +13,11 @@ use serde_json::json;
 fn bridge_uses_one_query_projection_and_retires_late_results_after_loss() {
     let query = Mutex::new(fresh_query());
     let bridge = DurableSessionControlBridge::new();
-    let accepted = bridge
-        .accepted_read_ticket(&query)
-        .expect("fresh query should expose its accepted ticket");
+    let preview = bridge
+        .preview(&query, DurableSessionControlOperation::Close)
+        .expect("fresh query should expose an available operation");
     let attempt = bridge
-        .begin(&query, accepted, DurableSessionControlOperation::Close)
+        .begin(&query, preview)
         .expect("fresh formal proof should produce one attempt");
 
     let retired = {
@@ -49,6 +49,33 @@ fn bridge_uses_one_query_projection_and_retires_late_results_after_loss() {
                 effect: DurableSessionControlEffect::OwnerClosed,
             },
         },
+    ));
+}
+
+#[test]
+fn control_disable_retires_a_preview_without_detaching_the_query() {
+    let query = Mutex::new(fresh_query());
+    let bridge = DurableSessionControlBridge::new();
+    let preview = bridge
+        .preview(&query, DurableSessionControlOperation::Delete)
+        .expect("fresh query should expose an available operation");
+
+    {
+        let mut query = query
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        assert!(!bridge.retire_pending_as_unknown(&mut query, DISABLED_RESULT_MESSAGE));
+        query.on_lagged();
+        assert!(matches!(
+            query.attachment(),
+            Some(codex_app_server_client::DurableSessionQueryAttachment::Session(_))
+        ));
+        assert_eq!(query.view_freshness(), QueryViewFreshness::Stale);
+    }
+
+    assert!(matches!(
+        bridge.begin(&query, preview),
+        Err(DurableSessionControlCaptureError::QueryViewNotFresh)
     ));
 }
 
@@ -90,8 +117,10 @@ fn formal_session_response() -> DurableSessionReadResponse {
                 "delete": available
             },
             "controlPrecondition": {
+                "type": "committedTeam",
                 "expectedStorageStatus": "active",
                 "expectedResidency": "observedOwnerHere",
+                "ownerIncarnation": "owner-a",
                 "teamInstanceId": "team-a",
                 "teamRevision": 7,
                 "commitGeneration": 4,

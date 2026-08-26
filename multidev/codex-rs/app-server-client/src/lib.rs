@@ -71,6 +71,7 @@ pub use crate::durable_session_control::DurableSessionControlAttemptState;
 pub use crate::durable_session_control::DurableSessionControlAttemptTicket;
 pub use crate::durable_session_control::DurableSessionControlCaptureError;
 pub use crate::durable_session_control::DurableSessionControlCertainty;
+pub use crate::durable_session_control::DurableSessionControlPreview;
 pub use crate::durable_session_query::CommittedProjection;
 pub use crate::durable_session_query::CommittedProjectionConflict;
 pub use crate::durable_session_query::DurableSessionQueryAttachment;

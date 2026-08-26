@@ -8,6 +8,7 @@ use std::sync::Mutex;
 use std::sync::MutexGuard;
 use std::sync::Weak;
 use tokio::sync::Notify;
+use uuid::Uuid;
 
 use crate::ThreadStoreError;
 use crate::ThreadStoreResult;
@@ -21,6 +22,7 @@ use crate::local::writer_lock::WriterLockGuard;
 #[derive(Clone)]
 pub struct RootWriterAuthority {
     thread_id: ThreadId,
+    incarnation_id: Uuid,
     state: Weak<RootWriterAuthorityState>,
 }
 
@@ -28,6 +30,14 @@ impl RootWriterAuthority {
     /// Returns the thread whose canonical writer owns this authority.
     pub fn thread_id(&self) -> ThreadId {
         self.thread_id
+    }
+
+    /// Returns the opaque identity of this exact live Root writer incarnation.
+    ///
+    /// A same-ID resume creates a fresh authority state and therefore a different value. Keeping
+    /// the value grants no write capability; callers still need a live permit from this authority.
+    pub fn incarnation_id(&self) -> Uuid {
+        self.incarnation_id
     }
 
     /// Starts one Team mutation under the live writer authority.
@@ -161,6 +171,7 @@ impl Drop for RootClosePermit {
 
 pub(crate) struct RootWriterAuthorityState {
     thread_id: ThreadId,
+    incarnation_id: Uuid,
     rollout_path: PathBuf,
     inner: Mutex<AuthorityInner>,
     writes_drained: Notify,
@@ -200,6 +211,7 @@ impl RootWriterAuthorityState {
     ) -> Arc<Self> {
         Arc::new(Self {
             thread_id,
+            incarnation_id: Uuid::new_v4(),
             rollout_path,
             inner: Mutex::new(AuthorityInner {
                 owner_attached: true,
@@ -217,6 +229,7 @@ impl RootWriterAuthorityState {
     pub(crate) fn downgrade(self: &Arc<Self>) -> RootWriterAuthority {
         RootWriterAuthority {
             thread_id: self.thread_id,
+            incarnation_id: self.incarnation_id,
             state: Arc::downgrade(self),
         }
     }
@@ -506,6 +519,21 @@ mod tests {
 
         drop(state);
         assert!(authority.begin_write().is_err());
+    }
+
+    #[test]
+    fn incarnation_id_is_stable_for_the_handle_after_owner_drop() {
+        let (_home, state) = authority_state();
+        let authority = state.downgrade();
+        let incarnation_id = authority.incarnation_id();
+        assert_eq!(state.downgrade().incarnation_id(), incarnation_id);
+
+        drop(state);
+        assert_eq!(authority.incarnation_id(), incarnation_id);
+        assert!(authority.begin_write().is_err());
+
+        let (_replacement_home, replacement) = authority_state();
+        assert_ne!(replacement.downgrade().incarnation_id(), incarnation_id);
     }
 
     #[test]

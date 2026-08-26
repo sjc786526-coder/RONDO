@@ -133,6 +133,7 @@ fn wire_identity_preserves_distinct_session_and_root_ids() {
         DurableSessionResidency::NotObservedHere,
         None,
         false,
+        None,
     );
     assert_eq!(view.identity.session_id, session_id.to_string());
     assert_eq!(

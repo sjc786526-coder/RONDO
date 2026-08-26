@@ -670,11 +670,11 @@ async fn formal_session_control(
     app_server: &AppServerSession,
     operation: DurableSessionControlOperation,
 ) -> Result<DurableSessionControlResponse> {
-    let accepted = app_server
-        .durable_session_control_accepted_read_ticket()
-        .expect("formal control requires an accepted fresh read");
+    let preview = app_server
+        .durable_session_control_preview(operation)
+        .expect("formal control requires an available fresh read");
     let attempt = app_server
-        .durable_session_control_begin(accepted, operation)
+        .durable_session_control_begin(preview)
         .expect("fresh proof should start one formal attempt");
     let response = app_server
         .request_handle()

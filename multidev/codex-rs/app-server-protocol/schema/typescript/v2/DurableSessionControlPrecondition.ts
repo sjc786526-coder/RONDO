@@ -6,5 +6,13 @@ import type { DurableSessionStorageStatus } from "./DurableSessionStorageStatus"
 
 /**
  * Query proof that the server must revalidate before applying a control operation.
+ *
+ * A committed Team proof can authorize the operations exposed by its query projection. The
+ * delete-retry proof is deliberately narrower: it exists only after an earlier delete removed the
+ * Team snapshot but retained the canonical Root marker as the ThreadStore retry anchor.
  */
-export type DurableSessionControlPrecondition = { expectedStorageStatus: DurableSessionStorageStatus, expectedResidency: DurableSessionResidency, teamInstanceId: string, teamRevision: number, commitGeneration: number, commitFingerprint: string, };
+export type DurableSessionControlPrecondition = { "type": "committedTeam", expectedStorageStatus: DurableSessionStorageStatus, expectedResidency: DurableSessionResidency,
+/**
+ * Opaque identity of the observed loaded owner incarnation. Cold proofs carry `None`.
+ */
+ownerIncarnation: string | null, teamInstanceId: string, teamRevision: number, commitGeneration: number, commitFingerprint: string, } | { "type": "deleteRetryAnchor", expectedStorageStatus: DurableSessionStorageStatus, expectedResidency: DurableSessionResidency, rootMarkerFingerprint: string, };

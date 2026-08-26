@@ -30,6 +30,31 @@ fn parses_only_formal_control_commands() {
 }
 
 #[test]
+fn confirmation_target_names_the_authoritative_root_and_state_transition() {
+    assert_eq!(
+        confirmation_target(
+            "session-a",
+            "root-a",
+            &DurableSessionControlOperation::SetRootState {
+                version_id: "version-a".to_string(),
+                expected_producer_state: DurableSessionTeamProducerState::Open,
+                expected_root_state: DurableSessionTeamRootState::Tracking,
+                next_root_state: DurableSessionTeamRootState::Resolved,
+            },
+        ),
+        "Session=session-a; canonical Root=root-a; version=version-a; expected producer=open; expected Root=tracking; next Root=resolved"
+    );
+    assert_eq!(
+        confirmation_target(
+            "session-a",
+            "root-a",
+            &DurableSessionControlOperation::Delete,
+        ),
+        "Session=session-a; canonical Root=root-a; target=canonical Root subtree"
+    );
+}
+
+#[test]
 fn formal_control_result_gallery() {
     let applied = render_completion(&DurableSessionControlResponse {
         outcome: DurableSessionControlOutcome::Applied {

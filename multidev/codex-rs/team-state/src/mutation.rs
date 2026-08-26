@@ -230,6 +230,8 @@ pub enum TeamError {
         current_revision: TeamRevision,
         current_commit_generation: u64,
     },
+    /// The caller acted on a previous live Root writer incarnation for the same durable lineage.
+    OwnerIncarnationConflict,
     /// The caller's session is not a registered participant of this team instance. Team
     /// capabilities are refused rather than defaulted.
     UnknownParticipant,
@@ -304,6 +306,9 @@ impl fmt::Display for TeamError {
                 f,
                 "Team snapshot changed: current instance={current_instance} revision={current_revision} commit_generation={current_commit_generation}"
             ),
+            Self::OwnerIncarnationConflict => {
+                f.write_str("the loaded Root writer incarnation changed after it was read")
+            }
             Self::UnknownParticipant => f.write_str(
                 "this session is not a registered participant of the team; team tools are unavailable",
             ),

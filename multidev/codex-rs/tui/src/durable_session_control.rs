@@ -1,6 +1,6 @@
 //! Parsing and deterministic copy for the formal `/session-control` UI.
 
-use codex_app_server_client::QueryReadTicket;
+use codex_app_server_client::DurableSessionControlPreview;
 use codex_app_server_protocol::DurableSessionControlEffect;
 use codex_app_server_protocol::DurableSessionControlOperation;
 use codex_app_server_protocol::DurableSessionControlOutcome;
@@ -59,8 +59,7 @@ impl DurableSessionControlCommand {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct DurableSessionControlConfirmation {
-    pub(crate) accepted_query_read_ticket: QueryReadTicket,
-    pub(crate) operation: DurableSessionControlOperation,
+    pub(crate) preview: DurableSessionControlPreview,
 }
 
 pub(crate) fn operation_label(operation: &DurableSessionControlOperation) -> &'static str {
@@ -70,6 +69,36 @@ pub(crate) fn operation_label(operation: &DurableSessionControlOperation) -> &'s
         DurableSessionControlOperation::Archive => "archive",
         DurableSessionControlOperation::Unarchive => "unarchive",
         DurableSessionControlOperation::Delete => "permanently delete",
+    }
+}
+
+pub(crate) fn confirmation_target(
+    session_id: &str,
+    root_thread_id: &str,
+    operation: &DurableSessionControlOperation,
+) -> String {
+    let target = format!("Session={session_id}; canonical Root={root_thread_id}");
+    match operation {
+        DurableSessionControlOperation::SetRootState {
+            version_id,
+            expected_producer_state,
+            expected_root_state,
+            next_root_state,
+        } => format!(
+            "{target}; version={version_id}; expected producer={}; expected Root={}; next Root={}",
+            producer_state_label(*expected_producer_state),
+            root_state_label(*expected_root_state),
+            root_state_label(*next_root_state),
+        ),
+        DurableSessionControlOperation::Close => {
+            format!("{target}; target=loaded canonical Root owner")
+        }
+        DurableSessionControlOperation::Archive | DurableSessionControlOperation::Delete => {
+            format!("{target}; target=canonical Root subtree")
+        }
+        DurableSessionControlOperation::Unarchive => {
+            format!("{target}; target=stored canonical Root")
+        }
     }
 }
 
@@ -149,12 +178,27 @@ fn parse_producer_state(value: &str) -> Option<DurableSessionTeamProducerState> 
     }
 }
 
+fn producer_state_label(state: DurableSessionTeamProducerState) -> &'static str {
+    match state {
+        DurableSessionTeamProducerState::Open => "open",
+        DurableSessionTeamProducerState::Closed => "closed",
+    }
+}
+
 fn parse_root_state(value: &str) -> Option<DurableSessionTeamRootState> {
     match value.to_ascii_lowercase().as_str() {
         "pending" => Some(DurableSessionTeamRootState::Pending),
         "tracking" => Some(DurableSessionTeamRootState::Tracking),
         "resolved" => Some(DurableSessionTeamRootState::Resolved),
         _ => None,
+    }
+}
+
+fn root_state_label(state: DurableSessionTeamRootState) -> &'static str {
+    match state {
+        DurableSessionTeamRootState::Pending => "pending",
+        DurableSessionTeamRootState::Tracking => "tracking",
+        DurableSessionTeamRootState::Resolved => "resolved",
     }
 }
 

@@ -19,18 +19,38 @@ pub struct DurableSessionControlParams {
 }
 
 /// Query proof that the server must revalidate before applying a control operation.
+///
+/// A committed Team proof can authorize the operations exposed by its query projection. The
+/// delete-retry proof is deliberately narrower: it exists only after an earlier delete removed the
+/// Team snapshot but retained the canonical Root marker as the ThreadStore retry anchor.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+#[ts(tag = "type")]
 #[ts(export_to = "v2/")]
-pub struct DurableSessionControlPrecondition {
-    pub expected_storage_status: DurableSessionStorageStatus,
-    pub expected_residency: DurableSessionResidency,
-    pub team_instance_id: String,
-    #[ts(type = "number")]
-    pub team_revision: u64,
-    #[ts(type = "number")]
-    pub commit_generation: u64,
-    pub commit_fingerprint: String,
+pub enum DurableSessionControlPrecondition {
+    CommittedTeam {
+        expected_storage_status: DurableSessionStorageStatus,
+        expected_residency: DurableSessionResidency,
+        /// Opaque identity of the observed loaded owner incarnation. Cold proofs carry `None`.
+        owner_incarnation: Option<String>,
+        team_instance_id: String,
+        #[ts(type = "number")]
+        team_revision: u64,
+        #[ts(type = "number")]
+        commit_generation: u64,
+        commit_fingerprint: String,
+    },
+    /// Proof of a canonical cold Root marker whose committed Team snapshot is already absent.
+    /// Only an explicit `Delete` attempt may consume this proof.
+    DeleteRetryAnchor {
+        expected_storage_status: DurableSessionStorageStatus,
+        expected_residency: DurableSessionResidency,
+        root_marker_fingerprint: String,
+    },
 }
 
 /// Mutation requested from the current canonical Durable Session authority.
