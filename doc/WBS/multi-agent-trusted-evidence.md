@@ -1,7 +1,7 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
 最后更新：2026-08-26 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
-状态：**第一期、第二期、M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、M3-C2、Plan 064、Plan 071、Plan 073、Plan 075、Plan 079、Plan 081、Plan 082 与四期 M4-A、M4-C0、M4-S1、M4-C1、M4-S2、M4-C2、M4-Z(core)、Plan 083、Plan 084 已完成；Plan 087 已立项、阶段 A 待执行且付费门关闭；Plan 060 技术 GO、Plan 064 DATA_GO、Plan 066 正式训练 GO；Plan 071 为 `BASE_COMPARABILITY_GO`，Plan 073 / M3-C2 为 `NO-GO`，Plan 079 为 `4B_BASE_QUALITY_NO_GO`，Plan 081 为 `LOCAL_TRAINING_READINESS_PASS`；Plan 082 最终验收通过，研究终态为 `VALID_NO_IMPROVEMENT`，训练/transfer Pod 均已释放，用户本人决定继续保留网络卷且该卷当前仍未删除；Plan 087 将在 9 USD 内自适应搜索更大 exact 1.7B 原参数路线，M3-D 保持锁定；M4-A 为 `M4_A_GO`，M4-C0 为 `M4_C0_PROTOTYPE_PASS`，M4-S1 为 `M4_S1_PASS`，M4-C1 为 `M4_C1_QUERY_PASS`，M4-S2 为 `M4_S2_PASS`，M4-C2 为 `M4_C2_CONTROL_PASS`，M4-Z(core) 为 `M4_Z_CORE_PASS`，M4-W0 为 `BINDING_ONLY_GO`**
+状态：**第一期、第二期、M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、M3-C2、Plan 064、Plan 071、Plan 073、Plan 075、Plan 079、Plan 081、Plan 082 与四期 M4-A、M4-C0、M4-S1、M4-C1、M4-S2、M4-C2、M4-Z(core)、Plan 083、Plan 084 已完成；Plan 060 技术 GO、Plan 064 DATA_GO、Plan 066 正式训练 GO；Plan 071 为 `BASE_COMPARABILITY_GO`，Plan 073 / M3-C2 为 `NO-GO`，Plan 079 为 `4B_BASE_QUALITY_NO_GO`，Plan 081 为 `LOCAL_TRAINING_READINESS_PASS`；Plan 082 最终验收通过，研究终态为 `VALID_NO_IMPROVEMENT`，训练/transfer Pod 均已释放，用户本人决定继续保留网络卷且该卷当前仍未删除；Plan 087 非付费阶段 A 已实现并通过本地聚焦门禁，等待审查者验收且付费门关闭，M3-D 保持锁定；M4-A 为 `M4_A_GO`，M4-C0 为 `M4_C0_PROTOTYPE_PASS`，M4-S1 为 `M4_S1_PASS`，M4-C1 为 `M4_C1_QUERY_PASS`，M4-S2 为 `M4_S2_PASS`，M4-C2 为 `M4_C2_CONTROL_PASS`，M4-Z(core) 为 `M4_Z_CORE_PASS`，M4-W0 为 `BINDING_ONLY_GO`**
 
 ## 当前定位
 
@@ -66,9 +66,9 @@ archive/unarchive/delete 跟随 Root 的原生权威生命周期。Team clone/br
   量化或授予本地产品资格。
 - Plan 060/066 已历史性证明单张 RunPod H100 PCIe 80GB 上的 BF16 全参数 FlashAdamW 训练、checkpoint 与恢复技术可行；
   该固定 recipe 后续出现模型质量与排序退化，因此不再作为当前冻结路线，也不改写其当时的技术/执行成功事实。
-- 当前 Plan 087 路线继续使用 exact 1.7B、既有 pair 设计、输入语义与冻结 v8 数据，明确禁止 LoRA/QLoRA/PEFT 与量化训练；
-  允许依据同 cohort validation 自适应改变原参数更新范围、优化动态、既有 objective 家族内部权重/组合和观察/checkpoint 节奏。
-  具体路线数、层数/模块、学习率、batch、更新数、优化器、scheduler 与切换策略不在 WBS 预先冻结。
+- 当前 Plan 087 路线继续使用 exact 1.7B、既有 pair 设计、输入语义与冻结 v8 数据，明确禁止 LoRA/QLoRA/PEFT 与量化训练；允许在
+  既有 objective 家族内按同 cohort validation 自适应改变原参数 scope、优化动态、组件权重/组合和观察/checkpoint 节奏。具体路线数、
+  层数/模块、学习率、batch、更新数、优化器、scheduler 与切换策略不在 WBS 预先冻结。
 - 训练控制须支持多个连续更新/观测点、同口径 validation 质量趋势、模型评价快照与完整恢复 checkpoint 分层，以及
   base/best/latest/少量关键转折点保留。base 继续作为研究 incumbent，只有同口径优于 base 的训练结果才成为目标候选；
   未优于 base 时诚实记录 no-improvement。当前研究不要求候选直接达到产品 GO，开发期 validation 不冒充 M3-C2 或 unseen 证据。
@@ -103,7 +103,7 @@ M3-B1c 正式分阶段训练与工件回收          │
                        ↓ `LOCAL_TRAINING_READINESS_PASS` 已成立
         Plan 082 云端连续训练与候选形成（已完成；`VALID_NO_IMPROVEMENT`，0 Pod，用户决定保留卷且仍未删除）
                        ↓
-        Plan 087 云端自适应原参数路线搜索（已立项；阶段 A 待执行，付费门关闭）
+        Plan 087 云端自适应原参数路线搜索（阶段 A 已实现待审；付费门关闭）
                        ╳
                  M3-D 端到端收口（未解锁）
 ```
@@ -358,23 +358,23 @@ S3-compatible API manifest 驱动续传并校验；本轮因 US-TX-3 不受支�
 `TRAINING_IMPROVEMENT_FOUND`、`VALID_NO_IMPROVEMENT`
 或诚实的 `INCONCLUSIVE`；前两个都完成研究目标，均不直接授予产品资格或解锁 M3-D。
 
-#### Plan 087：exact 1.7B 云端自适应原参数路线搜索（已立项）
+#### Plan 087：exact 1.7B 云端自适应原参数路线搜索（阶段 A 待审）
 
 **任务合同**：[`Plan 087 ExecPlan`](../../plan/087-publication-critic-cloud-adaptive-original-parameter-search-execplan.md)。
 
-**目标**：接续 Plan 082 已证明无改善的 score-head-only 路线，在 exact 1.7B、冻结 v8/pair/input、unseen 隔离和非 PEFT/非量化训练边界内，
-使用单张 A40/L40S 48GB 与不超过 9 USD 的任务新增外部费用，自适应搜索更有能力的原参数更新路线。路线可按同 cohort validation 调整
-参数范围、优化动态、既有 objective 内部权重/组合及更新/观察/checkpoint 节奏；不要求分离单一因果，也不建设通用调参平台。
+**当前状态**：非付费阶段 A 已在专用 worktree 实现 Plan 087 薄层：Plan 082 固定 recipe/formal validator 保持不变，新增可变但有界的
+原参数 recipe、从真实 parameter inventory 动态解析并单调扩大的 terminal-backbone scope、同 cohort 完整指标/pair margin 候选材料、
+路线 lineage、hash-linked 累计保守预算、checkpoint 容量预检、独立进程精确恢复后入选、source/data bundle、任务根写入约束、小型回传
+allowlist、幂等 Pod create 和歧义 stop/delete 后核对到 0 的终态入口。两条初始路线在 scope、scheduler、学习率与既有 objective 权重上有实际区别。聚焦 fake/fixture 与 Plan 081/082
+历史回归已通过；Stage A bundle 物理只含 train+validation，unseen rows/body 为 0。当前无 RunPod/HF 查询、真实模型、训练、费用或候选证据；
+必须先经指定审查者明确回复批准，付费授权才生效。
 
-**阶段与终态**：非付费阶段 A 先在专用 worktree 闭合薄能力、输入、运行入口、测试、预算与资产语义，提交后由审查者验收并明确批准才能
-进入付费阶段。付费阶段同时最多一个 Pod，找到候选即停；余额不足下一次完整有意义闭环时主动结束。终态为
-`PROMISING_CANDIDATE_RETAINED`、`BUDGET_EXHAUSTED_NO_CANDIDATE` 或 `INCONCLUSIVE_INFRASTRUCTURE`；前两个完成任务，第三个不表示
-模型路线失败。用户当前余额 9.14 USD，其中本任务最多消费 9 USD、其余 0.14 USD 留给终态后按需扩至最高 60GB 的网络卷；
-卷从当下够用的最小容量起步，不要求直接创建为 60GB，终态后的卷费不计入任务预算。
-
-**交接**：无论终态如何，都只回传验收与后续本地必需的小型资产，随后释放全部 Pod并确认 compute 止费；完整 checkpoint、权重和其它大工件
-留在网络卷，任何现有或新卷均不删除。候选只表示被反复用于自适应的 validation 上具有继续研究潜力，后续须另行立项从干净状态正式复现。
-本任务不运行 M3-C1/M3-C2、unseen、产品启用或 M3-D；无候选时以预算搜索窗口耗尽收口，基础设施证据不足与路线失败分开记录。
+**付费边界与终态**：阶段 B 启动时冻结实时余额基线与
+`min(9 USD, baseline - 0.14 USD)` 初始可用额；每个动作同时受累计保守任务费用、当前余额减 0.14 USD 和账单延迟止费余量约束。
+只用一张 A40/L40S 48GB、同时最多一个计费 Pod；优先只读 Plan 082 roots 的现有卷 `mwemzrn33y`，唯一远端写入是新 Plan 087 task root，
+容量只按需渐扩至最高 60GB，任何卷都不删除。终态为 `PROMISING_CANDIDATE_RETAINED`、`BUDGET_EXHAUSTED_NO_CANDIDATE` 或
+`INCONCLUSIVE_INFRASTRUCTURE`；前两个完成研究任务，第三个不表示模型路线失败。无论终态都先回传小型结果，再删除全部 Pod并确认
+0 Pod/compute 止费；大型 checkpoint 留卷。候选只进入后续另行立项的干净正式复现，不解锁 M3-C1/M3-C2、unseen、产品启用或 M3-D。
 
 ### D 阶段：端到端收口
 
@@ -393,7 +393,7 @@ S3-compatible API manifest 驱动续传并校验；本轮因 US-TX-3 不受支�
 - 完成证据归档到 `doc/WBS-COMPLETED.md`，本页只保留最终产品事实和后续仍有效的边界。
 
 **当前状态**：Plan 073 / M3-C2 为 `NO-GO`，Plan 079 为 `4B_BASE_QUALITY_NO_GO`，Plan 082 为
-`VALID_NO_IMPROVEMENT`；Plan 087 已立项但只搜索研究候选，当前阶段 A 待执行且付费门关闭。本阶段仍未解锁或启动，三期没有最终模型、
+`VALID_NO_IMPROVEMENT`；Plan 087 当前只完成非付费阶段 A，尚无真实候选且付费门关闭。本阶段仍未解锁或启动，三期没有最终模型、
 threshold、本地运行配置或产品资格。
 
 ## 串并行与资源关系
@@ -409,9 +409,8 @@ threshold、本地运行配置或产品资格。
 - Plan 081 已在独立 worktree 内完成 Publication Critic Python/训练合同与三期 WBS，不运行 Cargo、Docker、真实模型/GPU或云计算，
   不写/清理 Plan 069 target，也不以 Plan 079 卷为前置。Plan 082 已完成真实正式轮、GPU 专项验收和大型资产交接，训练 Pod 与一次性
   transfer Pod 均已释放并确认 compute 止费；最终验收已通过，用户本人决定继续保留网络卷 `mwemzrn33y`，该卷当前仍未删除。
-- Plan 087 不运行本地 Cargo、Docker或真实模型，不创建 Cargo target，不下载大型 checkpoint 到项目空间；RunPod 单 GPU 搜索可与
-  Plan 086 / `#39616` 本地重型 Rust 工作并行。两者共享的顶层 WBS 由后完成者基于届时 main 窄整合，不覆盖另一方向进展。
-- RunPod 云端 smoke/训练不占本地 Cargo build lock，可与产品代码、数据整理和四期非冲突开发并行；真实本地模型、
+- Plan 087 阶段 A 不运行本地 Cargo、Docker或真实模型；阶段 B 获批后只使用一个远端 A40/L40S Pod，可与四期不冲突的本地工作并行。
+  RunPod 云端训练不占本地 Cargo build lock；真实本地模型、
   Docker 与重型 Cargo 仍按根 `AGENTS.md` 全局串行。
 - 三期与已经正式收口的方向 1 没有产品依赖。如果未来重新启动方向 1，普通工作仍可并行安排，但共享 API 预算、
   本地 GPU、Docker、构建锁和磁盘时必须显式错峰。
@@ -515,6 +514,9 @@ threshold、本地运行配置或产品资格。
   15 USD 上限，且该付费授权只有在阶段 A 经最终审查者验收、用户本人再明确人工批准后才生效。训练完成后的强制审查等待、0 Pod
   S3 回传和删卷等待费用另行持续报告；任务总累计费用首次达到 10 USD 时非阻断告警。Plan 082 正式 Pod 只能在 GPU 专项审查确认无需
   再用后释放，任务网络卷删除还须用户本人另行明确人工批准。
+- Plan 087 已获得用户预置的阶段 B 外部动作与 9 USD 上限授权，但该授权只有指定审查者明确回复“阶段 A 验收通过，批准进入付费阶段”后
+  才生效；此前不得查询 RunPod/HF live 状态、上传、创建资源、下载/运行模型或产生费用。生效后可按 Plan 087 合同处理一个 A40/L40S Pod、
+  任务卷、exact HF revision 与窄 train+validation/source archive；不得发布模型/数据、删除卷、读取 unseen、使用第三种 GPU 或并行计费 Pod。
 - Plan 068、Plan 071 与 Plan 073 的一次性授权已随本地交接、真实推理、资格/联合横评、独立验收和 exact winner 卷删除全部完成，
   不向后续任务延伸。M3-D、新候选或继续训练、云资源、远端上传、真实 API 与产品启用均须另建任务并取得相应授权。
 - 训练数据、权重、逐样本输出与私有运行材料留在 `eval-data/` 或仓库外；`training/` 只保存体积合规的轻量合同与数据。

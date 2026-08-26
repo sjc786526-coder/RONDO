@@ -272,18 +272,26 @@ XXX用以下内容代替：
   按模板形成 Plan 087 合同并窄同步当前 WBS；未创建 ignored 任务资产、未访问 RunPod/HF、未产生费用。
 - 2026-08-26：两路只读独立复核检查 prior art、WBS/Git 边界与计划全文；发现的预算累计公式、卷读写范围和 RunPod 上传例外三项 Medium
   合同歧义已修订，复验无剩余 High/Medium correctness/functionality finding。
+- 2026-08-26：执行者完成阶段 A 实现：在 Plan 081/082 中性核心之上增加 Plan 087 adaptive recipe/scope/search/finalize 薄层，
+  闭合路线 lineage、hash-linked 累计保守预算、decimal GB 与实际可用 bytes 容量门、独立进程精确恢复后入选、三终态、窄 source/data
+  bundle、任务根写入边界、小型回传 allowlist、幂等 Pod create 与歧义 stop/delete 后核对；Plan 082 fixed recipe/formal validator
+  保持历史语义。
+- 2026-08-26：两条初始路线、云端 runbook 与 exact Hugging Face revision bootstrap 已准备；新增测试与 Plan 081/082 相关历史回归共
+  84 项通过（另有 34 个 subtests），shell syntax、Python AST、定向 Ruff 与 diff 检查通过。Stage A 本地数据投影只含
+  train+validation，物理 unseen rows/body 为 0；未查询或修改 RunPod/HF、未运行本地真实模型/Cargo/Docker、未产生费用。
+- 2026-08-26：两路独立只读实现审查提出的容量口径/实际余量、费用快照链、恢复 receipt 绑定、路线 evidence lineage、远端任务根写入、
+  Pod API 歧义回查与小型 handoff 边界已窄修；focused tests 与 runbook 操作序列随整改同步，两路最终复验均无剩余 High/Medium finding。
 
 ### 当前工作
 
-- 规划成果等待交给执行者；阶段 A 尚未开始，付费门关闭。
+- 阶段 A 已实现并完成本地门禁，正在形成 clean task-branch 提交与审查队列交接；付费门仍关闭。
 
 ### 本任务剩余步骤
 
-1. 执行者在既有 worktree 完成阶段 A 实现、输入/入口准备、聚焦测试、自检、文档/日志和提交。
-2. 执行者用指定队列申请阶段 A 验收；审查者关闭高/中等级 correctness/functionality finding，并明确决定是否批准进入阶段 B。
-3. 获批后刷新 live 资源/费用/余额，选择单张 A40/L40S 与卷策略，打通真实链路并从 clean exact base 开始预算内自适应搜索。
-4. 形成三个终态之一，保留相称资产、释放全部 Pod、确认 compute 止费，回传小型结果，更新任务状态/WBS/结果/精炼日志并提交。
-5. 执行者用指定队列请求最终验收；审查者完成相称独立复核与必要整改，验收通过后收口完成历史。
+1. 执行者提交阶段 A 后用指定队列申请验收；审查者关闭高/中等级 correctness/functionality finding，并明确决定是否批准进入阶段 B。
+2. 获批后刷新 live 资源/费用/余额，选择单张 A40/L40S 与卷策略，打通真实链路并从 clean exact base 开始预算内自适应搜索。
+3. 形成三个终态之一，保留相称资产、释放全部 Pod、确认 compute 止费，回传小型结果，更新任务状态/WBS/结果/精炼日志并提交。
+4. 执行者用指定队列请求最终验收；审查者完成相称独立复核与必要整改，验收通过后收口完成历史。
 
 ### 阻塞项
 
@@ -292,7 +300,7 @@ XXX用以下内容代替：
 
 ### 当前验收状态
 
-- `PLAN_READY / STAGE_A_PENDING / PAID_GATE_CLOSED`；尚无实现、真实训练或候选证据。
+- `STAGE_A_IMPLEMENTED / REVIEW_PENDING / PAID_GATE_CLOSED`；只有本地 fake/fixture/bundle 证据，尚无真实训练、费用或候选证据。
 
 ### 交接边界
 
@@ -317,3 +325,8 @@ XXX用以下内容代替：
 | 009 | Plan 087 不占本地重型资源，可与 Plan 086 并行；共享 WBS 由后完成者基于届时 main 窄整合 | 避免 Cargo/Docker/本地模型与共享文档互相覆盖 | concurrency | 已采纳 |
 | 010 | 阶段 A、额外请示和最终验收只走用户指定 Codex queue，每条消息主动声明执行者身份 | 满足跨会话审批和自动唤醒边界 | coordination | 已采纳 |
 | 011 | worktree 只提交，合并、推送、分支归档和 worktree 清理等待用户批准 | 遵循本次明确交付边界 | delivery | 已采纳 |
+| 012 | 候选判断保留完整指标与执行者四项整体判断，不冻结细粒度数值门；promising 必须绑定同一个由新 OS 进程精确恢复的 checkpoint | 既排除仅噪声/offset/threshold 的伪改善，又不把启发式研究候选误写成产品资格公式 | selection/recovery | 已采纳 |
+| 013 | 真实 parameter inventory 动态解析 score head、final norm 与末端 block；继续路线只追加更早 block，不把上游参数名猜测写死 | 保持配置可复现和 scope 单调，同时兼容 exact 模型实际命名 | training scope | 已采纳 |
+| 014 | 费用采用不可改写的 hash-linked 累计快照链；路线与终态必须按序绑定全部新增快照 | 同时覆盖延迟账单、Pod 替换和多段训练，避免只交末张快照丢失累计费用 | cost lineage | 已采纳 |
+| 015 | 候选 checkpoint 必须由不同 OS 进程的 verify-only 恢复 receipt 绑定 source/recovery process、route context、runtime 与 payload identity | 让“可恢复”成为实际执行证据，并阻止用其它 checkpoint 或同进程状态替代 | recovery | 已采纳 |
+| 016 | 所有云端写路径约束在显式 Plan 087 task root；Pod create/stop/delete 对不确定 API 响应先按唯一身份重查；本地回传只接受显式小文件 allowlist | 避免污染 Plan 082 roots、盲目重复计费实例或回传大权重树 | cloud lifecycle | 已采纳 |
