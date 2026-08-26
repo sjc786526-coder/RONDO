@@ -26,19 +26,22 @@ use std::fs;
 use std::io;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
+use std::path::Path;
 use std::path::PathBuf;
 use tempfile::TempDir;
 use tokio::process::Command;
 
-struct FailingMetadataFileSystem {
+struct MetadataOverrideFileSystem {
     path: PathUri,
+    replacement: Option<PathBuf>,
+    canonical_overrides: Vec<(PathUri, PathUri)>,
 }
 
 struct FixtureBoundedFileSystem {
     root: PathUri,
 }
 
-impl FailingMetadataFileSystem {
+impl MetadataOverrideFileSystem {
     fn unsupported<T>() -> FileSystemResult<T> {
         Err(io::Error::new(
             io::ErrorKind::Unsupported,
@@ -47,21 +50,40 @@ impl FailingMetadataFileSystem {
     }
 }
 
-impl ExecutorFileSystem for FailingMetadataFileSystem {
+impl ExecutorFileSystem for MetadataOverrideFileSystem {
     fn canonicalize<'a>(
         &'a self,
-        _path: &'a PathUri,
-        _sandbox: Option<&'a FileSystemSandboxContext>,
+        path: &'a PathUri,
+        sandbox: Option<&'a FileSystemSandboxContext>,
     ) -> ExecutorFileSystemFuture<'a, PathUri> {
-        Box::pin(async { Self::unsupported() })
+        Box::pin(async move {
+            if let Some((_, canonical)) = self
+                .canonical_overrides
+                .iter()
+                .find(|(source, _)| source.to_url() == path.to_url())
+            {
+                return Ok(canonical.clone());
+            }
+            LOCAL_FS.canonicalize(path, sandbox).await
+        })
     }
 
     fn read_file<'a>(
         &'a self,
-        _path: &'a PathUri,
-        _sandbox: Option<&'a FileSystemSandboxContext>,
+        path: &'a PathUri,
+        sandbox: Option<&'a FileSystemSandboxContext>,
     ) -> ExecutorFileSystemFuture<'a, Vec<u8>> {
-        Box::pin(async { Self::unsupported() })
+        Box::pin(async move {
+            #[cfg(unix)]
+            if path == &self.path
+                && let Some(replacement) = &self.replacement
+            {
+                let local_path = path.to_abs_path()?;
+                fs::remove_file(local_path.as_path())?;
+                std::os::unix::fs::symlink(replacement, local_path.as_path())?;
+            }
+            LOCAL_FS.read_file(path, sandbox).await
+        })
     }
 
     fn read_file_stream<'a>(
@@ -96,7 +118,7 @@ impl ExecutorFileSystem for FailingMetadataFileSystem {
         sandbox: Option<&'a FileSystemSandboxContext>,
     ) -> ExecutorFileSystemFuture<'a, FileMetadata> {
         Box::pin(async move {
-            if path == &self.path {
+            if path == &self.path && self.replacement.is_none() {
                 Err(io::Error::new(
                     io::ErrorKind::PermissionDenied,
                     "injected metadata failure",
@@ -733,8 +755,10 @@ async fn resolve_root_git_project_for_trust_ignores_metadata_errors() {
     let nested = proj.join("nested");
     std::fs::create_dir_all(proj.join(".git")).unwrap();
     std::fs::create_dir_all(&nested).unwrap();
-    let fs = FailingMetadataFileSystem {
+    let fs = MetadataOverrideFileSystem {
         path: PathUri::from_abs_path(&nested.join(".git").abs()),
+        replacement: None,
+        canonical_overrides: Vec::new(),
     };
 
     assert_eq!(
@@ -776,6 +800,27 @@ async fn resolve_root_git_project_for_trust_regular_repo_returns_repo_root() {
         Some(repo_path)
     );
 }
+
+fn write_linked_worktree_metadata(repo_root: &Path, worktree_root: &Path) -> PathBuf {
+    let worktree_git_dir = repo_root.join(".git/worktrees/feature-x");
+    std::fs::create_dir_all(&worktree_git_dir).unwrap();
+    std::fs::create_dir_all(worktree_root).unwrap();
+    std::fs::write(
+        worktree_root.join(".git"),
+        format!("gitdir: {}\n", worktree_git_dir.display()),
+    )
+    .unwrap();
+    std::fs::write(
+        worktree_git_dir.join("gitdir"),
+        format!("{}\n", worktree_root.join(".git").display()),
+    )
+    .unwrap();
+    std::fs::write(worktree_git_dir.join("commondir"), "../..\n").unwrap();
+    worktree_git_dir
+}
+
+#[path = "worktree_trust_tests.rs"]
+mod worktree_trust_tests;
 
 #[tokio::test]
 async fn resolve_root_git_project_for_trust_detects_worktree_and_returns_main_root() {
@@ -823,17 +868,9 @@ async fn resolve_root_git_project_for_trust_detects_worktree_and_returns_main_ro
 async fn resolve_root_git_project_for_trust_detects_worktree_pointer_without_git_command() {
     let tmp = TempDir::new().expect("tempdir");
     let repo_root = tmp.path().join("repo");
-    let common_dir = repo_root.join(".git");
-    let worktree_git_dir = common_dir.join("worktrees").join("feature-x");
     let worktree_root = tmp.path().join("wt");
-    std::fs::create_dir_all(&worktree_git_dir).unwrap();
-    std::fs::create_dir_all(&worktree_root).unwrap();
     std::fs::create_dir_all(worktree_root.join("nested")).unwrap();
-    std::fs::write(
-        worktree_root.join(".git"),
-        format!("gitdir: {}\n", worktree_git_dir.display()),
-    )
-    .unwrap();
+    write_linked_worktree_metadata(&repo_root, &worktree_root);
 
     let expected = repo_root.abs();
     let worktree_root = worktree_root.abs();

@@ -253,26 +253,37 @@ XXX用以下内容代替：
   直接消费该 resolver，现有合法 worktree/config/hooks 测试尚未闭合伪造现场和 host MCP 启动反例。
 - 2026-08-26：完成本 ExecPlan，冻结安全语义、兼容、资源、重跑、审查和本地提交边界；当前没有必须直接写主工作区的 ignored 业务资产，
   预期运行状态仅为全局锁、086 ignored watchdog metrics、069 ignored target 与 task-owned 临时 Git fixture。
+- 2026-08-26：执行者重新核对 exact upstream `bc3545b...` 相对 parent 的 12 文件增量及 live resolver/消费者；确认 config loader、active
+  project、app-server/TUI trust target 与 realtime grouping 均共享 `codex-git-utils` 的 resolver，不需要新增并行 trust 入口或消费者 plumbing。
+- 2026-08-26：在 `codex-git-utils` 的专用 trust 模块闭合 `.git` pointer、worktree admin directory、`gitdir` backlink、`commondir`、registered
+  checkout、common directory 与 main checkout ownership；小型 Git metadata 采用 64KiB 有界二进制读取并拒绝 symlink/异常类型，路径字节通过
+  `PathUri::join_native_bytes` 保留跨主机 POSIX 非 UTF-8 语义。
+- 2026-08-26：补齐 resolver、config、hooks 与 host MCP 正反覆盖；正式成功轮为 resolver/path/config 21/21、合法 config/hooks 2/2、host
+  MCP 1/1、app-server hooks 1/1，均使用测试自有新 `TempDir`/真实本机 Git fixture。非法 checkout 不继承主仓 config/permission/MCP，合法
+  registered worktree 不退化，当前 checkout 的独立显式 trust 仍生效。
+- 2026-08-26：`just fmt` 与 scoped `just fix -p codex-utils-path-uri -p codex-git-utils -p codex-core -p codex-app-server` 通过。一次合并行为批次
+  被 watchdog 以持续 memory full PSI 主动停止（exit 125，未作为测试结果），随后保留进度并拆窄通过；未清理 069 target，项目峰值未触及
+  285GB 主动停止线。
 
 ### 当前工作
 
-- 规划已完成，等待 Plan 086 执行者在指定 worktree 按 A-D 阶段实施；尚未修改产品代码、WBS 当前指针或完成历史。
+- 阶段 A-C 与执行者自审已经完成，正在形成 clean 候选提交并按指定队列请求独立验收；WBS 当前指针和完成历史尚未提前修改。
 
 ### 本任务剩余步骤
 
-- 完成阶段 A 的 exact delta/live consumer gap 冻结。
-- 完成阶段 B 的 RONDO 窄适配及首批聚焦测试。
-- 完成阶段 C 的正反行为、兼容与干净正式轮。
-- 完成阶段 D 的候选提交、指定审查、必要整改和最终文档收口；等待用户另行批准整合。
+- 完成阶段 D 的候选提交并通知指定审查者。
+- 按独立审查 finding 在本 worktree 内整改、复验和再次提交；审查通过后由审查者同步最终 Plan/WBS/COMPLETED。
+- 等待用户另行批准整合；不得在本任务启动 `#39153`、M4-W1 或其他下游工作。
 
 ### 阻塞项
 
-- 无计划级阻塞。canonical 构建锁、cgroup/watchdog、Windows `C:` 实际余量或其他必要资源计数不可用时按根规则 fail-closed；资源拒绝
-  不冒充产品 correctness 失败。需要新增 ignored/跨 worktree 写入或触及授权外边界时，通过指定队列请求批示。
+- 无计划级阻塞。sandbox 内首次重型入口因无法核对 systemd heavy scope 以 exit 84 fail-closed，随后使用同一 canonical lock/watchdog 在
+  获授权的宿主入口完成；一次 exit 125 资源停止已通过拆窄批次解决，未清理 target 或扩大授权。
 
 ### 当前验收状态
 
-- `PLANNED / NOT_STARTED`；`M4_W_39616_ADAPTATION_PASS` 尚未形成，WBS 仍应把 `#39616` 作为当前任务、`#39153` 作为严格后继。
+- `IMPLEMENTED / AWAITING_INDEPENDENT_REVIEW`；执行者门禁已通过，但 `M4_W_39616_ADAPTATION_PASS` 仍须独立审查接受，WBS 继续把
+  `#39616` 作为当前任务、`#39153` 作为严格后继。
 
 ### 交接边界
 
@@ -299,3 +310,7 @@ XXX用以下内容代替：
 | 011 | 当前无须直接写主工作区 ignored 业务资产；全局锁、086 watchdog metrics、069 target 和临时 Git fixture 是唯一预期运行状态 | 明确 gitignore 例外而不把运行状态冒充产品修改 | ignored/现场 | 已采纳 |
 | 012 | 最终只提交 086 worktree；本地 main 合并与远端推送均等待用户另行批准 | 服从本次明确交付边界 | Git/交付 | 已采纳 |
 | 013 | 只有 `#39616` 独立验收并获批进入 main 后，`#39153` 才获得启动资格；M4-W1 继续锁定 | 维持 WBS 已冻结的严格串行关系 | WBS/交接 | 已采纳 |
+| 014 | 将安全闭环从 `info.rs` 收口到 `codex-git-utils` 专用 trust 模块，所有既有消费者继续共享同一导出函数 | 保持唯一权威 resolver，同时避免把安全验证混入普通 Git 信息收集 | trust/架构 | 已采纳 |
+| 015 | 为 Git metadata 增加 `PathUri::join_native_bytes`，不把元数据先转成 lossy UTF-8/native host 路径 | 保留 remote executor、POSIX 非 UTF-8 与 Windows 拒绝边界，避免复制路径体系 | path/兼容 | 已采纳 |
+| 016 | 行为测试同时覆盖非法继承、合法注册与当前 checkout 独立显式 trust，直接观察 config/permission、MCP ready 与启动 marker | 证明 fail-closed 不会把显式用户授权或合法 worktree 一并降级 | 消费/测试 | 已采纳 |
+| 017 | 合并 core/app-server 行为批次被 memory PSI 停止后保留编译进度并拆成窄批次，不清理 target | 遵循调试保留进度和资源 fail-closed 约束，避免把设施停止冒充产品失败 | 构建/资源 | 已采纳 |
