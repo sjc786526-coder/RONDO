@@ -2,7 +2,8 @@
 
 最后更新：2026-08-25（Plan 079 已完成 Skywork 4B BF16 base 正式质量测评并取得 `4B_BASE_QUALITY_NO_GO`；
 Plan 081 已完成 exact 1.7B 非 LoRA 训练路线本地收敛与云端就绪并取得 `LOCAL_TRAINING_READINESS_PASS`，
-下一三期工作包 Plan 082 仍须另行立项授权，M3-D 保持锁定；Plan 077 / M4-C1、Plan 078 / M4-S2 已分别取得
+下一三期工作包 Plan 082 已立项且付费前阶段 A 可执行，付费阶段须经最终审查者验收放行，M3-D 保持锁定；
+Plan 077 / M4-C1、Plan 078 / M4-S2 已分别取得
 `M4_C1_QUERY_PASS`、`M4_S2_PASS`；Plan 080 / M4-C2 已通过最终独立验收并取得 `M4_C2_CONTROL_PASS`）
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段指针、跨方向关系、
@@ -23,7 +24,7 @@ Plan 081 已完成 exact 1.7B 非 LoRA 训练路线本地收敛与云端就绪�
 | 0：量化测评基准 | 既有设施与首次 schema v7 正式 canary 已完成，当前无 active campaign | 保留设施；历史结果见 COMPLETED，新 campaign 须重新立项与授权 |
 | 1：Harness 优化 | **正式收口；当前无 active 工作包** | 当前不继续新增观测或内核/热路径优化；既有实现、设施与历史结果保留。未来可由用户另行决定是否重新立项，本次收口不作永久禁止 |
 | 2：本地审批模型 | **已收口，今后不再开启** | 最终结论为“保留为实验”；不改生产默认，不再规划后续工作包 |
-| 3：RONDO Multi | 第一、二期及其收口案例、**三期 M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、M3-C2、Plan 064、Plan 071、Plan 073、Plan 075、Plan 079、Plan 081 与四期 M4-A、M4-C0、M4-S1、M4-C1、M4-S2、M4-C2、Plan 074 已完成** | Plan 081 已以 exact 1.7B、冻结 pair/input/v8、非 LoRA 和可动态扩大部分参数直接更新的路线取得本地训练就绪；Plan 082 是下一三期工作包，但真实模型、GPU、云端、费用与训练仍须另行立项授权。研究目标仍是形成同口径优于 base 的候选，不要求直接产品 GO；Critic 保持 default-off，M3-D 保持锁定。四期 S/C 必成子线已具备正式持久 Session、查询与控制能力；下一必成工作包是须另行立项授权的 M4-Z(core)，M4-W0 继续按独立价值门推进 |
+| 3：RONDO Multi | 第一、二期及其收口案例、**三期 M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、M3-C2、Plan 064、Plan 071、Plan 073、Plan 075、Plan 079、Plan 081 与四期 M4-A、M4-C0、M4-S1、M4-C1、M4-S2、M4-C2、Plan 074 已完成** | Plan 081 已以 exact 1.7B、冻结 pair/input/v8、非 LoRA 和可动态扩大部分参数直接更新的路线取得本地训练就绪；Plan 082 已立项，付费前阶段 A 可执行，真实模型/GPU/云端/费用/训练须在阶段 A 经最终审查者验收并同意进入付费阶段后才获授权。研究目标仍是形成同口径优于 base 的候选，不要求直接产品 GO；Critic 保持 default-off，M3-D 保持锁定。四期 S/C 必成子线已具备正式持久 Session、查询与控制能力；下一必成工作包是须另行立项授权的 M4-Z(core)，M4-W0 继续按独立价值门推进 |
 
 ### 方向命名口径
 
@@ -40,8 +41,9 @@ Plan 081 已完成 exact 1.7B 非 LoRA 训练路线本地收敛与云端就绪�
 
 ## 2. 下一工作包与顺序
 
-方向 3 是当前唯一仍在推进的产品线。Plan 081 已取得 `LOCAL_TRAINING_READINESS_PASS`；三期下一工作包是另行立项授权的
-Plan 082 真实云端 commissioning/训练参数开发。四期 Plan 080 / M4-C2 已取得 `M4_C2_CONTROL_PASS`；下一必成工作包是需要
+方向 3 是当前唯一仍在推进的产品线。Plan 081 已取得 `LOCAL_TRAINING_READINESS_PASS`；三期 Plan 082 已立项，当前先执行
+不付费的真实训练接缝与云端准备，阶段 A 经最终审查者验收并同意进入付费阶段后，才执行真实云端 commissioning/训练参数开发。
+四期 Plan 080 / M4-C2 已取得 `M4_C2_CONTROL_PASS`；下一必成工作包是需要
 另行立项与授权的 M4-Z(core) 全链收口。M4-W0 继续按自身价值门条件推进。
 方向 1 已正式收口，不作为方向 3 的前置或旁支。
 
@@ -83,8 +85,9 @@ Plan 082 真实云端 commissioning/训练参数开发。四期 Plan 080 / M4-C2
   量化、本地部署或产品资格。Plan 081 随后完成 exact 1.7B、冻结 pair/input/v8、禁止 LoRA/QLoRA 的本地路线准备，
   以可按训练动态扩大的部分参数直接更新为当前首选，并在不运行真实模型/GPU/云端的前提下闭合连续质量观察、checkpoint、恢复与归档；
   它不预先冻结具体层数、学习率、batch、更新数或优化器。后续真实训练以形成同口径优于 exact 1.7B base 的候选为研究目标，
-  不要求直接取得产品 GO；未优于 base 时保留 no-improvement 结论。任务 Pod 已删除，20 GB Standard 网络卷
-  `v1us0nmk0p` 按用户要求保留在 `US-IL-1` 并继续计费，删除仍须另行批准；详细结果与后续边界见三期子 WBS。
+  不要求直接取得产品 GO；未优于 base 时保留 no-improvement 结论。Plan 079 任务 Pod 已删除；用户提供的最新查询显示原 20 GB
+  Standard 网络卷 `v1us0nmk0p` 返回 404、已不存在，Plan 082 在创建资源前仍通过既有安全入口复核且不依赖或恢复该卷；
+  详细结果与后续边界见三期子 WBS。
 
 ### 方向 3：Durable Team Runtime 四期
 
@@ -106,7 +109,8 @@ Plan 082 真实云端 commissioning/训练参数开发。四期 Plan 080 / M4-C2
 - 四期不依赖 Publication Critic 训练、真实模型、真实 API 或性能测评，可以与三期模型链并行；它保持 shared workspace
   为默认，不建设通用 scheduler、自动路由、自动 merge/push、第二套 Team State/trace 或审计/可信平台。
 - Plan 081 已在不运行 Cargo、Docker、真实模型或云计算的边界内完成；未写 Plan 069 target，也未复制本地模型资产。
-  Plan 082 若另行授权，其云计算不占本地 Cargo build lock，可与四期有界并行开发；bundle/checkpoint/结果传输仍竞争本地网络与磁盘。
+  Plan 082 付费前阶段 A 已可执行；最终审查者验收阶段 A 并同意进入付费阶段后，其云计算不占本地 Cargo build lock，可与四期有界并行开发；
+  bundle/checkpoint/结果传输仍竞争本地网络与磁盘。
   后续第四期任务的每个重型 Cargo 批次仍须先取得用户针对该批次的明确批准，具体运行时机由用户人工判断、调度；获批后再按根
   `AGENTS.md` 与三期本地模型、Docker 等重型任务互斥。详细资源关系见四期子 WBS。
 
