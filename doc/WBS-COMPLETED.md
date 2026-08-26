@@ -2128,8 +2128,8 @@ formal retry 整改为 `d29e857`，最终独立验收提交为 `43cf0eeb3e1b4826
 
 ## M4-C2 正式 Session Control / TUI（Plan 080，2026-08-25）
 
-**状态**：稳定 app-server v2→client→TUI 控制链与 fresh Session/store 正式轮已完成；独立验收对 `aadddf4`、复验对 `4b508916`
-先后判定不通过，两轮整改实现、生成物和窄复验现已完成，等待独立复验重判。当前不提前重申 `M4_C2_CONTROL_PASS`。
+**状态**：稳定 app-server v2→client→TUI 控制链、fresh Session/store 正式轮、两轮独立审查整改与最终复验均已完成；验收通过、
+任务目标完成，结论为 `M4_C2_CONTROL_PASS`。产品候选提交为 `6865a649af11f8f93e069f436a8db855dad272cb`。
 
 - 新增独立默认关闭的稳定 `session/control`。正式 query 投影 control proof/availability；committed online proof 绑定 live Root owner
   incarnation，Team mutation gate 与 M4-S2 close barrier 在线性化点复验 exact owner、Team instance/revision/commit generation。
@@ -2146,7 +2146,7 @@ formal retry 整改为 `d29e857`，最终独立验收提交为 `43cf0eeb3e1b4826
   异常进入 terminal exact-owner cleanup，显式 RetainedError 仍可回滚；owner incarnation mismatch 统一为 `NotCurrentOwner`。Close 与
   active Archive 的 after-preflight Team commit race、query residency、typed Unknown 和 replacement-safe cleanup 已形成 13/13 直接回归。
 - fresh 正式轮完成 owner close、cold archive/unarchive、进程重启 list/read rebuild、delete 与 SessionNotFound，且没有启动 turn、模型
-  或 API。首次独立审查的 2 High、5 Medium、1 Low 均已有对应整改；执行者侧没有已知未关闭 high/medium finding。
+  或 API。首次独立审查的 2 High、5 Medium、1 Low 及后续复验 finding 均已闭合；最终独立复验无未关闭 correctness finding。
 - 改产品代码前的合并树 query×lifecycle 基线为 `45/45`；原正式控制轮 `17/17`、邻接 query×lifecycle `47/47` 与 fresh 证据按审查
   结论在原覆盖范围继续有效。整改直接轮 29 项最终全部通过，另补 default-off/query-only/removal token 3/3、teardown 后故障注入
   1/1 与普通 app-server query 邻接 1/1；第二轮冻结代码直接回归 13/13。stable/experimental app-server schema、七 crate及最终
@@ -2156,4 +2156,5 @@ formal retry 整改为 `d29e857`，最终独立验收提交为 `43cf0eeb3e1b4826
   Docker、真实 API/模型、训练、测评、benchmark、CI/PR 或远端操作。初始执行与整改细节分别见
   `agent_log/2026-08-25-153057-plan080-m4-c2-session-control-tui.md`、
   `agent_log/2026-08-25-170351-plan080-review-remediation.md`、
-  `agent_log/2026-08-25-190915-plan080-rereview-remediation.md`。
+  `agent_log/2026-08-25-190915-plan080-rereview-remediation.md`；最终独立验收见
+  `agent_log/2026-08-25-192431-plan080-final-independent-acceptance.md`，无剩余 correctness/functionality finding。

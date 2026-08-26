@@ -2,7 +2,7 @@
 
 最后更新：2026-08-25（Plan 079 已完成 Skywork 4B BF16 base 正式质量测评并取得 `4B_BASE_QUALITY_NO_GO`；
 三期尚未选择后继工作包，M3-D 保持锁定；Plan 077 / M4-C1、Plan 078 / M4-S2 已分别取得
-`M4_C1_QUERY_PASS`、`M4_S2_PASS`；Plan 080 / M4-C2 已完成两轮独立审查整改并等待复验重判）
+`M4_C1_QUERY_PASS`、`M4_S2_PASS`；Plan 080 / M4-C2 已通过最终独立验收并取得 `M4_C2_CONTROL_PASS`）
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段指针、跨方向关系、
 稳定工程边界和授权门；已完成成果与验收见 `doc/WBS-COMPLETED.md`，单次任务合同见 `plan/`，执行细节见
@@ -22,7 +22,7 @@
 | 0：量化测评基准 | 既有设施与首次 schema v7 正式 canary 已完成，当前无 active campaign | 保留设施；历史结果见 COMPLETED，新 campaign 须重新立项与授权 |
 | 1：Harness 优化 | **正式收口；当前无 active 工作包** | 当前不继续新增观测或内核/热路径优化；既有实现、设施与历史结果保留。未来可由用户另行决定是否重新立项，本次收口不作永久禁止 |
 | 2：本地审批模型 | **已收口，今后不再开启** | 最终结论为“保留为实验”；不改生产默认，不再规划后续工作包 |
-| 3：RONDO Multi | 第一、二期及其收口案例、**三期 M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、M3-C2、Plan 064、Plan 071、Plan 073、Plan 075、Plan 079 与四期 M4-A、M4-C0、M4-S1、M4-C1、M4-S2、Plan 074 已完成；M4-C2 两轮整改实现已收口并等待独立复验** | Plan 079 的 exact 4B BF16 base 正式质量测评为 `4B_BASE_QUALITY_NO_GO`，未形成训练、量化、本地部署或产品资格；三期尚未选择后继工作包，Critic 保持 default-off，M3-D 保持锁定。四期 S/C 必成子线已具备正式持久 Session 与查询能力，控制链整改等待复验；M4-Z(core) 须在 M4-C2 验收后另行立项，M4-W0 继续按独立价值门推进 |
+| 3：RONDO Multi | 第一、二期及其收口案例、**三期 M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、M3-C2、Plan 064、Plan 071、Plan 073、Plan 075、Plan 079 与四期 M4-A、M4-C0、M4-S1、M4-C1、M4-S2、M4-C2、Plan 074 已完成** | Plan 079 的 exact 4B BF16 base 正式质量测评为 `4B_BASE_QUALITY_NO_GO`，未形成训练、量化、本地部署或产品资格；三期尚未选择后继工作包，Critic 保持 default-off，M3-D 保持锁定。四期 S/C 必成子线已具备正式持久 Session、查询与控制能力；下一必成工作包是须另行立项授权的 M4-Z(core)，M4-W0 继续按独立价值门推进 |
 
 ### 方向命名口径
 
@@ -39,8 +39,8 @@
 
 ## 2. 下一工作包与顺序
 
-方向 3 是当前唯一仍在推进的产品线。三期尚未选择后继工作包；四期 Plan 080 / M4-C2 的两轮独立审查整改实现已完成，当前等待复验重判。
-验收通过后，下一必成工作包才是需要另行立项与授权的 M4-Z(core) 全链收口；M4-W0 继续按自身价值门条件推进。
+方向 3 是当前唯一仍在推进的产品线。三期尚未选择后继工作包；四期 Plan 080 / M4-C2 已取得 `M4_C2_CONTROL_PASS`。
+下一必成工作包是需要另行立项与授权的 M4-Z(core) 全链收口；M4-W0 继续按自身价值门条件推进。
 方向 1 已正式收口，不作为方向 3 的前置或旁支。
 
 ### 方向 3：Publication Critic 三期
@@ -95,8 +95,8 @@
   `M4_S2_PASS`；作为后整合者保留 M4-C1 query read seam 与 M4-S2 lifecycle write seam，并完成 shared 文件静态/格式收敛。
   Plan 080 / M4-C2 已完成默认关闭的稳定 v2 `session/control`、client/TUI confirmation/no-replay/resync、fresh store/restart 正式轮，
   并完成独立审查发现的 owner incarnation、最终 lifecycle revalidation、Delete retry、parent/TUI/gate 缺口、teardown 后
-  Team completion 失败，以及复验追加的 residency availability、accepted handoff terminal unknown、direct race/exact cleanup 与错误分类整改；当前等待独立
-  复验重判，不提前重申 `M4_C2_CONTROL_PASS`。验收通过后四期 S/C 必成子线才交接另行立项的 M4-Z(core)；M4-W0 仍是独立价值原型，
+  Team completion 失败，以及复验追加的 residency availability、accepted handoff terminal unknown、direct race/exact cleanup 与错误分类整改；
+  最终独立验收无剩余 correctness finding，结论为 `M4_C2_CONTROL_PASS`。四期 S/C 必成子线现交接另行立项的 M4-Z(core)；M4-W0 仍是独立价值原型，
   正式 W 实现须先获得 binding GO。
 - 四期不依赖 Publication Critic 训练、真实模型、真实 API 或性能测评，可以与三期模型链并行；它保持 shared workspace
   为默认，不建设通用 scheduler、自动路由、自动 merge/push、第二套 Team State/trace 或审计/可信平台。
