@@ -284,14 +284,16 @@ XXX用以下内容代替：
   消息缓冲区没有 `thread/started`，未增加生产代码、helper 或副作用审计设施。单项聚焦复验 `1/1` 通过，随后 fmt 通过。
 - 2026-08-26：审查者复核提交 `ea99e979`、消息缓冲语义及保存的 watchdog/JUnit，确认窄修关闭 015 的低等级测试保障余项且没有引入
   新 finding；`M4_W_39153_ADAPTATION_PASS` 保持成立。
+- 2026-08-26：经用户批准，验收头 `9d8b1af` 已 fast-forward 进入本地 `main`；`#39616 → #39153` 两项前置闭合，只解锁
+  “另行规划 M4-W1（尚未启动）”资格。未推送 worktree 分支，远端只随 local main 更新。
 
 ### 当前工作
 
-- 产品实现、独立验收与测试-only 防回归加固复核均已完成；`M4_W_39153_ADAPTATION_PASS` 成立，当前只等待获批整合本地 `main`。
+- 产品实现、独立验收、测试-only 防回归加固复核及本地 main 整合均已完成；`M4_W_39153_ADAPTATION_PASS` 成立。本计划冻结。
 
 ### 本任务剩余步骤
 
-- 等待用户批准是否整合本地 main；获批进入 main 后才把当前指针改为“另行规划 M4-W1（尚未启动）”。
+- 无。后续路线只由 WBS 维护；M4-W1 尚未启动，须另行规划与授权。
 
 ### 阻塞项
 
@@ -299,15 +301,15 @@ XXX用以下内容代替：
 
 ### 当前验收状态
 
-- `ACCEPTED / TASK_GOAL_COMPLETE / M4_W_39153_ADAPTATION_PASS / PENDING_LOCAL_MAIN_INTEGRATION`；测试-only follow-up 已复核，M4-W1
-  仍锁定且未规划。
+- `ACCEPTED / TASK_GOAL_COMPLETE / M4_W_39153_ADAPTATION_PASS / LOCAL_MAIN_INTEGRATED`；测试-only follow-up 已复核，M4-W1 仅取得
+  另行规划资格且尚未启动。
 
 ### 交接边界
 
-- 本任务完成后冻结此计划；088 只有在独立验收通过、用户批准并进入 local main 后，才使 `#39616 → #39153` 前置闭合，并且只把
-  M4-W1 指向另行规划，不在本计划内继续维护后续路线。
+- 本任务已冻结；088 经独立验收、用户批准并进入 local main，`#39616 → #39153` 前置已经闭合，只把 M4-W1 指向另行规划，
+  不在本计划内继续维护后续路线。
 - 已授权范围内普通实现、测试、修复和重跑由执行者自主完成；额外授权、计划外变数、不确定决策与最终验收只按第 3 节指定队列联系审查者。
-- 088 与 087 后续进入 main 时，后整合者加法式保留另一任务已进入主线的 WBS 状态，不整段覆盖；本分支不合并、不推送。
+- 088 已先进入 main；087 后续整合时须加法式保留 088 的 WBS 状态，不整段覆盖。工作树分支不单独推送。
 
 ## 6. 关键决策记录
 
@@ -331,3 +333,4 @@ XXX用以下内容代替：
 | 014 | 正式门禁采用 protocol serde、core 六项、app-server 全库与 legacy/paginated resume/fork 五项集成，不扩大到完整 workspace | shared core 风险已由直接配置单测、全 app-server lib 和端到端主链覆盖；完整 workspace 与本任务写集不成比例 | 测试 | 已采纳 |
 | 015 | 首次独立验收接受一项低风险测试余项：invalid-profile 反例未直接断言 child/started 不存在，但静态生命周期顺序已在创建前拒绝 | 当时产品路径正确且分层证据与任务风险相称；后由 016 关闭测试余项 | 验收/测试 | 已被 016 闭合 |
 | 016 | 用户后续收紧 015：只在现有 invalid-profile 场景断言 thread ID 集合不变且无 `thread/started`，不新增审计设施、不重跑宽门禁 | 关闭明确的防回归证据缺口，同时保持 follow-up 最小 | 测试 | 已验证 |
+| 017 | 用户批准后把验收头 fast-forward 进入 local main，并只解锁 M4-W1 的另行规划资格 | 完成 088 集成但不自动启动下游任务 | Git/WBS | 已完成 |

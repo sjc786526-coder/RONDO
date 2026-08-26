@@ -2271,7 +2271,8 @@ formal retry 整改为 `d29e857`，最终独立验收提交为 `43cf0eeb3e1b4826
 
 **状态**：`#39153@539a09cb28ca1ded4278c6d54716abbacab42428` 的 RONDO fail-closed 产品语义窄适配、正式聚焦验证与独立验收均已完成；
 验收通过、任务目标完成，结论为 `M4_W_39153_ADAPTATION_PASS`。实现提交为
-`57b7efbe12808b6e06089194ab6676b5a7e537e4`；当前等待用户批准整合本地 `main`。
+`57b7efbe12808b6e06089194ab6676b5a7e537e4`，测试加固提交为 `ea99e979ec4189311d6319cc93a0d7dd526829b4`；用户批准后，验收头
+`9d8b1afde4c7d537a3d6fcab48da4fae286d95d4` 已 fast-forward 进入本地 `main`。
 
 - cold resume 与顶层 fork 统一按“合法显式 override、最近持久设置、当前配置”恢复 approval policy、approvals reviewer 与
   active permission-profile identity。canonical `TurnContext` 以 presence-aware 三态补足普通 turn/compaction 的最小 identity 事实；
@@ -2286,4 +2287,4 @@ formal retry 整改为 `d29e857`，最终独立验收提交为 `43cf0eeb3e1b4826
   通过；测试加固热目标又以 `1/1` 通过。通过批次均 `stop=none / cleanup=none / swap peak=0`。未运行完整 workspace、Docker、
   真实 API/模型、训练、测评、CI/PR 或远端操作，未冒充通过。
 - 本任务未实施 M4-W1、primary binding、scoped authorization、replacement binding、workspace/permission registry 或第二套恢复状态。
-  088 进入本地 `main` 前 M4-W1 继续锁定；进入后也只解锁另行规划资格，不自动启动。
+  进入本地 `main` 后只解锁 M4-W1 的另行规划资格；M4-W1 尚未启动。
