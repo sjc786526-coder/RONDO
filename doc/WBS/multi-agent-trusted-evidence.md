@@ -1,7 +1,7 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
 最后更新：2026-08-25 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
-状态：**第一期、第二期、M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、M3-C2、Plan 064、Plan 071、Plan 073、Plan 075、Plan 079、Plan 081 与四期 M4-A、M4-C0、M4-S1、M4-C1、M4-S2、M4-C2 已完成；Plan 060 技术 GO、Plan 064 DATA_GO、Plan 066 正式训练 GO；Plan 071 为 `BASE_COMPARABILITY_GO`，Plan 073 / M3-C2 为 `NO-GO`，Plan 079 为 `4B_BASE_QUALITY_NO_GO`，Plan 081 为 `LOCAL_TRAINING_READINESS_PASS`；Plan 082 是未授权的三期下一工作包，M3-D 保持锁定；M4-A 为 `M4_A_GO`，M4-C0 为 `M4_C0_PROTOTYPE_PASS`，M4-S1 为 `M4_S1_PASS`，M4-C1 为 `M4_C1_QUERY_PASS`，M4-S2 为 `M4_S2_PASS`，M4-C2 为 `M4_C2_CONTROL_PASS`；下一四期必成工作包为须另行立项授权的 M4-Z(core)**
+状态：**第一期、第二期、M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、M3-C2、Plan 064、Plan 071、Plan 073、Plan 075、Plan 079、Plan 081 与四期 M4-A、M4-C0、M4-S1、M4-C1、M4-S2、M4-C2 已完成；Plan 060 技术 GO、Plan 064 DATA_GO、Plan 066 正式训练 GO；Plan 071 为 `BASE_COMPARABILITY_GO`，Plan 073 / M3-C2 为 `NO-GO`，Plan 079 为 `4B_BASE_QUALITY_NO_GO`，Plan 081 为 `LOCAL_TRAINING_READINESS_PASS`；Plan 082 是未授权的三期下一工作包，M3-D 保持锁定；M4-A 为 `M4_A_GO`，M4-C0 为 `M4_C0_PROTOTYPE_PASS`，M4-S1 为 `M4_S1_PASS`，M4-C1 为 `M4_C1_QUERY_PASS`，M4-S2 为 `M4_S2_PASS`，M4-C2 为 `M4_C2_CONTROL_PASS`；Plan 083 / M4-Z(core) 已立项授权、当前 `NOT_RUN`**
 
 ## 当前定位
 
@@ -33,7 +33,7 @@ Plan 067 / M4-A 已收敛 Durable Team Session、Session 控制面与可选 writ
 `M4_A_GO`。Plan 070 / M4-C0 已以默认关闭的 experimental surface 完成状态投影、owner/cold 操作路由、stale/result-unknown
 与权威重读原型，结论为 `M4_C0_PROTOTYPE_PASS`；M4-S1 已完成阶段 E 并取得 `M4_S1_PASS`；Plan 077、Plan 078、Plan 080 已依次
 完成正式 Session Query、恢复与生命周期、正式 Session Control/TUI，并分别取得 `M4_C1_QUERY_PASS`、`M4_S2_PASS`、
-`M4_C2_CONTROL_PASS`。四期 S/C 必成子线下一工作包是须另行立项授权的 M4-Z(core)；M4-W0 继续按自身合同推进，
+`M4_C2_CONTROL_PASS`。Plan 083 / M4-Z(core) 已立项授权并等待执行；M4-W0 继续按自身合同推进，
 M4-Z(core) 不被 W 线阻塞，只有 binding GO 后才立项正式 W1，其 handoff 范围服从价值门证据。
 Durable Team Session 的 V1 写 authority 归属于 canonical Root lineage，并持续覆盖成功 Team 提交；现有 Root active-writer
 作为唯一排他基础做架构内扩展，Team State 保持 canonical，并增加与其集成的专用 durability/read 能力，不建设相互竞争的第二套

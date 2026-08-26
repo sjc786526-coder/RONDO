@@ -1,5 +1,6 @@
 use super::*;
 use crate::tools::handlers::multi_agents_spec::create_close_agent_tool_v1;
+use codex_protocol::AgentPath;
 use codex_protocol::error::CodexErrorDetails;
 use codex_tools::ToolSpec;
 
@@ -22,12 +23,17 @@ impl ToolExecutor<ToolInvocation> for Handler {
     }
 
     fn handle(&self, invocation: ToolInvocation) -> codex_tools::ToolExecutorFuture<'_> {
-        Box::pin(async move { handle_close_agent(invocation).await.map(boxed_tool_output) })
+        Box::pin(async move {
+            handle_close_agent(invocation, /*resolve_v2_target*/ false)
+                .await
+                .map(boxed_tool_output)
+        })
     }
 }
 
-async fn handle_close_agent(
+pub(crate) async fn handle_close_agent(
     invocation: ToolInvocation,
+    resolve_v2_target: bool,
 ) -> Result<CloseAgentResult, FunctionCallError> {
     let ToolInvocation {
         session,
@@ -38,8 +44,36 @@ async fn handle_close_agent(
     } = invocation;
     let arguments = function_arguments(payload)?;
     let args: CloseAgentArgs = parse_arguments(&arguments)?;
-    let agent_id = parse_agent_id_target(&args.target)?;
-    let receiver_agent = session.services.agent_control.get_agent_metadata(agent_id);
+    let agent_id = if resolve_v2_target {
+        crate::agent::agent_resolver::resolve_agent_target(&session, &turn, &args.target).await?
+    } else {
+        parse_agent_id_target(&args.target)?
+    };
+    let receiver_agent = if resolve_v2_target {
+        let receiver_agent = session
+            .services
+            .agent_control
+            .ensure_agent_known(agent_id)
+            .map_err(|err| collab_agent_error(agent_id, err))?;
+        if receiver_agent
+            .agent_path
+            .as_ref()
+            .is_some_and(AgentPath::is_root)
+        {
+            return Err(FunctionCallError::RespondToModel(
+                "root is not a spawned agent".to_string(),
+            ));
+        }
+        if agent_id == session.thread_id {
+            return Err(FunctionCallError::RespondToModel(
+                "an agent cannot close itself; return your result and let the parent close you if needed"
+                    .to_string(),
+            ));
+        }
+        Some(receiver_agent)
+    } else {
+        session.services.agent_control.get_agent_metadata(agent_id)
+    };
     let known_agent = receiver_agent.is_some();
     let receiver_agent = receiver_agent.unwrap_or_default();
     session
@@ -101,13 +135,18 @@ async fn handle_close_agent(
         .await
         .map_err(|err| collab_agent_error(agent_id, err))
         .map(|_| ());
+    let call_status = if result.is_ok() {
+        CollabAgentToolCallStatus::Completed
+    } else {
+        collab_tool_call_status(&status, Some(agent_id))
+    };
     session
         .emit_turn_item_completed(
             &turn,
             TurnItem::CollabAgentToolCall(CollabAgentToolCallItem {
                 id: call_id,
                 tool: CollabAgentTool::CloseAgent,
-                status: collab_tool_call_status(&status, Some(agent_id)),
+                status: call_status,
                 sender_thread_id: session.thread_id,
                 receiver_thread_ids: vec![agent_id],
                 receiver_agents: vec![CollabAgentRef {

@@ -358,6 +358,7 @@ struct ThreadSpawnRequest {
     inherited_environments: Option<TurnEnvironmentSnapshot>,
     inherited_exec_policy: Option<Arc<crate::exec_policy::ExecPolicyManager>>,
     user_shell_override: Option<crate::shell::Shell>,
+    defer_durable_team_participant_registration: bool,
 }
 
 impl ThreadSpawnRequest {
@@ -376,6 +377,7 @@ impl ThreadSpawnRequest {
             inherited_environments: None,
             inherited_exec_policy: None,
             user_shell_override: None,
+            defer_durable_team_participant_registration: false,
         }
     }
 }
@@ -426,6 +428,7 @@ pub(crate) struct ResumeThreadWithHistoryOptions {
     pub(crate) parent_thread_id: Option<ThreadId>,
     pub(crate) inherited_environments: Option<TurnEnvironmentSnapshot>,
     pub(crate) inherited_exec_policy: Option<Arc<crate::exec_policy::ExecPolicyManager>>,
+    pub(crate) defer_durable_team_participant_registration: bool,
 }
 
 /// Shared, `Arc`-owned state for [`ThreadManager`]. This `Arc` is required to have a single
@@ -1097,7 +1100,7 @@ impl ThreadManager {
         {
             agent_control
                 .restore_v2_agent_metadata(&config, resumed.conversation_id)
-                .await;
+                .await?;
         }
         let options = StartThreadOptions {
             initial_history,
@@ -1887,6 +1890,7 @@ impl ThreadManagerState {
             /*inherited_environments*/ None,
             /*inherited_exec_policy*/ None,
             /*environments*/ None,
+            /*defer_durable_team_participant_registration*/ false,
         ))
         .await
     }
@@ -1905,6 +1909,7 @@ impl ThreadManagerState {
         inherited_environments: Option<TurnEnvironmentSnapshot>,
         inherited_exec_policy: Option<Arc<crate::exec_policy::ExecPolicyManager>>,
         environments: Option<Vec<TurnEnvironmentSelection>>,
+        defer_durable_team_participant_registration: bool,
     ) -> CodexResult<NewThread> {
         let client_mcp_extensions = self.client_mcp_extensions_for_child(parent_thread_id).await;
         let options = StartThreadOptions {
@@ -1922,6 +1927,8 @@ impl ThreadManagerState {
         request.forked_from_thread_id = forked_from_thread_id;
         request.inherited_environments = inherited_environments;
         request.inherited_exec_policy = inherited_exec_policy;
+        request.defer_durable_team_participant_registration =
+            defer_durable_team_participant_registration;
         Box::pin(self.spawn_thread(request)).await
     }
 
@@ -1937,6 +1944,7 @@ impl ThreadManagerState {
             parent_thread_id,
             inherited_environments,
             inherited_exec_policy,
+            defer_durable_team_participant_registration,
         } = options;
         let client_mcp_extensions = self.client_mcp_extensions_for_child(parent_thread_id).await;
         let thread_source = initial_history.get_resumed_thread_source();
@@ -1957,6 +1965,8 @@ impl ThreadManagerState {
         request.parent_thread_id = parent_thread_id;
         request.inherited_environments = inherited_environments;
         request.inherited_exec_policy = inherited_exec_policy;
+        request.defer_durable_team_participant_registration =
+            defer_durable_team_participant_registration;
         Box::pin(self.spawn_thread(request)).await
     }
 
@@ -1975,6 +1985,7 @@ impl ThreadManagerState {
         inherited_exec_policy: Option<Arc<crate::exec_policy::ExecPolicyManager>>,
         environments: Option<Vec<TurnEnvironmentSelection>>,
         thread_extension_init: ExtensionDataInit,
+        defer_durable_team_participant_registration: bool,
     ) -> CodexResult<NewThread> {
         let client_mcp_extensions = self.client_mcp_extensions_for_child(parent_thread_id).await;
         let options = StartThreadOptions {
@@ -1993,6 +2004,8 @@ impl ThreadManagerState {
         request.forked_from_thread_id = forked_from_thread_id;
         request.inherited_environments = inherited_environments;
         request.inherited_exec_policy = inherited_exec_policy;
+        request.defer_durable_team_participant_registration =
+            defer_durable_team_participant_registration;
         Box::pin(self.spawn_thread(request)).await
     }
 
@@ -2021,6 +2034,7 @@ impl ThreadManagerState {
             inherited_environments,
             inherited_exec_policy,
             user_shell_override,
+            defer_durable_team_participant_registration,
         } = request;
         let StartThreadOptions {
             config,
@@ -2142,6 +2156,7 @@ impl ThreadManagerState {
             attestation_provider: self.attestation_provider.clone(),
             external_time_provider: self.external_time_provider.clone(),
             inherited_multi_agent_version: multi_agent_version,
+            defer_durable_team_participant_registration,
             git_enrichment_policy: GitEnrichmentPolicy::Fresh,
             windows_sandbox_proxy_settings_mode:
                 codex_sandboxing::WindowsSandboxProxySettingsMode::Reconcile,

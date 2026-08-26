@@ -162,14 +162,24 @@ impl AgentControl {
         &self,
         config: &Config,
         root_thread_id: ThreadId,
-    ) {
-        self.state.register_root_thread(root_thread_id);
-
-        let Ok(state) = self.upgrade() else {
-            return;
+    ) -> CodexResult<()> {
+        let durable_team_enabled = config.durable_team_enabled();
+        let state = match self.upgrade() {
+            Ok(state) => state,
+            Err(err) if durable_team_enabled => return Err(err),
+            Err(_) => {
+                self.state.register_root_thread(root_thread_id);
+                return Ok(());
+            }
         };
         let Some(agent_graph_store) = state.agent_graph_store() else {
-            return;
+            self.state.register_root_thread(root_thread_id);
+            if durable_team_enabled {
+                return Err(CodexErr::Fatal(
+                    "durable Team resume requires an available agent graph store".to_string(),
+                ));
+            }
+            return Ok(());
         };
         let descendant_ids = match agent_graph_store
             .list_thread_spawn_descendants(
@@ -179,11 +189,18 @@ impl AgentControl {
             .await
         {
             Ok(descendant_ids) => descendant_ids,
+            Err(err) if durable_team_enabled => {
+                return Err(CodexErr::Fatal(format!(
+                    "failed to restore persisted durable V2 agent metadata for {root_thread_id}: {err}"
+                )));
+            }
             Err(err) => {
                 warn!("failed to restore persisted V2 agent metadata for {root_thread_id}: {err}");
-                return;
+                self.state.register_root_thread(root_thread_id);
+                return Ok(());
             }
         };
+        self.state.register_root_thread(root_thread_id);
 
         for thread_id in descendant_ids {
             if self.state.agent_metadata_for_thread(thread_id).is_some() {
@@ -225,9 +242,15 @@ impl AgentControl {
             }
             .await;
             if let Err(err) = restore_result {
+                if durable_team_enabled {
+                    return Err(CodexErr::Fatal(format!(
+                        "failed to restore durable V2 agent metadata for {thread_id}: {err}"
+                    )));
+                }
                 warn!("failed to restore V2 agent metadata for {thread_id}: {err}");
             }
         }
+        Ok(())
     }
 
     /// Spawn a new agent thread and submit the initial prompt.
@@ -477,6 +500,7 @@ impl AgentControl {
                 parent_thread_id,
                 inherited_environments,
                 inherited_exec_policy,
+                defer_durable_team_participant_registration: false,
             })
             .await
         {
@@ -613,11 +637,38 @@ impl AgentControl {
                     inheritance.environments,
                     inheritance.exec_policy,
                     options.environments.clone(),
+                    /*defer_durable_team_participant_registration*/ true,
                 ))
                 .await?
             }
             (None, _, _) => Box::pin(state.spawn_new_thread(config.clone(), self.clone())).await?,
         };
+        if let Err(edge_err) = self
+            .persist_thread_spawn_edge_for_source(
+                &state,
+                new_thread.thread.as_ref(),
+                new_thread.thread_id,
+                notification_source.as_ref(),
+            )
+            .await
+        {
+            return match self
+                .discard_unpublished_thread(&state, new_thread.thread_id, &new_thread.thread)
+                .await
+            {
+                Ok(()) => Err(edge_err),
+                Err(cleanup_err) => Err(CodexErr::Fatal(format!(
+                    "{edge_err}; cleanup also failed: {cleanup_err}"
+                ))),
+            };
+        }
+        self.activate_persisted_thread_spawn_participant(
+            &state,
+            new_thread.thread_id,
+            &new_thread.thread,
+            notification_source.as_ref(),
+        )
+        .await?;
         agent_metadata.agent_id = Some(new_thread.thread_id);
         reservation.commit(agent_metadata.clone());
         if let Some(residency_slot) = residency_slot {
@@ -661,13 +712,6 @@ impl AgentControl {
         // to subscribe or drain this newly created thread.
         // TODO(jif) add helper for drain
         state.notify_thread_created(new_thread.thread_id);
-
-        self.persist_thread_spawn_edge_for_source(
-            new_thread.thread.as_ref(),
-            new_thread.thread_id,
-            notification_source.as_ref(),
-        )
-        .await;
 
         match initial_input {
             SpawnInitialInput::UserInput(input) => {
@@ -967,6 +1011,7 @@ impl AgentControl {
                 inherited_exec_policy,
                 options.environments.clone(),
                 thread_extension_init,
+                /*defer_durable_team_participant_registration*/ true,
             )
             .await
     }
@@ -1127,8 +1172,39 @@ impl AgentControl {
                 parent_thread_id,
                 inherited_environments,
                 inherited_exec_policy,
+                defer_durable_team_participant_registration: true,
             })
             .await?;
+        if let Err(edge_err) = self
+            .persist_thread_spawn_edge_for_source(
+                &state,
+                resumed_thread.thread.as_ref(),
+                resumed_thread.thread_id,
+                Some(&notification_source),
+            )
+            .await
+        {
+            return match self
+                .discard_unpublished_thread(
+                    &state,
+                    resumed_thread.thread_id,
+                    &resumed_thread.thread,
+                )
+                .await
+            {
+                Ok(()) => Err(edge_err),
+                Err(cleanup_err) => Err(CodexErr::Fatal(format!(
+                    "{edge_err}; cleanup also failed: {cleanup_err}"
+                ))),
+            };
+        }
+        self.activate_persisted_thread_spawn_participant(
+            &state,
+            resumed_thread.thread_id,
+            &resumed_thread.thread,
+            Some(&notification_source),
+        )
+        .await?;
         let mut agent_metadata = agent_metadata;
         agent_metadata.agent_id = Some(resumed_thread.thread_id);
         reservation.commit(agent_metadata.clone());
@@ -1145,16 +1221,9 @@ impl AgentControl {
                 resumed_thread.thread_id,
                 Some(notification_source.clone()),
                 child_reference,
-                agent_metadata.agent_path.clone(),
+                agent_metadata.agent_path,
             );
         }
-        self.persist_thread_spawn_edge_for_source(
-            resumed_thread.thread.as_ref(),
-            resumed_thread.thread_id,
-            Some(&notification_source),
-        )
-        .await;
-
         Ok((resumed_thread.thread_id, multi_agent_version))
     }
 }

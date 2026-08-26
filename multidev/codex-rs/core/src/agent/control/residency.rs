@@ -79,6 +79,15 @@ impl AgentControl {
 }
 
 impl V2Residency {
+    #[cfg(test)]
+    pub(super) fn counts(&self) -> (usize, usize) {
+        let state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        (state.residents.len(), state.pending_slots)
+    }
+
     async fn reserve_slot(
         self: Arc<Self>,
         manager: &Arc<ThreadManagerState>,

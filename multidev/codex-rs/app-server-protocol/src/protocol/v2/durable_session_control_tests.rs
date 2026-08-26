@@ -263,3 +263,46 @@ fn applied_lifecycle_effects_keep_affected_thread_sets_typed() {
         );
     }
 }
+
+#[test]
+fn control_json_schema_uses_the_same_camel_case_keys_as_serde() {
+    let params_schema = serde_json::to_string(&schemars::schema_for!(DurableSessionControlParams))
+        .expect("control params schema should serialize");
+    let response_schema =
+        serde_json::to_string(&schemars::schema_for!(DurableSessionControlResponse))
+            .expect("control response schema should serialize");
+
+    for key in [
+        "expectedStorageStatus",
+        "ownerIncarnation",
+        "teamInstanceId",
+        "commitGeneration",
+        "expectedProducerState",
+        "nextRootState",
+    ] {
+        assert!(params_schema.contains(key), "missing schema key {key}");
+    }
+    for key in [
+        "mutationRevision",
+        "completedThreadIds",
+        "affectedThreadIds",
+    ] {
+        assert!(response_schema.contains(key), "missing schema key {key}");
+    }
+    for snake_case_key in [
+        "expected_storage_status",
+        "owner_incarnation",
+        "team_instance_id",
+        "commit_generation",
+        "expected_producer_state",
+        "next_root_state",
+        "mutation_revision",
+        "completed_thread_ids",
+        "affected_thread_ids",
+    ] {
+        assert!(
+            !params_schema.contains(snake_case_key) && !response_schema.contains(snake_case_key),
+            "schema must not expose non-wire key {snake_case_key}"
+        );
+    }
+}

@@ -14,6 +14,7 @@ use crate::session::turn_context::TurnContext;
 use crate::session_prefix::format_inter_agent_completion_message;
 use crate::thread_manager::thread_store_from_config;
 use crate::tools::context::ToolOutput;
+use crate::tools::handlers::multi_agents_v2::CloseAgentHandler as CloseAgentHandlerV2;
 use crate::tools::handlers::multi_agents_v2::FollowupTaskHandler as FollowupTaskHandlerV2;
 use crate::tools::handlers::multi_agents_v2::InterruptAgentHandler;
 use crate::tools::handlers::multi_agents_v2::ListAgentsHandler as ListAgentsHandlerV2;
@@ -4192,6 +4193,160 @@ async fn close_agent_submits_shutdown_and_returns_previous_status() {
 
     let status_after = manager.agent_control().get_status(agent_id).await;
     assert_eq!(status_after, AgentStatus::NotFound);
+}
+
+#[tokio::test]
+async fn multi_agent_v2_close_agent_rejects_foreign_session_targets_and_accepts_own_children() {
+    let (_session, turn) = make_session_and_context().await;
+    let mut config = turn.config.as_ref().clone();
+    config
+        .features
+        .enable(Feature::MultiAgentV2)
+        .expect("test config should allow Multi-Agent V2");
+    let manager = thread_manager();
+    let own_root = manager
+        .start_thread(StartThreadOptions::new(config.clone()))
+        .await
+        .expect("own Root should start");
+    let foreign_root = manager
+        .start_thread(StartThreadOptions::new(config.clone()))
+        .await
+        .expect("foreign Root should start");
+    let own_session = own_root.thread.session.clone();
+    let own_control = own_session.services.agent_control.clone();
+    let foreign_control = foreign_root.thread.session.services.agent_control.clone();
+
+    let spawn_child = async |control: &crate::agent::AgentControl,
+                             parent_thread_id: ThreadId,
+                             task_name: &str| {
+        control
+            .spawn_agent_with_metadata(
+                config.clone(),
+                vec![UserInput::Text {
+                    text: "child task".to_string(),
+                    text_elements: Vec::new(),
+                }],
+                Some(SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
+                    parent_thread_id,
+                    depth: 1,
+                    agent_path: Some(
+                        AgentPath::try_from(format!("/root/{task_name}"))
+                            .expect("task name should form an agent path"),
+                    ),
+                    agent_nickname: None,
+                    agent_role: None,
+                })),
+                crate::agent::control::SpawnAgentOptions::default(),
+            )
+            .await
+            .expect("child should spawn")
+            .thread_id
+    };
+    let foreign_child_id =
+        spawn_child(&foreign_control, foreign_root.thread_id, "foreign_worker").await;
+
+    for foreign_id in [foreign_root.thread_id, foreign_child_id] {
+        let Err(err) = CloseAgentHandlerV2
+            .handle(invocation(
+                own_session.clone(),
+                own_session.new_default_turn().await,
+                "close_agent",
+                function_payload(json!({"target": foreign_id.to_string()})),
+            ))
+            .await
+        else {
+            panic!("foreign Session target must be rejected");
+        };
+        assert!(
+            err.to_string().contains(&foreign_id.to_string()),
+            "rejection should identify the foreign target: {err}"
+        );
+        assert_ne!(
+            manager.agent_control().get_status(foreign_id).await,
+            AgentStatus::NotFound,
+            "rejected foreign target must remain loaded"
+        );
+    }
+
+    let own_named_child_id = spawn_child(&own_control, own_root.thread_id, "own_named").await;
+    CloseAgentHandlerV2
+        .handle(invocation(
+            own_session.clone(),
+            own_session.new_default_turn().await,
+            "close_agent",
+            function_payload(json!({"target": "own_named"})),
+        ))
+        .await
+        .expect("same-Team task name should close");
+    assert_eq!(
+        own_control.get_status(own_named_child_id).await,
+        AgentStatus::NotFound
+    );
+
+    let own_uuid_child_id = spawn_child(&own_control, own_root.thread_id, "own_uuid").await;
+    CloseAgentHandlerV2
+        .handle(invocation(
+            own_session.clone(),
+            own_session.new_default_turn().await,
+            "close_agent",
+            function_payload(json!({"target": own_uuid_child_id.to_string()})),
+        ))
+        .await
+        .expect("same-Team UUID should close");
+    assert_eq!(
+        own_control.get_status(own_uuid_child_id).await,
+        AgentStatus::NotFound
+    );
+
+    let Err(own_root_err) = CloseAgentHandlerV2
+        .handle(invocation(
+            own_session.clone(),
+            own_session.new_default_turn().await,
+            "close_agent",
+            function_payload(json!({"target": own_root.thread_id.to_string()})),
+        ))
+        .await
+    else {
+        panic!("current Root must not be closeable as an agent");
+    };
+    assert_eq!(
+        own_root_err,
+        FunctionCallError::RespondToModel("root is not a spawned agent".to_string())
+    );
+    assert_ne!(
+        own_control.get_status(own_root.thread_id).await,
+        AgentStatus::NotFound
+    );
+
+    let self_child_id = spawn_child(&own_control, own_root.thread_id, "self_worker").await;
+    let self_child_session = manager
+        .get_thread(self_child_id)
+        .await
+        .expect("self-test child should remain loaded")
+        .session
+        .clone();
+    let Err(self_close_err) = CloseAgentHandlerV2
+        .handle(invocation(
+            self_child_session.clone(),
+            self_child_session.new_default_turn().await,
+            "close_agent",
+            function_payload(json!({"target": self_child_id.to_string()})),
+        ))
+        .await
+    else {
+        panic!("an agent must not close itself");
+    };
+    assert_eq!(
+        self_close_err,
+        FunctionCallError::RespondToModel(
+            "an agent cannot close itself; return your result and let the parent close you if needed"
+                .to_string()
+        )
+    );
+    assert_ne!(
+        own_control.get_status(self_child_id).await,
+        AgentStatus::NotFound
+    );
 }
 
 #[tokio::test]

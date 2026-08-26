@@ -217,6 +217,8 @@ pub enum ExperimentalSessionControlError {
     OwnerIncarnationConflict,
     #[error("formal Session shutdown handoff failed: {message}")]
     ShutdownHandoff { message: String },
+    #[error("formal Session shutdown is blocked by active Team writers: {thread_ids:?}")]
+    ActiveWriters { thread_ids: Vec<ThreadId> },
     #[error("formal Session shutdown terminated the owner with an unknown close result: {message}")]
     ShutdownTerminatedWithError { message: String },
 }
@@ -275,14 +277,16 @@ pub(crate) async fn prepare_loaded_root_shutdown_at_snapshot(
                 message: error.to_string(),
             },
         )?;
-    lifecycle_close
-        .ensure_no_live_descendants()
-        .await
-        .map_err(
-            |error| ExperimentalSessionControlError::UnexpectedTeamError {
-                message: error.to_string(),
-            },
-        )?;
+    let live_descendants = lifecycle_close.live_descendants().await.map_err(|error| {
+        ExperimentalSessionControlError::UnexpectedTeamError {
+            message: error.to_string(),
+        }
+    })?;
+    if !live_descendants.is_empty() {
+        return Err(ExperimentalSessionControlError::ActiveWriters {
+            thread_ids: live_descendants,
+        });
+    }
     let team_close = agent_control
         .team()
         .begin_close_at_snapshot(expected_owner_incarnation_id, precondition)

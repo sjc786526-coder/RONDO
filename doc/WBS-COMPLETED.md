@@ -2175,3 +2175,24 @@ formal retry 整改为 `d29e857`，最终独立验收提交为 `43cf0eeb3e1b4826
 - 最终独立验收复跑 Plan 081 36/36 与 Plan 060/066/073 精选历史回归 9/9，合计 45/45；主审与三路独立复核无剩余
   P1/P2/P3。未运行真实模型、GPU、云端、Docker、Cargo、全 workspace 或 unseen，也未启用 Publication Critic 或解锁 M3-D。
 - Plan 082 是下一三期工作包但仍须另行立项授权；当前路线、顺序和授权边界只由 `doc/WBS.md` 与三期子 WBS 维护。
+
+## M4-Z(core) Durable Team 全链收口（Plan 083，2026-08-26）
+
+**状态**：公开 S/C 全链、fresh store/真实进程替换正式轮、两轮独立审查整改与最终复验均已完成；验收通过、任务目标完成，结论为
+`M4_Z_CORE_PASS`。最终产品候选为 `0a68f37667188bb7886ce51d4f79436b54bb9faa`。
+
+- Durable child graph 持久化、participant commit 与 registry/residency 发布按 fail-closed 顺序收口；persisted Open descendant 与 loaded
+  running descendant 共同阻塞 Root close。V2 `close_agent` 在当前 Team membership 边界内复用 subtree close，拒绝 foreign Root/child、
+  Root 与 self；V1 合同保持不变。公开错误与 serde/schema camelCase 合同已对齐。
+- 新增公开 app-server v2 全链回归：从 fresh Session/store 创建 Root/child、提交 Team State、由非 owner 权威查询，真实替换旧/新
+  app-server OS 进程后恢复同一 Session/Root/TeamInstance，继续 mutation，并闭合 child/Root close、archive/unarchive/delete 与最终
+  SessionNotFound。顶层 fork/new/clear 与 child `spawn_agent fork_turns`、query/control/no-replay/gates/non-durable/shared workspace
+  由职责层与邻接证据共同覆盖。
+- 首轮独立审查的 foreign target 与 phantom participant 两项 Medium 已整改；复审追加的 activation cleanup 顺序问题也已关闭。
+  cleanup 复用 shutdown captured owner → exact map lease → Closed edge → exact retirement，任一 teardown/owner/graph 失败仍保留 Root
+  close barrier；仅测试编译的定向 fault seam 不增加产品状态或第二套事务/审计设施。
+- 原宽聚焦 `30/30`、schema/precomputed 与相关 scoped clippy/fmt 门禁通过；最终整改又通过 failure-ordering `2/2`、graph/Root-close
+  邻接 `6/6` 与 `codex-core` scoped clippy。最终 fresh 正式轮 Nextest `fc6e8c7d-ff74-4af0-9147-a91580541ef8` 为 `1/1`，watchdog
+  `20260826-012504-1000-2261794` 为 `stop=none / cleanup=none`。
+- 未运行 full workspace、Docker、真实 API/模型、训练、benchmark、CI/PR 或远端写操作。执行与整改见对应 Plan 083 `agent_log`；
+  最终独立验收见 `agent_log/2026-08-26-013416-plan083-final-independent-acceptance.md`，无未关闭的高/中等级 correctness finding。

@@ -521,6 +521,8 @@ pub(crate) struct SessionSpawnArgs {
     pub(crate) attestation_provider: Option<Arc<dyn AttestationProvider>>,
     pub(crate) external_time_provider: Option<Arc<dyn TimeProvider>>,
     pub(crate) inherited_multi_agent_version: Option<MultiAgentVersion>,
+    /// Delay a durable child participant commit until its owner has persisted the graph edge.
+    pub(crate) defer_durable_team_participant_registration: bool,
     pub(crate) git_enrichment_policy: GitEnrichmentPolicy,
     pub(crate) windows_sandbox_proxy_settings_mode:
         codex_sandboxing::WindowsSandboxProxySettingsMode,
@@ -614,6 +616,7 @@ impl Session {
             attestation_provider,
             external_time_provider,
             inherited_multi_agent_version,
+            defer_durable_team_participant_registration,
             git_enrichment_policy,
             windows_sandbox_proxy_settings_mode,
         } = args;
@@ -813,6 +816,7 @@ impl Session {
             attestation_provider,
             external_time_provider,
             multi_agent_version,
+            defer_durable_team_participant_registration,
             git_enrichment_policy,
             windows_sandbox_proxy_settings_mode,
         ))

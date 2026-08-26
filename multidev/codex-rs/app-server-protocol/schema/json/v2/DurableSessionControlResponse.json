@@ -9,7 +9,7 @@
             "changed": {
               "type": "boolean"
             },
-            "mutation_revision": {
+            "mutationRevision": {
               "format": "uint64",
               "minimum": 0.0,
               "type": "integer"
@@ -24,7 +24,7 @@
           },
           "required": [
             "changed",
-            "mutation_revision",
+            "mutationRevision",
             "type"
           ],
           "title": "RootStateUpdatedDurableSessionControlEffect",
@@ -49,7 +49,7 @@
         },
         {
           "properties": {
-            "affected_thread_ids": {
+            "affectedThreadIds": {
               "items": {
                 "type": "string"
               },
@@ -64,7 +64,7 @@
             }
           },
           "required": [
-            "affected_thread_ids",
+            "affectedThreadIds",
             "type"
           ],
           "title": "ArchivedDurableSessionControlEffect",
@@ -88,7 +88,7 @@
         },
         {
           "properties": {
-            "affected_thread_ids": {
+            "affectedThreadIds": {
               "items": {
                 "type": "string"
               },
@@ -103,7 +103,7 @@
             }
           },
           "required": [
-            "affected_thread_ids",
+            "affectedThreadIds",
             "type"
           ],
           "title": "DeletedDurableSessionControlEffect",
@@ -175,7 +175,7 @@
         },
         {
           "properties": {
-            "completed_thread_ids": {
+            "completedThreadIds": {
               "items": {
                 "type": "string"
               },
@@ -196,7 +196,7 @@
             }
           },
           "required": [
-            "completed_thread_ids",
+            "completedThreadIds",
             "message",
             "operation",
             "type"
