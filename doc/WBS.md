@@ -2,7 +2,8 @@
 
 最后更新：2026-08-26（Plan 079 已完成 Skywork 4B BF16 base 正式质量测评并取得 `4B_BASE_QUALITY_NO_GO`；
 Plan 081 已完成 exact 1.7B 非 LoRA 训练路线本地收敛与云端就绪并取得 `LOCAL_TRAINING_READINESS_PASS`，
-Plan 082 已完成一轮有效干净正式训练并取得 `VALID_NO_IMPROVEMENT`，GPU 专项验收已通过且 Pod 已释放；网络卷继续保留，
+Plan 082 已完成一轮有效干净正式训练并取得 `VALID_NO_IMPROVEMENT`，GPU 专项验收和大型资产逐对象交接均已通过执行门禁且 Pod 已释放；
+网络卷继续保留并等待最终验收，
 M3-D 保持锁定；
 Plan 077 / M4-C1、Plan 078 / M4-S2 已分别取得
 `M4_C1_QUERY_PASS`、`M4_S2_PASS`；Plan 080 / M4-C2 已通过最终独立验收并取得 `M4_C2_CONTROL_PASS`）
@@ -25,7 +26,7 @@ Plan 077 / M4-C1、Plan 078 / M4-S2 已分别取得
 | 0：量化测评基准 | 既有设施与首次 schema v7 正式 canary 已完成，当前无 active campaign | 保留设施；历史结果见 COMPLETED，新 campaign 须重新立项与授权 |
 | 1：Harness 优化 | **正式收口；当前无 active 工作包** | 当前不继续新增观测或内核/热路径优化；既有实现、设施与历史结果保留。未来可由用户另行决定是否重新立项，本次收口不作永久禁止 |
 | 2：本地审批模型 | **已收口，今后不再开启** | 最终结论为“保留为实验”；不改生产默认，不再规划后续工作包 |
-| 3：RONDO Multi | 第一、二期及其收口案例、**三期 M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、M3-C2、Plan 064、Plan 071、Plan 073、Plan 075、Plan 079、Plan 081 与四期 M4-A、M4-C0、M4-S1、M4-C1、M4-S2、M4-C2、Plan 074 已完成** | Plan 082 已在 exact 1.7B、冻结 v8/pair/input、非 LoRA 与单张 L40S 上完成一轮有效干净正式训练，终态 `VALID_NO_IMPROVEMENT`；正式 step 2 恢复 checkpoint 与 step 4 latest checkpoint、原始 observations、输入及日志均保留。GPU 专项验收通过后唯一训练 Pod 已释放并确认 0 Pod/compute 止费，40GB 网络卷继续保留。US-TX-3 不受 provider S3 API 支持的阻断已经用户人工批准一次性 transfer Pod 例外：兼容可用时最低费用 CPU 优先，否则费用合理的任意单卡 GPU；同时至多一个，只读回传并校验冻结 39 对象，完成即删。网络卷删除仍须用户人工批准。该研究结论不提供产品 GO；Critic 保持 default-off，M3-D 保持锁定。四期 S/C 必成子线已具备正式持久 Session、查询与控制能力；下一必成工作包是须另行立项授权的 M4-Z(core)，M4-W0 继续按独立价值门推进 |
+| 3：RONDO Multi | 第一、二期及其收口案例、**三期 M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、M3-C2、Plan 064、Plan 071、Plan 073、Plan 075、Plan 079、Plan 081 与四期 M4-A、M4-C0、M4-S1、M4-C1、M4-S2、M4-C2、Plan 074 已完成** | Plan 082 已在 exact 1.7B、冻结 v8/pair/input、非 LoRA 与单张 L40S 上完成一轮有效干净正式训练，终态 `VALID_NO_IMPROVEMENT`；正式 step 2 恢复 checkpoint 与 step 4 latest checkpoint、原始 observations、输入及日志均保留。GPU 专项验收通过后唯一训练 Pod 已释放；一次性 transfer Pod 已只读回传并逐对象验证冻结 39 对象，随后删除并确认 0 Pod/compute 止费。40GB 网络卷继续保留，删除仍须用户人工批准；Plan 082 当前等待最终验收。该研究结论不提供产品 GO；Critic 保持 default-off，M3-D 保持锁定。四期 S/C 必成子线已具备正式持久 Session、查询与控制能力；下一必成工作包是须另行立项授权的 M4-Z(core)，M4-W0 继续按独立价值门推进 |
 
 ### 方向命名口径
 
@@ -44,8 +45,9 @@ Plan 077 / M4-C1、Plan 078 / M4-S2 已分别取得
 
 方向 3 是当前唯一仍在推进的产品线。Plan 081 已取得 `LOCAL_TRAINING_READINESS_PASS`；三期 Plan 082 已获用户付费批准并完成
 真实 commissioning、正式 freeze、干净 formal 和新进程恢复，终态为 `VALID_NO_IMPROVEMENT`。保留 Pod 的 GPU 专项验收已经通过，
-唯一训练 Pod 已释放并确认持续 compute 费率为 0；保留卷所在 `US-TX-3` 当前不提供 S3 API，用户已人工批准一次性最小 transfer Pod
-例外，等待审查者通过指定队列传达后执行回传。
+唯一训练 Pod 已释放并确认持续 compute 费率为 0；保留卷所在 `US-TX-3` 不提供 S3 API，故按用户一次性授权使用单个 transfer Pod
+只读回传冻结 39 对象。全部对象完成本地 bytes/SHA-256 校验后 transfer Pod 已删除，当前为
+`FINAL_REVIEW_PENDING / ZERO_POD / VOLUME_RETAINED_PENDING_USER_DELETE`。
 四期 Plan 080 / M4-C2 已取得 `M4_C2_CONTROL_PASS`；下一必成工作包是需要
 另行立项与授权的 M4-Z(core) 全链收口。M4-W0 继续按自身价值门条件推进。
 方向 1 已正式收口，不作为方向 3 的前置或旁支。
@@ -94,6 +96,8 @@ Plan 077 / M4-C1、Plan 078 / M4-S2 已分别取得
   `0.8252007961`，而 ROC AUC、strict win rate 与 balanced accuracy 不变，故诚实形成 `VALID_NO_IMPROVEMENT`。step 2 已由新进程
   恢复并继续更新，step 2 与 step 4 两份完整 checkpoint、正式/commissioning 原始 observations、输入和日志继续保留在 40GB 任务卷；
   当前实际占用约 31.21GB，无需删除或扩容。若后续容量确实逼近上限，须先报告并优先按用户授权扩容，不删除大 checkpoint。
+  冻结 bootstrap 的 39 个正式对象也已完整回传到项目 ignored 目录并逐对象验证；正式对象共 `13,797,142,360` bytes，加 bootstrap 后
+  `13,797,156,884` bytes。transfer Pod 已删除并确认 0 Pod，网络卷继续保留等待用户在最终验收后的独立删除决定。
   Plan 082 训练活动受 12 小时/15 USD 上限约束，训练与后续资源保留/无 Pod 回传费用分账报告，总累计达到 10 USD 时非阻断告警；
   详细结果与后续边界见三期子 WBS。
 
@@ -117,9 +121,8 @@ Plan 077 / M4-C1、Plan 078 / M4-S2 已分别取得
 - 四期不依赖 Publication Critic 训练、真实模型、真实 API 或性能测评，可以与三期模型链并行；它保持 shared workspace
   为默认，不建设通用 scheduler、自动路由、自动 merge/push、第二套 Team State/trace 或审计/可信平台。
 - Plan 081 已在不运行 Cargo、Docker、真实模型或云计算的边界内完成；未写 Plan 069 target，也未复制本地模型资产。
-  Plan 082 的 GPU 专项验收已通过，唯一训练 Pod 已释放，任务网络卷继续保留；其云计算不占本地 Cargo build lock；
-  bundle/checkpoint/结果传输仍竞争本地网络与磁盘。Plan 083 已完成且当前容量窗口安全，但 `US-TX-3` 任务卷不在 provider S3 API
-  支持列表；用户已批准同时至多一个、只读冻结 39 对象、完成即删的一次性 transfer Pod，CPU 优先、单卡 GPU 兜底。
+  Plan 082 的 GPU 专项验收与大型资产交接已完成，训练 Pod 和一次性 transfer Pod 均已释放，任务网络卷继续保留；当前不再竞争本地
+  网络与磁盘，也不占本地 Cargo build lock。Plan 083 已完成且本次容量窗口安全。
   后续第四期任务的每个重型 Cargo 批次仍须先取得用户针对该批次的明确批准，具体运行时机由用户人工判断、调度；获批后再按根
   `AGENTS.md` 与三期本地模型、Docker 等重型任务互斥。详细资源关系见四期子 WBS。
 

@@ -437,31 +437,35 @@ XXX用以下内容代替：
   实时可用且兼容时优先最低费用 CPU，否则可用费用合理的任意单卡 GPU；只读回传/续传/校验冻结 39 对象，禁止训练、GPU 模型加载、
   第二卷和远端工件修改。完成后立即删除并确认 0 Pod；卷继续保留。审查者在批准前只读确认当前 0 Pod、US-TX-3 40GB 卷仍存在、L40S
   库存 `LOW` 且当前 Secure/Community 费率为 0.99/0.79 USD/h，provider 已入账的 Plan 082 Pod 费用约 0.594 USD，未触发 10 USD 告警。
+- 2026-08-26：实时 CPU catalog 在 US-TX-3 无兼容供给，故选择该 DC 最低费用的可用 Secure RTX 4090（0.74 USD/h）挂载原卷；同一 Pod
+  的首个 CUDA 12.8 训练镜像因宿主驱动要求无法启动，改为官方 CPU-only base 后只用 SSH/rsync 读取冻结对象，未训练或加载模型。
+  bootstrap 与 39 个正式对象已回传到 ignored 目标，逐对象 bytes/SHA-256、exact-tree、0600/0700 和无符号链接检查全部通过；正式对象
+  共 `13,797,142,360` bytes，加 bootstrap 后 `13,797,156,884` bytes。transfer Pod 已删除，控制面确认 0 Pod/compute 费率为 0，40GB
+  卷 `mwemzrn33y` 继续保留。provider 当前记录 transfer Pod 费用约 0.239 USD，按完整墙钟保守上界约 0.961 USD；任务保守累计约
+  1.729 USD（含当前卷费），未触发 10 USD 告警。
 
 ### 当前工作
 
-- 正式训练与 GPU 专项验收已完成，当前为 `GPU_REVIEW_PASS / ZERO_POD / TRANSFER_POD_EXCEPTION_GRANTED`。唯一训练 Pod 已释放且
-  compute 止费；40GB 网络卷完整保留。审查提交后通过指定队列传达一次性 transfer Pod 授权，执行者随后按最小边界完成回传。
+- 正式训练、GPU 专项验收和最终大型资产交接均已完成，当前为
+  `FINAL_REVIEW_PENDING / ZERO_POD / VOLUME_RETAINED_PENDING_USER_DELETE`。冻结 39 对象与 bootstrap 已在本地逐对象验证，唯一 transfer
+  Pod 已删除并确认 compute 止费；40GB 网络卷继续保留，等待最终验收后由用户本人决定是否删除。
 
 ### 本任务剩余步骤
 
-1. 审查者通过指定队列正式传达 `TRANSFER_POD_EXCEPTION_GRANTED`；执行者创建前刷新兼容 CPU/单卡 GPU、费率和费用基线，同时只保留
-   一个 transfer Pod。
-2. 以批准的最小方式回传 bootstrap 精确列出的 39 对象，完成 `.part` 续传、全部 bytes/SHA-256 校验，立即删除 transfer Pod并确认
-   0 Pod/compute 止费，提交
-   `FINAL_REVIEW_PENDING / VOLUME_RETAINED_PENDING_USER_DELETE` 并按队列申请最终验收。
-3. 最终审查者只要求无需 GPU 的修复/复验并收口最终文档；验收后转请用户本人决定是否删除网络卷。执行者仅在收到用户人工批准后删除卷，
+1. 执行者提交 `FINAL_REVIEW_PENDING / VOLUME_RETAINED_PENDING_USER_DELETE` 并按队列申请最终验收。
+2. 最终审查者只要求无需 GPU 的修复/复验并收口最终文档；验收后转请用户本人决定是否删除网络卷。执行者仅在收到用户人工批准后删除卷，
    记录终态并通知；所有人继续等待用户决定合并/推送。
 
 ### 阻塞项
 
 - 阶段 A 无计划级阻塞。
-- 阶段 B 正式轮和 GPU 专项验收已完成，训练 Pod 已释放并止费；US-TX-3 S3 阻断已有一次性 transfer Pod 授权，无计划级阻塞。
-- 实际 RunPod 库存、价格、旧资源终态、网络卷/S3 兼容性和本地大工件回传窗口均须在相应动作前实时复核；规划时快照不构成运行事实。
+- 阶段 B 正式轮、GPU 专项验收和大型资产交接均已完成；当前 0 Pod、卷保留，无计划级阻塞。
+- 网络卷删除仍等待用户本人在最终验收后的独立人工决定。
 
 ### 当前验收状态
 
-- `GPU_REVIEW_PASS / ZERO_POD / TRANSFER_POD_EXCEPTION_GRANTED`；研究终态为 `VALID_NO_IMPROVEMENT`，最终大型资产交接与任务验收尚未完成。
+- `FINAL_REVIEW_PENDING / ZERO_POD / VOLUME_RETAINED_PENDING_USER_DELETE`；研究终态为 `VALID_NO_IMPROVEMENT`，大型资产交接已完成，
+  总体任务等待最终验收。
 
 ### 交接边界
 
