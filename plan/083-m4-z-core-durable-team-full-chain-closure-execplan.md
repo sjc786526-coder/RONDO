@@ -247,11 +247,12 @@ UUID替换为 `01a03c53-7cf4-78e0-bea3-c1eb7c4015da`，安全处理消息正文�
 
 ### 当前工作
 
-- `AWAITING_REVIEW`：执行者候选实现、正式证据、自审、候选状态和执行日志已收口，等待指定审查者独立验收。
+- `REVIEW_CHANGES_REQUESTED`：首轮独立审查确认 V2 `close_agent` Team target 隔离与 durable graph 失败后 phantom participant
+  两项中等级 correctness finding；详见 `agent_log/2026-08-26-001603-plan083-independent-review-round1.md`。
 
 ### 本任务剩余步骤
 
-- 审查者独立验收候选；若有 finding，执行者在同一 worktree 窄修、复验并重新提交后再次通知。
+- 执行者在同一 worktree 窄修两项 finding，运行相称聚焦回归并从 fresh store 重跑正式全链；提交后再次通知审查者。
 - 只有审查通过后，才由审查者同步最终 Plan/WBS/COMPLETED、验收日志与收口提交。
 
 ### 阻塞项
@@ -261,7 +262,8 @@ UUID替换为 `01a03c53-7cf4-78e0-bea3-c1eb7c4015da`，安全处理消息正文�
 
 ### 当前验收状态
 
-- `AWAITING_REVIEW`：执行者正式轮和相称门禁已通过，但 `M4_Z_CORE_PASS` 尚未成立；最终结论只由指定审查者给出。
+- `REVIEW_CHANGES_REQUESTED`：既有正式轮与相称门禁证据有效，但候选仍有两项中等级 correctness finding，`M4_Z_CORE_PASS`
+  尚未成立。
 
 ### 交接边界
 

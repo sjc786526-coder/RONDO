@@ -314,10 +314,9 @@ handoff 时投影其状态。该扩展不扩张为通用 workspace dashboard，�
 
 ### M4-Z(core)：Durable Team 全链收口
 
-**当前状态：`AWAITING_REVIEW`。** Plan 083 执行者候选已通过公开 app-server v2 fresh Session/store 全链、真实旧/新 OS 进程替换、
-恢复后 Team mutation、persisted descendant close barrier、V2 显式 child close、owner close 与 cold archive/unarchive/delete；相称的
-core/app-server/protocol/client/TUI/schema 回归与 scoped clippy 已通过。该状态仅表示候选等待指定审查者验收，不提前形成
-`M4_Z_CORE_PASS` 或完成历史。
+**当前状态：`REVIEW_CHANGES_REQUESTED`。** Plan 083 执行者候选已通过公开 app-server v2 fresh Session/store 全链、真实旧/新 OS
+进程替换及相称门禁；首轮独立审查确认 V2 `close_agent` 可越过 Team 边界关闭 foreign UUID，以及 graph persist 失败后会遗留
+committed phantom participant 两项 correctness 缺口。整改与复验完成前不形成 `M4_Z_CORE_PASS` 或完成历史。
 
 **目标**：完整打通 Team Session 创建、Team/Agent 状态推进、进程或连接中断、恢复、继续控制和显式生命周期操作，确认 S/C 主线
 形成独立可用的 Durable Team Runtime。
