@@ -2201,3 +2201,5 @@ formal retry 整改为 `d29e857`，最终独立验收提交为 `43cf0eeb3e1b4826
 - 最终审查复跑 Plan 081/082 training、handoff、scripts 与 Plan 068 相邻轻量回归 83/83；相关 Ruff 0.15.12、compileall、五支 shell
   `bash -n` 和 `git diff --check` 均通过。终审未重哈希约 13.8GB checkpoint payload，而是复核正式 loader/validator、已生成逐对象摘要、
   实树 bytes/权限和 manifest/receipt 闭合关系；无遗留高/中等级 correctness/functionality finding。
+- 最终验收后，用户本人明确决定继续保留 40GB Standard 网络卷 `mwemzrn33y`；该卷当前仍未删除并继续产生约 `$0.003889/h` 的卷费。
+  未来若改变决定，删除仍须新的明确人工授权。

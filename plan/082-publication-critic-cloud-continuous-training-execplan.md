@@ -448,27 +448,29 @@ XXX用以下内容代替：
   provider 可见入账至少 1.720537 USD，当前小时仍可能延迟追记。按已知训练/transfer Pod 完整墙钟、transfer container disk 与已见卷费
   计算的资源口径约 2.32 USD，另有约 0.003889 USD/h 的持续卷费；该口径取代上一条 1.729 USD“保守累计”表述，仍远低于 10 USD
   告警和 15 USD 边界。
+- 2026-08-26：最终验收后，用户本人明确决定继续保留 40GB Standard 网络卷 `mwemzrn33y`。该卷当前仍未删除，持续卷费继续产生；
+  本决定不恢复 Pod、不追加训练，也不改变 `VALID_NO_IMPROVEMENT` 和任务完成结论。
 
 ### 当前工作
 
 - Plan 082 实现、真实训练、GPU 专项验收、大型资产交接和最终验收均已完成并冻结，终态为
-  `FINAL_REVIEW_ACCEPTED / ZERO_POD / VOLUME_RETAINED_AWAITING_USER_DECISION`，研究结论为 `VALID_NO_IMPROVEMENT`。40GB 网络卷继续
-  保留；保留或删除由用户本人另行决定，不影响 Plan 082 任务完成结论。
+  `FINAL_REVIEW_ACCEPTED / ZERO_POD / VOLUME_RETAINED_BY_USER_DECISION`，研究结论为 `VALID_NO_IMPROVEMENT`。用户本人已决定继续
+  保留 40GB 网络卷 `mwemzrn33y`，该卷当前仍未删除。
 
 ### 本任务剩余步骤
 
-- 无剩余实现或验收步骤。资源尾项仅为用户决定是否删除网络卷；若明确批准，执行者只删除 exact 卷 `mwemzrn33y` 并复核 0 Pod/0 volume，
-  否则继续保留并承担持续卷费。工作树合并和推送仍等待用户决定。
+- 无剩余实现、验收或资源决策步骤。网络卷按用户决定继续保留并承担持续卷费；若用户未来改变决定，删除须重新取得明确人工授权。
+  工作树按用户本次指令合并并推送。
 
 ### 阻塞项
 
 - 阶段 A 无计划级阻塞。
 - 阶段 B 正式轮、GPU 专项验收和大型资产交接均已完成；当前 0 Pod、卷保留，无计划级阻塞。
-- 网络卷删除仍等待用户本人独立人工决定；这是资源尾项，不是任务完成阻塞。
+- 用户已决定保留网络卷；当前没有资源尾项阻塞。
 
 ### 当前验收状态
 
-- `FINAL_REVIEW_ACCEPTED / ZERO_POD / VOLUME_RETAINED_AWAITING_USER_DECISION`；验收通过、任务目标完成，研究终态为
+- `FINAL_REVIEW_ACCEPTED / ZERO_POD / VOLUME_RETAINED_BY_USER_DECISION`；验收通过、任务目标完成，研究终态为
   `VALID_NO_IMPROVEMENT`。Publication Critic 保持 default-off，M3-D 保持锁定。
 
 ### 交接边界
