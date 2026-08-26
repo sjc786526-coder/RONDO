@@ -28,6 +28,11 @@ create only within the same empty-account/single-create invocation, reconcile
 stop/delete outcomes by exact identity, and copy back only a manifest allowlist
 of small SHA-256-verified files. A pre-existing same-name Pod is never adopted
 because the frozen provider client cannot expose every creation-contract field.
+The frozen CLI result remains pending until the existing RunPod MCP v2 safe
+entry explicitly reports the exact requested `networkVolume.id` and mount path.
+Missing/null initialization state may be re-queried only within the
+pending receipt's finite deadline; no final creation receipt is issued
+otherwise.
 
 `runbook.md` is the only operational entry. Stage A ends before any command in
 its paid section. The task never reads unseen, uses a third GPU type, publishes

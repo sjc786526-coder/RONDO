@@ -162,18 +162,56 @@ volume and stop/terminate binding, so the helper fails closed. Inspect and
 terminalize the exact task Pod, confirm account-level zero, then create again;
 multiple matches or any unrelated Pod also fail closed.
 
+Creation is not confirmed merely because the Pod appears in the account list.
+The frozen `runpodctl` projects machine/image/disk fields but strips the raw
+network-volume attachment even when asked to include it. Therefore the create
+command emits only a pending receipt; it is never the upload/bootstrap gate.
+
 ```bash
-python3 training/publication-critic-plan087/runpod-create.py \
+python3 training/publication-critic-plan087/runpod-create.py create \
   --pod-name "$PLAN087_POD_NAME" --image "$PLAN087_IMAGE" \
   --gpu-id "$PLAN087_GPU_ID" --data-center-id "$PLAN087_DATA_CENTER" \
   --network-volume-id "$PLAN087_VOLUME_ID" \
   --container-disk-gb "$PLAN087_CONTAINER_GB" \
   --stop-after "$PLAN087_STOP_AT" --terminate-after "$PLAN087_TERMINATE_AT" \
   --captured-at "$PLAN087_CREATE_CAPTURED_AT" \
+  > "$PLAN087_LOCAL_ROOT/runpod-create-pending.json"
+```
+
+Before the pending receipt's finite `attachment_confirmation.deadline`, use the
+already-configured RunPod MCP safe entry `get_pod` with its exact Pod ID and
+both `includeMachine=true` and `includeNetworkVolume=true`. Persist the returned
+Pod object without reinterpretation in this small local envelope:
+
+```json
+{
+  "schema": "rondo-publication-critic-plan087-runpod-provider-observation-v1",
+  "captured_at": "<RFC3339 local capture time>",
+  "source": "runpod-mcp-get-pod-v2",
+  "include_machine": true,
+  "include_network_volume": true,
+  "pod": { "<exact MCP Pod response fields>": "..." }
+}
+```
+
+If `networkVolume` is absent/null during initialization, re-query only within
+that deadline. Then finalize the creation receipt locally:
+
+```bash
+python3 training/publication-critic-plan087/runpod-create.py confirm-attachment \
+  --pending-receipt "$PLAN087_LOCAL_ROOT/runpod-create-pending.json" \
+  --provider-observation "$PLAN087_LOCAL_ROOT/runpod-provider-observation.json" \
   > "$PLAN087_LOCAL_ROOT/runpod-create.json"
 ```
 
-Bind the returned exact ID and name in the task log. Use `runpodctl ssh info
+Confirmation requires `networkVolume.id` to be the exact requested task volume
+and `volumeMountPath` to be `/workspace`, and rechecks image, GPU, cloud, data
+center and disk. Missing/null/wrong attachment data fail; confirmation after
+the pending deadline also fails. On failure, do not rerun create: terminalize
+the exact task Pod and confirm zero first. Do not connect, upload or bootstrap
+until `runpod-create.json` exists as the success receipt.
+
+Bind the confirmed exact ID and name in the task log. Use `runpodctl ssh info
 <pod-id>` after every start/restart to refresh the SSH endpoint. Before upload,
 create the fresh `/workspace/rondo-plan087-<run>/incoming` tree through that
 endpoint with the task root and incoming directory both mode `0700`. Upload only

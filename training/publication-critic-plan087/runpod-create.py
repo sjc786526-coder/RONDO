@@ -9,10 +9,15 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable, Mapping, Sequence
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 
 CREATE_SCHEMA = "rondo-publication-critic-plan087-runpod-create-v1"
+CREATE_PENDING_SCHEMA = "rondo-publication-critic-plan087-runpod-create-pending-v1"
+PROVIDER_OBSERVATION_SCHEMA = (
+    "rondo-publication-critic-plan087-runpod-provider-observation-v1"
+)
 
 
 class CreateError(RuntimeError):
@@ -27,6 +32,10 @@ Query = Callable[[Sequence[str], float], Any]
 Mutation = Callable[[Sequence[str], float], None]
 
 
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
 def create_or_reconcile_exact_pod(
     args: argparse.Namespace,
     *,
@@ -34,6 +43,7 @@ def create_or_reconcile_exact_pod(
     mutate: Mutation,
     monotonic: Callable[[], float] = time.monotonic,
     sleeper: Callable[[float], None] = time.sleep,
+    wall_clock: Callable[[], datetime] = _utc_now,
 ) -> dict[str, Any]:
     if not args.pod_name.startswith(args.task_pod_name_prefix):
         raise CreateError("pod_name_outside_task_prefix")
@@ -48,6 +58,10 @@ def create_or_reconcile_exact_pod(
     ):
         raise CreateError("creation_arguments_invalid")
     requested = _requested_configuration(args)
+    confirmation_started_at = _normalize_datetime(wall_clock())
+    confirmation_deadline = confirmation_started_at + timedelta(
+        seconds=args.timeout_seconds
+    )
     deadline = monotonic() + args.timeout_seconds
 
     def remaining() -> float:
@@ -77,21 +91,12 @@ def create_or_reconcile_exact_pod(
             break
         sleeper(min(args.poll_seconds, remaining()))
     assert existing is not None
-    detail = query(
-        (
-            "pod",
-            "get",
-            existing["id"],
-            "--include-machine",
-            "--include-network-volume",
-        ),
-        remaining(),
-    )
-    observed = _validate_created_pod_observation(
+    detail = query(("pod", "get", existing["id"], "--include-machine"), remaining())
+    observed = _validate_runpodctl_pod_observation(
         detail, list_row=existing, requested=requested
     )
     return {
-        "schema": CREATE_SCHEMA,
+        "schema": CREATE_PENDING_SCHEMA,
         "captured_at": args.captured_at,
         "outcome": outcome,
         "mutation_response_uncertain": mutation_uncertain,
@@ -102,10 +107,113 @@ def create_or_reconcile_exact_pod(
             "desired_status": observed["desired_status"],
             "runtime_status": observed["runtime_status"],
         },
+        "attachment_confirmation": {
+            "started_at": _format_datetime(confirmation_started_at),
+            "deadline": _format_datetime(confirmation_deadline),
+            "required_source": "runpod-mcp-get-pod-v2",
+            "status": "pending",
+        },
         "creation_contract_binding": {
             "basis": "single_exact_create_request_after_empty_account",
             "requested": requested,
-            "provider_observed": observed,
+            "runpodctl_observed": observed,
+            "cross_process_reuse_allowed": False,
+        },
+        "account_pod_count": 1,
+    }
+
+
+def confirm_exact_pod_attachment(
+    pending_receipt: Any,
+    provider_observation: Any,
+    *,
+    wall_clock: Callable[[], datetime] = _utc_now,
+) -> dict[str, Any]:
+    """Finalize create only from the RunPod MCP v2 mount projection."""
+
+    pending = _validate_pending_receipt(pending_receipt)
+    confirmation = pending["attachment_confirmation"]
+    started_at = _rfc3339_instant(confirmation["started_at"])
+    deadline = _rfc3339_instant(confirmation["deadline"])
+    observed_now = _normalize_datetime(wall_clock())
+    if observed_now > deadline:
+        raise CreateError("attachment_confirmation_timeout")
+    if not isinstance(provider_observation, Mapping) or set(provider_observation) != {
+        "schema",
+        "captured_at",
+        "source",
+        "include_machine",
+        "include_network_volume",
+        "pod",
+    }:
+        raise CreateError("provider_attachment_observation_invalid")
+    observed_at = _rfc3339_instant(provider_observation.get("captured_at"))
+    if (
+        provider_observation.get("schema") != PROVIDER_OBSERVATION_SCHEMA
+        or provider_observation.get("source") != "runpod-mcp-get-pod-v2"
+        or provider_observation.get("include_machine") is not True
+        or provider_observation.get("include_network_volume") is not True
+        or observed_at < started_at
+        or observed_at > deadline
+        or observed_at > observed_now
+    ):
+        raise CreateError("provider_attachment_observation_invalid")
+    requested = pending["creation_contract_binding"]["requested"]
+    pod = provider_observation.get("pod")
+    if not isinstance(pod, Mapping):
+        raise CreateError("provider_attachment_observation_invalid")
+    gpu = pod.get("gpu")
+    machine = pod.get("machine")
+    network_volume = pod.get("networkVolume")
+    if (
+        pod.get("id") != pending["pod"]["id"]
+        or pod.get("name") != pending["pod"]["name"]
+        or pod.get("image") != requested["image"]
+        or pod.get("containerDiskInGb") != requested["container_disk_gb"]
+        or pod.get("volumeMountPath") != requested["volume_mount_path"]
+        or pod.get("desiredStatus") != "RUNNING"
+        or not isinstance(gpu, Mapping)
+        or gpu.get("id") != requested["gpu_id"]
+        or gpu.get("count") != requested["gpu_count"]
+        or not isinstance(machine, Mapping)
+        or machine.get("gpuTypeId") != requested["gpu_id"]
+        or machine.get("dataCenterId") != requested["data_center_id"]
+        or machine.get("secureCloud") is not True
+        or not isinstance(network_volume, Mapping)
+        or network_volume.get("id") != requested["network_volume_id"]
+        or (
+            network_volume.get("dataCenterId") is not None
+            and network_volume.get("dataCenterId") != requested["data_center_id"]
+        )
+    ):
+        raise CreateError("provider_attachment_configuration_drifted")
+    runpodctl_observed = pending["creation_contract_binding"]["runpodctl_observed"]
+    provider_observed = {
+        "id": pod["id"],
+        "name": pod["name"],
+        "image": pod["image"],
+        "gpu_id": gpu["id"],
+        "gpu_count": gpu["count"],
+        "cloud_type": "SECURE",
+        "data_center_id": machine["dataCenterId"],
+        "network_volume_id": network_volume["id"],
+        "container_disk_gb": pod["containerDiskInGb"],
+        "volume_mount_path": pod["volumeMountPath"],
+        "desired_status": pod["desiredStatus"],
+        "runtime_status": runpodctl_observed["runtime_status"],
+    }
+    return {
+        "schema": CREATE_SCHEMA,
+        "captured_at": provider_observation["captured_at"],
+        "outcome": pending["outcome"],
+        "mutation_response_uncertain": pending["mutation_response_uncertain"],
+        "pod": pending["pod"],
+        "creation_contract_binding": {
+            "basis": "single_exact_create_request_after_empty_account",
+            "requested": requested,
+            "runpodctl_observed": runpodctl_observed,
+            "provider_observed": provider_observed,
+            "provider_observation_source": "runpod-mcp-get-pod-v2",
             "cross_process_reuse_allowed": False,
         },
         "account_pod_count": 1,
@@ -190,7 +298,7 @@ def _requested_configuration(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
-def _validate_created_pod_observation(
+def _validate_runpodctl_pod_observation(
     value: Any,
     *,
     list_row: Mapping[str, Any],
@@ -221,7 +329,6 @@ def _validate_created_pod_observation(
         raise CreateError("created_pod_configuration_drifted")
     optional = {
         "cloudType": requested["cloud_type"],
-        "networkVolumeId": requested["network_volume_id"],
         "stopAfter": requested["stop_after"],
         "terminateAfter": requested["terminate_after"],
     }
@@ -232,12 +339,6 @@ def _validate_created_pod_observation(
                 observed = _rfc3339_instant(observed).isoformat().replace("+00:00", "Z")
             if observed != expected:
                 raise CreateError("created_pod_configuration_drifted")
-    network_volume = value.get("networkVolume")
-    if network_volume is not None and (
-        not isinstance(network_volume, Mapping)
-        or network_volume.get("id") != requested["network_volume_id"]
-    ):
-        raise CreateError("created_pod_configuration_drifted")
     return {
         "id": value["id"],
         "name": value["name"],
@@ -250,6 +351,124 @@ def _validate_created_pod_observation(
         "desired_status": value["desiredStatus"],
         "runtime_status": value["runtimeStatus"],
     }
+
+
+def _validate_pending_receipt(value: Any) -> dict[str, Any]:
+    if not isinstance(value, Mapping) or set(value) != {
+        "schema",
+        "captured_at",
+        "outcome",
+        "mutation_response_uncertain",
+        "pod",
+        "attachment_confirmation",
+        "creation_contract_binding",
+        "account_pod_count",
+    }:
+        raise CreateError("create_pending_receipt_invalid")
+    pod = value.get("pod")
+    confirmation = value.get("attachment_confirmation")
+    binding = value.get("creation_contract_binding")
+    if (
+        value.get("schema") != CREATE_PENDING_SCHEMA
+        or value.get("outcome") not in {"created", "reconciled_after_uncertain_create"}
+        or type(value.get("mutation_response_uncertain")) is not bool
+        or (
+            value.get("outcome") == "created"
+            and value.get("mutation_response_uncertain") is not False
+        )
+        or (
+            value.get("outcome") == "reconciled_after_uncertain_create"
+            and value.get("mutation_response_uncertain") is not True
+        )
+        or value.get("account_pod_count") != 1
+        or not isinstance(pod, Mapping)
+        or set(pod) != {"id", "name", "gpu_count", "desired_status", "runtime_status"}
+        or not isinstance(pod.get("id"), str)
+        or not pod["id"]
+        or not isinstance(pod.get("name"), str)
+        or not pod["name"]
+        or pod.get("gpu_count") != 1
+        or not isinstance(confirmation, Mapping)
+        or set(confirmation) != {"started_at", "deadline", "required_source", "status"}
+        or confirmation.get("required_source") != "runpod-mcp-get-pod-v2"
+        or confirmation.get("status") != "pending"
+        or not isinstance(binding, Mapping)
+        or set(binding)
+        != {
+            "basis",
+            "requested",
+            "runpodctl_observed",
+            "cross_process_reuse_allowed",
+        }
+        or binding.get("basis") != "single_exact_create_request_after_empty_account"
+        or binding.get("cross_process_reuse_allowed") is not False
+    ):
+        raise CreateError("create_pending_receipt_invalid")
+    started = _rfc3339_instant(confirmation["started_at"])
+    deadline = _rfc3339_instant(confirmation["deadline"])
+    requested = binding.get("requested")
+    observed = binding.get("runpodctl_observed")
+    requested_fields = {
+        "image",
+        "gpu_id",
+        "data_center_id",
+        "network_volume_id",
+        "gpu_count",
+        "cloud_type",
+        "container_disk_gb",
+        "volume_mount_path",
+        "stop_after",
+        "terminate_after",
+    }
+    observed_fields = {
+        "id",
+        "name",
+        "image",
+        "gpu_id",
+        "gpu_count",
+        "data_center_id",
+        "container_disk_gb",
+        "volume_mount_path",
+        "desired_status",
+        "runtime_status",
+    }
+    if (
+        deadline <= started
+        or not isinstance(requested, Mapping)
+        or set(requested) != requested_fields
+        or any(
+            not isinstance(requested.get(key), str) or not requested[key]
+            for key in (
+                "image",
+                "gpu_id",
+                "data_center_id",
+                "network_volume_id",
+            )
+        )
+        or requested.get("gpu_count") != 1
+        or requested.get("cloud_type") != "SECURE"
+        or not isinstance(requested.get("container_disk_gb"), int)
+        or isinstance(requested["container_disk_gb"], bool)
+        or requested["container_disk_gb"] <= 0
+        or requested.get("volume_mount_path") != "/workspace"
+        or _rfc3339_instant(requested.get("stop_after"))
+        >= _rfc3339_instant(requested.get("terminate_after"))
+        or not isinstance(observed, Mapping)
+        or set(observed) != observed_fields
+        or observed.get("id") != pod["id"]
+        or observed.get("name") != pod["name"]
+        or observed.get("gpu_count") != pod["gpu_count"]
+        or observed.get("desired_status") != pod["desired_status"]
+        or observed.get("runtime_status") != pod["runtime_status"]
+        or observed.get("image") != requested.get("image")
+        or observed.get("gpu_id") != requested.get("gpu_id")
+        or observed.get("gpu_count") != requested.get("gpu_count")
+        or observed.get("data_center_id") != requested.get("data_center_id")
+        or observed.get("container_disk_gb") != requested.get("container_disk_gb")
+        or observed.get("volume_mount_path") != requested.get("volume_mount_path")
+    ):
+        raise CreateError("create_pending_receipt_invalid")
+    return json.loads(json.dumps(value))
 
 
 def _one_observed(top: Mapping[str, Any], nested: Mapping[str, Any], *keys: str) -> Any:
@@ -274,6 +493,20 @@ def _rfc3339_instant(value: Any) -> datetime:
     if parsed.tzinfo is None or parsed.utcoffset() is None:
         raise CreateError("creation_datetime_invalid")
     return parsed.astimezone(timezone.utc)
+
+
+def _normalize_datetime(value: Any) -> datetime:
+    if (
+        not isinstance(value, datetime)
+        or value.tzinfo is None
+        or value.utcoffset() is None
+    ):
+        raise CreateError("creation_datetime_invalid")
+    return value.astimezone(timezone.utc)
+
+
+def _format_datetime(value: datetime) -> str:
+    return value.isoformat().replace("+00:00", "Z")
 
 
 def _pod_rows(value: Any) -> list[Mapping[str, Any]]:
@@ -319,38 +552,58 @@ def _run(
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--runpodctl", default="runpodctl")
-    parser.add_argument("--pod-name", required=True)
-    parser.add_argument("--task-pod-name-prefix", default="rondo-plan087-")
-    parser.add_argument("--image", required=True)
-    parser.add_argument("--gpu-id", required=True)
-    parser.add_argument("--data-center-id", required=True)
-    parser.add_argument("--network-volume-id", required=True)
-    parser.add_argument("--container-disk-gb", type=int, required=True)
-    parser.add_argument("--stop-after", required=True)
-    parser.add_argument("--terminate-after", required=True)
-    parser.add_argument("--wait-timeout", default="10m")
-    parser.add_argument("--captured-at", required=True)
-    parser.add_argument("--poll-seconds", type=float, default=5.0)
-    parser.add_argument("--timeout-seconds", type=float, default=660.0)
+    commands = parser.add_subparsers(dest="command", required=True)
+    create = commands.add_parser("create")
+    create.add_argument("--runpodctl", default="runpodctl")
+    create.add_argument("--pod-name", required=True)
+    create.add_argument("--task-pod-name-prefix", default="rondo-plan087-")
+    create.add_argument("--image", required=True)
+    create.add_argument("--gpu-id", required=True)
+    create.add_argument("--data-center-id", required=True)
+    create.add_argument("--network-volume-id", required=True)
+    create.add_argument("--container-disk-gb", type=int, required=True)
+    create.add_argument("--stop-after", required=True)
+    create.add_argument("--terminate-after", required=True)
+    create.add_argument("--wait-timeout", default="10m")
+    create.add_argument("--captured-at", required=True)
+    create.add_argument("--poll-seconds", type=float, default=5.0)
+    create.add_argument("--timeout-seconds", type=float, default=660.0)
+    confirm = commands.add_parser("confirm-attachment")
+    confirm.add_argument("--pending-receipt", type=Path, required=True)
+    confirm.add_argument("--provider-observation", type=Path, required=True)
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
-        result = create_or_reconcile_exact_pod(
-            args,
-            query=lambda command, timeout: _run_json(args.runpodctl, command, timeout),
-            mutate=lambda command, timeout: _run_mutation(
-                args.runpodctl, command, timeout
-            ),
-        )
+        if args.command == "create":
+            result = create_or_reconcile_exact_pod(
+                args,
+                query=lambda command, timeout: _run_json(
+                    args.runpodctl, command, timeout
+                ),
+                mutate=lambda command, timeout: _run_mutation(
+                    args.runpodctl, command, timeout
+                ),
+            )
+        else:
+            result = confirm_exact_pod_attachment(
+                _read_json(args.pending_receipt),
+                _read_json(args.provider_observation),
+            )
     except CreateError as exc:
         print(json.dumps({"status": "failed", "code": str(exc)}), file=sys.stderr)
         return 2
     print(json.dumps(result, sort_keys=True))
     return 0
+
+
+def _read_json(path: Path) -> Any:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise CreateError("provider_receipt_read_failed") from exc
 
 
 if __name__ == "__main__":

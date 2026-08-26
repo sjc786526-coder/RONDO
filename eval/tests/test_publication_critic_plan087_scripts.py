@@ -6,6 +6,7 @@ import os
 import subprocess
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -23,6 +24,7 @@ CREATE_SPEC = importlib.util.spec_from_file_location("plan087_runpod_create", CR
 assert CREATE_SPEC is not None and CREATE_SPEC.loader is not None
 create = importlib.util.module_from_spec(CREATE_SPEC)
 CREATE_SPEC.loader.exec_module(create)
+CONFIRMATION_START = datetime(2026, 8, 26, 12, 0, tzinfo=timezone.utc)
 
 
 def _create_args(**overrides) -> argparse.Namespace:
@@ -57,7 +59,6 @@ def _created_pod(args: argparse.Namespace, **overrides) -> dict:
         "desiredStatus": "RUNNING",
         "runtimeStatus": "initializing",
         "cloudType": "SECURE",
-        "networkVolume": {"id": args.network_volume_id},
         "stopAfter": args.stop_after,
         "terminateAfter": args.terminate_after,
         "machine": {
@@ -67,6 +68,38 @@ def _created_pod(args: argparse.Namespace, **overrides) -> dict:
     }
     value.update(overrides)
     return value
+
+
+def _provider_observation(
+    args: argparse.Namespace, pending: dict, **pod_overrides
+) -> dict:
+    pod = {
+        "id": pending["pod"]["id"],
+        "name": args.pod_name,
+        "image": args.image,
+        "containerDiskInGb": args.container_disk_gb,
+        "gpu": {"id": args.gpu_id, "count": 1},
+        "volumeMountPath": "/workspace",
+        "desiredStatus": "RUNNING",
+        "machine": {
+            "gpuTypeId": args.gpu_id,
+            "dataCenterId": args.data_center_id,
+            "secureCloud": True,
+        },
+        "networkVolume": {
+            "id": args.network_volume_id,
+            "dataCenterId": args.data_center_id,
+        },
+    }
+    pod.update(pod_overrides)
+    return {
+        "schema": create.PROVIDER_OBSERVATION_SCHEMA,
+        "captured_at": "2026-08-26T12:00:05Z",
+        "source": "runpod-mcp-get-pod-v2",
+        "include_machine": True,
+        "include_network_volume": True,
+        "pod": pod,
+    }
 
 
 class Plan087ScriptTests(unittest.TestCase):
@@ -246,7 +279,9 @@ class Plan087ScriptTests(unittest.TestCase):
             mutate=mutate,
             monotonic=lambda: 0.0,
             sleeper=lambda _seconds: None,
+            wall_clock=lambda: CONFIRMATION_START,
         )
+        self.assertEqual(result["schema"], create.CREATE_PENDING_SCHEMA)
         self.assertTrue(result["mutation_response_uncertain"])
         self.assertEqual(result["pod"]["id"], "pod-087")
         self.assertEqual(len(mutations), 1)
@@ -256,6 +291,19 @@ class Plan087ScriptTests(unittest.TestCase):
         )
         self.assertFalse(
             result["creation_contract_binding"]["cross_process_reuse_allowed"]
+        )
+        self.assertNotIn("provider_observed", result["creation_contract_binding"])
+        final = create.confirm_exact_pod_attachment(
+            result,
+            _provider_observation(args, result),
+            wall_clock=lambda: CONFIRMATION_START + timedelta(seconds=10),
+        )
+        self.assertEqual(final["schema"], create.CREATE_SCHEMA)
+        self.assertEqual(
+            final["creation_contract_binding"]["provider_observed"][
+                "network_volume_id"
+            ],
+            args.network_volume_id,
         )
         with self.assertRaisesRegex(
             create.CreateError, "existing_pod_contract_unverifiable"
@@ -268,6 +316,169 @@ class Plan087ScriptTests(unittest.TestCase):
                 sleeper=lambda _seconds: None,
             )
 
+    def test_create_uses_pending_receipt_for_stripped_runpodctl_projection(
+        self,
+    ) -> None:
+        args = _create_args()
+        state = {"pod": None}
+        mutations = []
+        queries = []
+
+        def query(command, _timeout):
+            queries.append(tuple(command))
+            if command[:2] == ("pod", "list"):
+                return [] if state["pod"] is None else [state["pod"]]
+            if command[:2] == ("pod", "get"):
+                return _created_pod(args)
+            raise AssertionError(command)
+
+        def mutate(command, _timeout):
+            mutations.append(command)
+            state["pod"] = _created_pod(args)
+
+        result = create.create_or_reconcile_exact_pod(
+            args,
+            query=query,
+            mutate=mutate,
+            monotonic=lambda: 0.0,
+            sleeper=lambda _seconds: None,
+            wall_clock=lambda: CONFIRMATION_START,
+        )
+        self.assertEqual(len(mutations), 1)
+        self.assertEqual(
+            [query for query in queries if query[:2] == ("pod", "get")],
+            [("pod", "get", "pod-087", "--include-machine")],
+        )
+        self.assertEqual(result["attachment_confirmation"]["status"], "pending")
+
+    def test_mcp_confirmation_rejects_missing_null_or_wrong_volume(self) -> None:
+        args = _create_args()
+        state = {"pod": None}
+
+        def query(command, _timeout):
+            if command[:2] == ("pod", "list"):
+                return [] if state["pod"] is None else [state["pod"]]
+            return _created_pod(args)
+
+        def mutate(_command, _timeout):
+            state["pod"] = _created_pod(args)
+
+        pending = create.create_or_reconcile_exact_pod(
+            args,
+            query=query,
+            mutate=mutate,
+            monotonic=lambda: 0.0,
+            sleeper=lambda _seconds: None,
+            wall_clock=lambda: CONFIRMATION_START,
+        )
+        cases = {
+            "missing": ...,
+            "null": None,
+            "wrong": {"id": "other-volume"},
+        }
+        for label, network_volume in cases.items():
+            observation = _provider_observation(args, pending)
+            if network_volume is ...:
+                observation["pod"].pop("networkVolume")
+            else:
+                observation["pod"]["networkVolume"] = network_volume
+            with (
+                self.subTest(label=label),
+                self.assertRaisesRegex(
+                    create.CreateError, "provider_attachment_configuration_drifted"
+                ),
+            ):
+                create.confirm_exact_pod_attachment(
+                    pending,
+                    observation,
+                    wall_clock=lambda: CONFIRMATION_START + timedelta(seconds=10),
+                )
+
+        final = create.confirm_exact_pod_attachment(
+            pending,
+            _provider_observation(args, pending),
+            wall_clock=lambda: CONFIRMATION_START + timedelta(seconds=10),
+        )
+        self.assertEqual(
+            final["creation_contract_binding"]["provider_observed"][
+                "network_volume_id"
+            ],
+            args.network_volume_id,
+        )
+        with self.assertRaisesRegex(
+            create.CreateError, "attachment_confirmation_timeout"
+        ):
+            create.confirm_exact_pod_attachment(
+                pending,
+                _provider_observation(args, pending),
+                wall_clock=lambda: CONFIRMATION_START + timedelta(seconds=31),
+            )
+
+    def test_mcp_confirmation_rejects_provider_configuration_drift(self) -> None:
+        args = _create_args()
+        state = {"pod": None}
+
+        def query(command, _timeout):
+            if command[:2] == ("pod", "list"):
+                return [] if state["pod"] is None else [state["pod"]]
+            return _created_pod(args)
+
+        def mutate(_command, _timeout):
+            state["pod"] = _created_pod(args)
+
+        pending = create.create_or_reconcile_exact_pod(
+            args,
+            query=query,
+            mutate=mutate,
+            monotonic=lambda: 0.0,
+            sleeper=lambda _seconds: None,
+            wall_clock=lambda: CONFIRMATION_START,
+        )
+
+        def wrong_image(pod):
+            pod["image"] = "wrong-image"
+
+        def wrong_gpu(pod):
+            pod["gpu"]["id"] = "NVIDIA L40S"
+
+        def wrong_machine_gpu(pod):
+            pod["machine"]["gpuTypeId"] = "NVIDIA L40S"
+
+        def wrong_region(pod):
+            pod["machine"]["dataCenterId"] = "US-KS-2"
+
+        def wrong_cloud(pod):
+            pod["machine"]["secureCloud"] = False
+
+        def wrong_disk(pod):
+            pod["containerDiskInGb"] += 1
+
+        def wrong_mount(pod):
+            pod["volumeMountPath"] = "/other"
+
+        for label, drift in {
+            "image": wrong_image,
+            "gpu": wrong_gpu,
+            "machine_gpu": wrong_machine_gpu,
+            "region": wrong_region,
+            "cloud": wrong_cloud,
+            "disk": wrong_disk,
+            "mount": wrong_mount,
+        }.items():
+            observation = _provider_observation(args, pending)
+            drift(observation["pod"])
+            with (
+                self.subTest(label=label),
+                self.assertRaisesRegex(
+                    create.CreateError, "provider_attachment_configuration_drifted"
+                ),
+            ):
+                create.confirm_exact_pod_attachment(
+                    pending,
+                    observation,
+                    wall_clock=lambda: CONFIRMATION_START + timedelta(seconds=10),
+                )
+
     def test_create_rejects_configuration_drift_after_single_mutation(self) -> None:
         drift_cases = {
             "image": {"imageName": "other@sha256:" + "b" * 64},
@@ -277,7 +488,6 @@ class Plan087ScriptTests(unittest.TestCase):
             },
             "container_disk": {"containerDiskInGb": 21},
             "mount": {"volumeMountPath": "/other"},
-            "network_volume": {"networkVolume": {"id": "other-volume"}},
             "stop_after": {"stopAfter": "2026-08-26T12:31:00Z"},
             "terminate_after": {"terminateAfter": "2026-08-26T12:46:00Z"},
         }

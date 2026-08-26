@@ -286,10 +286,16 @@ XXX用以下内容代替：
   候选或明确必要的恢复点才要求 fresh-process receipt；新 exact-base 路线可按 inventory 选择任意末端深度、显式模块或全参数，同一路线内仍严格扩展。
 - 2026-08-26：整改后 Plan 081/082/087 相邻聚焦回归 90 项通过（另有 44 个 subtests），定向 Ruff/format、15 文件 AST、shell syntax
   与 diff check 通过。云端生命周期与训练/搜索两路只读复验均无剩余 High/Medium correctness/functionality finding；未访问任何 live 外部状态。
+- 2026-08-26：阶段 A 首轮整改复审保留一个 Medium：显式请求网络卷投影后仍接受缺失/null。执行者确认并窄修为同一单-create 调用在既有
+  有限 deadline 内必须得到 provider 的精确卷绑定。只读复核进一步证明冻结 `runpodctl` 会剥离该字段，因此最终方案改为 create 只产出 pending
+  receipt，再由既有 RunPod MCP v2 safe entry 的原始 `networkVolume.id` 完成确认；缺失/null 可在 deadline 内重查，错误/超时 fail closed。
+- 2026-08-26：网络卷窄整改后 Plan 081/082/087 相邻聚焦回归 93 项通过（另有 53 个 subtests），其中 create/terminal 定向 12 项（19 个
+  subtests）覆盖卷缺失/null/错误/稍后出现、deadline 和 provider 配置漂移；定向 Ruff/format、15 文件 AST、shell syntax、diff check 与 WBS untouched
+  门禁通过。未访问任何 live 外部状态，付费门保持关闭。
 
 ### 当前工作
 
-- 阶段 A 首轮审查整改与本地复验已完成，正在形成 clean task-branch 提交与复审交接；付费门仍关闭。
+- 阶段 A 网络卷确认窄整改已实现，正在完成回归、clean task-branch 提交与复审交接；付费门仍关闭。
 
 ### 本任务剩余步骤
 
@@ -335,5 +341,5 @@ XXX用以下内容代替：
 | 014 | 费用采用不可改写的 hash-linked 累计快照链；路线与终态必须按序绑定全部新增快照 | 同时覆盖延迟账单、Pod 替换和多段训练，避免只交末张快照丢失累计费用 | cost lineage | 已采纳 |
 | 015 | 候选 checkpoint 必须由不同 OS 进程的 verify-only 恢复 receipt 绑定 source/recovery process、route context、runtime 与 payload identity | 让“可恢复”成为实际执行证据，并阻止用其它 checkpoint 或同进程状态替代 | recovery | 已采纳 |
 | 016 | 所有云端写路径约束在显式 Plan 087 task root；Pod create/stop/delete 对不确定 API 响应先按唯一身份重查；本地回传只接受显式小文件 allowlist | 避免污染 Plan 082 roots、盲目重复计费实例或回传大权重树 | cloud lifecycle | 已采纳 |
-| 017 | 冻结 `runpodctl` 无法回读完整网络卷和止费字段时，禁止跨调用复用同名 Pod；只允许空账户基线后单次精确 create 在同一调用内消解不确定响应 | 配置漂移无法完整证明，fail closed 比按名字领养计费资源更安全；仍避免 create 超时后的盲目重试 | cloud lifecycle | 已采纳 |
+| 017 | 冻结 `runpodctl` 无法回读全部止费字段且会剥离卷 attachment，禁止跨调用复用同名 Pod；空账户后单次 create 只形成 pending receipt，最终成功必须由既有 RunPod MCP v2 safe entry 明确观察到精确 `networkVolume.id` | 直接 CLI 轮询真实成功路径不可达；两阶段窄确认既保护 checkpoint 持久化和避免盲目二次 create，也不新建凭据/通用编排入口 | cloud lifecycle | 已采纳 |
 | 018 | 路线收口与 checkpoint 恢复分责：完整观测/checkpoint 可提前 `not_promising`，无恢复时明确记录 `none`；只有 promising 或明确必要恢复点承担 fresh-process 恢复 | 避免弱路线机械跑满和重复候选级恢复，同时保留候选可复用证据 | search/recovery | 已采纳 |
