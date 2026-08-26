@@ -1,6 +1,6 @@
 # 方向 3 四期：RONDO Multi Durable Team Runtime
 
-最后更新：2026-08-26 ｜ 产品线：RONDO Multi（`multidev/`）｜ 状态：**M4-A、M4-C0、M4-S1、M4-C1、M4-S2 与 M4-C2 已完成；M4-C1 / M4-S2 / M4-C2 分别为 `M4_C1_QUERY_PASS` / `M4_S2_PASS` / `M4_C2_CONTROL_PASS`；Plan 083 / M4-Z(core) 执行者候选为 `AWAITING_REVIEW`，M4-W0 继续按条件推进**
+最后更新：2026-08-26 ｜ 产品线：RONDO Multi（`multidev/`）｜ 状态：**M4-A、M4-C0、M4-S1、M4-C1、M4-S2、M4-C2 与 M4-Z(core) 已完成；M4-C1 / M4-S2 / M4-C2 / M4-Z(core) 分别为 `M4_C1_QUERY_PASS` / `M4_S2_PASS` / `M4_C2_CONTROL_PASS` / `M4_Z_CORE_PASS`；M4-W0 继续按条件推进**
 
 ## 1. 阶段定位
 
@@ -314,9 +314,10 @@ handoff 时投影其状态。该扩展不扩张为通用 workspace dashboard，�
 
 ### M4-Z(core)：Durable Team 全链收口
 
-**当前状态：`AWAITING_REVIEW`。** Plan 083 已完成两轮独立审查整改；participant activation cleanup 现在先 teardown captured owner，
-再取得 exact map lease，持 lease 写 Closed edge并 exact-retire，任一 teardown/owner/graph 失败仍保留 Root close barrier。相称聚焦、
-邻接、scoped lint/format 与 fresh 正式全链已通过；`M4_Z_CORE_PASS` 和完成历史仍由指定审查者终审后决定。
+**当前结果：验收通过，任务目标完成，结论为 `M4_Z_CORE_PASS`。** Plan 083 已完成公开 S/C 全链、fresh store/真实进程替换
+正式轮与两轮独立审查整改。participant activation cleanup 先 teardown captured owner，再取得 exact map lease，持 lease 写 Closed edge 并
+exact-retire；任一 teardown/owner/graph 失败仍保留 Root close barrier。相称聚焦、邻接、scoped lint/format 与最终 fresh 正式全链均通过，
+最终独立验收无未关闭的高/中等级 correctness finding。
 
 **目标**：完整打通 Team Session 创建、Team/Agent 状态推进、进程或连接中断、恢复、继续控制和显式生命周期操作，确认 S/C 主线
 形成独立可用的 Durable Team Runtime。
@@ -331,7 +332,7 @@ M4-S1（M4_S1_PASS）+ M4-C0（M4_C0_PROTOTYPE_PASS）
 ├─ M4-C1（M4_C1_QUERY_PASS）
 └─ M4-S2（M4_S2_PASS）
 
-M4-C1 + M4-S2 → M4-C2 / Plan 080（M4_C2_CONTROL_PASS）→ Plan 083 / M4-Z(core)（AWAITING_REVIEW）
+M4-C1 + M4-S2 → M4-C2 / Plan 080（M4_C2_CONTROL_PASS）→ Plan 083 / M4-Z(core)（M4_Z_CORE_PASS）
 
 M4-A → M4-W0（原型/价值门）
 M4-W0 binding GO + M4-S1 → M4-W1 开始
@@ -348,8 +349,8 @@ W-only delta ─/→ S/C
 
 - M4-A 已以 `M4_A_GO` 串行完成，S/C/W 共同采用第 2 节身份、生命周期、authority 与启用合同。
 - M4-C0 已完成并提供拆包输入；Plan 074 / `#37198`、M4-S1、M4-C1 与 M4-S2 已完成。Plan 080 已在合并树补跑 query×lifecycle
-  基线、完成正式控制链和 fresh store/restart 场景，并收口两轮独立审查整改与最终复验；Plan 083 / M4-Z(core) 执行者候选现为
-  `AWAITING_REVIEW`。M4-W0 继续按自身条件推进。
+  基线、完成正式控制链和 fresh store/restart 场景，并收口两轮独立审查整改与最终复验；Plan 083 / M4-Z(core) 随后完成 S/C
+  全链、两轮独立审查整改与最终复验并取得 `M4_Z_CORE_PASS`。M4-W0 继续按自身条件推进。
 - M4-W1 只在 binding GO 后开始，并等待 M4-S1 以复用持久接缝；最终 PASS 必须消费已完成的 M4-S2 并把
   resume/replacement binding 收口纳入自身出口，不存在无编号的后置收口包。
 - M4-Z(core) 只依赖 S/C 主线。W 若已经进入主线，由后完成者拥有一次兼容验收；W 未进入主线时不制造空实现或占位平台。
@@ -377,7 +378,7 @@ W-only delta ─/→ S/C
 |---|---|---|
 | 四期规划、源码研究、文档、轻量实现与非重型测试 | 开发用 Codex、普通 CPU/内存 | 可与三期非重型工作或未来另行授权的云任务并行；不产生 RONDO API/模型费用 |
 | M4-W0/W1 临时 Git 正确性验证 | 临时 repository/worktree、普通磁盘 I/O | 不需要真实模型、API、Docker 或长期 Git 资产；可与非重型 S/C 工作并行 |
-| 四期 Rust 重型构建或测试 | 仓库共享 Cargo build lock、本地内存与磁盘 | 默认每批先由用户明确批准；Plan 083 已由用户按 ExecPlan 一次性授权范围内的相称批次与修复后重跑。所有 worktree 继续全局串行，并按根 `AGENTS.md` 与 Docker、真实本地模型加载/推理互斥 |
+| 四期 Rust 重型构建或测试 | 仓库共享 Cargo build lock、本地内存与磁盘 | 默认每批先由用户明确批准；Plan 083 的一次性授权批次已经结束且不向后续任务转移。所有 worktree 继续全局串行，并按根 `AGENTS.md` 与 Docker、真实本地模型加载/推理互斥 |
 | 三期未来另行授权的真实 API 数据合成或横评 | 中转 API 预算与网络 | 不占 Cargo build lock，可与四期开发并行；范围、费用和授权与开发用 Codex 额度完全分开 |
 | 三期云端训练（当前无活跃任务） | 未来任务另行授权后使用的云 GPU、预算与工件传输 | M3-B1c 已完成且计算 Pod 已删除；未来任务不占本地 Cargo build lock，但工件传输仍竞争本地网络和磁盘，按实际压力错峰 |
 | 三期 M3-C1/M3-C2/M3-D 本地模型与测评 | 本地模型/GPU、可能的 Docker、测评数据与已授权 API | 与四期重型 Cargo、Docker 和其他真实本地模型任务按根资源门禁串行错峰 |
@@ -386,8 +387,8 @@ W-only delta ─/→ S/C
 第四期适合把 S、C、可选 W 原型、源码研究、测试设计和审查组织成若干**有界并行**流；共享 core/protocol/TUI 接缝、主线整合
 和全局 Cargo build lock 限制同时编码的主线数量。除对应 ExecPlan 已获得一次性授权外，后续 Cargo、clippy、生成器及其它会读写
 Rust target 的命令不得由执行者自行排队：执行者先报告准确命令批次、写集、069 target 与当前资源事实，由用户明确批准并人工决定
-运行时机。Plan 083 在其一次性授权内仍须服从 canonical lock/watchdog、全局串行和资源 fail-closed；工具链/profile/features 不兼容时
-不得静默创建第二个大型 target，先按当前空间事实评估增量重建。
+运行时机。Plan 083 的一次性授权已经结束；工具链/profile/features 不兼容时不得静默创建第二个大型 target，先按当前空间事实评估
+增量重建。
 开发用 Codex 额度不等于 RONDO 产品 API 额度；具体资源阈值和看门狗入口统一引用根 `AGENTS.md`，本 WBS 不复制容易漂移的数值。
 
 ## 6. 调试与验收原则
@@ -459,13 +460,14 @@ Rust target 的命令不得由执行者自行排队：执行者先报告准确�
 
 ## 9. 实施与授权边界
 
-本文只是长程 WBS，不是实施授权。M4-A、M4-C0、Plan 074 / `#37198`、M4-S1、M4-C1、M4-S2 与 M4-C2 已完成，结论分别见本节和
-`doc/WBS-COMPLETED.md`。Plan 083 / M4-Z(core) 的一次性实施授权与精确边界只由对应 ExecPlan 和用户指令提供；M4-W0、M4-W1
-继续服从本 WBS 的条件边。每项实施仍须确认当时主线、并行 worktree 与授权范围。
+本文只是长程 WBS，不是实施授权。M4-A、M4-C0、Plan 074 / `#37198`、M4-S1、M4-C1、M4-S2、M4-C2 与 M4-Z(core) 已完成，
+结论分别见本节和 `doc/WBS-COMPLETED.md`。Plan 083 的历史授权与精确边界由对应 ExecPlan 和用户指令记录；M4-W0、M4-W1
+继续服从本 WBS 的条件边。每项新实施仍须确认当时主线、并行 worktree 与授权范围。
 
 Plan 078 已消费 `#37847` 与 M4-C1 最新主线，完成 shared query/lifecycle 接缝收敛并取得 `M4_S2_PASS`。Plan 080 / M4-C2
-随后完成合并树 query×lifecycle 回归、正式 Session Control/TUI、两轮独立审查整改与最终复验，并取得 `M4_C2_CONTROL_PASS`。其它上游窄回移仍各自
-建立独立任务合同，并按第 3 节条件消费边进入主线；M4-W1 只有在 M4-W0 形成 binding GO 且 M4-S1/M4-S2 接缝成立后才可立项；
+随后完成合并树 query×lifecycle 回归、正式 Session Control/TUI、两轮独立审查整改与最终复验，并取得 `M4_C2_CONTROL_PASS`。
+Plan 083 / M4-Z(core) 又完成公开 S/C 全链与最终独立验收并取得 `M4_Z_CORE_PASS`。其它上游窄回移仍各自建立独立任务合同，并按第 3 节
+条件消费边进入主线；M4-W1 只有在 M4-W0 形成 binding GO 且 M4-S1/M4-S2 接缝成立后才可立项；
 可选 Workspace 控制面扩展再等待 M4-W1 PASS，完整基线升级仍是独立方向。
 
 普通第四期实现不需要外部或付费行为；如果具体任务扩展到真实 API、模型、训练、Docker、上传或其他外部状态，必须单独说明

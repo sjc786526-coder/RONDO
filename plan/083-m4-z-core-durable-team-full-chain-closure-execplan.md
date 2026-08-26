@@ -255,15 +255,16 @@ UUID替换为 `01a03c53-7cf4-78e0-bea3-c1eb7c4015da`，安全处理消息正文�
 - 定向 failure-ordering 回归 `2/2`、graph/Root-close 邻接回归 `6/6`、`codex-core` scoped clippy 与 `fmt-check` 通过；冻结后的
   fresh 正式全链 Nextest `fc6e8c7d-ff74-4af0-9147-a91580541ef8` 为 `1/1`，watchdog
   `20260826-012504-1000-2261794` 为 `stop=none / cleanup=none`，退出后无残留任务进程。
+- 指定审查者已复核最终候选 `0a68f37667188bb7886ce51d4f79436b54bb9faa`、定向/邻接 JUnit、watchdog 与 fresh 正式轮；无未关闭的
+  高/中等级 correctness finding。最终验收见 `agent_log/2026-08-26-013416-plan083-final-independent-acceptance.md`。
 
 ### 当前工作
 
-- `AWAITING_REVIEW`：第二轮 finding 的实现、复验、fresh 正式证据、自审与候选提交已完成，等待指定审查者终审。
+- Plan 083 产品代码、测试、生成物、两轮整改与最终独立验收均已收口，结论为 `M4_Z_CORE_PASS`；本计划随验收提交冻结。
 
 ### 本任务剩余步骤
 
-- 执行者提交当前 clean 候选并按指定队列再次通知审查者；只有审查通过后，才由审查者同步最终 Plan/WBS/COMPLETED、验收日志与
-  收口提交。
+- 无。
 
 ### 阻塞项
 
@@ -272,7 +273,7 @@ UUID替换为 `01a03c53-7cf4-78e0-bea3-c1eb7c4015da`，安全处理消息正文�
 
 ### 当前验收状态
 
-- `AWAITING_REVIEW`：执行者候选无已知未关闭 correctness finding；`M4_Z_CORE_PASS` 仍须由指定审查者终审后决定。
+- 验收通过、任务目标完成，结论为 `M4_Z_CORE_PASS`；无未关闭的高/中等级 correctness finding。
 
 ### 交接边界
 
@@ -302,3 +303,4 @@ UUID替换为 `01a03c53-7cf4-78e0-bea3-c1eb7c4015da`，安全处理消息正文�
 | 014 | V2 `close_agent` 在工具边界以当前 AgentControl registry 证明 target membership，并拒绝 Root/self；V1 显式 ID 合同保持不变 | UUID 解析不是 Team authority，shared manager 中 foreign Session teardown 不可补偿 | tools/ownership | 已采纳 |
 | 015 | Durable child Session 可延后 participant activation；owner 先持久化 Open edge，再 commit participant，确定性 activation 失败用既有 Closed edge 与 exact runtime cleanup 收口 | graph 确定失败不得留下不可恢复的 committed phantom participant，也不另建事务或状态源 | core/team/graph | 已采纳 |
 | 016 | activation cleanup 复用 explicit close 的 owner 顺序：shutdown captured owner → exact map lease → Closed edge → exact retirement | 任一 teardown/owner/graph 失败都必须保留至少一项 Root close barrier，且持 lease 防止 same-ID replacement 竞态 | core/graph/lifecycle | 已采纳 |
+| 017 | 接受 `0a68f37` 为最终产品候选；复用仅测试编译的定向 fault seam 与已保存的相称/fresh 证据，不重复宽门禁 | 直接覆盖整改失败时序且未改变公开合同；额外通用故障平台或重跑 30/30、full workspace 不提高本次终审价值 | review/tests | 已采纳 |
