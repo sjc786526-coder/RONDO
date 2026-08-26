@@ -343,10 +343,17 @@ XXX用以下内容代替：
   app-server OS + unique offline Critic 正式链 `1/1` 通过（JUnit SHA-256
   `7ff58d6e6971654c1e6ad374698bfbd4534c364cee95f377596e90e00b8fdcef`），`stop=none / cleanup=none`；未触发项目/Windows stop、
   35GB 临时例外或任何额外清理。
+- 第四轮独立复验报告 `agent_log/2026-08-26-154016-plan089-m4-w1-lifecycle-remediation-review.md` 唯一 finding 已关闭：no-restart
+  quiescence 后、不可逆 persistence 成功边界前的失败回滚，会先释放 admission fence、再撤销 shutdown marker，随后用现有
+  pending-work 入口恢复 trigger-turn/durable-sleep 唤醒。成功关闭、persistence 成功边界和 task admission 主流程未改变。
+- late revoke fault + 既有成功关闭聚焦回归 `2/2`、`codex-core` scoped clippy、fmt/diff 均通过。测试 fixture 使用临时真实 linked
+  worktree、managed authority 和 production binding revalidation，并断言 active task 确实安装。按审查决定沿用已接受的 fresh 正式链，
+  不重复运行。默认 Windows 50GB 门实际触发并在 Cargo 前停止后，仅对剩余聚焦命令启用已授权的 35GB 临时门；最终余量约
+  `49.97GB`，未清理任何文件、未触发项目 stop 或快速趋近 35GB。
 
 ### 当前工作
 
-- 完成最终生命周期整改提交，并按指定 queue 请求独立复验。
+- 完成失败回滚窄整改提交，并按指定 queue 请求独立复验。
 
 ### 本任务剩余步骤
 
@@ -361,7 +368,7 @@ XXX用以下内容代替：
 
 ### 当前验收状态
 
-- `FINAL_LIFECYCLE_REMEDIATION_COMPLETE / FORMAL_CHAIN_PASS / REVIEW_PENDING / INTEGRATION_NOT_AUTHORIZED /
+- `FAILURE_ROLLBACK_REMEDIATION_COMPLETE / FOCUSED_REGRESSION_PASS / REVIEW_PENDING / INTEGRATION_NOT_AUTHORIZED /
   M4_W1_PASS_NOT_YET_ESTABLISHED`。
 
 ### 交接边界
@@ -388,3 +395,4 @@ XXX用以下内容代替：
 | 013 | bound active turn 拒绝 authority-relevant settings 变化；idle 变化推进 runtime-only authority revision | 旧 OS sandbox 与 TurnContext 不能在权限收窄后继续代表当前 writer，同时无需持久化或建设第二套 authority | settings、turn admission | 已采纳 |
 | 014 | durable close 在 canonical persistence shutdown 前 confirmed quiesce bound process，并在 abort 后复验 late insertion | revoke 失败必须保留可持久 mutation 的 Root runtime，成功后才跨不可逆关闭边界 | Session Control、durable close | 已采纳 |
 | 015 | durable close 使用 shutdown-specific task abort，并以单一 admission gate 串行 task install 与 terminal teardown | 普通 Interrupted abort 会自动启动 pending work；关闭必须阻止重启并覆盖 reserve 到 install 的竞态，同时复用既有 shutdown marker | Session task admission、durable close | 已采纳 |
+| 016 | no-restart quiescence 在 persistence 成功前失败时，按 fence、marker、现有 pending-work 入口的顺序恢复 | 保留的 Root/runtime 必须继续消费 close 前已排队工作；复用现有 admission 可避免新增调度或生命周期权威 | durable close 失败回滚 | 已采纳 |

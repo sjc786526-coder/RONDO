@@ -748,7 +748,11 @@ pub async fn shutdown(sess: &Arc<Session>, sub_id: String) -> bool {
                         PreparedDurableSessionShutdownCompletion::RetainedError(error),
                     );
                 }
+                // Any admission fence owned by quiescence has been released with its error.
+                // Reopen session-control admission before asking the existing pending-work path
+                // to restore work suppressed by the shutdown-specific abort.
                 sess.finish_failed_experimental_session_control_shutdown();
+                sess.maybe_start_turn_for_pending_work().await;
                 return false;
             }
         }
@@ -783,7 +787,11 @@ pub async fn shutdown(sess: &Arc<Session>, sub_id: String) -> bool {
                 "Failed to shutdown thread persistence".to_string(),
             ));
         }
+        // Persistence did not cross its irreversible boundary. Release the shutdown fence, then
+        // reopen admission and restore pending work suppressed during quiescence.
+        drop(runtime_shutdown_mode);
         sess.finish_failed_experimental_session_control_shutdown();
+        sess.maybe_start_turn_for_pending_work().await;
         return false;
     }
 

@@ -7710,8 +7710,70 @@ async fn durable_shutdown_team_completion_failure_terminates_after_persistence_b
 }
 
 #[cfg(debug_assertions)]
+async fn install_valid_writer_binding_for_shutdown_test(session: &Session) -> tempfile::TempDir {
+    let fixture = tempfile::tempdir().expect("create writer binding fixture");
+    let repository_root = fixture.path().join("repo");
+    let worktree_root = fixture.path().join("checkout");
+    let git_dir = repository_root.join(".git/worktrees/shutdown-test");
+    std::fs::create_dir_all(&git_dir).expect("create worktree administration");
+    std::fs::create_dir_all(&worktree_root).expect("create linked worktree");
+    std::fs::write(
+        worktree_root.join(".git"),
+        format!("gitdir: {}\n", git_dir.display()),
+    )
+    .expect("write linked worktree pointer");
+    std::fs::write(
+        git_dir.join("gitdir"),
+        format!("{}\n", worktree_root.join(".git").display()),
+    )
+    .expect("write worktree backlink");
+    std::fs::write(git_dir.join("commondir"), "../..\n").expect("write common dir pointer");
+
+    let worktree_root = worktree_root.abs();
+    let environment_manager = session.services.turn_environments.environment_manager();
+    let local_environment = environment_manager
+        .get_environment(codex_exec_server::LOCAL_ENVIRONMENT_ID)
+        .expect("local test environment");
+    let identity = codex_git_utils::resolve_linked_worktree_identity(
+        local_environment.get_filesystem().as_ref(),
+        &worktree_root,
+    )
+    .await
+    .expect("valid linked worktree identity");
+    {
+        let mut state = session.state.lock().await;
+        state.session_configuration.permission_profile_state =
+            PermissionProfileState::from_constrained_legacy(codex_config::Constrained::allow_any(
+                PermissionProfile::workspace_write(),
+            ))
+            .expect("install managed workspace-write profile");
+        state.session_configuration.environments = TurnEnvironmentSelections::new(
+            worktree_root.clone(),
+            vec![local(worktree_root.clone())],
+        );
+        state.session_configuration.writer_workspace_binding = Some(
+            crate::writer_workspace_binding::WriterWorkspaceBindingState::available(
+                codex_protocol::protocol::WriterWorkspaceBinding {
+                    generation: 1,
+                    worktree_root: identity.worktree_root,
+                    git_dir: identity.git_dir,
+                    common_dir: identity.common_dir,
+                    repository_root: identity.repository_root,
+                    environment_id: codex_exec_server::LOCAL_ENVIRONMENT_ID.to_string(),
+                },
+            ),
+        );
+    }
+    session
+        .validate_writer_workspace_binding()
+        .await
+        .expect("shutdown test binding must pass production revalidation");
+    fixture
+}
+
+#[cfg(debug_assertions)]
 #[tokio::test]
-async fn durable_bound_writer_revoke_failure_retains_live_persistence() {
+async fn durable_bound_writer_revoke_failures_retain_and_resume_runtime() {
     struct EmptyWritePermit;
 
     impl codex_team_state::TeamWritePermit for EmptyWritePermit {
@@ -7827,22 +7889,7 @@ async fn durable_bound_writer_revoke_failure_retains_live_persistence() {
     .expect("create thread persistence");
     session.services.thread_store = thread_store;
     session.services.live_thread = Some(live_thread);
-    let binding_root = config.cwd.clone();
-    {
-        let mut state = session.state.lock().await;
-        state.session_configuration.writer_workspace_binding = Some(
-            crate::writer_workspace_binding::WriterWorkspaceBindingState::available(
-                codex_protocol::protocol::WriterWorkspaceBinding {
-                    generation: 1,
-                    worktree_root: binding_root.clone(),
-                    git_dir: binding_root.clone(),
-                    common_dir: binding_root.clone(),
-                    repository_root: binding_root,
-                    environment_id: codex_exec_server::LOCAL_ENVIRONMENT_ID.to_string(),
-                },
-            ),
-        );
-    }
+    let _binding_fixture = install_valid_writer_binding_for_shutdown_test(&session).await;
 
     let lifecycle_close = session
         .services
@@ -7894,6 +7941,109 @@ async fn durable_bound_writer_revoke_failure_retains_live_persistence() {
         .begin_durable_team_root_close(session.thread_id)
         .expect("aborted lifecycle close remains retryable");
     retry_close.abort();
+
+    let turn_context = session
+        .new_default_turn_with_sub_id("active-before-retry-close".to_string())
+        .await;
+    session
+        .spawn_task(
+            turn_context,
+            Vec::new(),
+            NeverEndingTask {
+                kind: TaskKind::Regular,
+                listen_to_cancellation_token: true,
+            },
+        )
+        .await;
+    assert!(
+        session
+            .active_turn
+            .lock()
+            .await
+            .as_ref()
+            .and_then(|turn| turn.task.as_ref())
+            .is_some(),
+        "valid bound writer fixture must install the active task"
+    );
+    session
+        .input_queue
+        .enqueue_mailbox_communication(
+            InterAgentCommunication::new(
+                AgentPath::root(),
+                AgentPath::root(),
+                Vec::new(),
+                "pending failed-shutdown trigger".to_string(),
+                /*trigger_turn*/ true,
+            ),
+            /*parent_turn_id*/ None,
+        )
+        .await;
+    assert!(session.input_queue.has_trigger_turn_mailbox_items().await);
+
+    let lifecycle_close = session
+        .services
+        .agent_control
+        .begin_durable_team_root_close(session.thread_id)
+        .expect("begin retry Root lifecycle close");
+    let (completion_tx, completion_rx) = oneshot::channel();
+    assert!(
+        session
+            .install_prepared_durable_session_shutdown(
+                "retry-close".to_string(),
+                PreparedDurableSessionShutdown {
+                    lifecycle_close,
+                    team_close: Box::new(AbortableClosePermit),
+                },
+                completion_tx,
+            )
+            .is_ok(),
+        "install retry shutdown handoff"
+    );
+    session
+        .services
+        .unified_exec_manager
+        .fail_confirmed_termination_after_for_tests(
+            // Quiescence revokes once before abort, and abort performs its own confirmed writer
+            // cleanup. Fail the explicit late-insertion revoke after both have succeeded.
+            /*successful_calls_before_failure*/
+            2,
+            "injected late process revoke failure",
+        )
+        .await;
+    session
+        .experimental_session_control_shutdown_submissions
+        .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+
+    assert!(!handlers::shutdown(&session, "retry-close".to_string()).await);
+    assert!(matches!(
+        completion_rx.await.expect("retry formal completion"),
+        PreparedDurableSessionShutdownCompletion::RetainedError(message)
+            if message.contains("injected late process revoke failure")
+    ));
+    assert!(
+        !session.experimental_session_control_shutdown_in_progress(),
+        "failed close must reopen task admission"
+    );
+    assert!(
+        !session.input_queue.has_trigger_turn_mailbox_items().await,
+        "pending trigger must be admitted after the fence and marker roll back"
+    );
+    assert_eq!(
+        store.calls().await.shutdown_thread,
+        0,
+        "late process revoke failure must retain canonical persistence"
+    );
+    session
+        .persist_writer_workspace_binding_event()
+        .await
+        .expect("retained persistence remains writable after late revoke failure");
+    let retry_close = session
+        .services
+        .agent_control
+        .begin_durable_team_root_close(session.thread_id)
+        .expect("late revoke failure keeps Root close retryable");
+    retry_close.abort();
+    session.abort_all_tasks(TurnAbortReason::Interrupted).await;
 }
 
 #[cfg(debug_assertions)]
@@ -7958,7 +8108,7 @@ async fn durable_bound_writer_shutdown_fences_pending_trigger_turn_until_teardow
         }
     }
 
-    let (mut session, turn_context) = make_session_and_context().await;
+    let (mut session, _turn_context) = make_session_and_context().await;
     let identity =
         codex_team_state::DurableTeamIdentity::new(session.session_id(), session.thread_id);
     let authority = Arc::new(SuccessfulCloseAuthority {
@@ -7973,27 +8123,15 @@ async fn durable_bound_writer_shutdown_fences_pending_trigger_turn_until_teardow
         .install_team(durable_team)
         .expect("install durable Team");
     let store = attach_in_memory_thread_store(&mut session).await;
-    let binding_root = session.get_config().await.cwd.clone();
-    {
-        let mut state = session.state.lock().await;
-        state.session_configuration.writer_workspace_binding = Some(
-            crate::writer_workspace_binding::WriterWorkspaceBindingState::available(
-                codex_protocol::protocol::WriterWorkspaceBinding {
-                    generation: 1,
-                    worktree_root: binding_root.clone(),
-                    git_dir: binding_root.clone(),
-                    common_dir: binding_root.clone(),
-                    repository_root: binding_root,
-                    environment_id: codex_exec_server::LOCAL_ENVIRONMENT_ID.to_string(),
-                },
-            ),
-        );
-    }
+    let _binding_fixture = install_valid_writer_binding_for_shutdown_test(&session).await;
 
     let session = Arc::new(session);
+    let turn_context = session
+        .new_default_turn_with_sub_id("active-before-successful-close".to_string())
+        .await;
     session
         .spawn_task(
-            Arc::new(turn_context),
+            turn_context,
             Vec::new(),
             NeverEndingTask {
                 kind: TaskKind::Regular,
@@ -8001,6 +8139,16 @@ async fn durable_bound_writer_shutdown_fences_pending_trigger_turn_until_teardow
             },
         )
         .await;
+    assert!(
+        session
+            .active_turn
+            .lock()
+            .await
+            .as_ref()
+            .and_then(|turn| turn.task.as_ref())
+            .is_some(),
+        "valid bound writer fixture must install the active task"
+    );
     session
         .input_queue
         .enqueue_mailbox_communication(
@@ -8058,7 +8206,10 @@ async fn durable_bound_writer_shutdown_fences_pending_trigger_turn_until_teardow
     assert_eq!(
         codex_thread_store::InMemoryThreadStoreCalls {
             create_thread: 1,
+            append_items: 2,
+            flush_thread: 3,
             shutdown_thread: 1,
+            update_thread_metadata: 2,
             ..Default::default()
         },
         store.calls().await

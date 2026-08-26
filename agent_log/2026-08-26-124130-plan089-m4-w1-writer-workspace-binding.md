@@ -3,9 +3,9 @@
 ## 结果
 
 - 在 `worktree-089-m4-w1-writer-workspace-binding@adbc33c` 上完成生产实现、生成物、分层验证和 final fresh 正式全链。
-- 三轮独立审查提出的 finding 均已完成整改，并通过相称聚焦门禁与最终 fresh 正式全链；当前状态为
-  `FINAL_LIFECYCLE_REMEDIATION_COMPLETE / FORMAL_CHAIN_PASS / REVIEW_PENDING / INTEGRATION_NOT_AUTHORIZED`。尚未独立复验接受、
-  合并或推送，因此不宣告 `M4_W1_PASS / PHASE_4_COMPLETE`。
+- 四轮独立审查提出的 finding 均已完成整改，并通过相称聚焦门禁；已接受的 fresh 正式全链保持有效。当前状态为
+  `FAILURE_ROLLBACK_REMEDIATION_COMPLETE / FOCUSED_REGRESSION_PASS / REVIEW_PENDING / INTEGRATION_NOT_AUTHORIZED`。尚未独立复验
+  接受、合并或推送，因此不宣告 `M4_W1_PASS / PHASE_4_COMPLETE`。
 
 ## 实现
 
@@ -76,6 +76,13 @@
   gate 后保持到 runtime teardown 完成，并复用既有 shutdown-in-progress 计数作为终态 admission marker；关闭失败时仍按既有路径撤销
   marker 并释放 gate，不新增 scheduler、持久事实或第二套生命周期权威。
 
+### 失败回滚整改
+
+- R4-F1：bound durable close 在 no-restart quiescence 后、不可逆 persistence 成功边界前失败时，先释放 task-admission fence，再撤销既有
+  shutdown-in-progress marker，最后调用现有 `maybe_start_turn_for_pending_work`。第二次 confirmed revoke 失败和 persistence shutdown
+  失败都恢复原有 trigger-turn/durable-sleep 唤醒；第一次 revoke 尚未 abort 时统一调用也会由现有 active-turn admission 自然拒绝。
+  成功关闭、persistence 成功边界、普通 Interrupted 和 task admission 主流程均未改变。
+
 ## 正式验证
 
 所有 Rust 重型命令均经 `multidev/justfile` → shared `scripts/with-build-lock.sh`，复用用户指定 069 target，项目门限保持
@@ -137,6 +144,20 @@
   app-server OS 进程、两 writer 隔离、scoped 外写、cold resume、binding invalidation/replacement、Query/Control/lifecycle，并断言
   offline Critic 恰好一次实际调用；`stop=none / cleanup=none`。
 
+### 失败回滚整改复验
+
+- late confirmed revoke fault + 既有成功关闭聚焦回归最终 `2/2` 通过（`20260826-155459-1000-454690`），nextest run id
+  `42450a18-8595-49d1-aa6e-9be035a82069`，JUnit SHA-256
+  `7ff1f84b38f41a440ee482b58061ffe4f53ff423184b2a9d28f9c4ecc2e70c9a`。失败回归断言 close 诚实返回 RetainedError、canonical
+  persistence/Root close authority 保留、marker 清除且 pending trigger 在 fence 回滚后被接纳；成功回归继续断言 terminal teardown 后
+  pending work 不被接纳。
+- 调试发现原成功回归使用手工无效 binding snapshot，active bound task 实际未安装；fixture 已改为临时真实 linked-worktree metadata、
+  managed workspace-write authority 并先经过 production revalidation，同时显式断言 active task 安装。late revoke 注入计数也覆盖
+  pre-abort revoke 与 abort 内 confirmed cleanup 后，精确命中第二次显式 revoke；未弱化产品断言。
+- `codex-core` scoped clippy 无 warning（`20260826-155649-1000-459061`），最终 `just fmt`、`git diff --check` 通过。按审查决定，本次生产
+  变更严格局限于不可逆 persistence 前的失败回滚，未触碰成功路径、persistence 成功边界或 task admission 主流程，故沿用已接受的
+  frozen fresh app-server OS + unique offline Critic 正式链，不重复运行。
+
 ## 资源与边界
 
 - 首次 app full-chain 编译在 `20260826-112652-1000-3557648` 达到项目主动停止线：`285,001,187,328 B`，Windows C: 实际余量从
@@ -162,11 +183,15 @@
 - 最终生命周期整改同样未清理任何文件。聚焦回归和 core clippy 均为 `stop=none / cleanup=none`；最终 fresh 正式链项目空间为
   `255,459,491,840 -> 255,721,639,936 B`，target `196,814,958,592 B`，Windows C: 实际余量为
   `50,058,534,912 -> 50,049,744,896 B`。仍未触发项目/Windows stop 或 35GB 临时例外，且未扩大任何资源处理范围。
+- 失败回滚整改的初次受监控增量编译后，下一次默认 preflight 实际触发 Windows 50GB 门并在 Cargo 启动前以 exit 77 停止。按用户原始
+  授权启用仅限本任务命令级的 35GB 临时门继续两条聚焦回归和 core clippy，未修改长期默认、未清理任何文件。最终通过回归 Windows
+  C: 余量为 `49,975,877,632 -> 49,974,558,720 B`；最终 clippy 为 `49,968,087,040 -> 49,965,322,240 B`，没有快速趋近 35GB。
+  两轮均为 `stop=none / cleanup=none`，项目最终 `255,605,542,912 B`、target `196,698,345,472 B`。
 
 ## 自审与交接
 
-- 执行者在三轮独立复验后再次按 local/remote process revoke、Forked strict durability/tombstone、turn 内 authority revocation、durable
-  close ordering/pending-work admission、child authority、review/path TOCTOU 和 Critic invocation 逐项静态自审；当前没有已知未关闭的
-  W1 高/中等级 correctness finding。
+- 执行者在四轮独立复验后再次按 local/remote process revoke、Forked strict durability/tombstone、turn 内 authority revocation、durable
+  close ordering/pending-work admission 与失败恢复、child authority、review/path TOCTOU 和 Critic invocation 逐项静态自审；当前没有
+  已知未关闭的 W1 高/中等级 correctness finding。
 - 089 分支只提交、不合并、不推送、不关闭 worktree、不归档分支。独立验收接受后也只能记录 `ACCEPTED / PENDING_INTEGRATION`；
   用户另行批准且成果成功进入并推送 `main` 后，才允许形成 `M4_W1_PASS / PHASE_4_COMPLETE`。

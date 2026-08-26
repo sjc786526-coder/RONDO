@@ -1450,7 +1450,22 @@ impl UnifiedExecProcessManager {
     /// path intentionally retains its legacy fire-and-forget behavior.
     pub(crate) async fn terminate_all_processes_confirmed(&self) -> Result<(), UnifiedExecError> {
         #[cfg(test)]
-        if let Some(message) = self.fail_next_confirmed_termination.lock().await.take() {
+        let injected_failure = {
+            let mut configured = self.fail_confirmed_termination_after.lock().await;
+            if configured
+                .as_ref()
+                .is_some_and(|(remaining, _)| *remaining == 0)
+            {
+                configured.take().map(|(_, message)| message)
+            } else {
+                if let Some((remaining, _)) = configured.as_mut() {
+                    *remaining -= 1;
+                }
+                None
+            }
+        };
+        #[cfg(test)]
+        if let Some(message) = injected_failure {
             return Err(UnifiedExecError::process_failed(message));
         }
         let processes = {
