@@ -413,31 +413,34 @@ XXX用以下内容代替：
   `747420dd...ab87` 随后从 exact base 和空 namespace 执行四步 score-head 训练，step 2 新进程恢复继续更新通过，最终终态为
   `VALID_NO_IMPROVEMENT`。boundary pair mean margin 从 `0.8252560622` 逐步回落到 `0.8252007961`；正式五个及成功 commissioning
   三个完整原始 observation、输入/日志、两份正式和两份 commissioning checkpoint 均保留，另生成轻量复盘索引与 39 对象 handoff bootstrap。
+- 2026-08-26：最终审查者完成保留 Pod 的 GPU 专项验收；正式 freeze/同 cohort 五点 observation、四次非零原参数更新、step 2
+  新进程恢复、step 4 完成态、两份正式 checkpoint manifest、39 对象 bootstrap 与实时 Pod/卷/费用事实相互一致，无遗留需要
+  GPU/Pod 才能关闭的高/中等级 correctness/functionality finding。结论为 `GPU_REVIEW_PASS / POD_RELEASE_AUTHORIZED`；
+  审查提交后通过指定队列通知执行者立即释放唯一 Pod，网络卷继续保留。尚未落盘的参数化 handoff binding、0 Pod inventory/download
+  和大型对象 bytes/SHA-256 校验均不需要 GPU，留给后续大型资产交接和最终验收。
 
 ### 当前工作
 
-- 正式训练已完成，当前为 `GPU_REVIEW_PENDING / POD_RETAINED`：只交付小型证据，单张 L40S Pod 与 40GB 网络卷保持运行，等待审查者
-  关闭仍可能需要 GPU 的事项并明确通知可以释放 Pod。
+- 正式训练与 GPU 专项验收已完成，当前为 `GPU_REVIEW_PASS / POD_RELEASE_AUTHORIZED`。执行者收到指定队列通知后立即释放唯一
+  L40S Pod、复核 0 Pod/compute 止费并提交资源状态；40GB 网络卷继续保留，未经用户本人另行人工批准不得删除。
 
 ### 本任务剩余步骤
 
-1. 提交正式轮小型证据并按队列请求 GPU 阶段验收；总累计费用首次达到 10 USD 时仍发一次非阻断告警，远端资源保持运行。
-2. 审查者只关闭所有合理可预见且仍需 GPU/Pod 的事项；执行者按审查结论修复/补跑。审查者明确确认无需再操作 GPU 后，执行者立即释放
-   Pod、核对 0 Pod/compute 费用归零并提交资源状态；无需 GPU 的事项留给最终验收。
-3. 等待 Plan 083 不占用共享磁盘且宿主容量安全窗口；不创建 transfer Pod，通过网络卷 S3-compatible API 完成 inventory、`.part`
+1. 执行者收到审查者队列通知后立即释放唯一 Pod、核对 0 Pod/compute 费用归零并提交资源状态；网络卷继续保留。
+2. 等待 Plan 083 不占用共享磁盘且宿主容量安全窗口；不创建 transfer Pod，通过网络卷 S3-compatible API 完成 inventory、`.part`
    Range 续传、全部必要对象 bytes/SHA-256 校验，提交 `FINAL_REVIEW_PENDING / VOLUME_RETAINED_PENDING_USER_DELETE` 并按队列申请最终验收。
-4. 最终审查者只要求无需 GPU 的修复/复验并收口最终文档；验收后转请用户本人决定是否删除网络卷。执行者仅在收到用户人工批准后删除卷，
+3. 最终审查者只要求无需 GPU 的修复/复验并收口最终文档；验收后转请用户本人决定是否删除网络卷。执行者仅在收到用户人工批准后删除卷，
    记录终态并通知；所有人继续等待用户决定合并/推送。
 
 ### 阻塞项
 
 - 阶段 A 无计划级阻塞。
-- 阶段 B 正式轮已完成；当前无计划级阻塞，Pod 释放机械等待 GPU 阶段审查者明确许可。
+- 阶段 B 正式轮和 GPU 专项验收已完成；当前无计划级阻塞，Pod 已获释放许可，等待执行者执行并回报 0 Pod 事实。
 - 实际 RunPod 库存、价格、旧资源终态、网络卷/S3 兼容性和本地大工件回传窗口均须在相应动作前实时复核；规划时快照不构成运行事实。
 
 ### 当前验收状态
 
-- `GPU_REVIEW_PENDING / POD_RETAINED`。
+- `GPU_REVIEW_PASS / POD_RELEASE_AUTHORIZED`；研究终态为 `VALID_NO_IMPROVEMENT`，最终大型资产交接与任务验收尚未完成。
 
 ### 交接边界
 
