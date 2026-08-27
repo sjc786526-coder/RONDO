@@ -1,8 +1,8 @@
 # RONDO 长程规划（WBS）
 
-最后更新：2026-08-27（方向 3 Publication Critic 三期 Plan 094 已形成正式有效负向研究终态；
-当前处于 `ROUTE_O_VALID_NO_MATERIAL_IMPROVEMENT / ZERO_POD / VOLUME_RETAINED / FINAL_REVIEW_ACCEPTED`，Plan 090 已确认的同一 validation 微弱重复信号未扩大为实质候选，
-Plan 093 已建立当前 RONDO Multi Linux 全 workspace 正确性基线；M3-D 保持锁定）
+最后更新：2026-08-27（方向 3 Publication Critic 三期 Plan 095 已立项，将在既有 service 边界内增加 default-off、
+eval/reference-only 的云端 scorer backend；当前处于 `PLANNED / EXECUTION_NOT_STARTED`。Plan 094 有效负向研究终态与 Plan 093
+Linux 全 workspace 正确性基线保持有效；Plan 095 不延续训练路线或解锁 M3-D）
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段指针、跨方向关系、
 稳定工程边界和授权门；已完成成果与验收见 `doc/WBS-COMPLETED.md`，单次任务合同见 `plan/`，执行细节见
@@ -22,7 +22,7 @@ Plan 093 已建立当前 RONDO Multi Linux 全 workspace 正确性基线；M3-D 
 | 0：量化测评基准 | 既有设施与首次 schema v7 正式 canary 已完成，当前无 active campaign | 保留设施；历史结果见 COMPLETED，新 campaign 须重新立项与授权 |
 | 1：Harness 优化 | **正式收口；当前无 active 工作包** | 当前不继续新增观测或内核/热路径优化；既有实现、设施与历史结果保留。未来可由用户另行决定是否重新立项，本次收口不作永久禁止 |
 | 2：本地审批模型 | **已收口，今后不再开启** | 最终结论为“保留为实验”；不改生产默认，不再规划后续工作包 |
-| 3：RONDO Multi | 第一、二期与第四期已完成；三期 Plan 094 有效无实质改善结果与 zero-Pod 收口已通过最终验收 | 当前无 active 三期工作包；保留卷上必要权重，不再训练或重建 Pod，不释放 unseen 或产品资格，M3-D 不自动解锁。第四期历史统一见 COMPLETED |
+| 3：RONDO Multi | 第一、二期与第四期已完成；三期 Plan 095 云端参考 scorer backend 已立项 | 只在既有 Publication Critic service 内增加显式选择的 eval/reference-only backend；不改本地 worker、team_publish 或默认关闭姿态，不做 threshold 标定/批量测评/v8/unseen，M3-D 不解锁。第四期历史统一见 COMPLETED |
 
 方向 3 当前 Linux 正确性基线由 Plan 093 建立：default features、standard local Nextest、checksum-verified V8 的完整 workspace
 为 `14660/14660` passed、0 failure/error/timeout，另有 1/1 setup passed；24 个 skip 不计 passed。正式证据和精确边界见
@@ -55,6 +55,9 @@ Plan 090 guarded import 因历史 cursor 不兼容按合同拒绝，正式轮使
 material/strict/operating event，step 4 按预冻结平台规则形成 `ROUTE_O_VALID_NO_MATERIAL_IMPROVEMENT`；step 2/3 均由新进程恢复并继续。
 三份保留 checkpoint 已在挂载卷上深读资格化，小型证据已回传，大型权重保留在 70GB 既有卷。预释放审查通过后，唯一 Pod 已精确 stop/delete；
 账户 0 Pod、compute `$0/h` 与本地 finalizer 均完成，账户只剩卷费 `$0.007/h`。该任务仍只使用开发 validation，不回答独立 cohort 或产品资格，M3-D 继续锁定。
+Plan 095 现作为与上述训练路线正交的后端接入任务启动：复用 Plan 055/057/068 已有服务、typed verdict 与发布接缝，只增加显式选择的
+云端 reference scorer backend，并在离线全链通过后用合成 packet 形成少量真实 API 证据。它不消费冻结 v8/unseen，不冻结最终
+threshold，不改变本地 worker 或产品默认，不上传项目数据，也不继承或修改 Plan 094 的云资源。
 方向 1 已正式收口，不作为方向 3 的前置或旁支。
 
 ### 方向 3：Publication Critic 三期
@@ -123,6 +126,11 @@ material/strict/operating event，step 4 按预冻结平台规则形成 `ROUTE_O
   扩到 70GB 的既有卷，小型结果已回传。预释放审查通过后，唯一 Pod 已删除并独立复核账户 0 Pod / compute `$0/h`；本地 finalizer
   保持同一有效负向终态，并已通过整体最终验收。不读取 unseen、不授予产品资格或 M3-D 解锁。任务合同见
   `plan/094-publication-critic-route-o-continuous-training-execplan.md`。
+- Plan 095 已独立立项，在不改变 `PublicationScorer`/service/packet/render/`team_publish`/本地 worker 语义的前提下，增加
+  default-off 的云端参考 scorer backend 与显式选择路径。先用 fake/loopback provider 复用现有生命周期与资源矩阵，再以合成 packet
+  完成少量真实 API commissioning 和 clean smoke；identity 对 provider 无法验证的 tokenizer/serving 分量必须诚实标注。任务不做批量
+  测评、最终 threshold、v8/unseen、GPU、真实本地模型或项目数据上传，合同见
+  `plan/095-publication-critic-cloud-reference-scorer-backend-execplan.md`。
 
 如果未来重新启动方向 1，它仍与方向 3 保持产品源码和任务合同独立；本地重型 Cargo、Docker、真实本地模型
 加载/推理继续全局串行，并由实际进入实施的工作包协调共享资源。
