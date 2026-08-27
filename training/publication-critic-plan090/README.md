@@ -18,5 +18,11 @@ Plan 087 research result.  Plan 090 does not add a Pod creator or receipt
 system: the repository-wide stock script creates, the executor independently
 checks the live Pod, and the retained terminal helper releases a mismatch.
 
-`runbook.md` is the only operational entry.  Its paid sections remain closed
-until the reviewer explicitly approves Stage B.
+`runbook.md` is the only operational entry. Its paid sections were opened only after
+the reviewer explicitly approved Stage B; the completed task grants no continuing
+cloud authorization.
+
+The completed clean confirmation is summarized in
+[`eval/results/publication-critic/plan090-route-o-confirmation-v1.md`](../../eval/results/publication-critic/plan090-route-o-confirmation-v1.md),
+with a compact machine-readable projection beside it. The full terminal result and
+small handoffs remain in the task-owned ignored Plan 090 namespace.

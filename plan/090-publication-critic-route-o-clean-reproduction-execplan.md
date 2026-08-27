@@ -48,38 +48,38 @@ exact base 独立干净运行，回答两个问题：
 
 ### 完成/验收标准
 
-- [ ] 阶段 A 与最终交付均只在 Plan 090 worktree 完成 tracked 修改并分别提交，worktree clean；未经用户批准不合并、不推送、不归档分支、
+- [x] 阶段 A 与最终交付均只在 Plan 090 worktree 完成 tracked 修改并分别提交，worktree clean；未经用户批准不合并、不推送、不归档分支、
       不删除 worktree。
-- [ ] exact 模型 revision、snapshot identity、v8 train/validation、input/scalar/pair/objective 语义、Route O 九张量 scope 和 recipe 与
+- [x] exact 模型 revision、snapshot identity、v8 train/validation、input/scalar/pair/objective 语义、Route O 九张量 scope 和 recipe 与
       Plan 087 正式结果精确一致；formal runtime 同时匹配其 container image、Python、Torch、Transformers 和 SDPA/fused AdamW 环境身份；
       unseen 全程物理不可达。
-- [ ] 在任何新训练结果出现前，冻结第二次 clean run 的 seed 元数据 `20260902`、两次独立 run 的判断口径、数值容差、无明显塌缩条件、
+- [x] 在任何新训练结果出现前，冻结第二次 clean run 的 seed 元数据 `20260902`、两次独立 run 的判断口径、数值容差、无明显塌缩条件、
       FP32 触发/解释规则、
       独立 namespace 和最小保留集合；阶段 B 不得事后改口径追逐 PASS。
-- [ ] 既有 exact base 与 Plan 087 Route O checkpoint 只做 no-update 统一诊断和历史比较；Plan 090 每条训练均从 exact base 和独立干净空间开始，
+- [x] 既有 exact base 与 Plan 087 Route O checkpoint 只做 no-update 统一诊断和历史比较；Plan 090 每条训练均从 exact base 和独立干净空间开始，
       不继承旧候选或前一路线的参数、optimizer、scheduler、RNG 或 cursor。
-- [ ] 正式顺序为 base/旧 Route O 诊断 → 原 seed BF16 → 条件触发的第二 seed BF16 → 条件触发的 FP32；前置分支失败即停止后续训练，
+- [x] 正式顺序为 base/旧 Route O 诊断 → 原 seed BF16 → 条件触发的第二 seed BF16 → 条件触发的 FP32；前置分支失败即停止后续训练，
       不通过临时调参、加 update、换 seed 或重选指标挽救。
-- [ ] FP32 对照从 exact base 开始并实际以阶段 A 已声明的 FP32 路径执行原参数更新；不得只把 BF16 候选转型后重新评分。若实现同时改变
+- [x] FP32 对照从 exact base 开始并实际以阶段 A 已声明的 FP32 路径执行原参数更新；不得只把 BF16 候选转型后重新评分。若实现同时改变
       forward/activation 与 update 精度，结果必须按“FP32 参数训练条件对照”解释，不冒充严格 update-only 因果证明。
-- [ ] base、Plan 087 Route O 和 Plan 090 各有效结果使用同一评价实现，分别记录 train 与 validation 的 objective/component 变化、raw/projected
+- [x] base、Plan 087 Route O 和 Plan 090 各有效结果使用同一评价实现，分别记录 train 与 validation 的 objective/component 变化、raw/projected
       Boundary 与 Within-PASS margin、pair 分布/strict wins、ROC AUC、既有 threshold/operating 指标及必要参数变化摘要，足以判断训练目标、
       validation 传递、pair 抵消和精度影响；不建设统计、审计或可信平台。
-- [ ] 两次 BF16 clean run 的 PASS 依据预冻结整体口径，而非 bitwise 相同、统一 offset、单一 threshold、单个 ordering 或任一孤立指标；
+- [x] 两次 BF16 clean run 的 PASS 依据预冻结整体口径，而非 bitwise 相同、统一 offset、单一 threshold、单个 ordering 或任一孤立指标；
       `seed_sensitive_stability_tested=false` 固定写入 freeze/runtime/result，不把第二次确定性重复表述为随机 seed 稳定性；
       FP32 单条不同结果本身不被夸大为已证明 BF16 偶然，结论边界与实际精度语义一致。
-- [ ] 阶段 B 准入前刷新 live 余额、未结费用、库存/价格、0 Pod、卷状态/实际可用 bytes，并确认 base 诊断、原 seed BF16、可能必需的第二 seed BF16、
+- [x] 阶段 B 准入前刷新 live 余额、未结费用、库存/价格、0 Pod、卷状态/实际可用 bytes，并确认 base 诊断、原 seed BF16、可能必需的第二 seed BF16、
       小型回传和止费在安全可用额度内；6 USD 是硬上限而非消费目标。
-- [ ] 同时最多一个计费 Pod，完整正式确认序列绑定同一个 exact US-TX-3 L40S Pod 与现有 `mwemzrn33y` 卷。库存紧张时使用通用创建脚本，
+- [x] 同时最多一个计费 Pod，完整正式确认序列绑定同一个 exact US-TX-3 L40S Pod 与现有 `mwemzrn33y` 卷。库存紧张时使用通用创建脚本，
       创建后独立核验实际价格、
       GPU/数量、机房、镜像和卷挂载；不符、来源不明或无法确认时立即释放。
-- [ ] 不新建、扩容或删除网络卷；Plan 082/087 roots 只读。空间不足时只清理本任务创建且已确认不再需要的中间工件，仍不足则暂停并请示。
-- [ ] 保留 exact base 引用、最终有效候选、必要转折点、完整小型指标和可复用恢复信息；不永久保存所有中间 checkpoint。大型模型、权重、
+- [x] 不新建、扩容或删除网络卷；Plan 082/087 roots 只读。空间不足时只清理本任务创建且已确认不再需要的中间工件，仍不足则暂停并请示。
+- [x] 保留 exact base 引用、最终有效候选、必要转折点、完整小型指标和可复用恢复信息；不永久保存所有中间 checkpoint。大型模型、权重、
       checkpoint 和环境留在网络卷，本地只回传验收与后续决策必需的小型结果、manifest、日志和资源终态。
-- [ ] 发布 PASS 或清理其替代恢复点前，最终保留的 Plan 090 candidate 已由不同 OS 新进程完成 no-update restore/等强实际可复用性验证；
+- [x] 发布 PASS 或清理其替代恢复点前，最终保留的 Plan 090 candidate 已由不同 OS 新进程完成 no-update restore/等强实际可复用性验证；
       不要求每个负面中间 checkpoint 做同等验证。
-- [ ] 无论终态如何，全部任务 Pod均已 stop/delete，并通过实时查询确认 0 Pod、compute `$0/h`；57GB 网络卷继续保留且未删除。
-- [ ] 相关轻量 Python 聚焦测试、必要 static/format/compile 检查、改动 shell 的 `bash -n` 与 `git diff --check` 通过；不运行本地 Cargo、Docker、
+- [x] 无论终态如何，全部任务 Pod均已 stop/delete，并通过实时查询确认 0 Pod、compute `$0/h`；57GB 网络卷继续保留且未删除。
+- [x] 相关轻量 Python 聚焦测试、必要 static/format/compile 检查、改动 shell 的 `bash -n` 与 `git diff --check` 通过；不运行本地 Cargo、Docker、
       真实模型或全 workspace 测试，fake、调试、正式结果、skip 和未运行项如实区分。
 - [ ] 最终独立审查无遗留 High/Medium correctness/functionality finding，并分别报告“验收通过/不通过”和“任务目标完成/失败”；PASS 不越界为
       独立泛化、unseen、M3-C1/M3-C2、产品启用或 M3-D。
@@ -294,25 +294,44 @@ XXX用以下内容代替：
 - 2026-08-26：本轮聚焦测试 `16 passed`，定向 Ruff/format/compile/diff 通过，独立只读复核 `0 High / 0 Medium`。新 source-only namespace
   `/home/sjc/desktop/RONDO/eval-data/publication-critic/plan090/rondo-plan090-stage-a-214f137/` 约 `5.0 MiB`，source archive `9f9685e9…`
   绑定 `214f137` 并通过提取/exact-tree；按审查决定 data archive 不重建，继续复用 `rondo-plan090-stage-a-a2f8aa1/data-bundle.tar`。
+- 2026-08-26：阶段 A 最终复审为 `0 High / 0 Medium`，明确回复“阶段 A 验收通过，批准进入付费阶段”；审查提交 `87d3fe3` 后按
+  既有 ExecPlan 打开付费门，没有扩大预算、硬件、区域或卷授权。
+- 2026-08-27：阶段 B 初始 live 余额 `$6.1495080272`、账户 0 Pod；existing 57GB 卷 `mwemzrn33y` 位于 `US-TX-3`。库存波动时以
+  通用脚本创建 `rondo-plan090-20260827-confirm01`，随后独立确认 exact 单张 L40S、`$0.99/h`、SECURE、冻结镜像与卷挂载后才使用。
+- 2026-08-27：上传并复验 clean `214f137` source archive `9f9685e9…` 与物理无 unseen 的 train+validation archive `6d98c163…`；
+  复用卷上 exact revision snapshot `18d9edf…`，没有访问 HF 下载路径。短 commissioning 从 no-update 诊断到单更新、checkpoint、不同
+  进程恢复和 small handoff 完整打通后，删除 task-owned debug root，再从 clean formal namespace 开始正式序列。
+- 2026-08-27：两次 BF16 clean execution 均通过冻结整体 rubric，validation delta 均为 raw Boundary `+0.00390625`、projected
+  Boundary `+0.0008611325`、raw Within-PASS `-0.0033482143`、projected Within-PASS `+0.0001389426`、ROC AUC
+  `+0.0014005602`；第二 checkpoint `8b4b88b…` 由不同 OS 进程完成 no-update 恢复。两次不同 seed 只作执行元数据，仍固定
+  `seed_sensitive_stability_tested=false`。
+- 2026-08-27：条件性整模型 FP32 对照真实运行，参数、forward、gradient、optimizer state 与保存均为 float32，autocast/TF32 关闭；
+  raw Boundary `-0.0065941466`、projected Boundary `+0.0062063820`，未通过 raw 方向/分布检查。该结果按冻结合同只作精度路径诊断，
+  不自动覆盖两个有效 BF16 clean repeat，终态为 `ROUTE_O_CONFIRMATION_PASS`。
+- 2026-08-27：最终 27 文件 small handoff 共 `2,116,244` bytes、manifest content `94c41dcd…`，commissioning 4 文件 handoff 共
+  `1,233,696` bytes、manifest content `bb244693…`，云端与本地均通过 exact-tree。保留第二 BF16 恢复 checkpoint；已确认替代的首个
+  BF16、FP32 和 debug checkpoint 均在回传小结果后从 Plan 090 task root 清理，Plan 082/087 roots 未写入。
+- 2026-08-27：terminal helper 停止并删除 exact task Pod，live 复核 0 Pod、compute `$0/h`；57GB 卷保留、未扩容或删除。终态余额
+  `$5.4566316335`，保守 Plan 090 费用 `$0.71`，低于 `$6` 硬上限。完整终态与 handoff 保留在主物理根
+  `/home/sjc/desktop/RONDO/eval-data/publication-critic/plan090/rondo-plan090-stage-b-20260827/`（约 `5.5 MiB`）。
 
 ### 当前工作
 
-- 阶段 A 两轮审查 finding 已整改、重新提交并重建正式 source；付费门保持关闭，等待审查者复验与明确付费阶段批准。
+- 阶段 B/C 已形成 `ROUTE_O_CONFIRMATION_PASS / ZERO_POD` 并完成本地小结果回传；正在完成 tracked 结果、WBS、完成记录与精炼日志，随后
+  提交并申请最终独立审查。
 
 ### 本任务剩余步骤
 
-- 阶段 A：通过指定队列申请审查者验收；若有 finding，只做相称非付费整改并重新提交。
-- 阶段 B：在批准后完成真实链路打通与冻结确认序列，生成小型结果并释放 Pod。
-- 阶段 C：0 Pod 本地结果/WBS/完成记录/日志收口，聚焦复验、提交并申请最终审查。
+- 完成结果投影和权威文档的聚焦复验，提交 clean task branch，并通过指定队列申请 Plan 090 最终审查；若有 finding，只做相称本地整改，
+  不重跑训练或重建 Pod。
 
 ### 阻塞项
 
-- 阶段 B 付费门关闭；需审查者明确回复“阶段 A 验收通过，批准进入付费阶段”后才可打开。
-- live 余额、未结费用、US-TX-3 L40S 库存/价格和卷可用 bytes 仅能在执行期刷新；历史快照不能当作当前准入证据。
+- 无。GPU 工作和外部写状态均已终止；最终审查只消费已回传的本地小型证据。
 
 ### 当前验收状态
 
-- `STAGE_A_REMEDIATED / REVIEW_PENDING / PAID_GATE_CLOSED`。
+- `ROUTE_O_CONFIRMATION_PASS / ZERO_POD / FINAL_REVIEW_PENDING`。
 
 ### 交接边界
 
@@ -341,3 +360,5 @@ XXX用以下内容代替：
 | 012 | 继续复用已审查的小型 handoff envelope、通用抢卡脚本和 Plan 087 terminal helper，不新增 Plan 090 Pod 创建器或创建 receipt | 职责契合且可减少重复设施；实际 Pod 属性仍由执行者创建后独立核验 | 云端接缝 | 已采纳 |
 | 013 | checkpoint 前故障使用新的空 attempt namespace；checkpoint 后只恢复 exact checkpoint，PASS 最终候选要求同 hostname 的不同 OS 新进程恢复 | 同时保持 clean-base 语义、恢复可用性与同一 formal Pod 约束 | 恢复与保留 | 已采纳 |
 | 014 | 两个正向 BF16 结果形成后，若必需恢复/闭环因基础设施失败，允许诚实发布 INCONCLUSIVE；任何有效负面结果仍不得被 infrastructure 覆盖 | 使恢复门与合法终态闭合，同时保护负面研究结果 | 终态状态机 | 已采纳 |
+| 015 | FP32 全条件对照的 raw Boundary 为负、projected 指标为正时，保留预冻结“诊断性、非自动 veto”语义，Plan 090 仍以两个 BF16 clean repeat 和恢复闭环形成 PASS | FP32 同时改变完整精度路径，不能把单条 raw/projected 分歧升级为严格因果反证 | 最终研究解释 | 已采纳 |
+| 016 | 终态只保留第二 BF16 恢复合格 checkpoint；确认替代后的 debug、首个 BF16 与 FP32 checkpoint 在小结果回传后清理 | 在 57GB 不扩容边界内保留唯一后续有效大资产，避免重复占用 | 远端资产保留 | 已采纳 |

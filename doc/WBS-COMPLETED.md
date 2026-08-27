@@ -2354,3 +2354,30 @@ formal retry 整改为 `d29e857`，最终独立验收提交为 `43cf0eeb3e1b4826
   `AGENTS.md` / `CLAUDE.md` 固定“先创建、后独立核验、不符立即释放”。相邻聚焦测试 91 项、34 个 subtests 通过；最终审查 High 0、
   Medium 0。结果见 `eval/results/publication-critic/plan087-adaptive-search-v1.{json,md}`，原因研究见
   `doc/research/2026-08-26-publication-critic-training-route-outcome-analysis.md`。
+
+## Publication Critic Route O 干净复现与执行/数值重复确认（Plan 090，2026-08-26）
+
+**状态**：阶段 A 预冻结、独立验收、阶段 B 云端正式确认、候选恢复、资产回传和阶段 C 止费均已完成；任务目标完成并等待最终独立审查，
+终态为 `ROUTE_O_CONFIRMATION_PASS / ZERO_POD`。
+
+- 在 exact `Skywork/Skywork-Reward-V2-Qwen3-1.7B@e51ea3e08fb81326c3b812a7ff0cb9cee83e59cc`、冻结 v8
+  train `128/58`、validation `55/26`、物理无 unseen、同一 US-TX-3 L40S 与 Route O 九张量/`33,558,784` 原参数配方下，
+  从 exact base 和独立 namespace 完成两个 clean BF16 execution。
+- `20260901` 与 `20260902` 两次运行均通过预冻结完整 rubric，validation delta 同为 raw Boundary `+0.00390625`、projected
+  Boundary `+0.00086113`、raw Within-PASS `-0.00334821`、projected Within-PASS `+0.00013894`、ROC AUC
+  `+0.00140056`；balanced/best-balanced/false-PASS/strict 指标不退化。第二 checkpoint `8b4b88b…` 由不同 OS 进程完成 no-update
+  恢复并作为唯一 Plan 090 大型候选保留在网络卷。
+- 正式路径无 shuffle、有效 dropout 或其它 seed-sensitive consumer，两个 seed 只作独立执行元数据，固定
+  `seed_sensitive_stability_tested=false`。结果确认同一冻结 validation 上的数值/执行重复性，不证明随机 seed 稳定或独立 cohort 泛化。
+- 条件性整模型 FP32 参数训练对照真实执行，参数、forward、gradient、optimizer state 与保存均为 float32，autocast/TF32 关闭；
+  raw Boundary `-0.00659415`、projected Boundary `+0.00620638`，未通过同一 rubric。该单条对照保留为完整精度路径敏感性诊断，
+  不冒充严格 update-only 因果证明，也不自动推翻两个有效 BF16 clean repeat。
+- 保守任务费用 `$0.71`，低于 `$6` 硬上限。task Pod 已 stop/delete 并实时复核 0 Pod、compute `$0/h`；既有 57GB 卷
+  `mwemzrn33y` 未扩容或删除，继续以 `$0.006/h` 保留。Plan 082/087 roots 保持只读，确认替代的 debug、首个 BF16 与 FP32 checkpoint
+  在小型结果回传后清理。
+- ignored final handoff 为 27 文件、`2,116,244` bytes、manifest content `94c41dcd…`；commissioning handoff 为 4 文件、
+  `1,233,696` bytes、manifest content `bb244693…`，均通过云端/本地 exact-tree。结果见
+  `eval/results/publication-critic/plan090-route-o-confirmation-v1.{json,md}`。没有本地模型、Cargo、Docker、真实 API/Judge、HF 上传、
+  unseen、第三种 GPU、多 GPU、换区或卷变更。
+- 该任务不授予 M3-C1/M3-C2、产品 GO 或 M3-D 解锁；Plan 090 剩余预算与外部动作授权不转移。若继续回答独立 cohort 或产品资格，
+  须另立任务、冻结相称合同并重新授权。
