@@ -271,14 +271,17 @@ XXX用以下内容代替：
   不为纯配置持久化重复全 workspace。独立审查结论为 ACCEPT。
 - 2026-08-27：用户批准主线集成并要求把基线纳入顶层/方向 3 子 WBS。确认 `main` / `origin/main` clean 且同为 `e30c8a3d` 后，已把
   当前 main 合入 093，保留 Plan 090 的现行路线结论；顶层 WBS、方向 3 子 WBS 与 WBS-COMPLETED 已补入 Plan 093 正确性基线。
+- 2026-08-27：WBS 收口提交 `a3787dd` 后，共享构建合同复跑 7/7、两产品保守入口 dry-run 解析正确，093 worktree clean；随后以
+  merge commit `11ef1ca577d81172faecbe1c34d668aad98ede5f` 合入 `main`，完成最终文档提交并推送 `origin/main`。共享 target 与正式证据
+  继续保留，093 分支按惯例归档且 worktree 释放。
 
 ### 当前工作
 
-- 技术实现、并发整改、必要验证、独立验收与 WBS 基线同步均已完成；正在执行已获批准的主线集成与任务现场释放。
+- Plan 093 已完成技术实现、正式验证、独立验收、WBS 同步、主线集成、推送与任务现场释放；本计划冻结。
 
 ### 本任务剩余步骤
 
-- 提交本轮 WBS 更新，合并并推送 main；随后更新本计划的实际集成终态，归档 093 分支并释放 worktree。
+- 无。后续路线只见顶层与方向 3 子 WBS，不在本计划追加。
 
 ### 阻塞项
 
@@ -286,12 +289,12 @@ XXX用以下内容代替：
 
 ### 当前验收状态
 
-- `REVIEW_ACCEPTED / TECHNICAL_GOAL_COMPLETE / MAIN_INTEGRATION_PENDING / NOT_PUSHED`。
+- `COMPLETED / ACCEPTED / INTEGRATED / PUSHED / MULTIDEV_FULL_WORKSPACE_BASELINE_PASS`。
 
 ### 交接边界
 
 - 本任务完成后冻结此计划；它不重新打开多智能体第四期，也不改变 Publication Critic 三期路线。任何下游工作只见 WBS，不在本计划追加。
-- 执行者技术完成后的固定停止点是 093 分支本地提交与 clean worktree；最终主线集成和清理由用户后续授权。
+- 用户已批准并完成最终主线集成、推送和 093 清理；共享 target 与正式证据按合同保留。
 
 ## 6. 关键决策记录
 

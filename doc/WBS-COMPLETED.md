@@ -2420,8 +2420,9 @@ formal retry 整改为 `d29e857`，最终独立验收提交为 `43cf0eeb3e1b4826
 
 ## RONDO Multi 干净全 Workspace 基线与共享构建现场收口（Plan 093，2026-08-27）
 
-**状态**：`COMPLETED / ACCEPTED / MAIN_INTEGRATION_PENDING / NOT_PUSHED`。技术实现、正式全量、并发配置整改与独立验收均已完成；
-本条先记录待集成事实，实际主线合并与推送完成后再更新终态。
+**状态**：`COMPLETED / ACCEPTED / INTEGRATED / PUSHED / MULTIDEV_FULL_WORKSPACE_BASELINE_PASS`。技术实现、正式全量、并发配置整改、
+独立验收与主线收口均已完成；Plan 093 以 merge commit `11ef1ca577d81172faecbe1c34d668aad98ede5f` 进入 `main` 并推送
+`origin/main`。
 
 - 受支持 Unix 正式重型入口现在以产品 identity 把主工作区和 linked worktree 路由到物理仓库根的共享 target；Multi/Local 分别使用
   `.codex/cargo-target/rondo-multi` 与 `.codex/cargo-target/rondo-local`。本任务从空目录创建并保留 Multi 叶子，没有创建或加热
@@ -2439,3 +2440,6 @@ formal retry 整改为 `d29e857`，最终独立验收提交为 `43cf0eeb3e1b4826
   `test-with-codex-v8-conservative`（`jobs=1`、LLD 单线程）。合同测试 7/7、日常入口窄编译/链接/测试 18/18、保守 V8 入口
   18/18；配置与原正式轮等效，未重复完整 workspace。最终独立验收 High/Medium/Low correctness finding 为 0，报告见
   `agent_log/2026-08-27-005816-plan093-independent-review.md`。
+- 主线集成前先把当时 `main@e30c8a3d` 合入 093，完整保留 Plan 090 的现行路线与历史；WBS 收口后共享构建合同复跑 7/7，
+  Multi/Local 保守入口 dry-run 均解析为 `CARGO_BUILD_JOBS=1` 且继续经过 V8 wrapper、canonical lock/watchdog 和产品 target 路由。
+  本次只做相称轻量复核，没有重复完整 workspace。集成记录见 `agent_log/2026-08-27-011307-plan093-main-integration.md`。
