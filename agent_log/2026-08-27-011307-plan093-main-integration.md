@@ -8,4 +8,5 @@
   并继续使用 V8 wrapper、canonical lock/watchdog 与各自产品 target 路由。文档 diff 门通过，未重复完整 workspace。
 - Plan 093 以 merge commit `11ef1ca577d81172faecbe1c34d668aad98ede5f` 进入 `main`。正式 14660/14660 JUnit、共享
   `.codex/cargo-target/rondo-multi` 与 retained evidence 继续保留；`rondo-local` 未创建或加热。
-- 集成后按仓库惯例推送 `origin/main`，归档 Plan 093 历史分支并释放其 clean worktree；未改动或清理其它并行 worktree。
+- 集成后已推送 `origin/main`。本次用户授权只明确覆盖主线合并与文档同步；Plan 093 原分支与 clean worktree 继续保留，归档/释放等待
+  单独明确批准。未改动或清理其它并行 worktree。

@@ -2443,3 +2443,5 @@ formal retry 整改为 `d29e857`，最终独立验收提交为 `43cf0eeb3e1b4826
 - 主线集成前先把当时 `main@e30c8a3d` 合入 093，完整保留 Plan 090 的现行路线与历史；WBS 收口后共享构建合同复跑 7/7，
   Multi/Local 保守入口 dry-run 均解析为 `CARGO_BUILD_JOBS=1` 且继续经过 V8 wrapper、canonical lock/watchdog 和产品 target 路由。
   本次只做相称轻量复核，没有重复完整 workspace。集成记录见 `agent_log/2026-08-27-011307-plan093-main-integration.md`。
+- `worktree-093-clean-full-workspace-baseline` 与原任务分支继续 clean 保留；本次用户授权只覆盖主线集成与文档同步，分支归档和 worktree
+  释放等待单独明确批准，不影响已经完成的主线技术终态。
