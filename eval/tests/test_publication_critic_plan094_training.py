@@ -795,18 +795,22 @@ class Plan094TrainingTests(unittest.TestCase):
         spec = _run_spec(run_kind="formal")
         validation, validation_logits = _cohort("validation")
         training, train_logits = _cohort("train")
-        validation_logits[2] = copy.deepcopy(validation_logits[0])
-        train_logits[2] = copy.deepcopy(train_logits[0])
-        validation_logits[2]["validation-boundary-0-preferred"] = -1.0
-        validation_logits[2]["validation-boundary-0-dispreferred"] = 1.0
-        for step in range(3, 7):
+        for step in range(2, 7):
             validation_logits[step] = copy.deepcopy(validation_logits[1])
             train_logits[step] = copy.deepcopy(train_logits[1])
+            for index in range(19):
+                validation_logits[step][
+                    f"validation-boundary-{index}-preferred"
+                ] -= 0.01 * (step - 1)
+            for index in range(29):
+                train_logits[step][f"train-boundary-{index}-preferred"] -= (
+                    0.01 * (step - 1)
+                )
         first = _Plan094FakeAdapter(spec, validation_logits, train_logits)
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             controller, _spec, _validation, _training = _controller(root, first)
-            controller.run(first, stop_after=1)
+            controller.run(first, stop_after=2)
             checkpoint_id = controller.state["latest_checkpoint_id"]
             second = _Plan094FakeAdapter(spec, validation_logits, train_logits)
             controller = Plan094ContinuousTrainingController.resume(
@@ -830,8 +834,40 @@ class Plan094TrainingTests(unittest.TestCase):
                 budget_snapshot=_budget(cost=0.1),
                 report_threshold=spec["report_threshold"],
             )
-            controller.run(second, stop_after=4)
+            controller.run(second, stop_after=3)
+            checkpoint_id = controller.state["latest_checkpoint_id"]
+            third = _Plan094FakeAdapter(spec, validation_logits, train_logits)
+            controller = Plan094ContinuousTrainingController.resume(
+                freeze=frozen_contract(),
+                run_spec=spec,
+                route_contract=read_json(ROUTE_PATH),
+                control_plan=ControlPlan.from_value(spec["control_plan"]),
+                comparison_policy=ComparisonPolicy.from_value(
+                    spec["comparison_policy"]
+                ),
+                training_dataset=training,
+                validation_dataset=validation,
+                artifact_store=Plan094ArtifactStore(root),
+                adapter=third,
+                checkpoint_id=checkpoint_id,
+                process_identity={
+                    "instance_id": "3" * 32,
+                    "hostname": "fixture-b",
+                    "pid": 3,
+                },
+                budget_snapshot=_budget(cost=0.2),
+                report_threshold=spec["report_threshold"],
+            )
+            controller.run(third, stop_after=4)
             self.assertEqual(controller.state["status"], "terminal")
+            self.assertEqual(
+                len(controller.state["plan094"]["recovery_proven_checkpoints"]),
+                2,
+            )
+            self.assertNotIn(
+                "checkpoint-attempt-000-step-000002",
+                controller.plan094_store.verified_checkpoint_ids(),
+            )
             self.assertEqual(
                 len(controller.plan094_store.evaluation_result_ids()), 4
             )
@@ -878,15 +914,15 @@ class Plan094TrainingTests(unittest.TestCase):
                     resource_state=drifted_resource,
                     terminal_budget_snapshot=_budget(cost=0.2, projected=0.0),
                 )
-            turning_id = controller.state["plan094"]["checkpoint_roles"][
-                "turning_points"
-            ][0]
+            retained_id = controller.state["plan094"]["checkpoint_roles"][
+                "fresh_process_recovery"
+            ]
             owned = set(
                 controller.plan094_store.verified_checkpoint_ids()
             )
             controller.plan094_store.prune(
                 keep_snapshot_ids=set(),
-                keep_checkpoint_ids=owned - {turning_id},
+                keep_checkpoint_ids=owned - {retained_id},
                 prune_checkpoints=True,
             )
             with self.assertRaisesRegex(

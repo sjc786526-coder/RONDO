@@ -222,15 +222,18 @@ def _verify_live_terminal_checkpoints(
             raise FullModelTrainingError(
                 "plan094_terminal_retained_checkpoint_missing"
             )
-    for checkpoint_id, digest in state["plan094"][
-        "recovery_proven_checkpoints"
-    ].items():
-        try:
-            recovered_checkpoint = store.verify_checkpoint(checkpoint_id)
-        except FullModelTrainingError as exc:
-            raise FullModelTrainingError("plan094_terminal_recovery_missing") from exc
-        if recovered_checkpoint["content_sha256"] != digest:
-            raise FullModelTrainingError("plan094_terminal_recovery_missing")
+    recovery_id = roles.get("fresh_process_recovery")
+    recovery_digest = state["plan094"]["recovery_proven_checkpoints"].get(
+        recovery_id
+    )
+    if not isinstance(recovery_id, str) or not isinstance(recovery_digest, str):
+        raise FullModelTrainingError("plan094_terminal_recovery_missing")
+    try:
+        recovered_checkpoint = store.verify_checkpoint(recovery_id)
+    except FullModelTrainingError as exc:
+        raise FullModelTrainingError("plan094_terminal_recovery_missing") from exc
+    if recovered_checkpoint["content_sha256"] != recovery_digest:
+        raise FullModelTrainingError("plan094_terminal_recovery_missing")
 
 
 def qualify_terminal_checkpoints(
@@ -322,7 +325,6 @@ def _required_terminal_checkpoints(
             roles.get("latest"),
             roles.get("fresh_process_recovery"),
             *roles.get("turning_points", []),
-            *state["plan094"]["recovery_proven_checkpoints"],
         )
         if isinstance(identifier, str)
     }
@@ -341,6 +343,9 @@ def _required_terminal_checkpoints(
         if recovered is not None and recovered != digest:
             raise FullModelTrainingError("plan094_terminal_recovery_missing")
         expected[checkpoint_id] = digest
+    recovery_id = roles.get("fresh_process_recovery")
+    if recovery_id not in state["plan094"]["recovery_proven_checkpoints"]:
+        raise FullModelTrainingError("plan094_terminal_recovery_missing")
     return expected
 
 
