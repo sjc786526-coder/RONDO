@@ -22,6 +22,7 @@ from .plan081_contract import ComparisonPolicy, TrainableScope
 
 
 OBSERVATION_SCHEMA = "rondo-publication-critic-plan081-observation-v1"
+TRAINING_OBSERVATION_SCHEMA = "rondo-publication-critic-training-cohort-observation-v1"
 
 
 def validation_identity_sha256(dataset: ValidationDataset) -> str:
@@ -156,6 +157,78 @@ def build_validation_observation(
     diagnostics.
     """
 
+    if any(
+        row.get("proposed_split") != "validation"
+        for row in dataset.supervision.values()
+    ):
+        raise FullModelTrainingError("plan081_observation_requires_validation_split")
+    return _build_cohort_observation(
+        dataset,
+        raw_logits,
+        global_step=global_step,
+        scope=scope,
+        policy=policy,
+        report_threshold=report_threshold,
+        schema=OBSERVATION_SCHEMA,
+        metadata_key="validation",
+        split="validation",
+        identity_sha256=validation_identity_sha256(dataset),
+        feeds_parameter_updates=False,
+        control_use="quality_observation_scope_and_stop_decisions_only",
+    )
+
+
+def build_training_observation(
+    dataset: PortableTrainingDataset,
+    raw_logits: Mapping[str, Any],
+    *,
+    global_step: int,
+    scope: TrainableScope,
+    policy: ComparisonPolicy,
+    report_threshold: float = 0.5,
+) -> dict[str, Any]:
+    """Score train before/after through the validation metric implementation.
+
+    This is diagnostic-only, no-gradient scoring.  It does not change the
+    training objective or let the train cohort act as a validation gate.
+    """
+
+    if any(
+        row.get("proposed_split") != "train"
+        for row in dataset.supervision.values()
+    ):
+        raise FullModelTrainingError("plan081_observation_requires_train_split")
+    return _build_cohort_observation(
+        dataset,
+        raw_logits,
+        global_step=global_step,
+        scope=scope,
+        policy=policy,
+        report_threshold=report_threshold,
+        schema=TRAINING_OBSERVATION_SCHEMA,
+        metadata_key="cohort",
+        split="train",
+        identity_sha256=training_identity_sha256(dataset),
+        feeds_parameter_updates=True,
+        control_use="diagnostic_before_after_only",
+    )
+
+
+def _build_cohort_observation(
+    dataset: Any,
+    raw_logits: Mapping[str, Any],
+    *,
+    global_step: int,
+    scope: TrainableScope,
+    policy: ComparisonPolicy,
+    report_threshold: float,
+    schema: str,
+    metadata_key: str,
+    split: str,
+    identity_sha256: str,
+    feeds_parameter_updates: bool,
+    control_use: str,
+) -> dict[str, Any]:
     if (
         not isinstance(global_step, int)
         or isinstance(global_step, bool)
@@ -166,11 +239,6 @@ def build_validation_observation(
         or not 0.0 <= float(report_threshold) <= 1.0
     ):
         raise FullModelTrainingError("plan081_observation_arguments_invalid")
-    if any(
-        row.get("proposed_split") != "validation"
-        for row in dataset.supervision.values()
-    ):
-        raise FullModelTrainingError("plan081_observation_requires_validation_split")
     if set(raw_logits) != set(dataset.supervision):
         raise FullModelTrainingError("plan081_observation_score_cohort_mismatch")
 
@@ -242,18 +310,18 @@ def build_validation_observation(
 
     comparison_value = _comparison_value(metrics, pair_margins, policy.metric)
     return {
-        "schema": OBSERVATION_SCHEMA,
+        "schema": schema,
         "global_step": global_step,
         "scope": scope.as_dict(),
-        "validation": {
-            "identity_sha256": validation_identity_sha256(dataset),
+        metadata_key: {
+            "identity_sha256": identity_sha256,
             "dataset_revision": "v8",
-            "split": "validation",
+            "split": split,
             "candidate_count": len(dataset.supervision),
             "pair_count": len(dataset.pairs),
             "gradient_access": False,
-            "feeds_parameter_updates": False,
-            "control_use": "quality_observation_scope_and_stop_decisions_only",
+            "feeds_parameter_updates": feeds_parameter_updates,
+            "control_use": control_use,
             "qualification_claim": False,
             "m3_c2_claim": False,
             "unseen_claim": False,

@@ -670,7 +670,7 @@ class _ContinuousTrainingControllerCore:
             or not isinstance(receipt.get("raw_logits"), Mapping)
         ):
             raise FullModelTrainingError("plan081_validation_receipt_invalid")
-        return build_validation_observation(
+        observation = build_validation_observation(
             self.validation_dataset,
             receipt["raw_logits"],
             global_step=global_step,
@@ -678,6 +678,15 @@ class _ContinuousTrainingControllerCore:
             policy=self.comparison_policy,
             report_threshold=self.report_threshold,
         )
+        return self._augment_validation_observation(
+            observation, raw_logits=receipt["raw_logits"]
+        )
+
+    def _augment_validation_observation(
+        self, observation: dict[str, Any], *, raw_logits: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        del raw_logits
+        return observation
 
     def _record_observation(
         self, adapter: Any, *, step: int, scope: TrainableScope
