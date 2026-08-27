@@ -6,8 +6,8 @@ from pathlib import Path
 from unittest import mock
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SCRIPT = REPO_ROOT / "scripts/create-runpod-plan079-initial-when-ready.py"
-SPEC = importlib.util.spec_from_file_location("runpod_plan079_initial_monitor", SCRIPT)
+SCRIPT = REPO_ROOT / "scripts/create-runpod-when-ready.py"
+SPEC = importlib.util.spec_from_file_location("runpod_create_when_ready", SCRIPT)
 assert SPEC is not None and SPEC.loader is not None
 monitor = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(monitor)
@@ -16,7 +16,7 @@ SPEC.loader.exec_module(monitor)
 def _args() -> argparse.Namespace:
     return argparse.Namespace(
         runpodctl="runpodctl",
-        pod_name="rondo-plan079-initial-01",
+        pod_name="rondo-create-when-ready-fixture",
         gpu_id="provider-current-gpu-id",
         gpu_count=1,
         compute_type="GPU",
@@ -81,7 +81,7 @@ class _Provider:
         raise AssertionError(label)
 
 
-class RunPodPlan079InitialMonitorTests(unittest.TestCase):
+class RunPodCreateWhenReadyTests(unittest.TestCase):
     def test_create_command_uses_runtime_parameters(self):
         args = _args()
         args.gpu_id = "new-provider-gpu"

@@ -1,0 +1,74 @@
+{
+  "comparison_policy": {
+    "direction": "higher_is_better",
+    "metric": "within_pass_pair_mean_margin",
+    "tolerance": 0.0
+  },
+  "control_plan": {
+    "checkpoint_steps": [1, 2, 3],
+    "maximum_updates": 3,
+    "observation_steps": [1, 2, 3],
+    "turning_point_limit": 2
+  },
+  "description": "Wider terminal-backbone route with linear warmup-decay and a more balanced binary/pair objective.",
+  "recipe": {
+    "activation_checkpointing": true,
+    "attention_backend": "sdpa",
+    "binary_micro_batch_size": 1,
+    "gradient_clip_norm": 0.75,
+    "macro_update": "one_full_v8_train_cohort",
+    "objective": {
+      "binary_loss": "softplus(-signed_target*logits[:,0])",
+      "component_weights": {
+        "binary": 0.4,
+        "boundary": 0.35,
+        "within_pass": 0.25
+      },
+      "direction": "preferred_minus_dispreferred",
+      "pair_loss": "softplus(dispreferred-preferred)",
+      "pair_margin": 0.0,
+      "pair_temperature": 1.0,
+      "scalar": "logits[:,0]"
+    },
+    "optimizer": {
+      "betas": [0.9, 0.999],
+      "epsilon": 1e-08,
+      "fused": true,
+      "learning_rate": 3e-06,
+      "name": "torch.optim.AdamW",
+      "weight_decay": 0.01
+    },
+    "pair_micro_batch_size": 1,
+    "parameter_dtype": "bfloat16",
+    "scheduler": {
+      "name": "linear_warmup_decay",
+      "total_updates": 3,
+      "warmup_updates": 1
+    },
+    "schema": "rondo-publication-critic-plan087-training-recipe-v1",
+    "seed": 20260827
+  },
+  "report_threshold": 0.5,
+  "route_id": "route-b-wider-decay",
+  "schema": "rondo-publication-critic-plan087-route-candidate-v1",
+  "scope_phases": [
+    {
+      "after_observation_step": null,
+      "strategy": {
+        "backbone_blocks": 2,
+        "include_final_norm": true,
+        "include_score_head": true,
+        "schema": "rondo-publication-critic-plan087-scope-strategy-v1"
+      }
+    },
+    {
+      "after_observation_step": 1,
+      "strategy": {
+        "backbone_blocks": 3,
+        "include_final_norm": true,
+        "include_score_head": true,
+        "schema": "rondo-publication-critic-plan087-scope-strategy-v1"
+      }
+    }
+  ]
+}

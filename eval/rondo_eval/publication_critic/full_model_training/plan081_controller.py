@@ -533,6 +533,15 @@ class _ContinuousTrainingControllerCore:
             raise FullModelTrainingError("plan081_checkpoint_probe_failed") from exc
 
     @classmethod
+    def _resume_constructor_kwargs(
+        cls, controller_state: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        """Subclass hook for small plan-specific state bound by a checkpoint."""
+
+        del cls, controller_state
+        return {}
+
+    @classmethod
     def resume(
         cls,
         *,
@@ -576,6 +585,7 @@ class _ContinuousTrainingControllerCore:
             validation_dataset=validation_dataset,
             artifact_store=artifact_store,
             report_threshold=report_threshold,
+            **cls._resume_constructor_kwargs(controller_state),
         )
         controller._validate_adapter(adapter)
         controller._accept_resumed_state(

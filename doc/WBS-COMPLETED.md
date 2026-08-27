@@ -2334,3 +2334,23 @@ formal retry 整改为 `d29e857`，最终独立验收提交为 `43cf0eeb3e1b4826
   资源门、独立审查和整改证据见本文件对应 M4 条目、冻结 ExecPlan 与 `agent_log/`。
 - binding 状态/失效展示与 replacement TUI 只保留为未来未排期可选增强，不属于第四期遗留任务。第四期不再阻塞或依赖仍在推进的
   Publication Critic 三期，历史任务授权不向未来工作继承。
+
+## Publication Critic 1.7B 云端自适应原参数路线搜索（Plan 087，2026-08-26）
+
+**状态**：非付费阶段、付费自适应搜索、资产保留、止费、最终仓库收口与独立验收均已完成；验收通过、任务目标完成，终态为
+`PROMISING_CANDIDATE_RETAINED / ZERO_POD`。正式结果提交为 `995adb8`，最终仓库整改提交为 `2a8ab98`。
+
+- exact BF16 `Skywork/Skywork-Reward-V2-Qwen3-1.7B@e51ea3e08fb81326c3b812a7ff0cb9cee83e59cc`、冻结 v8 train/validation、
+  pair/input/scalar 语义、unseen 隔离与非 PEFT/非量化训练边界保持不变。从 exact base 完成 A–O 15 条自适应原参数路线。
+- Route O 更新末块内部输入变换/归一化九张量、共 `33,558,784` 个原参数，一次 full-cohort 更新取得 raw boundary margin
+  `+0.00390625`、projected boundary `+0.00086113`、projected within-PASS `+0.00013894` 与 ROC AUC `+0.00140056`；关键
+  operating 指标未退化。精确 checkpoint 经不同 OS 进程 no-update 恢复，完整权重只留网络卷。
+- 该结果满足任务内研究候选启发式，但没有证明效果可靠：15 条路线共用 validation 自适应选择，Route O 只有一次更新且没有 clean
+  reproduction；raw within-PASS 轻微回退，strict/threshold 指标不变，AUC 增量只对应一个跨类 ordering。它不授予 unseen、
+  M3-C1/M3-C2、产品资格或 M3-D 解锁。
+- 任务保守费用 `$3.009`，低于冻结的 `$8.9852646939` 上限；全部 Pod 已 stop/delete 并复核 0 Pod、compute `$0/h`。用户决定保留
+  57GB 网络卷 `mwemzrn33y`，未经授权不得删除；Plan 087 剩余预算和外部动作授权不向后续任务转移。
+- 最终仓库收口把抢卡入口通用化为 `scripts/create-runpod-when-ready.py`，删除 Plan 087 专用创建器/receipt 路线，并在根
+  `AGENTS.md` / `CLAUDE.md` 固定“先创建、后独立核验、不符立即释放”。相邻聚焦测试 91 项、34 个 subtests 通过；最终审查 High 0、
+  Medium 0。结果见 `eval/results/publication-critic/plan087-adaptive-search-v1.{json,md}`，原因研究见
+  `doc/research/2026-08-26-publication-critic-training-route-outcome-analysis.md`。

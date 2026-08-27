@@ -17,7 +17,7 @@ volume.
    that volume at `/workspace`. Prefer MCP for resource state and billing; use
    `runpodctl pod create` only because the MCP create call cannot attach an
    existing network volume. Recheck the created Pod and volume through MCP.
-   If stock must be polled, `scripts/create-runpod-plan079-initial-when-ready.py`
+   If stock must be polled, `scripts/create-runpod-when-ready.py`
    may own only the latency-sensitive poll/create step after the controller has
    separately approved budget, price, volume, image, CUDA and all runtime
    arguments. Run at most one monitor for an exact Pod name; after an uncertain

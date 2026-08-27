@@ -184,6 +184,20 @@ class TorchContinuousTrainingAdapter:
     without installing or loading the 1.7B model.
     """
 
+    runtime_kind = RUNTIME_KIND
+    image_identity_environment_variable = "RONDO_PLAN082_IMAGE_IDENTITY"
+    training_state_codec = "plan082-torch-state-v1"
+
+    @classmethod
+    def validate_recipe_value(cls, value: Any) -> dict[str, Any]:
+        """Validate the concrete recipe without weakening Plan 082's contract.
+
+        Plan 087 subclasses this narrow seam.  The historical Plan 082 class
+        continues to call the exact fixed validator above.
+        """
+
+        return validate_recipe(value)
+
     def __init__(
         self,
         *,
@@ -203,7 +217,8 @@ class TorchContinuousTrainingAdapter:
         self.tokenizer = tokenizer
         self.exact_tokenizer = ExactTokenizer(tokenizer)
         self.device = device
-        self.recipe = validate_recipe(recipe)
+        self.recipe = self.validate_recipe_value(recipe)
+        self.component_weights = dict(self.recipe["objective"]["component_weights"])
         self.snapshot_root = Path(snapshot_root)
         self.snapshot_receipt = json.loads(json.dumps(snapshot_receipt))
         self.runtime_facts = json.loads(json.dumps(runtime_facts))
@@ -227,7 +242,7 @@ class TorchContinuousTrainingAdapter:
         model_lock_path: Path,
         recipe: Mapping[str, Any],
     ) -> "TorchContinuousTrainingAdapter":
-        recipe_value = validate_recipe(recipe)
+        recipe_value = cls.validate_recipe_value(recipe)
         receipt = verify_snapshot(snapshot_root, model_lock_path)
         try:
             torch = importlib.import_module("torch")
@@ -285,7 +300,7 @@ class TorchContinuousTrainingAdapter:
             snapshot_root=snapshot_root,
             snapshot_receipt=receipt,
             runtime_facts={
-                "runtime_kind": RUNTIME_KIND,
+                "runtime_kind": cls.runtime_kind,
                 "gpu_name": gpu_name,
                 "gpu_count": 1,
                 "cuda_version": str(getattr(torch.version, "cuda", "")),
@@ -297,7 +312,9 @@ class TorchContinuousTrainingAdapter:
                 "quantized_training": False,
                 "environment": observe_environment(
                     torch_module=torch,
-                    image_identity=os.getenv("RONDO_PLAN082_IMAGE_IDENTITY"),
+                    image_identity=os.getenv(
+                        cls.image_identity_environment_variable
+                    ),
                 ),
             },
         )
@@ -419,9 +436,7 @@ class TorchContinuousTrainingAdapter:
         ]
         if self.optimizer is None:
             self.optimizer = self._new_optimizer(new_parameters)
-            self.scheduler = self.torch.optim.lr_scheduler.LambdaLR(
-                self.optimizer, lambda _step: 1.0
-            )
+            self.scheduler = self._new_scheduler(self.optimizer)
         elif new_parameters:
             if len(self.optimizer.param_groups) != 1:
                 raise FullModelTrainingError("plan082_optimizer_group_layout_invalid")
@@ -472,8 +487,8 @@ class TorchContinuousTrainingAdapter:
             self._training_cache = {identity: tokenized}
         self.model.train()
         self.optimizer.zero_grad(set_to_none=True)
-        component_sums = {name: 0.0 for name in COMPONENT_WEIGHTS}
-        component_counts = {name: 0 for name in COMPONENT_WEIGHTS}
+        component_sums = {name: 0.0 for name in self.component_weights}
+        component_counts = {name: 0 for name in self.component_weights}
 
         candidate_ids = tuple(sorted(training_dataset.supervision))
         binary_batch = int(self.recipe["binary_micro_batch_size"])
@@ -487,7 +502,7 @@ class TorchContinuousTrainingAdapter:
             self._require_finite_loss(loss)
             (
                 loss
-                * COMPONENT_WEIGHTS["binary"]
+                * self.component_weights["binary"]
                 * (len(batch_ids) / len(candidate_ids))
             ).backward()
             component_sums["binary"] += float(loss.detach().item()) * len(batch_ids)
@@ -517,12 +532,16 @@ class TorchContinuousTrainingAdapter:
                 loss = pair_loss(
                     scalars[0::2],
                     scalars[1::2],
-                    margin=0.0,
-                    temperature=1.0,
+                    margin=float(self.recipe["objective"]["pair_margin"]),
+                    temperature=float(
+                        self.recipe["objective"]["pair_temperature"]
+                    ),
                 )
                 self._require_finite_loss(loss)
                 (
-                    loss * COMPONENT_WEIGHTS[kind] * (len(batch_pairs) / len(pairs))
+                    loss
+                    * self.component_weights[kind]
+                    * (len(batch_pairs) / len(pairs))
                 ).backward()
                 component_sums[kind] += float(loss.detach().item()) * len(batch_pairs)
                 component_counts[kind] += len(batch_pairs)
@@ -620,7 +639,7 @@ class TorchContinuousTrainingAdapter:
         }
 
     def training_state_codec_id(self) -> str:
-        return "plan082-torch-state-v1"
+        return self.training_state_codec
 
     def capture_training_state(self) -> dict[str, Any]:
         if self.optimizer is None or self.scheduler is None:
@@ -772,6 +791,30 @@ class TorchContinuousTrainingAdapter:
             )
         except Exception as exc:
             raise FullModelTrainingError("plan082_optimizer_create_failed") from exc
+
+    def _new_scheduler(self, optimizer: Any) -> Any:
+        config = self.recipe["scheduler"]
+        if config["name"] == "constant":
+
+            def schedule(_step: int) -> float:
+                return 1.0
+        elif config["name"] == "linear_warmup_decay":
+            warmup = int(config["warmup_updates"])
+            total = int(config["total_updates"])
+
+            def schedule(step: int) -> float:
+                if warmup and step < warmup:
+                    return float(step + 1) / float(warmup)
+                remaining = max(total - step, 0)
+                decay_steps = max(total - warmup, 1)
+                return float(remaining) / float(decay_steps)
+
+        else:  # Every concrete recipe validator must close this branch.
+            raise FullModelTrainingError("plan082_scheduler_invalid")
+        try:
+            return self.torch.optim.lr_scheduler.LambdaLR(optimizer, schedule)
+        except Exception as exc:
+            raise FullModelTrainingError("plan082_scheduler_create_failed") from exc
 
     def _forward(
         self, tokenized: Mapping[str, Any], candidate_ids: Sequence[str]
