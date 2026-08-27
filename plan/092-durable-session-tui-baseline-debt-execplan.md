@@ -25,8 +25,8 @@
 - [x] scoped fix、格式检查与 `git diff --check` 通过。
 - [x] Plan 090 工作树和成果保持原样。
 - [x] 独立只读审查无未关闭高、中等级 correctness finding。
-- [ ] 任务变更、Plan 动态状态、精炼日志和 `doc/WBS-COMPLETED.md` 形成完整提交与集成记录。
-- [ ] 验收提交进入本地 `main` 并推送 `origin/main`；任务分支不推送，完成后按仓库惯例归档。
+- [x] 任务变更、Plan 动态状态、精炼日志和 `doc/WBS-COMPLETED.md` 形成完整提交与集成记录。
+- [x] 验收提交进入本地 `main` 并推送 `origin/main`；任务分支不推送，完成后按仓库惯例归档。
 
 ## 2. 范围
 
@@ -105,15 +105,17 @@
 - 2026-08-26：最终资源核验项目 `272354115584` bytes、069 target `212729303040` bytes、Windows `C:` 实际余量
   `42414792704` bytes；canonical lock 可取得，无 active heavy scope 或 Cargo/rustc/nextest，memory full PSI avg10 为 0。
 - 2026-08-26：实现与验收提交 `6ad805ca45cee5d477d33086d9f7ae8b68849f47` 已形成，092 worktree clean，并从
-  `main@7776ba0` 无冲突 fast-forward 进入本地 `main`；远端同步与最终记录仍待完成。
+  `main@7776ba0` 无冲突 fast-forward 进入本地 `main`。
+- 2026-08-26：本地集成记录提交 `4fce78c` 连同实现提交已推送 `origin/main`；任务分支未推送，已归档为
+  `zz-done/worktree-092-durable-session-tui-baseline-debt`，092 worktree 保留且 clean。
 
 ### 当前工作
 
-- 完成远端同步和最终历史记录。
+- 无。
 
 ### 本任务剩余步骤
 
-- 推送 `origin/main`，更新最终 COMPLETED 集成记录并归档分支。
+- 无。
 
 ### 阻塞项
 
@@ -121,7 +123,7 @@
 
 ### 当前验收状态
 
-- `IMPLEMENTATION_COMPLETE / ACCEPTED / INTEGRATED_LOCAL / PUSH_PENDING`。
+- `COMPLETED / ACCEPTED / INTEGRATED / PUSHED / DURABLE_SESSION_TUI_BASELINE_DEBT_PASS`。
 
 ### 交接边界
 

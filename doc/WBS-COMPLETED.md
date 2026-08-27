@@ -2372,8 +2372,9 @@ formal retry 整改为 `d29e857`，最终独立验收提交为 `43cf0eeb3e1b4826
 
 ## Durable Session TUI 基线欠账窄修复（Plan 092，2026-08-26）
 
-**状态**：三项既有 `codex-tui` 基线失败已关闭并独立验收，`6ad805ca45cee5d477d33086d9f7ae8b68849f47` 已进入本地 `main`；
-远端同步待完成，本条暂不宣告最终 `PUSHED` 终态。
+**状态**：`COMPLETED / ACCEPTED / INTEGRATED / PUSHED / DURABLE_SESSION_TUI_BASELINE_DEBT_PASS`。
+三项既有 `codex-tui` 基线失败已关闭并独立验收；实现提交 `6ad805ca45cee5d477d33086d9f7ae8b68849f47` 与集成记录提交
+`4fce78c` 已进入本地 `main` 并推送 `origin/main`，任务分支未推送且已归档。
 
 - duplicate protocol fixture 的 operation 子树改由 typed `DurableSessionOperations` 构造，保留 JSON response 反序列化与重复 identity
   断言，并让正式 operation 新增时以编译失败暴露 fixture 欠账；protocol、schema 与产品语义未修改。
