@@ -320,10 +320,13 @@ XXX用以下内容代替：
   64/64 通过，独立复核无遗留 High/Medium finding。未运行 Cargo、Docker、真实模型、训练或云写。
 - 2026-08-26：阶段 A 只读 RunPod 快照为余额 `$5.4443864251`、账户费率 `$0.006/h`、0 Pod、`mwemzrn33y` 位于 US-TX-3 且 57GB、
   Secure L40S `$0.99/h` 且当时无库存。该快照只用于准备，阶段 B 创建资源前必须重新刷新。阶段 A 未创建主物理根 Plan 094 ignored namespace。
+- 2026-08-26：首轮独立审查以 1 High / 3 Medium 拒绝阶段 A；整改已将 bootstrap 与后续 paid launch 绑定五分钟内 task-owned budget
+  snapshot、核验费率和有限 timeout，Plan 090 外部点只保留 previous 语义，本任务训练 claim 只认自有 checkpoint，并把 Hub token 清除移到
+  snapshot 分支之前。未改变模型、数据、Route O、material rubric、停止或保留规则。
 
 ### 当前工作
 
-- 阶段 A 实现、相称轻量门禁与提交前独立只读复核已完成，正在提交并通过指定队列交审；付费门保持关闭。
+- 阶段 A 首轮审查整改与相称轻量门禁已完成，正在提交并通过指定队列申请复审；付费门保持关闭。
 
 ### 本任务剩余步骤
 
@@ -338,7 +341,7 @@ XXX用以下内容代替：
 
 ### 当前验收状态
 
-- `STAGE_A_IMPLEMENTED / REVIEW_PENDING / PAID_GATE_CLOSED / LIVE_READ_ONLY_REFRESHED`。
+- `STAGE_A_REMEDIATED / REREVIEW_PENDING / PAID_GATE_CLOSED / LIVE_READ_ONLY_REFRESHED`。
 
 ### 交接边界
 

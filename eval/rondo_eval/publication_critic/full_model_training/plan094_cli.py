@@ -45,6 +45,7 @@ from .plan094_bundle import (
 from .plan094_contract import (
     DATA_BUNDLE_CONTENT_SHA256,
     PLAN090_SOURCE_CHECKPOINT_PATH,
+    authorize_paid_segment,
     freeze_sha256,
     frozen_contract,
     materialize_run_spec,
@@ -98,6 +99,11 @@ def _parser() -> argparse.ArgumentParser:
     write_freeze.add_argument("--output", type=Path, required=True)
     budget = commands.add_parser("validate-budget")
     budget.add_argument("--snapshot", type=Path, required=True)
+    segment = commands.add_parser("authorize-segment")
+    segment.add_argument("--snapshot", type=Path, required=True)
+    segment.add_argument("--maximum-seconds", type=int, required=True)
+    segment.add_argument("--compute-rate-usd-per-hour", type=float, required=True)
+    segment.add_argument("--storage-rate-usd-per-hour", type=float, required=True)
     snapshot = commands.add_parser("verify-snapshot")
     snapshot.add_argument("--snapshot", type=Path, required=True)
     snapshot.add_argument("--model-lock", type=Path, required=True)
@@ -233,6 +239,15 @@ def _dispatch(args: argparse.Namespace) -> Any:
         return value
     if args.command == "validate-budget":
         return validate_budget_snapshot(read_json(args.snapshot))
+    if args.command == "authorize-segment":
+        _require_paid_gate()
+        _require_task_owned_paths(args.snapshot)
+        return authorize_paid_segment(
+            read_json(args.snapshot),
+            maximum_seconds=args.maximum_seconds,
+            compute_rate_usd_per_hour=args.compute_rate_usd_per_hour,
+            storage_rate_usd_per_hour=args.storage_rate_usd_per_hour,
+        )
     if args.command == "verify-snapshot":
         _require_paid_gate()
         return verify_snapshot(args.snapshot, args.model_lock)

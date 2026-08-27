@@ -16,6 +16,9 @@ PYTHONPATH=eval python3 -B -m \
 single-task seams.  They do not create or release a Pod.  Stage B commands
 fail closed unless `RONDO_PLAN094_STAGE_B_APPROVED=1`; the operator may set it
 only after the reviewer sends the exact approval required by the ExecPlan.
+Bootstrap and every later paid command also require a fresh task-owned budget
+snapshot, verified compute/storage rates, and a finite timeout whose full cost
+fits the remaining 5 USD headroom and closure reserve.
 
 No model, checkpoint, cache, virtual environment, raw result, or secret belongs
 in this tracked directory.  Large artifacts remain under the independent

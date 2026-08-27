@@ -585,9 +585,7 @@ class Plan094ContinuousTrainingController(_ContinuousTrainingControllerCore):
         self.state["plan094"]["checkpoint_roles"] = expected_roles
         self.state["plan094"]["stop_decision"] = expected_stop
         self.state["plan094"]["pending_checkpoint"] = None
-        self.state["selection"] = self._selection_from_roles(
-            expected_roles, checkpoint_id
-        )
+        self.state["selection"] = self._selection_from_roles(expected_roles)
         self._apply_stop_status(expected_stop)
 
     def _apply_stop_status(self, stop: Mapping[str, Any]) -> None:
@@ -605,26 +603,38 @@ class Plan094ContinuousTrainingController(_ContinuousTrainingControllerCore):
         *,
         recovered: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
-        if not results:
-            return {}
-        latest = results[-1]
+        owned = [
+            row
+            for row in results
+            if row["checkpoint"].get("source_external") is False
+        ]
+        if not owned:
+            return {
+                "material_candidate": None,
+                "latest": None,
+                "fresh_process_recovery": None,
+                "checkpoint_backed_best": None,
+                "training_best": None,
+                "turning_points": [],
+            }
+        latest = owned[-1]
         material = next(
             (
                 row
-                for row in results
+                for row in owned
                 if row["assessment"]["passed"] is True
             ),
             None,
         )
         checkpoint_best = max(
-            results,
+            owned,
             key=lambda row: (
                 float(row["assessment"]["deltas"]["raw_boundary"]),
                 float(row["assessment"]["deltas"]["roc_auc"]),
             ),
         )
         training_best = max(
-            results,
+            owned,
             key=lambda row: float(row["training_observation"]["comparison_value"]),
         )
         if recovered is None:
@@ -632,7 +642,7 @@ class Plan094ContinuousTrainingController(_ContinuousTrainingControllerCore):
         recovery_id = next(reversed(recovered), None) if recovered else None
         turning: list[str] = []
         previous_signature: tuple[Any, ...] | None = None
-        for row in results:
+        for row in owned:
             signature = _discrete_signature(row["assessment"])
             if previous_signature is not None and signature != previous_signature:
                 turning.append(str(row["checkpoint"]["checkpoint_id"]))
@@ -653,20 +663,25 @@ class Plan094ContinuousTrainingController(_ContinuousTrainingControllerCore):
             "turning_points": turning,
         }
 
-    def _selection_from_roles(
-        self, roles: Mapping[str, Any], checkpoint_id: str
-    ) -> dict[str, Any]:
+    def _selection_from_roles(self, roles: Mapping[str, Any]) -> dict[str, Any]:
+        observed_ids = [
+            str(row["checkpoint_id"]) for row in self.state["observations"]
+        ]
+        latest_id = roles.get("latest")
+        previous_id = None
+        if observed_ids:
+            if latest_id == observed_ids[-1]:
+                if len(observed_ids) >= 2:
+                    previous_id = observed_ids[-2]
+            else:
+                previous_id = observed_ids[-1]
         return {
             "base": "matching_exact_base",
-            "previous_checkpoint_id": (
-                self.state["observations"][-2]["checkpoint_id"]
-                if len(self.state["observations"]) >= 2
-                else None
-            ),
+            "previous_checkpoint_id": previous_id,
             "training_best_checkpoint_id": roles.get("training_best"),
             "checkpoint_backed_best_id": roles.get("checkpoint_backed_best"),
             "material_candidate_checkpoint_id": roles.get("material_candidate"),
-            "latest_checkpoint_id": checkpoint_id,
+            "latest_checkpoint_id": latest_id,
         }
 
     def _apply_plan094_retention(self) -> None:
@@ -936,9 +951,7 @@ class Plan094ContinuousTrainingController(_ContinuousTrainingControllerCore):
         if results:
             roles = self._roles_after(results)
             self.state["plan094"]["checkpoint_roles"] = roles
-            self.state["selection"] = self._selection_from_roles(
-                roles, str(results[-1]["checkpoint"]["checkpoint_id"])
-            )
+            self.state["selection"] = self._selection_from_roles(roles)
 
     def _validate_plan090_source_controller(
         self,
@@ -1149,6 +1162,19 @@ class Plan094ContinuousTrainingController(_ContinuousTrainingControllerCore):
         elif bound != identity:
             raise FullModelTrainingError("plan094_runtime_identity_drifted")
 
+    def _has_task_owned_training(self) -> bool:
+        if any(
+            row.get("source_external") is False
+            for row in self.state["observations"]
+            if isinstance(row, Mapping)
+        ):
+            return True
+        pending = self.state["plan094"]["pending_checkpoint"]
+        return (
+            isinstance(pending, Mapping)
+            and pending.get("source_external") is False
+        )
+
     def archive_summary(self) -> dict[str, Any]:
         return {
             "schema": SUMMARY_SCHEMA,
@@ -1185,7 +1211,7 @@ class Plan094ContinuousTrainingController(_ContinuousTrainingControllerCore):
                 "checkpoint_first_evaluation": True,
                 "training_and_evaluation_recovery_separate": True,
                 "matching_exact_base": self.state["base"] is not None,
-                "real_training_run": bool(self.state["updates"]),
+                "real_training_run": self._has_task_owned_training(),
                 "unseen_evidence": False,
                 "product_go": False,
                 "m3_c2_evidence": False,

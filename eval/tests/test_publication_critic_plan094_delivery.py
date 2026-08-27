@@ -7,6 +7,7 @@ import sys
 import tarfile
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -28,6 +29,10 @@ from rondo_eval.publication_critic.full_model_training.plan094_cli import (  # n
     _record_optional,
     _require_paid_gate,
     _require_task_owned_paths,
+)
+from rondo_eval.publication_critic.full_model_training.plan094_contract import (  # noqa: E402
+    authorize_paid_segment,
+    validate_budget_snapshot,
 )
 
 SCRIPT_ROOT = REPO_ROOT / "training/publication-critic-plan094"
@@ -95,6 +100,66 @@ class Plan094DeliveryTests(unittest.TestCase):
                 },
             )
             self.assertEqual(result.returncode, 2)
+        bootstrap = (SCRIPT_ROOT / "runpod-bootstrap.sh").read_text()
+        self.assertLess(
+            bootstrap.index(
+                "unset HF_TOKEN HUGGING_FACE_HUB_TOKEN HUGGINGFACEHUB_API_TOKEN"
+            ),
+            bootstrap.index('existing_model="${RONDO_PLAN094_EXISTING_MODEL_ROOT:-}"'),
+        )
+        launcher = (SCRIPT_ROOT / "runpod-launch.sh").read_text()
+        self.assertLess(
+            launcher.index("authorize-segment"), launcher.index("nohup setsid")
+        )
+
+    def test_paid_segment_is_fresh_rate_bound_and_hard_capped(self) -> None:
+        now = datetime.now(timezone.utc)
+
+        def budget(captured_at: datetime) -> dict:
+            return validate_budget_snapshot(
+                {
+                    "schema": "rondo-publication-critic-plan094-budget-snapshot-v1",
+                    "captured_at": captured_at.isoformat().replace("+00:00", "Z"),
+                    "live_balance_usd": 5.4,
+                    "known_unsettled_usd": 0.1,
+                    "stage_b_baseline_balance_usd": 5.4,
+                    "stage_b_baseline_known_unsettled_usd": 0.1,
+                    "conservative_task_cost_usd": 0.2,
+                    "closure_reserve_usd": 0.5,
+                    "projected_segment_and_closure_usd": 1.1,
+                }
+            )
+
+        authorization = authorize_paid_segment(
+            budget(now),
+            maximum_seconds=1800,
+            compute_rate_usd_per_hour=0.99,
+            storage_rate_usd_per_hour=0.006,
+            now=now,
+        )
+        self.assertLess(
+            authorization["task_cost_and_closure_upper_bound_usd"], 5.0
+        )
+        with self.assertRaisesRegex(
+            FullModelTrainingError, "plan094_segment_budget_not_authorized"
+        ):
+            authorize_paid_segment(
+                budget(now),
+                maximum_seconds=18000,
+                compute_rate_usd_per_hour=0.99,
+                storage_rate_usd_per_hour=0.006,
+                now=now,
+            )
+        with self.assertRaisesRegex(
+            FullModelTrainingError, "plan094_segment_budget_snapshot_stale"
+        ):
+            authorize_paid_segment(
+                budget(now - timedelta(seconds=301)),
+                maximum_seconds=60,
+                compute_rate_usd_per_hour=0.99,
+                storage_rate_usd_per_hour=0.006,
+                now=now,
+            )
 
     def test_source_archive_round_trip_is_clean_narrow_and_secret_free(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

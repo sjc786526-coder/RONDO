@@ -420,6 +420,42 @@ class Plan094TrainingTests(unittest.TestCase):
             self.assertEqual(
                 controller.state["plan094"]["evaluation_overlays"], [checkpoint_id]
             )
+            self.assertFalse(controller.archive_summary()["claims"]["real_training_run"])
+            self.assertEqual(
+                controller.state["selection"]["previous_checkpoint_id"],
+                checkpoint_id,
+            )
+            self.assertIsNone(
+                controller.state["selection"]["latest_checkpoint_id"]
+            )
+            roles = controller.state["plan094"]["checkpoint_roles"]
+            self.assertTrue(
+                all(
+                    roles[key] is None
+                    for key in (
+                        "material_candidate",
+                        "latest",
+                        "fresh_process_recovery",
+                        "checkpoint_backed_best",
+                        "training_best",
+                    )
+                )
+            )
+            self.assertEqual(roles["turning_points"], [])
+
+            controller.run(adapter, stop_after=2)
+            self.assertTrue(controller.archive_summary()["claims"]["real_training_run"])
+            owned_checkpoint_id = controller.state["latest_checkpoint_id"]
+            self.assertNotEqual(owned_checkpoint_id, checkpoint_id)
+            self.assertEqual(
+                controller.state["selection"]["previous_checkpoint_id"],
+                checkpoint_id,
+            )
+            roles = controller.state["plan094"]["checkpoint_roles"]
+            self.assertEqual(roles["latest"], owned_checkpoint_id)
+            self.assertEqual(roles["checkpoint_backed_best"], owned_checkpoint_id)
+            self.assertEqual(roles["training_best"], owned_checkpoint_id)
+            self.assertNotIn(checkpoint_id, roles["turning_points"])
 
             wrong_adapter = _Plan094FakeAdapter(
                 spec, plan094_logits, plan094_train_logits

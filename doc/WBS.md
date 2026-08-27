@@ -1,7 +1,7 @@
 # RONDO 长程规划（WBS）
 
-最后更新：2026-08-26（方向 3 Publication Critic 三期 Plan 094 的非付费阶段 A 已实现并提交前待独立验收；
-当前处于 `STAGE_A_IMPLEMENTED / REVIEW_PENDING / PAID_GATE_CLOSED`，Plan 090 已确认的同一 validation 微弱重复信号只作为待越过的历史包络，
+最后更新：2026-08-26（方向 3 Publication Critic 三期 Plan 094 的非付费阶段 A 已完成首轮审查整改、待复审；
+当前处于 `STAGE_A_REMEDIATED / REREVIEW_PENDING / PAID_GATE_CLOSED`，Plan 090 已确认的同一 validation 微弱重复信号只作为待越过的历史包络，
 M3-D 保持锁定）
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段指针、跨方向关系、
@@ -22,7 +22,7 @@ M3-D 保持锁定）
 | 0：量化测评基准 | 既有设施与首次 schema v7 正式 canary 已完成，当前无 active campaign | 保留设施；历史结果见 COMPLETED，新 campaign 须重新立项与授权 |
 | 1：Harness 优化 | **正式收口；当前无 active 工作包** | 当前不继续新增观测或内核/热路径优化；既有实现、设施与历史结果保留。未来可由用户另行决定是否重新立项，本次收口不作永久禁止 |
 | 2：本地审批模型 | **已收口，今后不再开启** | 最终结论为“保留为实验”；不改生产默认，不再规划后续工作包 |
-| 3：RONDO Multi | 第一、二期与第四期已完成；三期 Plan 094 非付费阶段 A 已实现、待审查，付费门关闭 | 保持 exact 1.7B 与 Route O 唯一更新范围，沿连续训练轨迹判断微弱信号能否扩大为实质候选；不释放 unseen 或产品资格，M3-D 不自动解锁。第四期历史统一见 COMPLETED |
+| 3：RONDO Multi | 第一、二期与第四期已完成；三期 Plan 094 阶段 A 已整改、待复审，付费门关闭 | 保持 exact 1.7B 与 Route O 唯一更新范围，沿连续训练轨迹判断微弱信号能否扩大为实质候选；不释放 unseen 或产品资格，M3-D 不自动解锁。第四期历史统一见 COMPLETED |
 
 ### 方向命名口径
 
@@ -114,7 +114,8 @@ validation，不回答独立 cohort 或产品资格，M3-D 继续锁定。
   必须另立任务而不是沿用 Plan 090 授权。
 - Plan 094 非付费阶段 A 已实现 checkpoint-first 训练/测评分责、完整 Plan 090 checkpoint 精确导入与 exact-base fallback、同轮 base、
   预冻结 material/停止/最多六个完整 checkpoint 的角色去重保留、fresh-process 恢复并继续、5 USD 单调预算和 0 Pod 终态门。轻量 fake/focused
-  门禁已覆盖正向、有效负向、评测幂等恢复和 clean source bundle；当前待指定审查者验收，付费门关闭，不读取 unseen、不授予产品资格或
+  门禁已覆盖正向、有效负向、评测幂等恢复和 clean source bundle；首轮审查指出的付费 segment、历史角色/摘要与 Hub 凭据边界已窄修，
+  当前待复审，付费门关闭，不读取 unseen、不授予产品资格或
   M3-D 解锁。任务合同见
   `plan/094-publication-critic-route-o-continuous-training-execplan.md`。
 

@@ -32,7 +32,11 @@ Pods.  Every action consumes a validated snapshot with one fixed Stage B
 baseline, monotonic conservative task cost, a closure reserve, and the cost of
 the proposed segment plus checkpoint/result transfer/termination.  The action
 headroom is the smaller of remaining 5 USD task headroom and live account
-headroom after reserve.  Do not recharge.
+headroom after reserve.  Write the fresh snapshot inside the Plan 094 task root
+and set `RONDO_PLAN094_BUDGET_SNAPSHOT`, the independently verified aggregate
+compute and storage rates, and a finite `RONDO_PLAN094_MAX_SECONDS`.  The
+bootstrap/launch seam rejects a snapshot older than five minutes or a timeout
+whose full rate-bound cost plus closure reserve does not fit.  Do not recharge.
 
 If no US-TX-3 L40S is immediately available, use only:
 
@@ -57,10 +61,13 @@ volume/Pod, change region/GPU, or expose unseen.
 Create one new `/workspace/rondo-plan094-<run>/incoming`, upload only verified
 source and physical train+validation archives, set the `RONDO_PLAN094_*`
 variables including `RONDO_PLAN094_STAGE_B_APPROVED=1`, then run
-`runpod-bootstrap.sh`.  It exact-tree verifies both inputs, uses a task-local
-venv, preserves image Torch, and reuses a verified exact snapshot read-only.
-Only if no exact snapshot exists may it download the frozen public revision;
-all Hub token variables are unset and there is no upload path.
+`runpod-bootstrap.sh` with no arguments.  Its internal timeout covers the whole
+bootstrap segment and its fresh budget authorization is recorded before pip,
+snapshot reuse/download, or model work.  It exact-tree verifies both inputs,
+uses a task-local venv, preserves image Torch, and reuses a verified exact
+snapshot read-only.  Only if no exact snapshot exists may it download the
+frozen public revision; all Hub token variables are unconditionally unset
+before either snapshot branch and there is no upload path.
 
 Plan 082/087/090 roots are read-only.  Plan 094 writes only its new root.  Check
 actual free bytes before each complete checkpoint.  Prune only evaluated,
@@ -97,7 +104,10 @@ For every process, refresh and validate the budget snapshot.  Set artifact root
 exactly to `$RONDO_PLAN094_TASK_ROOT/<artifact_namespace>/artifacts`.
 `start` either imports Plan 090 step 1 or rebuilds step 1 from exact base.
 `resume` consumes a task-owned Plan 094 checkpoint in a different OS process.
-Use `--stop-after` to advance only to the next intended observation point.
+Run inventory, commissioning, start/resume and post-check commands only through
+`runpod-launch.sh`; each unique launch consumes its own fresh budget snapshot
+and writes an authorization receipt before starting its bounded worker.  Use
+`--stop-after` to advance only to the next intended observation point.
 
 The controller order is fixed: update, full atomic checkpoint, manifest/tree
 readback and independent restore qualification, then validation/train

@@ -6,6 +6,7 @@ import json
 import math
 import statistics
 from collections.abc import Mapping, Sequence
+from datetime import datetime, timezone
 from typing import Any
 
 from .contract import (
@@ -32,6 +33,9 @@ RUN_SPEC_SCHEMA = "rondo-publication-critic-plan094-run-spec-v1"
 ASSESSMENT_SCHEMA = "rondo-publication-critic-plan094-material-assessment-v1"
 STOP_DECISION_SCHEMA = "rondo-publication-critic-plan094-stop-decision-v1"
 BUDGET_SCHEMA = "rondo-publication-critic-plan094-budget-snapshot-v1"
+SEGMENT_AUTHORIZATION_SCHEMA = (
+    "rondo-publication-critic-plan094-segment-authorization-v1"
+)
 
 PLAN090_SOURCE_CHECKPOINT_ID = "checkpoint-attempt-000-step-000001"
 PLAN090_SOURCE_CHECKPOINT_SHA256 = (
@@ -598,6 +602,83 @@ def validate_budget_snapshot(value: Any) -> dict[str, Any]:
     return result
 
 
+def authorize_paid_segment(
+    budget_snapshot: Any,
+    *,
+    maximum_seconds: int,
+    compute_rate_usd_per_hour: Any,
+    storage_rate_usd_per_hour: Any,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Bind one bounded paid command to a fresh budget and observed rates."""
+
+    budget = validate_budget_snapshot(budget_snapshot)
+    if (
+        not isinstance(maximum_seconds, int)
+        or isinstance(maximum_seconds, bool)
+        or maximum_seconds <= 0
+    ):
+        raise FullModelTrainingError("plan094_segment_authorization_invalid")
+    try:
+        compute_rate = _nonnegative(compute_rate_usd_per_hour)
+        storage_rate = _nonnegative(storage_rate_usd_per_hour)
+    except FullModelTrainingError as exc:
+        raise FullModelTrainingError(
+            "plan094_segment_authorization_invalid"
+        ) from exc
+    if compute_rate <= 0.0:
+        raise FullModelTrainingError("plan094_segment_authorization_invalid")
+    captured = _utc_datetime(budget["captured_at"])
+    observed_now = now or datetime.now(timezone.utc)
+    if observed_now.tzinfo is None:
+        raise FullModelTrainingError("plan094_segment_authorization_invalid")
+    observed_now = observed_now.astimezone(timezone.utc)
+    age_seconds = (observed_now - captured).total_seconds()
+    if age_seconds < -30.0 or age_seconds > 300.0:
+        raise FullModelTrainingError("plan094_segment_budget_snapshot_stale")
+
+    try:
+        segment_cost = (
+            (compute_rate + storage_rate) * float(maximum_seconds) / 3600.0
+        )
+    except OverflowError as exc:
+        raise FullModelTrainingError(
+            "plan094_segment_authorization_invalid"
+        ) from exc
+    if not math.isfinite(segment_cost):
+        raise FullModelTrainingError("plan094_segment_authorization_invalid")
+    closure = float(budget["closure_reserve_usd"])
+    upper_bound = (
+        float(budget["conservative_task_cost_usd"])
+        + segment_cost
+        + closure
+    )
+    live_available = float(budget["live_balance_usd"]) - float(
+        budget["known_unsettled_usd"]
+    )
+    projected = float(budget["projected_segment_and_closure_usd"])
+    if (
+        budget["segment_authorized"] is not True
+        or projected + 1e-12 < segment_cost + closure
+        or upper_bound > 5.0 + 1e-12
+        or segment_cost + closure > live_available + 1e-12
+    ):
+        raise FullModelTrainingError("plan094_segment_budget_not_authorized")
+    core = {
+        "schema": SEGMENT_AUTHORIZATION_SCHEMA,
+        "authorized_at": observed_now.isoformat().replace("+00:00", "Z"),
+        "budget_snapshot_content_sha256": budget["content_sha256"],
+        "budget_snapshot_captured_at": budget["captured_at"],
+        "maximum_seconds": maximum_seconds,
+        "compute_rate_usd_per_hour": compute_rate,
+        "storage_rate_usd_per_hour": storage_rate,
+        "segment_cost_upper_bound_usd": segment_cost,
+        "closure_reserve_usd": closure,
+        "task_cost_and_closure_upper_bound_usd": upper_bound,
+    }
+    return {**core, "content_sha256": sha256_bytes(canonical_json_bytes(core))}
+
+
 def _summarize_observation(
     value: Mapping[str, Any], *, expected_split: str
 ) -> dict[str, Any]:
@@ -832,6 +913,20 @@ def _nonnegative(value: Any) -> float:
     return float(value)
 
 
+def _utc_datetime(value: Any) -> datetime:
+    if not isinstance(value, str) or not value.strip():
+        raise FullModelTrainingError("plan094_segment_authorization_invalid")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise FullModelTrainingError(
+            "plan094_segment_authorization_invalid"
+        ) from exc
+    if parsed.tzinfo is None:
+        raise FullModelTrainingError("plan094_segment_authorization_invalid")
+    return parsed.astimezone(timezone.utc)
+
+
 def _sha256(value: Any) -> bool:
     return (
         isinstance(value, str)
@@ -861,7 +956,9 @@ __all__ = [
     "PLAN090_SOURCE_CHECKPOINT_PATH",
     "PLAN090_SOURCE_CHECKPOINT_SHA256",
     "RUN_SPEC_SCHEMA",
+    "SEGMENT_AUTHORIZATION_SCHEMA",
     "STOP_DECISION_SCHEMA",
+    "authorize_paid_segment",
     "assess_material",
     "decide_stop",
     "freeze_sha256",
