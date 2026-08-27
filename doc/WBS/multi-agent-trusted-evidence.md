@@ -2,8 +2,8 @@
 
 最后更新：2026-08-27 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
 状态：**第一期、第二期已完成；Publication Critic 三期 Plan 096 已完成唯一 55 条正式轮与独立复算，当前为
-`FORMAL_COMPLETE / CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH / FIRST_REVIEW_FINDING_REMEDIATED / RE_REVIEW_PENDING`。首次验收接受
-正式结果，唯一 Medium authority preflight finding 已窄修并通过离线回归。Plan 094 的
+`COMPLETED / FIRST_INDEPENDENT_REVIEW_ACCEPTED / GOAL_COMPLETED / CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH`。唯一 Medium
+authority preflight finding 已窄修，首次独立验收复验为 0 High / 0 Medium / 0 Low correctness finding。Plan 094 的
 `ROUTE_O_VALID_NO_MATERIAL_IMPROVEMENT / ZERO_POD / VOLUME_RETAINED / FINAL_REVIEW_ACCEPTED` 和 Plan 095 的
 `COMPLETED / FINAL_REVIEW_ACCEPTED / INTEGRATED / PUSHED` 均保持有效；Plan 096 当前终态不解锁 Plan 097，M3-D 与产品启用仍锁定**
 
@@ -108,7 +108,7 @@ M3-B1c 正式分阶段训练与工件回收          │
 
 并列 reference 支线：M3-B2a 已有可替换 service → Plan 095 云端参考 scorer backend（已完成）
                                               ↓
-                         Plan 096 validation 资格与 headroom（正式完成，待验收；NOT QUALIFIED，不解锁 Plan 097）
+                         Plan 096 validation 资格与 headroom（已完成并通过独立验收；NOT QUALIFIED，不解锁 Plan 097）
 ```
 
 四阶段叙事保持不变：A 阶段收口产品合同并建立轻量基准；B 阶段让模型链与产品链接力并行；C 阶段串行完成本地资格和
@@ -443,7 +443,7 @@ clean smoke 两个正反 packet 分别得到 `PASS` 与 `REWRITE`，另有 HTTP 
 11 USD。未使用 Docker。任务不做批量测评、最终 threshold、v8/unseen、GPU、真实本地模型或项目数据上传，C: 余量停止线仅在本任务
 命令上下文临时为 30GB，不改默认值。该 backend 是 eval/reference-only，不改变产品默认 backend，也不解锁 M3-D。
 
-#### Plan 096：Validation 云端 Scorer 资格与任务对齐参考上界测定（当前）
+#### Plan 096：Validation 云端 Scorer 资格与任务对齐参考上界测定（已完成并通过独立验收）
 
 **任务合同**：[`Plan 096 ExecPlan`](../../plan/096-validation-cloud-scorer-qualification-and-headroom-execplan.md)。
 
@@ -453,16 +453,16 @@ synthetic/非正式输入上完整打通 provider、typed scalar、usage/cost、
 validation release、质量门与 headroom 规则，从新空 namespace 完成唯一 55 条正式轮。沿用 Plan 073/079 的发布质量门；新 headroom
 规则只看 ROC AUC 与 Boundary strict win 两个既有 threshold-free 门：都过为 HIGH、都不过为 LOW、一过一不过为 INCONCLUSIVE。
 
-**当前状态与依赖**：`FORMAL_COMPLETE / CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH / FIRST_REVIEW_FINDING_REMEDIATED /
-RE_REVIEW_PENDING`。在 clean source
+**当前状态与依赖**：`COMPLETED / FIRST_INDEPENDENT_REVIEW_ACCEPTED / GOAL_COMPLETED /
+CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH`。在 clean source
 `7bdcad9196d4e7a2de39f6618e0d193476b0d6e6` 与全新空 namespace 上完成 55/55、零最终 typed failure 的唯一正式轮，并由独立入口逐字段
 复算一致。完整 curve 无 admissible operating point；fallback threshold `0.9` 的 False PASS `8/21`、False REWRITE `0/34`、balanced
 accuracy `0.8095`，ROC AUC `0.8403` 与 Boundary strict win `15/19` 均过 threshold-free 门，所以资格不成立但 headroom 为 HIGH。
 正式 56 attempts 含一次 policy 允许的 transient retry；正式费用 `1.3855704 RMB`，含两轮 commissioning 的任务总费用
 `2.1391799 RMB`，低于 30 RMB 上限。历史 exact 1.7B/4B 使用既有同 release tracked 结果，未重跑本地模型；cloud/local template 与 raw
-score 不等价的部分已披露。首次验收已接受正式研究结果；已有 authority 时不同 `run_id` 仍可能重复评分的唯一 finding 已改为在 namespace
-创建和 evaluator 调用前 typed fail-closed，离线回归验证 evaluator 0 调用、authority 不变且无新 namespace。该终态不解锁 Plan 097，
-复验接受前不写完成历史。
+score 不等价的部分已披露。已有 authority 时不同 `run_id` 仍可能重复评分的唯一 finding 已改为在 release 处理、namespace 创建和 evaluator
+调用前 typed fail-closed；离线回归验证 evaluator 0 调用、authority 不变且无新 namespace，首次独立验收复验为 0 High / 0 Medium /
+0 Low。该有效负向资格终态完成研究目标但不解锁 Plan 097；完成历史见 `doc/WBS-COMPLETED.md`。
 
 **边界**：保持 Publication Critic default-off、本地 scorer、产品 wire/verdict、Team State 与发布行为不变；不修改数据/标签/split/pair/
 rubric/quality floor，不读取 unseen，不训练/微调/量化，不使用 Docker/GPU/RunPod，不启用产品或 M3-D。Plan 095 产品 client 只返回 verdict，

@@ -2496,3 +2496,35 @@ formal retry 整改为 `d29e857`，最终独立验收提交为 `43cf0eeb3e1b4826
   `agent_log/2026-08-27-075500-plan095-review-remediation.md`；Sol 最终复验见
   `agent_log/2026-08-27-110223-plan095-sol-re-review.md`。用户本人创建的临时远端 backup ref 已按其明确授权删除；本地 main 集成无冲突并
   保留 main 独有 README 提交，记录见 `agent_log/2026-08-27-111225-plan095-main-integration.md`。main 已推送；分支归档和 worktree 删除仍待批准。
+
+## Publication Critic Validation 云端 Scorer 资格与参考上界测定（Plan 096，2026-08-27）
+
+**状态**：`COMPLETED / FIRST_INDEPENDENT_REVIEW_ACCEPTED / GOAL_COMPLETED /
+CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH / NOT_INTEGRATED / NOT_PUSHED`。实现提交为 `7295156`，8192 output headroom 修复为
+`7bdcad9`，正式结果提交为 `7c4e74c`，authority preflight 返修为 `08a4adb`；首次独立验收复验提交 `8d1640e` 为 0 High / 0 Medium /
+0 Low correctness finding。
+
+- 在 Plan 095 同一 `CloudPublicationScorer` 请求、template/projection、strict parser、retry 与 identity 路径上增加 eval-only
+  scalar/usage observation 和 one-shot binary；Python 薄层复用 Plan 073 curve/质量门、canonical validation release 与既有 write-once
+  基元，闭合 freeze、费用、blind runner、恢复、归档、独立复算及 exact 1.7B/4B 历史投影。产品 service/client/wire/verdict、local worker、
+  Team State、`team_publish` 与 default-off 均未改变。
+- 首轮 4096 synthetic commissioning 为 54/55，唯一响应恰好吃满 `completion_tokens=4096` 并被严格 parser 正确拒绝；该轮独立保留且未
+  拼接。保持模型、prompt、默认 thinking/high effort 与 parser 不变，只把 output headroom 提升到 8192 后从新 clean commit/namespace
+  完整重跑，得到 55/55、零 typed failure。
+- 唯一正式 namespace `plan096-formal-20260827T201304Z-validation-55` 从空状态完成 55/55、零最终 typed failure、56 HTTP attempts；
+  其中一次冻结 policy 允许的 `ProviderTransientFailure` 在同一 logical call 内重试，未重跑任何有效 scalar 或质量结果。独立入口从 freeze、
+  canonical release 与 scores 逐字段复算出相同 curve、分歧、usage/cost 与终态。
+- 正式 fallback threshold `0.9`：False PASS `8/21`、False REWRITE `0/34`、balanced accuracy `0.809524`；ROC AUC `0.840336` 与
+  Boundary strict win `15/19` 均过 threshold-free 门，但完整 curve 没有 admissible operating point。故唯一研究终态为
+  `CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH`：任务目标完成，scorer 未获资格，Plan 097、产品启用与 M3-D 均不解锁。
+- 首次验收唯一 Medium finding 是已有 formal authority 时不同 `run_id` 会在 claim 前重复评分。返修让 archive 在 release 处理、namespace
+  创建与 evaluator 调用前 typed fail-closed；回归断言 evaluator 0 调用、authority bytes 不变且无新 namespace，相关 Python 95/95 通过。
+  Rust crate 62/62、Clippy、fmt 与 compiled-binary loopback 55/55 在实现批次通过；未运行全 workspace。
+- 正式费用 `1.3855704 RMB`，两轮 commissioning 加正式轮合计 165 logical calls / 166 attempts / `2.1391799 RMB`，低于 30 RMB
+  上限，余额不转移。只向 provider 发送 bounded validation packet projection；labels/pairs/split supervision、unseen、训练集、源码与密钥
+  均未发送。未使用 Docker、GPU、RunPod、训练或真实本地模型。
+- tracked 结果见 `eval/results/publication-critic/deepseek-v4-flash-cloud-quality-v1.{json,md}`；task-owned ignored body-free archive 位于
+  `eval-data/publication-critic/plan096/`。首次审查、返修与复验分别见
+  `agent_log/2026-08-27-134602-plan096-first-independent-review.md`、
+  `agent_log/2026-08-27-135000-plan096-first-review-remediation.md`、
+  `agent_log/2026-08-27-135349-plan096-first-review-remediation-recheck.md`。未经用户批准不合并、不推送、不归档分支或删除 worktree。

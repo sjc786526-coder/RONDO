@@ -301,24 +301,26 @@ XXX用以下内容代替：
   创建和 evaluator 调用前执行 authority preflight；末尾 atomic claim 继续承担并发兜底。离线回归先形成 authority，再用不同 `run_id` 验证
   typed `formal_result_already_authoritative`、evaluator 0 调用、authority bytes 不变且新 namespace 不存在；相关 Python 测试 95/95 通过。
   未运行真实 API，既有正式结果、tracked projection、费用与终态不变。
+- 2026-08-27：返修复验提交 `8d1640e` 以 0 High / 0 Medium / 0 Low correctness finding 接受首次独立验收；审查确认 authority
+  preflight 时序、95/95 相关 Python 回归、formal/result/price/cost 零漂移与 Plan 097 锁定均成立。按 decision 013 完成
+  `doc/WBS-COMPLETED.md`、WBS 最终状态和最终日志收口；未重跑真实 API、Rust 重型门禁或全 workspace。
 
 ### 当前工作
 
-- `RE_REVIEW_PENDING`：首次验收唯一 Medium finding 已修复并通过相称离线回归；正在提交返修与当前状态，随后请求指定审查者复验。
+- `COMPLETED`：实现、正式运行、结果归档、finding 返修、首次独立验收和最终文档收口均已完成；task branch 只待用户决定是否合并、推送或归档。
 
 ### 本任务剩余步骤
 
-- 提交返修并通过指定 queue 请求复验后停止；被唤醒时自主收敛剩余 finding。首次审查接受后，按 decision 013 追加
-  `doc/WBS-COMPLETED.md`、WBS 最终状态与最终日志，提交全部变动并发送用户指定的最终完成消息。
+- 本任务内无剩余实施步骤；提交最终收口并按用户指定模板通过 queue 通知审查者后冻结本计划。后续路线只以 WBS 为准。
 
 ### 阻塞项
 
-- 当前无已确认阻塞；返修提交后只等待指定审查者复验。
+- 无。
 
 ### 当前验收状态
 
-- `OFFLINE_VERIFIED / REAL_COMMISSIONING_COMPLETE / FORMAL_COMPLETE /
-  CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH / FIRST_REVIEW_FINDING_REMEDIATED / RE_REVIEW_PENDING`。
+- `COMPLETED / FIRST_INDEPENDENT_REVIEW_ACCEPTED / GOAL_COMPLETED /
+  CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH / NOT_INTEGRATED / NOT_PUSHED`。
 
 ### 交接边界
 
@@ -353,3 +355,4 @@ XXX用以下内容代替：
 | 018 | 正式轮只对一次 `ProviderTransientFailure` 按冻结 retry policy 在同一 logical call 内重试；无 usage 的首次 attempt 按 1 RMB fallback 计费，不重跑任何有效 scalar 或负向质量结果 | 区分获准的基础设施恢复与禁止的结果选择；保留完整 attempt provenance 与 55 个唯一最终 observation | formal、费用、恢复 | 已采纳 |
 | 019 | 正式终态冻结为 `CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH`，不解锁 Plan 097；tracked 结果同时保留资格失败与高 headroom 两层事实 | 完整 curve 无 admissible operating point，但两个预冻结 threshold-free 门均通过，不能把校准/error trade-off 问题误写为低任务分辨能力 | 结论、WBS、交接 | 已采纳 |
 | 020 | formal runner 在处理 release、创建 namespace 与调用 evaluator 前，先由 archive 校验根级 authority 未被 claim；末尾 atomic claim 保留为并发兜底 | 已有 authority 时继续评分会重复外发有效 validation 并产生费用；前移现有门禁即可闭合，无需引入通用锁或新状态机 | formal、archive、费用安全 | 已采纳 |
+| 021 | 首次独立验收复验 0/0/0 后，按 decision 013 将任务收口为 `GOAL_COMPLETED`，同时保留 scorer `NOT_QUALIFIED` 与 Plan 097 不解锁 | 研究任务已得到完整、可复算且验收接受的唯一质量终态；任务完成不等于被测 scorer 获得产品或后继资格 | WBS、历史、交付 | 已采纳 |
