@@ -2369,3 +2369,18 @@ formal retry 整改为 `d29e857`，最终独立验收提交为 `43cf0eeb3e1b4826
   `setRootState` fixture/snapshot 既有欠账，独立验收裁定不阻断且不跨范围代修。未运行 full workspace、真实 API/模型、Docker、训练或测评。
 - 重型批次均经共享 lock/watchdog 复用 Plan 069 target；30GB Windows `C:` 停止线仅按用户临时批准用于 Plan 091 命令，未改变长期门禁。
   独立验收见 `agent_log/2026-08-26-183420-plan091-independent-acceptance.md`。
+
+## Durable Session TUI 基线欠账窄修复（Plan 092，2026-08-26）
+
+**状态**：三项既有 `codex-tui` 基线失败已关闭并独立验收，`6ad805ca45cee5d477d33086d9f7ae8b68849f47` 已进入本地 `main`；
+远端同步待完成，本条暂不宣告最终 `PUSHED` 终态。
+
+- duplicate protocol fixture 的 operation 子树改由 typed `DurableSessionOperations` 构造，保留 JSON response 反序列化与重复 identity
+  断言，并让正式 operation 新增时以编译失败暴露 fixture 欠账；protocol、schema 与产品语义未修改。
+- 两项 snapshot 只补入当前正式 `set-root-state` availability/provenance，无其它 UI 漂移。聚焦 query/control 与 Plan 091 prompt-edit
+  回归 22/22 passed；完整 `codex-tui` crate 为 3439 passed、0 failure、0 error、4 skipped。
+- 完整 crate 唯一 retry 是 fake transport teardown 首次 `Broken pipe` 后通过，定点复核 1/1 一次通过；4 个 skip 为 3 个 manual tmux
+  resize smoke 和 Linux 上忽略的 Windows AltGr 测试，均未计通过。独立只读审查 High/Medium finding 为 0。
+- 所有重型批次经共享 lock/watchdog 和命令级 270/285/290GB、Plan 092 临时 30GB Windows `C:` 门。首个聚焦尝试由 memory full PSI
+  主动停止后保留进度重跑通过；没有下调门限、清理 target 或删除 worktree。详细证据见
+  `agent_log/2026-08-26-193017-plan092-durable-session-tui-baseline-debt.md`。

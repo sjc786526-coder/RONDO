@@ -37,4 +37,5 @@
 - ignored/task-owned 证据位于 092 `.codex/build-watchdog/plan092-*`；共享构建资产位于既有 069 target；格式缓存位于
   `/tmp/plan092-uv-cache`。
 
-当前为 `IMPLEMENTATION_COMPLETE / ACCEPTED / MAIN_INTEGRATION_PENDING`；主线集成完成事实将在集成后单独收口。
+实现与验收提交 `6ad805ca45cee5d477d33086d9f7ae8b68849f47` 已无冲突 fast-forward 进入本地 `main`；当前为
+`IMPLEMENTATION_COMPLETE / ACCEPTED / INTEGRATED_LOCAL / PUSH_PENDING`，远端同步成功后再记录最终终态。

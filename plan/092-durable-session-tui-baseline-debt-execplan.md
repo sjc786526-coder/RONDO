@@ -104,15 +104,16 @@
   满足任务合同。
 - 2026-08-26：最终资源核验项目 `272354115584` bytes、069 target `212729303040` bytes、Windows `C:` 实际余量
   `42414792704` bytes；canonical lock 可取得，无 active heavy scope 或 Cargo/rustc/nextest，memory full PSI avg10 为 0。
+- 2026-08-26：实现与验收提交 `6ad805ca45cee5d477d33086d9f7ae8b68849f47` 已形成，092 worktree clean，并从
+  `main@7776ba0` 无冲突 fast-forward 进入本地 `main`；远端同步与最终记录仍待完成。
 
 ### 当前工作
 
-- 形成任务提交并进入主线集成。
+- 完成远端同步和最终历史记录。
 
 ### 本任务剩余步骤
 
-- 提交实现与验收记录，确认 092 worktree clean。
-- 合并、推送，更新最终 COMPLETED 集成记录并归档分支。
+- 推送 `origin/main`，更新最终 COMPLETED 集成记录并归档分支。
 
 ### 阻塞项
 
@@ -120,7 +121,7 @@
 
 ### 当前验收状态
 
-- `IMPLEMENTATION_COMPLETE / ACCEPTED / MAIN_INTEGRATION_PENDING`。
+- `IMPLEMENTATION_COMPLETE / ACCEPTED / INTEGRATED_LOCAL / PUSH_PENDING`。
 
 ### 交接边界
 
