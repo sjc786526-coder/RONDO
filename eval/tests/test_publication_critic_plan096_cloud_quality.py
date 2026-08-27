@@ -52,6 +52,7 @@ from rondo_eval.publication_critic.cloud_quality.runner import (  # noqa: E402
     build_scores_document,
     recompute,
     run_commissioning,
+    run_formal,
     score_items,
     tracked_projection,
 )
@@ -471,6 +472,53 @@ class ArchiveAndRunnerTest(unittest.TestCase):
             self.assertTrue(all(set(row) == {"candidate_id", "label", "score"} for row in summary["rows"]))
             archive.claim_formal_result(freeze, result)
             self.assertIsNotNone(archive.load_authority())
+
+    def test_formal_authority_blocks_new_namespace_before_evaluation(self) -> None:
+        release = _release()
+        labels = {
+            row["candidate_id"]: row["binary_label"]
+            for row in release["supervision"]
+        }
+        first = _freeze(suffix="authority-first")
+        second = _freeze(suffix="authority-second")
+
+        class UnexpectedEvaluator:
+            calls = 0
+
+            def evaluate(self, candidate_id: str, packet: object) -> object:
+                self.calls += 1
+                raise AssertionError((candidate_id, packet))
+
+        with tempfile.TemporaryDirectory() as directory:
+            runs_root = Path(directory)
+            with mock.patch(
+                "rondo_eval.publication_critic.cloud_quality.runner.release_sha256",
+                return_value=VALIDATION_RELEASE_SHA256,
+            ):
+                _, result = run_formal(
+                    first,
+                    release,
+                    runs_root=runs_root,
+                    evaluator=FakeEvaluator(labels),
+                )
+                authority_path = runs_root / "formal-authority.json"
+                authority_before = authority_path.read_bytes()
+                evaluator = UnexpectedEvaluator()
+                with self.assertRaisesRegex(
+                    CloudQualityError, "formal_result_already_authoritative"
+                ):
+                    run_formal(
+                        second,
+                        release,
+                        runs_root=runs_root,
+                        evaluator=evaluator,
+                    )
+
+            self.assertTrue(result["complete"])
+            self.assertEqual(evaluator.calls, 0)
+            self.assertEqual(authority_path.read_bytes(), authority_before)
+            second_path = runs_root / second["namespace"]["run_id"]
+            self.assertFalse(second_path.exists() or second_path.is_symlink())
 
     def test_commissioning_exact_resume_and_formal_empty(self) -> None:
         release = _release()

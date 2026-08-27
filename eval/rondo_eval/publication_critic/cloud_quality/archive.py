@@ -181,6 +181,12 @@ class CloudQualityArchive:
         require_sha256(value.get("freeze_sha256"), "formal_authority_invalid")
         return value
 
+    def require_formal_unclaimed(self) -> None:
+        """Reject another formal run before creating its namespace or scoring."""
+
+        if self.mode == "formal" and self.load_authority() is not None:
+            raise CloudQualityError("formal_result_already_authoritative")
+
     def claim_formal_result(self, freeze_value: Any, result: Any) -> Path:
         freeze = validate_freeze(freeze_value)
         if (

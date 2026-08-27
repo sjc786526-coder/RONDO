@@ -2,8 +2,8 @@
 
 最后更新：2026-08-27 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
 状态：**第一期、第二期已完成；Publication Critic 三期 Plan 096 已完成唯一 55 条正式轮与独立复算，当前为
-`FORMAL_COMPLETE / CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH / FIRST_REVIEW_PENDING`。云端 scorer 的 ROC AUC 与 Boundary
-threshold-free 门均通过，但完整 curve 没有满足既有发布质量门的 operating point。Plan 094 的
+`FORMAL_COMPLETE / CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH / FIRST_REVIEW_FINDING_REMEDIATED / RE_REVIEW_PENDING`。首次验收接受
+正式结果，唯一 Medium authority preflight finding 已窄修并通过离线回归。Plan 094 的
 `ROUTE_O_VALID_NO_MATERIAL_IMPROVEMENT / ZERO_POD / VOLUME_RETAINED / FINAL_REVIEW_ACCEPTED` 和 Plan 095 的
 `COMPLETED / FINAL_REVIEW_ACCEPTED / INTEGRATED / PUSHED` 均保持有效；Plan 096 当前终态不解锁 Plan 097，M3-D 与产品启用仍锁定**
 
@@ -453,13 +453,16 @@ synthetic/非正式输入上完整打通 provider、typed scalar、usage/cost、
 validation release、质量门与 headroom 规则，从新空 namespace 完成唯一 55 条正式轮。沿用 Plan 073/079 的发布质量门；新 headroom
 规则只看 ROC AUC 与 Boundary strict win 两个既有 threshold-free 门：都过为 HIGH、都不过为 LOW、一过一不过为 INCONCLUSIVE。
 
-**当前状态与依赖**：`FORMAL_COMPLETE / CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH / FIRST_REVIEW_PENDING`。在 clean source
+**当前状态与依赖**：`FORMAL_COMPLETE / CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH / FIRST_REVIEW_FINDING_REMEDIATED /
+RE_REVIEW_PENDING`。在 clean source
 `7bdcad9196d4e7a2de39f6618e0d193476b0d6e6` 与全新空 namespace 上完成 55/55、零最终 typed failure 的唯一正式轮，并由独立入口逐字段
 复算一致。完整 curve 无 admissible operating point；fallback threshold `0.9` 的 False PASS `8/21`、False REWRITE `0/34`、balanced
 accuracy `0.8095`，ROC AUC `0.8403` 与 Boundary strict win `15/19` 均过 threshold-free 门，所以资格不成立但 headroom 为 HIGH。
 正式 56 attempts 含一次 policy 允许的 transient retry；正式费用 `1.3855704 RMB`，含两轮 commissioning 的任务总费用
 `2.1391799 RMB`，低于 30 RMB 上限。历史 exact 1.7B/4B 使用既有同 release tracked 结果，未重跑本地模型；cloud/local template 与 raw
-score 不等价的部分已披露。该终态不解锁 Plan 097，首次独立验收接受前不写完成历史。
+score 不等价的部分已披露。首次验收已接受正式研究结果；已有 authority 时不同 `run_id` 仍可能重复评分的唯一 finding 已改为在 namespace
+创建和 evaluator 调用前 typed fail-closed，离线回归验证 evaluator 0 调用、authority 不变且无新 namespace。该终态不解锁 Plan 097，
+复验接受前不写完成历史。
 
 **边界**：保持 Publication Critic default-off、本地 scorer、产品 wire/verdict、Team State 与发布行为不变；不修改数据/标签/split/pair/
 rubric/quality floor，不读取 unseen，不训练/微调/量化，不使用 Docker/GPU/RunPod，不启用产品或 M3-D。Plan 095 产品 client 只返回 verdict，

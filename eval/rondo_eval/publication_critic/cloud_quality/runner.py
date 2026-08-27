@@ -558,10 +558,10 @@ def run_formal(
     freeze = validate_freeze(freeze_value)
     if freeze["namespace"]["mode"] != "formal":
         raise CloudQualityError("formal_runner_mode_invalid")
+    archive = CloudQualityArchive(runs_root, freeze["namespace"]["run_id"], "formal")
+    archive.require_formal_unclaimed()
     release = _validate_exact_release(release_value)
-    archive = CloudQualityArchive(
-        runs_root, freeze["namespace"]["run_id"], "formal"
-    ).create(freeze)
+    archive.create(freeze)
     # The evaluator receives this narrow projection, never release supervision or pairs.
     items = [
         {"candidate_id": item["candidate_id"], "packet": item["packet"]}

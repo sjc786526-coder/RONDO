@@ -295,25 +295,30 @@ XXX用以下内容代替：
 - 2026-08-27：生成 tracked JSON/Markdown 结果与精炼实施日志；task-owned ignored archive 位于主物理根
   `eval-data/publication-critic/plan096/`，不含 provider 正文、credential 或 unseen。首次独立审查接受前不写
   `doc/WBS-COMPLETED.md`。
+- 2026-08-27：首次独立验收接受唯一正式轮、费用、重试、数据外发、产品不变性、独立复算与研究终态，但以 0 High / 1 Medium
+  暂不通过：已有 `formal-authority.json` 时，不同 formal `run_id` 仍会先创建 namespace 并评分，直到 claim 阶段才拒绝。
+- 2026-08-27：finding 已窄修。archive 新增与 Plan 079 同职责的 `require_formal_unclaimed()`，runner 在 validation release 处理、namespace
+  创建和 evaluator 调用前执行 authority preflight；末尾 atomic claim 继续承担并发兜底。离线回归先形成 authority，再用不同 `run_id` 验证
+  typed `formal_result_already_authoritative`、evaluator 0 调用、authority bytes 不变且新 namespace 不存在；相关 Python 测试 95/95 通过。
+  未运行真实 API，既有正式结果、tracked projection、费用与终态不变。
 
 ### 当前工作
 
-- `FIRST_REVIEW_PENDING`：实现、commissioning、formal、独立复算、tracked result 与当前状态同步均已完成；正在闭合最终定向门禁、
-  task branch clean commit 与首次独立审查请求。
+- `RE_REVIEW_PENDING`：首次验收唯一 Medium finding 已修复并通过相称离线回归；正在提交返修与当前状态，随后请求指定审查者复验。
 
 ### 本任务剩余步骤
 
-- 提交待审状态并通过指定 queue 请求首次独立审查后停止；被唤醒时自主收敛 finding。首次审查接受后，按 decision 013 追加
+- 提交返修并通过指定 queue 请求复验后停止；被唤醒时自主收敛剩余 finding。首次审查接受后，按 decision 013 追加
   `doc/WBS-COMPLETED.md`、WBS 最终状态与最终日志，提交全部变动并发送用户指定的最终完成消息。
 
 ### 阻塞项
 
-- 当前无已确认阻塞；只等待本计划要求的首次独立审查。
+- 当前无已确认阻塞；返修提交后只等待指定审查者复验。
 
 ### 当前验收状态
 
 - `OFFLINE_VERIFIED / REAL_COMMISSIONING_COMPLETE / FORMAL_COMPLETE /
-  CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH / FIRST_REVIEW_PENDING`。
+  CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH / FIRST_REVIEW_FINDING_REMEDIATED / RE_REVIEW_PENDING`。
 
 ### 交接边界
 
@@ -347,3 +352,4 @@ XXX用以下内容代替：
 | 017 | 真实合成 commissioning 证明默认 high thinking 会偶发吃满 4096；保持 scorer 语义不变，仅把 `max_output_tokens` 与允许上限提升到 8192，并从新 clean commit/namespace 完整重跑 | 截断有完整 usage 且严格 parser 正确拒绝，属于 formal 前应修复的请求容量兼容性问题；不能重试该有效失败后与旧成功拼接冒充同配置结果 | provider、descriptor、commissioning | 已采纳 |
 | 018 | 正式轮只对一次 `ProviderTransientFailure` 按冻结 retry policy 在同一 logical call 内重试；无 usage 的首次 attempt 按 1 RMB fallback 计费，不重跑任何有效 scalar 或负向质量结果 | 区分获准的基础设施恢复与禁止的结果选择；保留完整 attempt provenance 与 55 个唯一最终 observation | formal、费用、恢复 | 已采纳 |
 | 019 | 正式终态冻结为 `CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH`，不解锁 Plan 097；tracked 结果同时保留资格失败与高 headroom 两层事实 | 完整 curve 无 admissible operating point，但两个预冻结 threshold-free 门均通过，不能把校准/error trade-off 问题误写为低任务分辨能力 | 结论、WBS、交接 | 已采纳 |
+| 020 | formal runner 在处理 release、创建 namespace 与调用 evaluator 前，先由 archive 校验根级 authority 未被 claim；末尾 atomic claim 保留为并发兜底 | 已有 authority 时继续评分会重复外发有效 validation 并产生费用；前移现有门禁即可闭合，无需引入通用锁或新状态机 | formal、archive、费用安全 | 已采纳 |

@@ -1,9 +1,9 @@
 # RONDO 长程规划（WBS）
 
-最后更新：2026-08-27（方向 3 Publication Critic 三期当前工作包 Plan 096 已完成唯一 55 条正式轮与独立复算，待首次独立验收；终态为
-`CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH`。云端 scorer 的 threshold-free 分辨能力过线，但完整 curve 没有满足既有发布质量门的
-operating point，因此 Plan 097 不解锁。Plan 095 最终验收、主线集成与推送，Plan 094 有效负向研究终态及 Plan 093 Linux 全 workspace
-正确性基线均保持有效）
+最后更新：2026-08-27（方向 3 Publication Critic 三期 Plan 096 已完成唯一 55 条正式轮与独立复算；首次验收接受研究结果并提出唯一 Medium
+formal authority preflight finding，该 finding 已窄修并通过离线回归，当前待复验。终态保持
+`CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH`，Plan 097 不解锁。Plan 095 最终验收、主线集成与推送，Plan 094 有效负向研究终态及
+Plan 093 Linux 全 workspace 正确性基线均保持有效）
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段指针、跨方向关系、
 稳定工程边界和授权门；已完成成果与验收见 `doc/WBS-COMPLETED.md`，单次任务合同见 `plan/`，执行细节见
@@ -23,7 +23,7 @@ operating point，因此 Plan 097 不解锁。Plan 095 最终验收、主线集�
 | 0：量化测评基准 | 既有设施与首次 schema v7 正式 canary 已完成，当前无 active campaign | 保留设施；历史结果见 COMPLETED，新 campaign 须重新立项与授权 |
 | 1：Harness 优化 | **正式收口；当前无 active 工作包** | 当前不继续新增观测或内核/热路径优化；既有实现、设施与历史结果保留。未来可由用户另行决定是否重新立项，本次收口不作永久禁止 |
 | 2：本地审批模型 | **已收口，今后不再开启** | 最终结论为“保留为实验”；不改生产默认，不再规划后续工作包 |
-| 3：RONDO Multi | 第一、二期、第四期已完成；三期 Plan 096 为 `FORMAL_COMPLETE / FIRST_REVIEW_PENDING` | 正式终态 `CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH` 不解锁 Plan 097；不读 unseen、不改产品默认 |
+| 3：RONDO Multi | 第一、二期、第四期已完成；三期 Plan 096 为 `FORMAL_COMPLETE / FIRST_REVIEW_FINDING_REMEDIATED / RE_REVIEW_PENDING` | 正式终态 `CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH` 不解锁 Plan 097；不读 unseen、不改产品默认 |
 
 方向 3 当前 Linux 正确性基线由 Plan 093 建立：default features、standard local Nextest、checksum-verified V8 的完整 workspace
 为 `14660/14660` passed、0 failure/error/timeout，另有 1/1 setup passed；24 个 skip 不计 passed。正式证据和精确边界见
@@ -60,7 +60,8 @@ Plan 095 已完成并进入主线：复用 Plan 055/057/068 服务、typed verdi
 合成 packet 的真实 API commissioning/clean smoke、全部窄修与最终验收均通过。Plan 096 已在保持产品默认、local worker、Team State 与
 发布行为不变的前提下，对冻结 validation 55 条完成 DeepSeek V4 Flash 正式 curve 与独立复算。正式 55/55、零最终 typed failure；
 ROC AUC `0.8403` 与 Boundary strict win `15/19` 均过线，但 fallback threshold `0.9` 的 False PASS `8/21` 超过 `5/21` 上限，故终态为
-`CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH`，当前等待首次独立验收且不解锁 Plan 097。不读取 unseen，不延续训练或继承 Plan 094 云资源。
+`CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH`。首次验收接受该研究结果；唯一 authority preflight finding 已离线窄修，当前待复验且不解锁
+Plan 097。不读取 unseen，不延续训练或继承 Plan 094 云资源。
 方向 1 已正式收口，不作为方向 3 的前置或旁支。
 
 ### 方向 3：Publication Critic 三期
@@ -137,7 +138,8 @@ ROC AUC `0.8403` 与 Boundary strict win `15/19` 均过线，但 fallback thresh
   definition 强制带 `rondo-cloud-reference-` 前缀，threshold 为显式非最终参考值。首次 finding 已全部窄修并通过 Sol 最终复验，任务不做
   批量测评、最终 threshold、v8/unseen、GPU、真实本地模型或项目数据上传；合同见
   `plan/095-publication-critic-cloud-reference-scorer-backend-execplan.md`。
-- Plan 096 已完成实现、真实 synthetic commissioning、clean freeze、空 namespace 正式 55 条与独立复算，等待首次独立验收。正式模型
+- Plan 096 已完成实现、真实 synthetic commissioning、clean freeze、空 namespace 正式 55 条与独立复算；首次验收接受正式结果，唯一
+  authority preflight finding 已窄修并通过离线回归，当前待复验。正式模型
   `deepseek-v4-flash` 的结果为 `CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH`：False PASS `8/21`、False REWRITE `0/34`、balanced
   accuracy `0.8095`、ROC AUC `0.8403`、Boundary strict win `15/19`，完整 curve 无 admissible operating point。正式轮 55/55、零最终
   typed failure、56 attempts，其中一次冻结 policy 允许的 transient retry；正式费用 `1.3855704 RMB`，含两轮 commissioning 的任务总费用
