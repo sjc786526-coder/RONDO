@@ -81,7 +81,7 @@ material/strict/operating event，step 4 按预冻结平台规则形成 `ROUTE_O
 - M3-C1 / Plan 068 已完成本地工件交接、真实 scorer/service 接入、四对象正式资格运行、独立验收与远端止费。正式 v3 结论为
   base `NOT_QUALIFIED`、C1 `QUALIFIED`、C2 `NOT_QUALIFIED`、C3 `QUALIFIED`：base 未过 projected drift 与临时 verdict parity，
   C2 未过 ranking/direction，C1/C3 的 runner/service 一致性、稳定性和有界资源门通过；unseen-test 未用于适配或选择。
-  本地保留 120/120 个必要对象与正式 checkpoint；RunPod exact winner 卷已删除，当前 0 Pod、0 volume、持续费用为 0。
+  本地保留 110/120 个必要对象（正式 checkpoint 载荷已释放，manifest/metadata 与验收收据保留）；RunPod exact winner 卷已删除，当前 0 Pod、0 volume、持续费用为 0。
 - Plan 071 在不改冻结权重、数据、Plan 054/055/057 产品语义或最终 threshold 的前提下，将 cross-runtime raw/envelope、
   同 deployment worker parity 与精确 service verdict 分层判断，并以同一规则从干净状态重验 exact base、C1、C3。唯一有效正式轮
   `plan071-formal-20260825T064600Z-qualification-v5` 给出 base/C1/C3 均 `QUALIFIED`，C2 未重验并保持 Plan 068 历史
