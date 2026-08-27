@@ -1,8 +1,8 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
 最后更新：2026-08-26 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
-状态：**第一期、第二期已完成；Publication Critic 三期 Plan 090 为
-`ROUTE_O_CONFIRMATION_PASS / ZERO_POD` 并等待最终独立审查。Route O 已在同一冻结 validation 上完成两次 clean BF16 数值/执行重复与恢复，
+状态：**第一期、第二期已完成；Publication Critic 三期 Plan 090 已通过最终独立验收，终态为
+`ROUTE_O_CONFIRMATION_PASS / ZERO_POD`。Route O 已在同一冻结 validation 上完成两次 clean BF16 数值/执行重复与恢复，
 但随机 seed 敏感性、独立 cohort、unseen 与产品资格仍未验证；M3-D 保持锁定**
 
 ## 当前定位
@@ -367,7 +367,7 @@ Boundary `+0.00620638`，未通过同一 rubric；该单条完整精度路径对
 任务 Pod 已停止并删除，live 复核 0 Pod、compute `$0/h`；卷未扩容或删除，只保留恢复合格的第二 BF16 checkpoint。Plan 082/087 roots
 保持只读，完整结果摘要见 [`plan090-route-o-confirmation-v1.md`](../../eval/results/publication-critic/plan090-route-o-confirmation-v1.md)。
 
-**当前边界**：终态为 `ROUTE_O_CONFIRMATION_PASS / ZERO_POD`，等待最终独立审查；只确认同一冻结 validation 上的执行/数值重复性，
+**当前边界**：终态为 `ROUTE_O_CONFIRMATION_PASS / ZERO_POD / FINAL_REVIEW_ACCEPTED`；只确认同一冻结 validation 上的执行/数值重复性，
 不授予随机 seed 稳定、独立 cohort 泛化、unseen、M3-C1/M3-C2、产品启用或 M3-D 资格。Plan 090 预算与外部动作授权已关闭；当前没有
 已授权后续工作包，若继续须另行规划和授权。
 

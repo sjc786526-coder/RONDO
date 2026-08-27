@@ -22,7 +22,7 @@ seed 敏感性或独立 cohort 泛化，M3-D 保持锁定）
 | 0：量化测评基准 | 既有设施与首次 schema v7 正式 canary 已完成，当前无 active campaign | 保留设施；历史结果见 COMPLETED，新 campaign 须重新立项与授权 |
 | 1：Harness 优化 | **正式收口；当前无 active 工作包** | 当前不继续新增观测或内核/热路径优化；既有实现、设施与历史结果保留。未来可由用户另行决定是否重新立项，本次收口不作永久禁止 |
 | 2：本地审批模型 | **已收口，今后不再开启** | 最终结论为“保留为实验”；不改生产默认，不再规划后续工作包 |
-| 3：RONDO Multi | 第一、二期与第四期已完成；三期 Plan 090 已形成 `ROUTE_O_CONFIRMATION_PASS / ZERO_POD`，等待最终独立审查，当前无已授权后续工作包 | Route O 已在同一冻结 validation 上重复，但没有随机 seed 敏感性、独立 cohort、unseen 或产品资格证据。是否另立独立 cohort/产品资格任务由用户后续决定；M3-D 不自动解锁。第四期历史统一见 COMPLETED |
+| 3：RONDO Multi | 第一、二期与第四期已完成；三期 Plan 090 已通过最终独立验收，终态为 `ROUTE_O_CONFIRMATION_PASS / ZERO_POD`，当前无已授权后续工作包 | Route O 已在同一冻结 validation 上重复，但没有随机 seed 敏感性、独立 cohort、unseen 或产品资格证据。是否另立独立 cohort/产品资格任务由用户后续决定；M3-D 不自动解锁。第四期历史统一见 COMPLETED |
 
 ### 方向命名口径
 
@@ -46,7 +46,7 @@ shuffle、有效 dropout 或其它 seed-sensitive consumer，因此该结果只�
 `-0.00659415`、projected Boundary `+0.00620638`，只支持精度路径敏感性诊断，不构成严格 update-only 因果反证。
 Plan 090 保守费用 `$0.71`，低于 `$6` 硬上限；任务 Pod 已删除并实时复核 0 Pod、compute `$0/h`。只保留恢复合格的第二 BF16
 checkpoint 于既有 57GB 卷 `mwemzrn33y`，卷未扩容或删除并继续按 `$0.006/h` 计费。Plan 087/090 的剩余预算与外部授权均不向后续转移。
-当前等待 Plan 090 最终独立审查，没有已授权后续工作包；若要回答独立 cohort 泛化或产品资格，须另行规划、冻结数据与授权。M3-D 继续锁定。
+Plan 090 最终独立验收已通过，没有已授权后续工作包；若要回答独立 cohort 泛化或产品资格，须另行规划、冻结数据与授权。M3-D 继续锁定。
 方向 1 已正式收口，不作为方向 3 的前置或旁支。
 
 ### 方向 3：Publication Critic 三期

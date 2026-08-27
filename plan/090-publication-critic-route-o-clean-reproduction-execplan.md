@@ -81,7 +81,7 @@ exact base 独立干净运行，回答两个问题：
 - [x] 无论终态如何，全部任务 Pod均已 stop/delete，并通过实时查询确认 0 Pod、compute `$0/h`；57GB 网络卷继续保留且未删除。
 - [x] 相关轻量 Python 聚焦测试、必要 static/format/compile 检查、改动 shell 的 `bash -n` 与 `git diff --check` 通过；不运行本地 Cargo、Docker、
       真实模型或全 workspace 测试，fake、调试、正式结果、skip 和未运行项如实区分。
-- [ ] 最终独立审查无遗留 High/Medium correctness/functionality finding，并分别报告“验收通过/不通过”和“任务目标完成/失败”；PASS 不越界为
+- [x] 最终独立审查无遗留 High/Medium correctness/functionality finding，并分别报告“验收通过/不通过”和“任务目标完成/失败”；PASS 不越界为
       独立泛化、unseen、M3-C1/M3-C2、产品启用或 M3-D。
 
 ## 2. 范围
@@ -317,21 +317,19 @@ XXX用以下内容代替：
 
 ### 当前工作
 
-- 阶段 B/C 已形成 `ROUTE_O_CONFIRMATION_PASS / ZERO_POD` 并完成本地小结果回传；正在完成 tracked 结果、WBS、完成记录与精炼日志，随后
-  提交并申请最终独立审查。
+- 实现、云端正式确认、资产回传、止费、tracked 结果、权威文档和最终独立验收均已完成；Plan 090 在专用分支本地接受。
 
 ### 本任务剩余步骤
 
-- 完成结果投影和权威文档的聚焦复验，提交 clean task branch，并通过指定队列申请 Plan 090 最终审查；若有 finding，只做相称本地整改，
-  不重跑训练或重建 Pod。
+- 无任务内剩余步骤。合并 main、推送、分支归档和 worktree 清理等待用户批准，不影响本轮完成结论。
 
 ### 阻塞项
 
-- 无。GPU 工作和外部写状态均已终止；最终审查只消费已回传的本地小型证据。
+- 无。GPU 工作和外部写状态均已终止，任务预算与外部动作授权已关闭。
 
 ### 当前验收状态
 
-- `ROUTE_O_CONFIRMATION_PASS / ZERO_POD / FINAL_REVIEW_PENDING`。
+- `ROUTE_O_CONFIRMATION_PASS / ZERO_POD / FINAL_REVIEW_ACCEPTED`。
 
 ### 交接边界
 
@@ -362,3 +360,4 @@ XXX用以下内容代替：
 | 014 | 两个正向 BF16 结果形成后，若必需恢复/闭环因基础设施失败，允许诚实发布 INCONCLUSIVE；任何有效负面结果仍不得被 infrastructure 覆盖 | 使恢复门与合法终态闭合，同时保护负面研究结果 | 终态状态机 | 已采纳 |
 | 015 | FP32 全条件对照的 raw Boundary 为负、projected 指标为正时，保留预冻结“诊断性、非自动 veto”语义，Plan 090 仍以两个 BF16 clean repeat 和恢复闭环形成 PASS | FP32 同时改变完整精度路径，不能把单条 raw/projected 分歧升级为严格因果反证 | 最终研究解释 | 已采纳 |
 | 016 | 终态只保留第二 BF16 恢复合格 checkpoint；确认替代后的 debug、首个 BF16 与 FP32 checkpoint 在小结果回传后清理 | 在 57GB 不扩容边界内保留唯一后续有效大资产，避免重复占用 | 远端资产保留 | 已采纳 |
+| 017 | 最终独立验收接受 `ROUTE_O_CONFIRMATION_PASS / ZERO_POD`，不新增训练或云端动作；后续独立 cohort、unseen 或产品资格须另立任务 | 冻结合同、raw results、terminal 重算、费用/资源终态与文档一致，四路复核无 High/Medium finding | 验收与后续边界 | 已采纳 |
