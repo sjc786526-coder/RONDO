@@ -263,29 +263,34 @@ XXX用以下内容代替：
   ready 零 provider 请求，正反合成 packet 分别得到 `PASS` 与 `REWRITE`，另有 HTTP 400 负向对照证明请求确实到达选定 provider。
 - 2026-08-27：完成费用与副作用收口（保守 5 USD / 50 USD；无 Docker/GPU/本地模型；`/tmp` 工件已清理；主根未新增 ignored 资产），
   并同步顶层/三期 WBS、`doc/WBS-COMPLETED.md` 与 `agent_log/2026-08-27-071500-plan095-cloud-reference-scorer-backend.md`。
+- 2026-08-27：首次独立验收完成，定向重跑 `codex-publication-critic` `54/54` 仍通过，但发现 1 High、3 Medium、2 Low finding；
+  结论为 `REVIEW_REJECTED / REMEDIATION_REQUIRED`，报告见 `agent_log/2026-08-27-071711-plan095-review.md`。
 
 ### 当前工作
 
-- 实现、验证与文档收口全部完成，095 worktree 已提交并保持 clean，等待审查者验收。
+- 首次验收未通过，095 worktree 返回执行者按审查报告做窄修；已有真实 API smoke 证据保留。
 
 ### 本任务剩余步骤
 
-- 无。验收若提出返修意见，在本 worktree 内窄修并重跑受影响门禁后回报。
+- 绑定 provider requested model 与 expected model identity，并显式表达不可验证 serving revision。
+- 统一 retry 实际退避与最坏预算公式，补 N=3/4 边界测试并修正文档中的 deadline 陈述。
+- 复用 loopback fixture 补 cloud in-flight cancel 与 active shutdown/force-cancel；闭合 Bazel lock update/check。
+- 更正新增测试数量，按实际 provider request/attempt 重算保守费用；提交 clean worktree 后重新请求验收。
 - 本任务完成后冻结此计划；不在此安排 threshold 标定、批量测评、v8/unseen、产品启用或 M3-D。
 
 ### 阻塞项
 
-- 无。
+- 无外部原则阻塞；上述均可在既有范围内窄修。只有确实必须改变公共 identity/service wire 时才按 queue 请示。
 
 ### 当前验收状态
 
-- `IMPLEMENTED / OFFLINE_PASS / REAL_SMOKE_PASS / COST_5USD_OF_50 / PENDING_REVIEW`。
+- `REVIEW_REJECTED / REMEDIATION_REQUIRED / REAL_SMOKE_EVIDENCE_RETAINED / COST_RECOUNT_REQUIRED`。
 
 ### 交接边界
 
-- 已知并如实记录的边界：云端 descriptor 校验强制“最坏 retry 预算 ≤ service job deadline”，因此 backend 自身的 attempt
-  deadline 总先于 service `ExecutionTimeout` 触发，慢 provider 表现为 typed `BackendFailed`；service job deadline 仍是外层兜底。
-- `just bazel-lock-update` 未运行（本机无 bazel）。`Cargo.lock` 只新增到已有 workspace crate 的依赖边，预期无 `MODULE.bazel.lock` 漂移。
+- 首次审查决定不改 service/public identity 体系、不复制整套 Plan 055 测试，也不要求重新付费跑真实 API；具体最小返修和证据继承条件见
+  `agent_log/2026-08-27-071711-plan095-review.md`。
+- 必须用任务局部 Bazel/Bazelisk 或其它不改全局工具链的方式闭合既有 Bazel lock update/check；不得再以依赖已存在推断无漂移。
 - 本任务不自行合并、推送、归档/重命名分支或删除 worktree，等待用户批准。
 
 ## 6. 关键决策记录
