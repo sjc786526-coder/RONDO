@@ -1086,12 +1086,13 @@ mod tests {
         let packet = build_packet(&test_client(), prepared, history).unwrap();
         let packet = assert_packet_golden("existing_event", &packet);
 
-        let keys = packet
+        let mut keys = packet
             .as_object()
             .unwrap()
             .keys()
             .cloned()
             .collect::<Vec<_>>();
+        keys.sort_unstable();
         assert_eq!(
             keys,
             vec![

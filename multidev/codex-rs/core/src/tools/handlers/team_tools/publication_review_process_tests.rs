@@ -347,9 +347,9 @@ fn service_binary() -> TestResult<PathBuf> {
         return Ok(path);
     }
 
-    // Cargo callers must opt into the exact binary they just built so a stale target artifact
-    // cannot masquerade as product-process evidence. Bazel explicitly supplies this sibling
-    // binary through runfiles, where the shared resolver is the authoritative location.
+    // Cargo/Nextest callers use a setup script to build and supply the exact service binary for
+    // this run. Bazel supplies the sibling binary through runfiles, where the shared resolver is
+    // the authoritative location.
     if codex_utils_cargo_bin::runfiles_available() {
         return codex_utils_cargo_bin::cargo_bin("codex-publication-critic-service")
             .map_err(Into::into);

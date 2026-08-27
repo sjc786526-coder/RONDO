@@ -2,6 +2,76 @@
 
 # Pure helpers shared by the build watchdog and its lightweight tests.
 
+rondo_git_common_root() {
+  local checkout_root="$1"
+  local git_common_dir=""
+  local common_root=""
+
+  [[ "$checkout_root" == /* && -d "$checkout_root" && ! -L "$checkout_root" ]] || return 1
+  git_common_dir="$(
+    git -C "$checkout_root" rev-parse --path-format=absolute --git-common-dir 2>/dev/null
+  )" || return 1
+  git_common_dir="$(realpath -e -- "$git_common_dir" 2>/dev/null)" || return 1
+  [[ -d "$git_common_dir" && ! -L "$git_common_dir" ]] || return 1
+  common_root="$(dirname -- "$git_common_dir")"
+  common_root="$(realpath -e -- "$common_root" 2>/dev/null)" || return 1
+  [[ -d "$common_root" && ! -L "$common_root" ]] || return 1
+  printf '%s' "$common_root"
+}
+
+rondo_product_cargo_target() {
+  local checkout_root="$1"
+  local product="$2"
+  local common_root=""
+  local product_leaf=""
+
+  case "$product" in
+    rondo-local) product_leaf="rondo-local" ;;
+    rondo-multi) product_leaf="rondo-multi" ;;
+    *) return 1 ;;
+  esac
+  common_root="$(rondo_git_common_root "$checkout_root")" || return 1
+  printf '%s/.codex/cargo-target/%s' "$common_root" "$product_leaf"
+}
+
+rondo_project_limits_are_valid() {
+  local warn_bytes="$1"
+  local stop_bytes="$2"
+  local max_bytes="$3"
+  local sample_interval="$4"
+
+  [[ "$warn_bytes" =~ ^[0-9]+$ && "$stop_bytes" =~ ^[0-9]+$ \
+    && "$max_bytes" =~ ^[0-9]+$ && "$sample_interval" =~ ^[0-9]+$ ]] \
+    || return 1
+  ((warn_bytes < stop_bytes && stop_bytes < max_bytes && sample_interval > 0))
+}
+
+rondo_write_effective_run_summary_fields() {
+  local project_root="$1"
+  local cargo_product="$2"
+  local cargo_target_dir="$3"
+  local project_warn_bytes="$4"
+  local project_stop_bytes="$5"
+  local project_max_bytes="$6"
+  local windows_c_free_stop_bytes="$7"
+
+  [[ "$project_root" == /* && "$cargo_target_dir" == /* ]] || return 1
+  case "$cargo_product" in
+    "" | rondo-local | rondo-multi) ;;
+    *) return 1 ;;
+  esac
+  rondo_project_limits_are_valid \
+    "$project_warn_bytes" "$project_stop_bytes" "$project_max_bytes" 1 || return 1
+  [[ "$windows_c_free_stop_bytes" =~ ^[0-9]+$ ]] || return 1
+  printf 'project_root=%s\n' "$project_root"
+  printf 'cargo_product=%s\n' "$cargo_product"
+  printf 'cargo_target_dir=%s\n' "$cargo_target_dir"
+  printf 'project_warn_bytes=%s\n' "$project_warn_bytes"
+  printf 'project_stop_bytes=%s\n' "$project_stop_bytes"
+  printf 'project_max_bytes=%s\n' "$project_max_bytes"
+  printf 'windows_c_free_stop_bytes=%s\n' "$windows_c_free_stop_bytes"
+}
+
 rondo_cgroup_population_state() {
   local cgroup_root="$1"
   local runner_pid="${2:-}"
@@ -222,4 +292,11 @@ rondo_inspect_junit_report() {
     return 0
   fi
   printf 'retained\t%s\n' "$junit_sha256"
+}
+
+rondo_payload_was_confirmed_oom_killed() {
+  local run_rc="$1"
+  local stop_reason="$2"
+
+  [[ "$run_rc" == "137" && "$stop_reason" == "cgroup_reported_oom_kill" ]]
 }

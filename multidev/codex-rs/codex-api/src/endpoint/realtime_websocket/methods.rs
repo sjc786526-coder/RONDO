@@ -21,6 +21,7 @@ use crate::endpoint::realtime_websocket::protocol::RealtimeVoice;
 use crate::endpoint::realtime_websocket::protocol::parse_realtime_event;
 use crate::error::ApiError;
 use crate::provider::Provider;
+use codex_client::TransportError;
 use codex_client::backoff;
 use codex_http_client::maybe_build_rustls_client_config_with_custom_ca;
 use codex_protocol::protocol::ConversationTextParams;
@@ -36,6 +37,7 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
+use std::time::Duration;
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 use tokio::sync::mpsc;
@@ -700,6 +702,7 @@ fn contains_transcript_entry(entries: &[RealtimeTranscriptEntry], role: &str, te
 pub struct RealtimeWebsocketClient {
     provider: Provider,
     webrtc_sideband_base_url: String,
+    websocket_connect_timeout: Option<Duration>,
 }
 
 impl RealtimeWebsocketClient {
@@ -707,7 +710,14 @@ impl RealtimeWebsocketClient {
         Self {
             provider,
             webrtc_sideband_base_url: OPENAI_REALTIME_API_BASE_URL.to_string(),
+            websocket_connect_timeout: None,
         }
+    }
+
+    /// Bounds each websocket handshake attempt without limiting session initialization.
+    pub fn with_websocket_connect_timeout(mut self, timeout: Duration) -> Self {
+        self.websocket_connect_timeout = Some(timeout);
+        self
     }
 
     /// Overrides the direct WebRTC sideband URL for local development and tests.
@@ -841,14 +851,23 @@ impl RealtimeWebsocketClient {
         let connector = maybe_build_rustls_client_config_with_custom_ca()
             .map_err(|err| ApiError::Stream(format!("failed to configure websocket TLS: {err}")))?
             .map(tokio_tungstenite::Connector::Rustls);
-        let (stream, response) = tokio_tungstenite::connect_async_tls_with_config(
+        let connect = tokio_tungstenite::connect_async_tls_with_config(
             request,
             Some(websocket_config()),
             false,
             connector,
-        )
-        .await
-        .map_err(|err| ApiError::Stream(format!("failed to connect realtime websocket: {err}")))?;
+        );
+        let connect_result = if let Some(timeout) = self.websocket_connect_timeout {
+            match tokio::time::timeout(timeout, connect).await {
+                Ok(result) => result,
+                Err(_) => return Err(ApiError::Transport(TransportError::Timeout)),
+            }
+        } else {
+            connect.await
+        };
+        let (stream, response) = connect_result.map_err(|err| {
+            ApiError::Stream(format!("failed to connect realtime websocket: {err}"))
+        })?;
         info!(
             ws_url = %ws_url,
             status = %response.status(),
@@ -1055,6 +1074,37 @@ mod tests {
     use tokio::net::TcpListener;
     use tokio_tungstenite::accept_async;
     use tokio_tungstenite::tungstenite::Message;
+
+    fn test_realtime_provider(base_url: String, max_attempts: u64) -> Provider {
+        Provider {
+            name: "test".to_string(),
+            base_url,
+            query_params: Some(HashMap::new()),
+            headers: HeaderMap::new(),
+            retry: RetryConfig {
+                max_attempts,
+                base_delay: Duration::ZERO,
+                retry_429: false,
+                retry_5xx: false,
+                retry_transport: false,
+            },
+            stream_idle_timeout: Duration::from_secs(5),
+        }
+    }
+
+    fn test_realtime_session_config(event_parser: RealtimeEventParser) -> RealtimeSessionConfig {
+        RealtimeSessionConfig {
+            instructions: "backend prompt".to_string(),
+            initial_items: Vec::new(),
+            delegation_ack_filler: None,
+            model: Some("realtime-test-model".to_string()),
+            session_id: Some("conv_test".to_string()),
+            event_parser,
+            session_mode: RealtimeSessionMode::Conversational,
+            output_modality: RealtimeOutputModality::Audio,
+            voice: RealtimeVoice::Cove,
+        }
+    }
 
     #[test]
     fn parse_session_updated_event() {
@@ -1830,6 +1880,158 @@ mod tests {
             .expect("build ws url");
 
         assert_eq!(url.as_str(), "wss://api.openai.com/v1/live/rtc_test");
+    }
+
+    #[tokio::test]
+    async fn websocket_connect_timeout_bounds_only_the_handshake() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("local addr");
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.expect("accept");
+            let mut ws = accept_async(stream).await.expect("accept ws");
+            ws.next()
+                .await
+                .expect("session update")
+                .expect("session update ok");
+            sleep(Duration::from_millis(500)).await;
+            ws.send(Message::Text(
+                json!({
+                    "type": "session.started",
+                    "session": {"id": "sess_delayed"}
+                })
+                .to_string()
+                .into(),
+            ))
+            .await
+            .expect("send session.started");
+            ws.next()
+                .await
+                .expect("close frame")
+                .expect("close frame ok");
+        });
+
+        let client = RealtimeWebsocketClient::new(test_realtime_provider(
+            format!("http://{addr}"),
+            /*max_attempts*/ 0,
+        ))
+        .with_websocket_connect_timeout(Duration::from_millis(250));
+        let connection = tokio::time::timeout(
+            Duration::from_secs(2),
+            client.connect(
+                test_realtime_session_config(RealtimeEventParser::FramelessBidi),
+                HeaderMap::new(),
+                HeaderMap::new(),
+            ),
+        )
+        .await
+        .expect("session initialization should outlive the handshake timeout")
+        .expect("connect after delayed session start");
+
+        connection.close().await.expect("close");
+        tokio::time::timeout(Duration::from_secs(2), server)
+            .await
+            .expect("server should stop after the close frame")
+            .expect("server task");
+    }
+
+    #[tokio::test]
+    async fn websocket_connect_timeout_stops_a_pending_handshake() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("local addr");
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (stream, _) = tokio::time::timeout(Duration::from_secs(2), listener.accept())
+                .await
+                .expect("client should connect to the pending handshake server")
+                .expect("accept");
+            release_rx.await.expect("release pending handshake");
+            drop(stream);
+        });
+
+        let client = RealtimeWebsocketClient::new(test_realtime_provider(
+            format!("http://{addr}"),
+            /*max_attempts*/ 0,
+        ))
+        .with_websocket_connect_timeout(Duration::from_millis(250));
+        let result = tokio::time::timeout(
+            Duration::from_secs(2),
+            client.connect(
+                test_realtime_session_config(RealtimeEventParser::V1),
+                HeaderMap::new(),
+                HeaderMap::new(),
+            ),
+        )
+        .await
+        .expect("pending handshake should respect the configured timeout");
+
+        release_tx
+            .send(())
+            .expect("pending handshake should retain its receiver");
+        tokio::time::timeout(Duration::from_secs(2), server)
+            .await
+            .expect("pending handshake server should stop")
+            .expect("server task");
+        assert!(matches!(
+            result,
+            Err(ApiError::Transport(TransportError::Timeout))
+        ));
+    }
+
+    #[tokio::test]
+    async fn webrtc_sideband_retries_each_timed_out_handshake() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("local addr");
+        let (accepted_tx, accepted_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            let mut streams = Vec::new();
+            for _ in 0..2 {
+                let (stream, _) = tokio::time::timeout(Duration::from_secs(2), listener.accept())
+                    .await
+                    .expect("each sideband attempt should connect")
+                    .expect("accept");
+                streams.push(stream);
+            }
+            accepted_tx
+                .send(())
+                .expect("two-attempt observer should be waiting");
+            release_rx.await.expect("release pending handshakes");
+            drop(streams);
+        });
+
+        let client = RealtimeWebsocketClient::new(test_realtime_provider(
+            "https://provider.invalid".to_string(),
+            /*max_attempts*/ 1,
+        ))
+        .with_webrtc_sideband_base_url(format!("http://{addr}"))
+        .with_websocket_connect_timeout(Duration::from_millis(250));
+        let (result, accepted) = tokio::join!(
+            tokio::time::timeout(
+                Duration::from_secs(2),
+                client.connect_webrtc_sideband(
+                    test_realtime_session_config(RealtimeEventParser::V1),
+                    "rtc_retry",
+                    HeaderMap::new(),
+                    HeaderMap::new(),
+                ),
+            ),
+            tokio::time::timeout(Duration::from_secs(2), accepted_rx),
+        );
+
+        release_tx
+            .send(())
+            .expect("pending handshakes should retain their receiver");
+        tokio::time::timeout(Duration::from_secs(2), server)
+            .await
+            .expect("sideband handshake server should stop")
+            .expect("server task");
+        accepted
+            .expect("both websocket attempts should connect")
+            .expect("accepted observer should remain open");
+        assert!(matches!(
+            result.expect("sideband retries should finish within the test deadline"),
+            Err(ApiError::Transport(TransportError::Timeout))
+        ));
     }
 
     #[tokio::test]

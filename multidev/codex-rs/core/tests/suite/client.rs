@@ -493,6 +493,7 @@ async fn response_item_ids_persist_across_resume_and_preserve_server_ids() -> an
 async fn synthetic_call_output_id_is_stable_across_resumes() -> anyhow::Result<()> {
     let function_call_id = "missing-output-call";
     let thread_id = ThreadId::default();
+    let tmpdir = TempDir::new()?;
     let rollout = vec![
         RolloutLine {
             timestamp: "2024-01-01T00:00:00.000Z".to_string(),
@@ -503,7 +504,7 @@ async fn synthetic_call_output_id_is_stable_across_resumes() -> anyhow::Result<(
                     id: thread_id,
                     parent_thread_id: None,
                     timestamp: "2024-01-01T00:00:00Z".to_string(),
-                    cwd: ".".into(),
+                    cwd: tmpdir.path().to_path_buf(),
                     originator: "test_originator".to_string(),
                     cli_version: "test_version".to_string(),
                     model_provider: Some("test-provider".to_string()),
@@ -526,7 +527,6 @@ async fn synthetic_call_output_id_is_stable_across_resumes() -> anyhow::Result<(
             }),
         },
     ];
-    let tmpdir = TempDir::new()?;
     let session_path = tmpdir.path().join("normalized-call-output-item-id.jsonl");
     let mut file = std::fs::File::create(&session_path)?;
     for line in rollout {
@@ -806,7 +806,7 @@ async fn resume_includes_initial_messages_and_sends_prior_items() {
                 "id": convo_id,
                 "timestamp": "2024-01-01T00:00:00Z",
                 "instructions": "be nice",
-                "cwd": ".",
+                "cwd": tmpdir.path().display().to_string(),
                 "originator": "test_originator",
                 "cli_version": "test_version",
                 "model_provider": "test-provider"
@@ -1015,6 +1015,7 @@ async fn resume_replays_legacy_js_repl_image_rollout_shapes() {
     };
     let legacy_image_url = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==";
     let thread_id = ThreadId::default();
+    let tmpdir = TempDir::new().unwrap();
     let rollout = vec![
         RolloutLine {
             timestamp: "2024-01-01T00:00:00.000Z".to_string(),
@@ -1025,7 +1026,7 @@ async fn resume_replays_legacy_js_repl_image_rollout_shapes() {
                     id: thread_id,
                     parent_thread_id: None,
                     timestamp: "2024-01-01T00:00:00Z".to_string(),
-                    cwd: ".".into(),
+                    cwd: tmpdir.path().to_path_buf(),
                     originator: "test_originator".to_string(),
                     cli_version: "test_version".to_string(),
                     model_provider: Some("test-provider".to_string()),
@@ -1066,7 +1067,6 @@ async fn resume_replays_legacy_js_repl_image_rollout_shapes() {
         },
     ];
 
-    let tmpdir = TempDir::new().unwrap();
     let session_path = tmpdir
         .path()
         .join("resume-legacy-js-repl-image-rollout.jsonl");
@@ -1155,6 +1155,7 @@ async fn resume_replays_image_tool_outputs_with_detail() {
     let function_call_id = "view-image-call";
     let custom_call_id = "js-repl-call";
     let thread_id = ThreadId::default();
+    let tmpdir = TempDir::new().unwrap();
     let rollout = vec![
         RolloutLine {
             timestamp: "2024-01-01T00:00:00.000Z".to_string(),
@@ -1165,7 +1166,7 @@ async fn resume_replays_image_tool_outputs_with_detail() {
                     id: thread_id,
                     parent_thread_id: None,
                     timestamp: "2024-01-01T00:00:00Z".to_string(),
-                    cwd: ".".into(),
+                    cwd: tmpdir.path().to_path_buf(),
                     originator: "test_originator".to_string(),
                     cli_version: "test_version".to_string(),
                     model_provider: Some("test-provider".to_string()),
@@ -1233,7 +1234,6 @@ async fn resume_replays_image_tool_outputs_with_detail() {
         },
     ];
 
-    let tmpdir = TempDir::new().unwrap();
     let session_path = tmpdir
         .path()
         .join("resume-image-tool-outputs-with-detail.jsonl");

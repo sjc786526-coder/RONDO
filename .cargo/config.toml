@@ -14,12 +14,13 @@
 # 优先级：命令行 `-j N` > 环境变量 CARGO_BUILD_JOBS > 本文件；项目安全规则禁止
 # 普通开发使用前两者提高并发。确需调整时必须由用户单独授权并重新评估看门狗阈值。
 #
-# 取值依据（2026-08-08 实测，见 doc/development-environment.md §3.5）：
-# jobs=6 / test-threads=10 已完成 Codex 0.147.0 冷构建和 14,074 项全量测试。
-# target 峰值约 126.0 GB；cgroup 总内存峰值约 20.4 GB，其中不可回收的匿名+内核
-# 峰值约 11.2 GB，swap 峰值约 0.38 GB。构建同时受独立 cgroup 和实时看门狗保护。
+# 2026-08-08 的 jobs=6 历史基准见 doc/development-environment.md §3.5。Plan 093
+# 的 196 GB 共享 target 在较高 Cargo/LLD 并发下反复触发持续 PSI 停机，因此日常
+# 默认收紧到 jobs=2，并把 GNU/Linux LLD 的内部线程固定为 1。必须尽量一次跑完的
+# workspace 使用产品 Justfile 中受跟踪的 conservative 入口（jobs=1），不要临时
+# 拼接 CARGO_BUILD_JOBS/RUSTFLAGS。
 [build]
-jobs = 6
+jobs = 2
 
 # 机器级 rustc 总并发兜底。jobs 只管单次 cargo 调用内部的并发，两个 agent 各自直接
 # 敲 cargo 仍可能叠加；with-build-lock.sh 负责保证经过 just 的重型 Cargo 构建互斥，
@@ -29,3 +30,8 @@ jobs = 6
 # worktree 里都各自指向自己那一份，不写死绝对路径。脚本安全依赖不可用时
 # fail-closed；显式关闭开关只用于用户单独授权的故障诊断。
 rustc-wrapper = "./.cargo/rustc-throttle.sh"
+
+# 当前正式 Linux 构建通过 linker driver 调用 LLD；限制单次链接内部并发，避免 Cargo
+# jobs 已受控但一个 rust-lld 仍自行扩张。Windows 使用各产品已有的目标专属 flags。
+[target.'cfg(all(target_os = "linux", target_env = "gnu"))']
+rustflags = ["-C", "link-arg=-Wl,--threads=1"]

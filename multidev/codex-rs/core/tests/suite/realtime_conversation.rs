@@ -1314,14 +1314,21 @@ async fn conversation_webrtc_sideband_connect_failure_closes_with_error() -> Res
         )
         .mount(&server)
         .await;
-    let mut builder = test_codex().with_config(|config| {
+    let realtime_server = start_websocket_server_with_headers(vec![WebSocketConnectionConfig {
+        requests: vec![vec![]],
+        response_headers: Vec::new(),
+        accept_delay: Some(Duration::from_millis(250)),
+        close_after_requests: false,
+    }])
+    .await;
+    let realtime_ws_base_url = realtime_server.uri().to_string();
+    let mut builder = test_codex().with_config(move |config| {
         config.experimental_realtime_ws_backend_prompt = Some("backend prompt".to_string());
         config.experimental_realtime_ws_model = Some("realtime-test-model".to_string());
         config.experimental_realtime_ws_startup_context = Some(String::new());
-        config.experimental_realtime_ws_base_url = Some("http://127.0.0.1:1".to_string());
-        // Keep the failure-path test inside wait_for_event's timeout on Windows,
-        // where refused localhost websocket connects can take around two seconds.
+        config.experimental_realtime_ws_base_url = Some(realtime_ws_base_url);
         config.model_provider.request_max_retries = Some(0);
+        config.model_provider.websocket_connect_timeout_ms = Some(50);
         config.realtime.version = RealtimeWsVersion::V1;
     });
     let test = builder.build(&server).await?;
@@ -1373,7 +1380,7 @@ async fn conversation_webrtc_sideband_connect_failure_closes_with_error() -> Res
         _ => None,
     })
     .await;
-    assert!(!err.is_empty());
+    assert!(err.to_lowercase().contains("timed out"), "{err}");
 
     let closed = wait_for_event_match(&test.codex, |msg| match msg {
         EventMsg::RealtimeConversationClosed(closed) => Some(closed.clone()),
@@ -1395,6 +1402,7 @@ async fn conversation_webrtc_sideband_connect_failure_closes_with_error() -> Res
     .await;
     assert_eq!(err.message, "conversation is not running");
 
+    realtime_server.shutdown().await;
     Ok(())
 }
 
@@ -1699,8 +1707,17 @@ async fn conversation_start_connect_failure_emits_realtime_error_only() -> Resul
     skip_if_no_network!(Ok(()));
 
     let server = start_websocket_server(vec![]).await;
-    let mut builder = test_codex().with_config(|config| {
-        config.experimental_realtime_ws_base_url = Some("http://127.0.0.1:1".to_string());
+    let realtime_server = start_websocket_server_with_headers(vec![WebSocketConnectionConfig {
+        requests: vec![vec![]],
+        response_headers: Vec::new(),
+        accept_delay: Some(Duration::from_millis(250)),
+        close_after_requests: false,
+    }])
+    .await;
+    let realtime_ws_base_url = realtime_server.uri().to_string();
+    let mut builder = test_codex().with_config(move |config| {
+        config.experimental_realtime_ws_base_url = Some(realtime_ws_base_url);
+        config.model_provider.websocket_connect_timeout_ms = Some(50);
         config.realtime.version = RealtimeWsVersion::V1;
     });
     let test = builder.build_with_websocket_server(&server).await?;
@@ -1736,7 +1753,7 @@ async fn conversation_start_connect_failure_emits_realtime_error_only() -> Resul
         _ => None,
     })
     .await;
-    assert!(!err.is_empty());
+    assert!(err.to_lowercase().contains("timed out"), "{err}");
 
     let closed = timeout(Duration::from_millis(200), async {
         wait_for_event_match(&test.codex, |msg| match msg {
@@ -1748,6 +1765,7 @@ async fn conversation_start_connect_failure_emits_realtime_error_only() -> Resul
     .await;
     assert!(closed.is_err(), "connect failure should not emit closed");
 
+    realtime_server.shutdown().await;
     server.shutdown().await;
     Ok(())
 }

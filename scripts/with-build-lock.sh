@@ -20,9 +20,10 @@
 #   RONDO_BUILD_MEMORY_HIGH=<size>          (default 21G)
 #   RONDO_BUILD_MEMORY_MAX=<size>           (default 22G)
 #   RONDO_BUILD_SWAP_MAX=<size>             (default 5G)
-#   RONDO_BUILD_PROJECT_WARN_BYTES=<bytes>  (default 240 GB decimal)
-#   RONDO_BUILD_PROJECT_STOP_BYTES=<bytes>  (default 255 GB decimal)
-#   RONDO_BUILD_PROJECT_MAX_BYTES=<bytes>   (default 260 GB decimal)
+#   RONDO_BUILD_CARGO_PRODUCT=rondo-local|rondo-multi
+#   RONDO_BUILD_PROJECT_WARN_BYTES=<bytes>  (default 270 GB decimal)
+#   RONDO_BUILD_PROJECT_STOP_BYTES=<bytes>  (default 285 GB decimal)
+#   RONDO_BUILD_PROJECT_MAX_BYTES=<bytes>   (default 290 GB decimal)
 #   RONDO_BUILD_WINDOWS_C_FREE_STOP_BYTES=<bytes> (default 50 GB decimal)
 #   RONDO_BUILD_RESIDUAL_GRACE_SECONDS=<s>  (default 5)
 #   RONDO_BUILD_METRICS_DIR=<path>
@@ -50,12 +51,11 @@ fi
 project_root="${RONDO_PROJECT_ROOT:-}"
 worktree_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
 if [[ -z "$project_root" ]]; then
-  git_common_dir="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
-  if [[ -z "$git_common_dir" ]]; then
+  project_root="$(rondo_git_common_root "$worktree_root" || true)"
+  if [[ -z "$project_root" ]]; then
     echo "[rondo] cannot resolve the shared RONDO repository root" >&2
     exit 66
   fi
-  project_root="$(dirname -- "$git_common_dir")"
 fi
 project_root="$(realpath -e -- "$project_root" 2>/dev/null || true)"
 worktree_root="$(realpath -e -- "$worktree_root" 2>/dev/null || true)"
@@ -63,6 +63,40 @@ if [[ -z "$project_root" ]] || [[ ! -d "$project_root" ]] \
   || [[ -z "$worktree_root" ]] || [[ ! -d "$worktree_root" ]]; then
   echo "[rondo] invalid RONDO_PROJECT_ROOT" >&2
   exit 67
+fi
+
+cargo_product="${RONDO_BUILD_CARGO_PRODUCT:-}"
+canonical_product_target=""
+export_cargo_target=0
+if [[ -n "$cargo_product" ]]; then
+  canonical_product_target="$(
+    rondo_product_cargo_target "$worktree_root" "$cargo_product" 2>/dev/null || true
+  )"
+  if [[ -z "$canonical_product_target" ]]; then
+    echo "[rondo] invalid RONDO_BUILD_CARGO_PRODUCT" >&2
+    exit 82
+  fi
+fi
+if [[ -n "${CARGO_TARGET_DIR:-}" ]]; then
+  target_dir="$CARGO_TARGET_DIR"
+  export_cargo_target=1
+elif [[ -n "$canonical_product_target" ]]; then
+  target_dir="$canonical_product_target"
+  export_cargo_target=1
+else
+  target_dir="${PWD}/target"
+fi
+unset RONDO_BUILD_CARGO_PRODUCT
+if [[ "$target_dir" != /* ]]; then
+  target_dir="${PWD}/${target_dir}"
+fi
+target_dir="$(realpath -m -- "$target_dir" 2>/dev/null || true)"
+if [[ -z "$target_dir" ]] || [[ "$target_dir" != "${project_root}/"* ]]; then
+  echo "[rondo] CARGO_TARGET_DIR must stay inside the monitored RONDO project root" >&2
+  exit 82
+fi
+if ((export_cargo_target == 1)); then
+  export CARGO_TARGET_DIR="$target_dir"
 fi
 
 runtime_dir="/run/user/${uid}"
@@ -136,9 +170,9 @@ done
 memory_high="${RONDO_BUILD_MEMORY_HIGH:-21G}"
 memory_max="${RONDO_BUILD_MEMORY_MAX:-22G}"
 swap_max="${RONDO_BUILD_SWAP_MAX:-5G}"
-project_warn_bytes="${RONDO_BUILD_PROJECT_WARN_BYTES:-240000000000}"
-project_stop_bytes="${RONDO_BUILD_PROJECT_STOP_BYTES:-255000000000}"
-project_max_bytes="${RONDO_BUILD_PROJECT_MAX_BYTES:-260000000000}"
+project_warn_bytes="${RONDO_BUILD_PROJECT_WARN_BYTES:-270000000000}"
+project_stop_bytes="${RONDO_BUILD_PROJECT_STOP_BYTES:-285000000000}"
+project_max_bytes="${RONDO_BUILD_PROJECT_MAX_BYTES:-290000000000}"
 windows_c_free_stop_bytes="${RONDO_BUILD_WINDOWS_C_FREE_STOP_BYTES:-50000000000}"
 nonreclaimable_stop_bytes="${RONDO_BUILD_NONRECLAIMABLE_STOP_BYTES:-20401094656}"
 swap_sustained_stop_bytes="${RONDO_BUILD_SWAP_SUSTAINED_STOP_BYTES:-4294967296}"
@@ -163,12 +197,18 @@ for setting in "${numeric_settings[@]}"; do
     exit 73
   fi
 done
-if ((project_warn_bytes >= project_stop_bytes \
-  || project_stop_bytes >= project_max_bytes \
-  || disk_sample_interval == 0)); then
+if ! rondo_project_limits_are_valid \
+  "$project_warn_bytes" "$project_stop_bytes" "$project_max_bytes" "$disk_sample_interval"; then
   echo "[rondo] invalid project warning/stop/max or sample interval ordering" >&2
   exit 74
 fi
+
+write_effective_run_summary_fields() {
+  rondo_write_effective_run_summary_fields \
+    "$project_root" "$cargo_product" "$target_dir" \
+    "$project_warn_bytes" "$project_stop_bytes" "$project_max_bytes" \
+    "$windows_c_free_stop_bytes"
+}
 
 read_windows_c_capacity() {
   local used=""
@@ -211,16 +251,6 @@ fi
 if ((host_swap_free_before <= 1048576)); then
   echo "[rondo] host free swap is already below 1 GiB" >&2
   exit 79
-fi
-
-target_dir="${CARGO_TARGET_DIR:-${PWD}/target}"
-if [[ "$target_dir" != /* ]]; then
-  target_dir="${PWD}/${target_dir}"
-fi
-target_dir="$(realpath -m -- "$target_dir" 2>/dev/null || true)"
-if [[ -z "$target_dir" ]] || [[ "$target_dir" != "${project_root}/"* ]]; then
-  echo "[rondo] CARGO_TARGET_DIR must stay inside the monitored RONDO project root" >&2
-  exit 82
 fi
 
 metrics_parent="${RONDO_BUILD_METRICS_DIR:-${worktree_root}/.codex/build-watchdog}"
@@ -288,6 +318,7 @@ if [[ "${command_args[0]}" == "cargo" && "${command_args[1]:-}" == "nextest" \
       printf 'junit_profile=%s\n' "$junit_profile"
       printf 'junit_path=\n'
       printf 'junit_sha256=\n'
+      write_effective_run_summary_fields
     } >"$summary_file"
     echo "[rondo] nextest evidence requires the local profile and no custom profile/config arguments" >&2
     exit 83
@@ -307,6 +338,7 @@ if [[ "${command_args[0]}" == "cargo" && "${command_args[1]:-}" == "nextest" \
         printf 'junit_profile=%s\n' "$junit_profile"
         printf 'junit_path=%s\n' "$junit_path"
         printf 'junit_sha256=\n'
+        write_effective_run_summary_fields
       } >"$summary_file"
       echo "[rondo] cannot prepare the per-run nextest configuration" >&2
       exit 83
@@ -325,11 +357,12 @@ fi
   printf 'junit_profile=%s\n' "$junit_profile"
   printf 'junit_path=%s\n' "$junit_path"
   printf 'junit_sha256=\n'
+  write_effective_run_summary_fields
 } >"$summary_file"
 
 unit="rondo-build-${uid}-${started_stamp//[^0-9]/}-$$.scope"
 echo "[rondo] watchdog metrics: ${run_dir}" >&2
-echo "[rondo] limits: project stop/max=${project_stop_bytes}/${project_max_bytes} bytes, memory high/max=${memory_high}/${memory_max}, swap max=${swap_max}" >&2
+echo "[rondo] limits: project warn/stop/max=${project_warn_bytes}/${project_stop_bytes}/${project_max_bytes} bytes, Windows C: free stop=${windows_c_free_stop_bytes} bytes, memory high/max=${memory_high}/${memory_max}, swap max=${swap_max}" >&2
 
 cgroup_root=""
 control_group=""
@@ -367,6 +400,7 @@ write_minimal_summary() {
     printf 'junit_profile=%s\n' "$junit_profile"
     printf 'junit_path=%s\n' "$junit_path"
     printf 'junit_sha256=%s\n' "$junit_sha256"
+    write_effective_run_summary_fields
   } >"$summary_tmp"
   mv -f -- "$summary_tmp" "$summary_file"
 }
@@ -804,8 +838,7 @@ summary_tmp="${summary_file}.tmp"
   printf 'memory_high=%s\n' "$memory_high"
   printf 'memory_max=%s\n' "$memory_max"
   printf 'swap_max=%s\n' "$swap_max"
-  printf 'project_stop_bytes=%s\n' "$project_stop_bytes"
-  printf 'project_max_bytes=%s\n' "$project_max_bytes"
+  write_effective_run_summary_fields
 } >"$summary_tmp"
 mv -f -- "$summary_tmp" "$summary_file"
 
@@ -816,7 +849,7 @@ fi
 systemctl --user reset-failed "$unit" >/dev/null 2>&1 || true
 echo "[rondo] finished status=${final_rc} command_status=${run_rc} stop=${stop_reason} cleanup=${cleanup_reason} project=${project_after} target=${target_after}; summary=${summary_file}" >&2
 
-if ((run_rc == 137)); then
+if rondo_payload_was_confirmed_oom_killed "$run_rc" "$stop_reason"; then
   echo "[rondo] the command was OOM-killed inside its ${memory_max} cgroup" >&2
 fi
 exit "$final_rc"

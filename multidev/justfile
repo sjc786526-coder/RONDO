@@ -9,6 +9,7 @@ python := if os_family() == "windows" { "python" } else { "python3" }
 # The build lock and resource watchdog are shared by every RONDO product line,
 # so they live at the repository root rather than inside one product tree.
 watchdog := justfile_directory() / ".." / "scripts" / "with-build-lock.sh"
+cargo_product := "rondo-multi"
 
 # Display help
 help:
@@ -57,7 +58,7 @@ fmt-check:
 # for why the lock exists.
 [unix]
 build *args:
-    {{ watchdog }} cargo build "$@"
+    RONDO_BUILD_CARGO_PRODUCT={{ cargo_product }} {{ watchdog }} cargo build "$@"
 
 [windows]
 build *args:
@@ -65,7 +66,7 @@ build *args:
 
 [unix]
 fix *args:
-    {{ watchdog }} cargo clippy --fix --tests --allow-dirty "$@"
+    RONDO_BUILD_CARGO_PRODUCT={{ cargo_product }} {{ watchdog }} cargo clippy --fix --tests --allow-dirty "$@"
 
 [windows]
 fix *args:
@@ -73,7 +74,7 @@ fix *args:
 
 [unix]
 clippy *args:
-    {{ watchdog }} cargo clippy --tests "$@"
+    RONDO_BUILD_CARGO_PRODUCT={{ cargo_product }} {{ watchdog }} cargo clippy --tests "$@"
 
 [windows]
 clippy *args:
@@ -104,7 +105,7 @@ install:
 # there should be no need to add `--all-features`.
 [unix]
 test *args:
-    RUST_MIN_STACK={{ rust_min_stack }} NEXTEST_PROFILE=local {{ watchdog }} cargo nextest run --no-fail-fast "$@"
+    RONDO_BUILD_CARGO_PRODUCT={{ cargo_product }} RUST_MIN_STACK={{ rust_min_stack }} NEXTEST_PROFILE=local {{ watchdog }} cargo nextest run --no-fail-fast "$@"
 
 [windows]
 test *args:
@@ -113,7 +114,7 @@ test *args:
 # Run the bounded Team State sequence property with a reproducible seed.
 [unix]
 team-state-sequence-properties seed="20260820047":
-    TEAM_STATE_SEQUENCE_SEED="$1" RUST_MIN_STACK={{ rust_min_stack }} NEXTEST_PROFILE=local {{ watchdog }} cargo nextest run --no-fail-fast -p codex-team-state --lib --run-ignored only -E 'test(team_state_sequence_properties)'
+    RONDO_BUILD_CARGO_PRODUCT={{ cargo_product }} TEAM_STATE_SEQUENCE_SEED="$1" RUST_MIN_STACK={{ rust_min_stack }} NEXTEST_PROFILE=local {{ watchdog }} cargo nextest run --no-fail-fast -p codex-team-state --lib --run-ignored only -E 'test(team_state_sequence_properties)'
 
 [windows]
 team-state-sequence-properties seed="20260820047":
@@ -123,7 +124,14 @@ team-state-sequence-properties seed="20260820047":
 # retaining the same build lock, watchdog, and JUnit behavior as `just test`.
 [unix]
 test-with-codex-v8 *args:
-    RUST_MIN_STACK={{ rust_min_stack }} NEXTEST_PROFILE=local {{ python }} ../scripts/with_codex_v8_artifacts.py -- {{ watchdog }} cargo nextest run --no-fail-fast "$@"
+    RONDO_BUILD_CARGO_PRODUCT={{ cargo_product }} RUST_MIN_STACK={{ rust_min_stack }} NEXTEST_PROFILE=local {{ python }} ../scripts/with_codex_v8_artifacts.py -- {{ watchdog }} cargo nextest run --no-fail-fast "$@"
+
+# Conservative full-workspace fallback for runs that must finish in one pass.
+# LLD stays at the repository default of one thread; this tracked entry lowers
+# Cargo jobs to one without requiring an operator-supplied command override.
+[unix]
+test-with-codex-v8-conservative *args:
+    CARGO_BUILD_JOBS=1 RONDO_BUILD_CARGO_PRODUCT={{ cargo_product }} RUST_MIN_STACK={{ rust_min_stack }} NEXTEST_PROFILE=local {{ python }} ../scripts/with_codex_v8_artifacts.py -- {{ watchdog }} cargo nextest run --no-fail-fast "$@"
 
 # Run from the repository root so scripts that resolve paths from `cwd` see
 # the same layout they use in GitHub Actions.
@@ -134,7 +142,7 @@ test-github-scripts:
 # Run explicit workspace benchmark targets.
 [unix]
 bench *args:
-    {{ watchdog }} cargo bench --workspace --bench '*' {args}
+    RONDO_BUILD_CARGO_PRODUCT={{ cargo_product }} {{ watchdog }} cargo bench --workspace --bench '*' {args}
 
 [windows]
 bench *args:
@@ -221,7 +229,7 @@ mcp-server-run *args:
 # Regenerate the json schema for config.toml from the current config types.
 [unix]
 write-config-schema:
-    {{ watchdog }} cargo run -p codex-core --bin codex-write-config-schema
+    RONDO_BUILD_CARGO_PRODUCT={{ cargo_product }} {{ watchdog }} cargo run -p codex-core --bin codex-write-config-schema
 
 [windows]
 write-config-schema:
@@ -230,7 +238,7 @@ write-config-schema:
 # Regenerate vendored app-server protocol schema artifacts.
 [unix]
 write-app-server-schema *args:
-    {{ watchdog }} python3 app-server-protocol/scripts/write_schema_fixtures.py {{ args }}
+    RONDO_BUILD_CARGO_PRODUCT={{ cargo_product }} {{ watchdog }} python3 app-server-protocol/scripts/write_schema_fixtures.py {{ args }}
 
 [windows]
 write-app-server-schema *args:
@@ -239,7 +247,7 @@ write-app-server-schema *args:
 [no-cd]
 [unix]
 write-hooks-schema:
-    {{ watchdog }} cargo run --manifest-path {{ justfile_directory() }}/codex-rs/Cargo.toml -p codex-hooks --bin write_hooks_schema_fixtures
+    RONDO_BUILD_CARGO_PRODUCT={{ cargo_product }} {{ watchdog }} cargo run --manifest-path {{ justfile_directory() }}/codex-rs/Cargo.toml -p codex-hooks --bin write_hooks_schema_fixtures
 
 [no-cd]
 [windows]

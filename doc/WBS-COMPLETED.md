@@ -2417,3 +2417,25 @@ formal retry 整改为 `d29e857`，最终独立验收提交为 `43cf0eeb3e1b4826
 - 主线整合以当时 main 为底，保留已完成的 Plan 091、Plan 092 与第四期收口，只追加 Plan 090 三期事实；主线复验 Plan 090 `16/16`、
   相邻 Plan 081/082/087 `85/85`，三个 shell syntax、freeze、终态结果和 diff 门均通过。整合记录见
   `agent_log/2026-08-26-212140-plan090-main-integration.md`。
+
+## RONDO Multi 干净全 Workspace 基线与共享构建现场收口（Plan 093，2026-08-27）
+
+**状态**：`COMPLETED / ACCEPTED / MAIN_INTEGRATION_PENDING / NOT_PUSHED`。技术实现、正式全量、并发配置整改与独立验收均已完成；
+本条先记录待集成事实，实际主线合并与推送完成后再更新终态。
+
+- 受支持 Unix 正式重型入口现在以产品 identity 把主工作区和 linked worktree 路由到物理仓库根的共享 target；Multi/Local 分别使用
+  `.codex/cargo-target/rondo-multi` 与 `.codex/cargo-target/rondo-local`。本任务从空目录创建并保留 Multi 叶子，没有创建或加热
+  Local 叶子。
+- 共享 watchdog 的永久项目门更新为十进制 `270000000000 / 285000000000 / 290000000000` bytes，永久 Windows `C:` 停止线保持
+  `50000000000` bytes；每轮 summary 记录产品、target 与四条实际门线。旧 069 target 在 canonical lock 和安全前置下精确删除，
+  已完成的 069/087/089/091/092 worktree 安全释放且历史分支/提交保留。
+- 新共享 target 从空目录完成冷全 workspace，暴露的 20 项稳定失败均以有界产品/fixture/测试修复闭合。最终实现提交
+  `b25b5bb2e57490b8615a8c5c1c432c0fe39440db` 上以 Linux、default features、standard local Nextest、checksum-verified V8 完成
+  `14660/14660` passed、0 failure/error/timeout，另有 1/1 setup passed、24 skipped、1 retry-pass；唯一 retry 新进程复核 1/1。
+- 正式 JUnit SHA-256 为 `ef2d16c4e1f4d1bfb411ddf7fe47127a0b7832cf7f35e649d1fe239e44f55e4b`，原始证据保留在
+  `test-data/_retained-test-evidence/plan093-clean-full-workspace-baseline/runs/final-b25b5bb2e574-20260827T071344Z/`，共享 Multi target
+  继续保留供后续任务增量复用。
+- 独立验收后把日常 Cargo 固化为 `jobs=2`、GNU/Linux LLD 单线程、rustc slots=2，并为两产品增加受跟踪的
+  `test-with-codex-v8-conservative`（`jobs=1`、LLD 单线程）。合同测试 7/7、日常入口窄编译/链接/测试 18/18、保守 V8 入口
+  18/18；配置与原正式轮等效，未重复完整 workspace。最终独立验收 High/Medium/Low correctness finding 为 0，报告见
+  `agent_log/2026-08-27-005816-plan093-independent-review.md`。

@@ -415,10 +415,9 @@ eval-b2-no-api product rondo_bundle docker_host_volume metrics_dir:
         --codex-binary-manifest "$common_root/eval-data/bin/codex/rust-v0.147.0-be6e8eac029b183056b7e4402879f15d2c85f61b-x86_64-unknown-linux-musl-runtime-bundle/manifest.json" \
         --docker-host-volume "{{docker_host_volume}}"
 
-# One supervised lightweight `codex` build for one RONDO product line. Only one
-# product target may be hot at a time (see doc/WBS.md 4.3), so clean the other
-# side before switching. The Cargo target stays inside the monitored project
-# root and the whole build runs under the shared root watchdog.
+# One supervised lightweight `codex` build for one RONDO product line. The two
+# product identities use separate shared target leaves, while every heavy build
+# remains globally serialized under the root watchdog.
 product-build product metrics_dir:
     @test ! -e "{{metrics_dir}}" || { echo "metrics dir already exists" >&2; exit 2; }
     @case "{{product}}" in \
@@ -427,7 +426,7 @@ product-build product metrics_dir:
         *) echo "product must be rondo-local or rondo-multi" >&2; exit 2 ;; \
         esac; \
         RONDO_BUILD_METRICS_DIR="{{metrics_dir}}" \
-        CARGO_TARGET_DIR="$PWD/$source_dir/codex-rs/target" \
+        RONDO_BUILD_CARGO_PRODUCT="{{product}}" \
         "$PWD/scripts/with-build-lock.sh" \
         cargo build --locked --manifest-path "$PWD/$source_dir/codex-rs/Cargo.toml" \
         -p codex-cli --bin codex
@@ -442,7 +441,7 @@ product-default-off-test product metrics_dir:
         *) echo "product must be rondo-local or rondo-multi" >&2; exit 2 ;; \
         esac; \
         RONDO_BUILD_METRICS_DIR="{{metrics_dir}}" \
-        CARGO_TARGET_DIR="$PWD/$source_dir/codex-rs/target" \
+        RONDO_BUILD_CARGO_PRODUCT="{{product}}" \
         "$PWD/scripts/with-build-lock.sh" \
         cargo test --locked --manifest-path "$PWD/$source_dir/codex-rs/Cargo.toml" \
         -p codex-core --lib -- config::config_loader_tests::

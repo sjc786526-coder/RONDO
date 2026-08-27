@@ -1,6 +1,6 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
-最后更新：2026-08-26 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
+最后更新：2026-08-27 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
 状态：**第一期、第二期已完成；Publication Critic 三期 Plan 090 已通过最终独立验收，终态为
 `ROUTE_O_CONFIRMATION_PASS / ZERO_POD`。Route O 已在同一冻结 validation 上完成两次 clean BF16 数值/执行重复与恢复，
 但随机 seed 敏感性、独立 cohort、unseen 与产品资格仍未验证；M3-D 保持锁定**
@@ -23,6 +23,18 @@ Producer、Critic、Harness、Root 的职责及现行 Team State 不变量以该
 
 四期 Durable Team Runtime 已正式收口，终态为 `M4_W1_PASS / PHASE_4_COMPLETE`，没有后续必需工作包；完整历史见
 `doc/WBS-COMPLETED.md`，简要归档入口见 [`doc/WBS/durable-team-runtime.md`](durable-team-runtime.md)，本页只继续维护三期路线。
+
+## 当前 Linux 正确性基线
+
+Plan 093 在 RONDO Multi 的 default features、standard local Nextest 与 checksum-verified V8 口径下，从空的产品级共享 target
+完成冷 workspace，并在有界修复后于实现提交 `b25b5bb2e57490b8615a8c5c1c432c0fe39440db` 完成正式全 workspace：
+`14660/14660` passed、0 failure/error/timeout，另有 1/1 Unix setup passed；24 个 skip 按平台、手工/生成/property、child helper、
+已延后不稳定项和真实 API smoke 分类，不计 passed。唯一 loopback proxy retry 已在新进程 `retries=0` 下 1/1 一次通过。
+
+正式证据保留在 `test-data/_retained-test-evidence/plan093-clean-full-workspace-baseline/runs/final-b25b5bb2e574-20260827T071344Z/`，
+JUnit SHA-256 为 `ef2d16c4e1f4d1bfb411ddf7fe47127a0b7832cf7f35e649d1fe239e44f55e4b`。随后只持久化等效构建资源配置和文档，
+没有改产品测试语义或重复完整 workspace；合同测试 7/7、日常入口窄编译/链接/测试 18/18、保守 V8 入口 18/18 均通过，独立验收
+High/Medium/Low correctness finding 为 0。
 
 ## 三期目标与冻结决定
 
@@ -479,7 +491,9 @@ unseen 与产品资格仍未验证。本阶段仍未解锁或启动，三期没�
   `doc/eval-data-layout.md`。
 - 历史 binary、receipt、trace 与结果保持不可变，只作为对应阶段的完成证据，不冒充三期运行身份。
 - Team Lens 是本地离线 reducer/viewer，不参与 runtime 调度，不保存正文，不建立第二套 tracing facility。
-- 重型 Cargo、Docker 和真实本地模型继续按项目全局资源门禁串行；付费 API 服从对应任务的范围、预算和授权，
+- 重型 Cargo、Docker 和真实本地模型继续按项目全局资源门禁串行。Multi 的受支持 Unix 重型入口共享物理仓库根
+  `.codex/cargo-target/rondo-multi`；日常 Cargo 使用 `jobs=2`、GNU/Linux LLD 单线程和 2 个机器级 rustc 槽，要求尽量一次跑完的
+  完整 workspace 使用受跟踪的 `test-with-codex-v8-conservative`（`jobs=1`、LLD 单线程）。付费 API 服从对应任务的范围、预算和授权，
   在不争用本地重型资源时可以与普通非重型工作并行。
 - 不引入合规/取证平台、PKI/签名链、trust score、在线学习路由器、judge 集群、全量 transcript/CoT 广播、
   自由群聊、固定大 swarm 或通用副作用缓存。
