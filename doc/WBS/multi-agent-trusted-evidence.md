@@ -1,9 +1,8 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
 最后更新：2026-08-26 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
-状态：**第一期、第二期已完成；Publication Critic 三期仍在推进。Plan 073 / M3-C2 为 `NO-GO`，Plan 079 为
-`4B_BASE_QUALITY_NO_GO`，Plan 081 为 `LOCAL_TRAINING_READINESS_PASS`，Plan 082 为 `VALID_NO_IMPROVEMENT`；Plan 087 最终验收通过，
-研究终态为 `PROMISING_CANDIDATE_RETAINED / ZERO_POD`，Route O 效果可靠性未确认；M3-D 保持锁定**
+状态：**第一期、第二期已完成；Publication Critic 三期仍在推进。Plan 087 为
+`PROMISING_CANDIDATE_RETAINED / ZERO_POD`，Route O 效果可靠性未确认；Plan 090 已完成规划并等待非付费阶段 A 实施，M3-D 保持锁定**
 
 ## 当前定位
 
@@ -43,7 +42,7 @@ Producer、Critic、Harness、Root 的职责及现行 Team State 不变量以该
   该固定 recipe 后续出现模型质量与排序退化，因此不再作为当前冻结路线，也不改写其当时的技术/执行成功事实。
 - Plan 087 已在 exact BF16 1.7B、既有 pair/input 与冻结 v8、非 PEFT/非量化边界内完成 15 条自适应路线。Route O 更新末块内部
   输入变换/归一化九张量、`33,558,784` 个原参数后形成恢复合格研究候选；信号很小且共用 validation 参与路线选择，效果可靠性未确认。
-  下一研究工作包只冻结“另行规划并授权干净正式复现”的目标，具体精度对照、诊断与复现策略由届时 ExecPlan 决定。
+  Plan 090 已另行规划并冻结同 seed/第二 seed 干净复现与条件性 FP32 对照；当前仍未形成新的训练证据。
 - 训练控制须支持多个连续更新/观测点、同口径 validation 质量趋势、模型评价快照与完整恢复 checkpoint 分层，以及
   base/best/latest/少量关键转折点保留。base 继续作为研究 incumbent，只有同口径优于 base 的训练结果才成为目标候选；
   未优于 base 时诚实记录 no-improvement。当前研究不要求候选直接达到产品 GO，开发期 validation 不冒充 M3-C2 或 unseen 证据。
@@ -79,7 +78,8 @@ M3-B1c 正式分阶段训练与工件回收          │
         Plan 082 云端连续训练与候选形成（已完成；`VALID_NO_IMPROVEMENT`，0 Pod，用户决定保留卷且仍未删除）
                        ↓
         Plan 087 云端自适应原参数路线搜索（已完成；`PROMISING_CANDIDATE_RETAINED`，0 Pod）
-                       ↓ 另行规划并授权 Route O 干净正式复现
+                       ↓
+        Plan 090 Route O 干净复现与稳定性确认（已规划；阶段 A 未开始）
                        ╳
                  M3-D 端到端收口（未解锁）
 ```
@@ -350,6 +350,23 @@ S3-compatible API manifest 驱动续传并校验；本轮因 US-TX-3 不受支�
 产品启用或 M3-D。详细跨路线原因见
 [`2026-08-26 Publication Critic 模型路线结果与根因分析`](../research/2026-08-26-publication-critic-training-route-outcome-analysis.md)。
 
+#### Plan 090：Route O 干净复现与稳定性确认（已规划）
+
+**任务合同**：[`Plan 090 ExecPlan`](../../plan/090-publication-critic-route-o-clean-reproduction-execplan.md)。
+
+**目标与顺序**：保持 exact 1.7B、冻结 v8/pair/input、Route O 九张量与原 BF16 recipe 不变，从 exact base 和独立空间先执行原 seed
+`20260901` 干净复现；通过预冻结整体口径后，必须执行第二 seed `20260902`。只有两个 BF16 seed 均保持一致方向，且余额足以完成完整
+更新—比较—保存—止费闭环时，才运行一次匹配的真实 FP32 原参数更新对照。现有 Route O checkpoint 只用于 no-update 统一诊断，不能作为
+Plan 090 训练起点；不搜索新 Route、超参数或 update。
+
+**资源与授权门**：阶段 A 只做非付费准备、预冻结和轻量验证，提交并经审查者明确批准后才进入阶段 B。阶段 B 的完整正式确认序列绑定同一
+exact US-TX-3 L40S Pod 与现有 57GB `mwemzrn33y`，同时最多一个计费 Pod；6 USD 是新增费用硬上限，实际安全额度以 live 余额扣除未结费用
+和必要终态余量后的较低值为准。网络卷不得新建、扩容或删除，Plan 082/087 roots 只读；最终必须 0 Pod、compute `$0/h`。
+
+**当前状态与边界**：ExecPlan 已完成，阶段 A 尚未实施，付费门关闭。正式终态为 `ROUTE_O_CONFIRMATION_PASS`、
+`ROUTE_O_CONFIRMATION_NO_GO` 或 `INCONCLUSIVE_INFRASTRUCTURE`；三者都只回答复现任务，不授予独立泛化、unseen、M3-C1/M3-C2、
+产品启用或 M3-D 资格。三个可信终态均表示 Plan 090 执行目标完成；基础设施终态只表示模型问题未得到回答。
+
 ### D 阶段：端到端收口
 
 #### M3-D：端到端收口
@@ -366,9 +383,8 @@ S3-compatible API manifest 驱动续传并校验；本轮因 US-TX-3 不受支�
 - 相关正确性测试纳入既有测试体系，必要测评可复跑并自动归档；
 - 完成证据归档到 `doc/WBS-COMPLETED.md`，本页只保留最终产品事实和后续仍有效的边界。
 
-**当前状态**：Plan 073 / M3-C2 为 `NO-GO`，Plan 079 为 `4B_BASE_QUALITY_NO_GO`，Plan 082 为
-`VALID_NO_IMPROVEMENT`；Plan 087 为 `PROMISING_CANDIDATE_RETAINED`，但 Route O 尚未证明效果可靠。本阶段仍未解锁或启动，三期没有
-最终模型、threshold、本地运行配置或产品资格；下一研究工作包是另行规划并授权的干净正式复现。
+**当前状态**：Plan 087 为 `PROMISING_CANDIDATE_RETAINED`，但 Route O 尚未证明效果可靠；Plan 090 已规划该干净正式复现，阶段 A
+尚未开始。本阶段仍未解锁或启动，三期没有最终模型、threshold、本地运行配置或产品资格。
 
 ## 串并行与资源关系
 
@@ -384,8 +400,8 @@ S3-compatible API manifest 驱动续传并校验；本轮因 US-TX-3 不受支�
   不写/清理共享 Cargo target，也不以 Plan 079 卷为前置。Plan 082 已完成真实正式轮、GPU 专项验收和大型资产交接，训练 Pod 与一次性
   transfer Pod 均已释放并确认 compute 止费；最终验收已通过，用户本人决定继续保留网络卷 `mwemzrn33y`，该卷当前仍未删除。
 - Plan 087 已结束并释放全部 Pod，当前不占本地 Cargo build lock、Docker、真实本地模型或云 compute；用户决定保留的 57GB
-  `mwemzrn33y` 网络卷继续计费，未经授权不得删除。后续复现须以新任务重新授权；真实本地模型、
-  Docker 与重型 Cargo 仍按根 `AGENTS.md` 全局串行。
+  `mwemzrn33y` 网络卷继续计费，未经授权不得删除。Plan 090 只使用该卷与云端 L40S，不占本地重型资源；阶段 A 非付费，阶段 B 仍由
+  审查者门控。真实本地模型、Docker 与重型 Cargo 仍按根 `AGENTS.md` 全局串行。
 - 三期与已经正式收口的方向 1 没有产品依赖。如果未来重新启动方向 1，普通工作仍可并行安排，但共享 API 预算、
   本地 GPU、Docker、构建锁和磁盘时必须显式错峰。
 - M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、M3-C2、M3-D 各自对应一个任务级 plan；
@@ -474,7 +490,8 @@ S3-compatible API manifest 驱动续传并校验；本轮因 US-TX-3 不受支�
   S3 回传和删卷等待费用另行持续报告；任务总累计费用首次达到 10 USD 时非阻断告警。Plan 082 正式 Pod 只能在 GPU 专项审查确认无需
   再用后释放，任务网络卷删除还须用户本人另行明确人工批准。
 - Plan 087 的阶段 B 外部动作与 9 USD 授权已经随 `PROMISING_CANDIDATE_RETAINED / ZERO_POD` 终态关闭；剩余预算不转移。Route O
-  复现、继续训练、云资源、权重回传、unseen 或产品动作都须另建任务并取得授权；现有网络卷仍不得擅自删除。
+  历史搜索或其它外部动作授权不再有效。Plan 090 已作为新任务冻结 6 USD 上限、US-TX-3 单张 L40S、现有卷挂载和必要小型回传范围；
+  只有非付费阶段 A 经审查者明确批准后付费授权才生效。换区/换卡、卷扩容/新建/删除、unseen 或产品动作仍须新的明确授权。
 - Plan 068、Plan 071 与 Plan 073 的一次性授权已随本地交接、真实推理、资格/联合横评、独立验收和 exact winner 卷删除全部完成，
   不向后续任务延伸。M3-D、新候选或继续训练、云资源、远端上传、真实 API 与产品启用均须另建任务并取得相应授权。
 - 训练数据、权重、逐样本输出与私有运行材料留在 `eval-data/` 或仓库外；`training/` 只保存体积合规的轻量合同与数据。

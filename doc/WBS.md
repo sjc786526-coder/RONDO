@@ -1,8 +1,8 @@
 # RONDO 长程规划（WBS）
 
-最后更新：2026-08-26（方向 3 当前继续推进 Publication Critic 三期；Plan 082 已完成有效正式训练并取得
-`VALID_NO_IMPROVEMENT`；Plan 087 已完成预算内自适应搜索并取得 `PROMISING_CANDIDATE_RETAINED / ZERO_POD`，
-Route O 效果可靠性未确认，M3-D 保持锁定）
+最后更新：2026-08-26（方向 3 当前继续推进 Publication Critic 三期；Plan 087 已取得
+`PROMISING_CANDIDATE_RETAINED / ZERO_POD`，Route O 效果可靠性未确认；Plan 090 已完成规划，等待非付费阶段 A 实施，
+M3-D 保持锁定）
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段指针、跨方向关系、
 稳定工程边界和授权门；已完成成果与验收见 `doc/WBS-COMPLETED.md`，单次任务合同见 `plan/`，执行细节见
@@ -22,7 +22,7 @@ Route O 效果可靠性未确认，M3-D 保持锁定）
 | 0：量化测评基准 | 既有设施与首次 schema v7 正式 canary 已完成，当前无 active campaign | 保留设施；历史结果见 COMPLETED，新 campaign 须重新立项与授权 |
 | 1：Harness 优化 | **正式收口；当前无 active 工作包** | 当前不继续新增观测或内核/热路径优化；既有实现、设施与历史结果保留。未来可由用户另行决定是否重新立项，本次收口不作永久禁止 |
 | 2：本地审批模型 | **已收口，今后不再开启** | 最终结论为“保留为实验”；不改生产默认，不再规划后续工作包 |
-| 3：RONDO Multi | 第一、二期与第四期已完成，第四期终态为 `M4_W1_PASS / PHASE_4_COMPLETE`；**三期 Publication Critic 仍在推进，Plan 087 已完成** | Plan 087 终态为 `PROMISING_CANDIDATE_RETAINED / ZERO_POD`，Route O 是恢复合格但效果可靠性未确认的研究候选；下一研究工作包须另行规划并授权干净正式复现，不自动解锁 unseen、M3-C1/M3-C2、产品 GO 或 M3-D。第四期历史统一见 COMPLETED，不再保留后续必需工作包 |
+| 3：RONDO Multi | 第一、二期与第四期已完成，第四期终态为 `M4_W1_PASS / PHASE_4_COMPLETE`；**三期 Publication Critic 仍在推进，Plan 090 已规划** | Plan 090 只做 Route O 预冻结后的同 seed/第二 seed 干净复现与条件性 FP32 对照；阶段 A 为非付费准备，付费阶段须经审查者明确批准。不自动解锁 unseen、M3-C1/M3-C2、产品 GO 或 M3-D。第四期历史统一见 COMPLETED，不再保留后续必需工作包 |
 
 ### 方向命名口径
 
@@ -40,7 +40,9 @@ Route O 效果可靠性未确认，M3-D 保持锁定）
 网络卷 `mwemzrn33y`，该卷当前仍未删除，状态为 `FINAL_REVIEW_ACCEPTED / ZERO_POD / VOLUME_RETAINED_BY_USER_DECISION`。
 Plan 087 已完成 exact BF16 1.7B 的 A–O 15 条自适应路线并通过最终验收；Route O 更新末块内部输入变换/归一化九张量、
 共 `33,558,784` 个原参数，一次 full-cohort 更新后形成 `PROMISING_CANDIDATE_RETAINED`。该信号很小且使用同一 validation 自适应选择，
-目前只具备研究候选资格；下一 Publication Critic 工作包应另行规划并授权预冻结 Route O 的干净正式复现，Plan 087 剩余预算不转移。
+目前只具备研究候选资格。Plan 090 已按独立任务规划预冻结 Route O 的同 seed/第二 seed 干净复现与条件性 FP32 对照；当前只完成计划，
+非付费阶段 A 尚未执行，付费阶段仍由审查者门控。Plan 087 剩余预算和外部动作授权不转移；Plan 090 新增费用上限为 6 USD，并以执行时
+实时余额扣除必要止费/回传/短期卷保留余量后的较低安全额度为准。
 任务终态为 0 Pod、compute `$0/h`；57GB 卷 `mwemzrn33y` 保留且不得擅自删除，Plan 087 保守费用 `$3.009`，低于冻结上限
 `$8.9852646939`。
 方向 1 已正式收口，不作为方向 3 的前置或旁支。
@@ -101,6 +103,9 @@ Plan 087 已完成 exact BF16 1.7B 的 A–O 15 条自适应路线并通过最�
   `+0.00013894` 与 ROC AUC `+0.00140056`，关键 operating 指标未退化；checkpoint 已由不同 OS 进程 no-update 恢复，终态为
   `PROMISING_CANDIDATE_RETAINED / FINAL_REVIEW_ACCEPTED / ZERO_POD`。由于 15 条路线共用 validation 且没有干净重跑，效果可靠性、
   重复性与独立泛化未确认；后续只允许另行立项和授权的冻结 recipe 正式复现，不解锁 unseen、M3-C1/M3-C2、产品启用或 M3-D。
+- Plan 090 已冻结为 Route O 窄确认任务：先以原 seed `20260901` 做 BF16 干净复现，通过后才执行预冻结第二 seed `20260902`；两者均保持
+  一致方向时，可在完整闭环预算内增加一次真实 FP32 原参数更新对照。每条训练均从 exact base 和独立空间开始，不搜索 Route 或参数；
+  终态为 `ROUTE_O_CONFIRMATION_PASS`、`ROUTE_O_CONFIRMATION_NO_GO` 或 `INCONCLUSIVE_INFRASTRUCTURE`，均不直接解锁下游。
 
 如果未来重新启动方向 1，它仍与方向 3 保持产品源码和任务合同独立；本地重型 Cargo、Docker、真实本地模型
 加载/推理继续全局串行，并由实际进入实施的工作包协调共享资源。
