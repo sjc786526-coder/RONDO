@@ -2469,3 +2469,6 @@ formal retry 整改为 `d29e857`，最终独立验收提交为 `43cf0eeb3e1b4826
   删除卷或执行产品动作。该有效负向结论不授予独立 cohort、产品 GO、M3-C1/M3-C2 或 M3-D 解锁。
 - 最终独立验收未发现 High/Medium correctness 或 functionality finding，分别判定为“验收通过 / 任务目标完成”；报告见
   `agent_log/2026-08-27-023839-plan094-final-review.md`。
+- 主线整合以当时 `main@05021a8572` 为基准，完整保留 Plan 093 全 workspace 基线与 `training/` 目录规则，只把三份共享 WBS 文档中的
+  Plan 094 部分更新为最终状态；merge commit 为 `08bbf3e35c1668234f73de0dae7a776aeb6a126c`。main 复验 Plan 094/Plan 087 定向测试
+  `21/21` 及 compile/static/diff 门禁通过，没有重复重型流程。整合记录见 `agent_log/2026-08-27-024733-plan094-main-integration.md`。
