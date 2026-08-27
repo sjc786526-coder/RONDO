@@ -289,10 +289,15 @@ XXX用以下内容代替：
   `/home/sjc/desktop/RONDO/eval-data/publication-critic/plan090/rondo-plan090-stage-a-a2f8aa1/`（约 `6.6 MiB`）。source archive `22bbfd70…`
   绑定 `a2f8aa1` 并通过提取/exact-tree；data archive `6d98c163…` 重新生成并复验 content `2247dd09…`、unseen `0`。旧 `stage-a-final/`
   保留为历史资产，不再作为正式执行源。
+- 2026-08-26：整改复审确认首轮四项 finding 已闭合，另发现两个 BF16 已通过并恢复、正预算要求 FP32 时 exact Pod 丢失没有合法终态；
+  提交 `214f137` 只在 validated positive FP32 start branch 下放行 infrastructure INCONCLUSIVE，并保持零/低预算 PASS 与负面不可覆盖。
+- 2026-08-26：本轮聚焦测试 `16 passed`，定向 Ruff/format/compile/diff 通过，独立只读复核 `0 High / 0 Medium`。新 source-only namespace
+  `/home/sjc/desktop/RONDO/eval-data/publication-critic/plan090/rondo-plan090-stage-a-214f137/` 约 `5.0 MiB`，source archive `9f9685e9…`
+  绑定 `214f137` 并通过提取/exact-tree；按审查决定 data archive 不重建，继续复用 `rondo-plan090-stage-a-a2f8aa1/data-bundle.tar`。
 
 ### 当前工作
 
-- 阶段 A 审查 finding 已整改、重新提交并重建正式 source/data 资产；付费门保持关闭，等待审查者复验与明确付费阶段批准。
+- 阶段 A 两轮审查 finding 已整改、重新提交并重建正式 source；付费门保持关闭，等待审查者复验与明确付费阶段批准。
 
 ### 本任务剩余步骤
 
