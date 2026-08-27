@@ -1,5 +1,8 @@
 mod backend;
 mod client;
+mod cloud_config;
+mod cloud_scorer;
+mod cloud_template;
 #[cfg(test)]
 mod config_tests;
 mod contract;
@@ -15,6 +18,13 @@ mod wire;
 
 pub use client::ClientConfig;
 pub use client::PublicationCriticClient;
+pub use cloud_config::CLOUD_BACKEND_PROTOCOL;
+pub use cloud_config::CloudScorerConfig;
+pub use cloud_config::CloudScorerConfigError;
+pub use cloud_config::CloudScorerDescriptor;
+pub use cloud_config::cloud_reference_scoring_identity;
+pub use cloud_config::provider_managed_model_identity;
+pub use cloud_scorer::CloudPublicationScorer;
 pub use contract::Verdict;
 pub use failure::ContractFailure;
 pub use failure::CriticFailure;
