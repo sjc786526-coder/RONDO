@@ -263,15 +263,20 @@ XXX用以下内容代替：
 - 2026-08-27：退出保护性元数据复核显示并行 owner 已把 090 推进到 `7a6904e5` 并归档为 `zz-done/*`，另创建 clean 的 094
   worktree；main 也已推进到 `e30c8a3d`。本任务未参与这些变化，未读取其内容/diff/ignored 资产，也不清理 090/094；093 仍独立且未进入
   main。
+- 2026-08-27：独立审查确认产品修复、原任务保护、正式证据和项目外边界均无 correctness finding；唯一阻断是正式全量使用的
+  `jobs=1 + LLD1` 未持久化且日常默认仍为 jobs=6。经用户授权由审查者直接整改：日常默认改为 `jobs=2 + LLD1`、rustc slots=2，
+  两产品增加受跟踪的 `test-with-codex-v8-conservative`（jobs=1 + LLD1），合同测试补齐根外 target 与不可用计数器 fail-closed。
+- 2026-08-27：并发合同测试 7/7、两产品 Just 解析/格式通过；日常默认入口实际编译、链接并运行小包 18/18，采到
+  `rust-lld_count=1`，保守 checksum-V8 入口同包 18/18。用户决定沿用已有等效 jobs=1 + LLD1 的 14660/14660 正式全量，
+  不为纯配置持久化重复全 workspace。独立审查结论为 ACCEPT。
 
 ### 当前工作
 
-- 执行者实现、验证、动态 Plan 与实施日志已完成并提交 093 分支；等待计划制定者独立验收。
+- 技术实现、并发整改、必要验证与独立验收均已完成；等待用户批准主线集成和任务现场释放。
 
 ### 本任务剩余步骤
 
-- 执行者无剩余实现或验证步骤。计划制定者按队列合同独立验收；验收日志、`doc/WBS-COMPLETED.md` 与 Plan 验收收口由审查者在
-  093 分支处理。合并、推送、093 归档和 worktree 释放等待用户另行批准。
+- 无剩余实现、验证或验收步骤。`doc/WBS-COMPLETED.md`、主线合并、推送、093 分支归档和 worktree 释放等待用户另行批准后统一收口。
 
 ### 阻塞项
 
@@ -279,7 +284,7 @@ XXX用以下内容代替：
 
 ### 当前验收状态
 
-- `EXECUTOR_COMPLETE / REVIEW_PENDING / MAIN_INTEGRATION_PENDING / NOT_PUSHED`。
+- `REVIEW_ACCEPTED / TECHNICAL_GOAL_COMPLETE / MAIN_INTEGRATION_PENDING / NOT_PUSHED`。
 
 ### 交接边界
 
@@ -306,3 +311,5 @@ XXX用以下内容代替：
 | 012 | Realtime provider 的 websocket connect timeout 只限定每次 handshake，session 初始化与 sideband retry 保持原生命周期 | 冷全量暴露真实 pending connect 无上界；把 timeout 放在更外层会错误限制 Frameless session start 并改变 retry 语义 | codex-api、core | 已采纳 |
 | 013 | 正式唯一 HTTP 502 retry 在同轮第二次及新进程 `retries=0` 均通过，分类为瞬时 loopback proxy/调度波动；24 个 skip 按既有 ignore 原因保留 | 符合第 3.10 节对可接受环境波动的定点稳定复核要求，且冷/最终 skip 数量一致、无新增 skip | 结果判定、证据 | 已采纳 |
 | 014 | 093 的后续释放只移除 093 自身，不假设并行 worktree 集合静止；当前 090/094 均由其 owner 决定生命周期 | 执行期间 090 已归档并新增 094，证明最初“只剩 main/090”的现场假设会漂移；收口必须继续保护未知并行工作 | Git、并行隔离 | 已采纳 |
+| 015 | 日常 Cargo 固化为 `jobs=2 + LLD1`，rustc slots=2；完整 workspace 的受跟踪保守入口固化为 `jobs=1 + LLD1` | Plan 093 较高并发反复触发 PSI stop，正式全量依赖的安全组合不能只留在临时命令 | Cargo 配置、Just、资源安全 | 已采纳 |
+| 016 | 并发整改后不重复完整 workspace，沿用原等效 `jobs=1 + LLD1` 正式 JUnit，并以合同、入口解析和窄编译/链接验证持久配置 | 产品/测试/依赖/feature/target 路由未变；重复 14660 项不能额外证明编译调度，而窄编译实际观察到单一 rust-lld | 验收策略、证据 | 已采纳 |
