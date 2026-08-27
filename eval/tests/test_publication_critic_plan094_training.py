@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import shutil
 import sys
 import tempfile
 import unittest
@@ -43,6 +44,7 @@ from rondo_eval.publication_critic.full_model_training.plan094_controller import
 )
 from rondo_eval.publication_critic.full_model_training.plan094_finalize import (  # noqa: E402
     finalize_terminal,
+    qualify_terminal_checkpoints,
 )
 from rondo_eval.publication_critic.full_model_training.plan090_artifacts import (  # noqa: E402
     Plan090ArtifactStore,
@@ -836,6 +838,11 @@ class Plan094TrainingTests(unittest.TestCase):
             self.assertLessEqual(
                 len(controller.plan094_store.verified_checkpoint_ids()), 6
             )
+            qualification = qualify_terminal_checkpoints(
+                freeze=frozen_contract(),
+                controller_state=controller.state,
+                artifact_root=root,
+            )
             result = finalize_terminal(
                 freeze=frozen_contract(),
                 controller_state=controller.state,
@@ -892,6 +899,33 @@ class Plan094TrainingTests(unittest.TestCase):
                     artifact_root=root,
                     resource_state=result["resource_state"],
                     terminal_budget_snapshot=_budget(cost=0.2, projected=0.0),
+                )
+            remaining = set(controller.plan094_store.verified_checkpoint_ids())
+            self.assertTrue(remaining)
+            shutil.rmtree(root / "recovery-checkpoints")
+            qualified_result = finalize_terminal(
+                freeze=frozen_contract(),
+                controller_state=controller.state,
+                artifact_root=root,
+                resource_state=result["resource_state"],
+                terminal_budget_snapshot=_budget(cost=0.2, projected=0.0),
+                checkpoint_qualification=qualification,
+            )
+            self.assertEqual(qualified_result["outcome"], result["outcome"])
+            tampered = copy.deepcopy(qualification)
+            checkpoint_id = next(iter(tampered["owned_checkpoints"]))
+            tampered["owned_checkpoints"][checkpoint_id] = "0" * 64
+            with self.assertRaisesRegex(
+                FullModelTrainingError,
+                "plan094_terminal_checkpoint_qualification_invalid",
+            ):
+                finalize_terminal(
+                    freeze=frozen_contract(),
+                    controller_state=controller.state,
+                    artifact_root=root,
+                    resource_state=result["resource_state"],
+                    terminal_budget_snapshot=_budget(cost=0.2, projected=0.0),
+                    checkpoint_qualification=tampered,
                 )
 
 

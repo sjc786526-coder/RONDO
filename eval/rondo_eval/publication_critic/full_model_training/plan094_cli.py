@@ -55,7 +55,7 @@ from .plan094_contract import (
     validate_run_spec,
 )
 from .plan094_controller import Plan094ContinuousTrainingController, validate_runtime_identity
-from .plan094_finalize import finalize_terminal
+from .plan094_finalize import finalize_terminal, qualify_terminal_checkpoints
 
 PROCESS_RECEIPT_SCHEMA = "rondo-publication-critic-plan094-process-receipt-v1"
 
@@ -159,12 +159,19 @@ def _parser() -> argparse.ArgumentParser:
     _add_run_arguments(resume)
     resume.add_argument("--checkpoint-id", required=True)
 
+    qualification = commands.add_parser("qualify-terminal-checkpoints")
+    qualification.add_argument("--freeze", type=Path, required=True)
+    qualification.add_argument("--controller-state", type=Path, required=True)
+    qualification.add_argument("--artifact-root", type=Path, required=True)
+    qualification.add_argument("--output", type=Path, required=True)
+
     terminal = commands.add_parser("finalize-terminal")
     terminal.add_argument("--freeze", type=Path, required=True)
     terminal.add_argument("--controller-state", type=Path, required=True)
     terminal.add_argument("--artifact-root", type=Path, required=True)
     terminal.add_argument("--resource-state", type=Path, required=True)
     terminal.add_argument("--terminal-budget", type=Path, required=True)
+    terminal.add_argument("--checkpoint-qualification", type=Path)
     terminal.add_argument("--outcome")
     terminal.add_argument("--reason")
     terminal.add_argument("--output", type=Path, required=True)
@@ -318,6 +325,16 @@ def _dispatch(args: argparse.Namespace) -> Any:
         return result
     if args.command in {"start", "resume"}:
         return _run(args, recovery=args.command == "resume")
+    if args.command == "qualify-terminal-checkpoints":
+        _require_paid_gate()
+        _require_task_owned_paths(args.output)
+        result = qualify_terminal_checkpoints(
+            freeze=read_json(args.freeze),
+            controller_state=read_json(args.controller_state),
+            artifact_root=args.artifact_root,
+        )
+        write_exclusive(args.output, pretty_json_bytes(result))
+        return result
     if args.command == "finalize-terminal":
         _require_task_owned_paths(args.output)
         result = finalize_terminal(
@@ -326,6 +343,11 @@ def _dispatch(args: argparse.Namespace) -> Any:
             artifact_root=args.artifact_root,
             resource_state=read_json(args.resource_state),
             terminal_budget_snapshot=read_json(args.terminal_budget),
+            checkpoint_qualification=(
+                read_json(args.checkpoint_qualification)
+                if args.checkpoint_qualification is not None
+                else None
+            ),
             outcome=args.outcome,
             reason=args.reason,
         )

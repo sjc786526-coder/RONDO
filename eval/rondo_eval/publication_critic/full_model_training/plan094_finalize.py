@@ -21,6 +21,9 @@ from .plan094_contract import (
 from .plan094_controller import CONTROLLER_SCHEMA, validate_runtime_identity
 
 TERMINAL_SCHEMA = "rondo-publication-critic-plan094-terminal-result-v1"
+CHECKPOINT_QUALIFICATION_SCHEMA = (
+    "rondo-publication-critic-plan094-terminal-checkpoint-qualification-v1"
+)
 MODEL_OUTCOMES = {
     "ROUTE_O_MATERIAL_CANDIDATE_RETAINED",
     "ROUTE_O_VALID_NO_MATERIAL_IMPROVEMENT",
@@ -35,6 +38,7 @@ def finalize_terminal(
     artifact_root: Path,
     resource_state: Mapping[str, Any],
     terminal_budget_snapshot: Mapping[str, Any],
+    checkpoint_qualification: Mapping[str, Any] | None = None,
     outcome: str | None = None,
     reason: str | None = None,
 ) -> dict[str, Any]:
@@ -103,63 +107,22 @@ def finalize_terminal(
             or selected_result["checkpoint"].get("source_external") is not False
         ):
             raise FullModelTrainingError("plan094_terminal_checkpoint_missing")
-        try:
-            selected_checkpoint = store.verify_checkpoint(selected_checkpoint_id)
-        except FullModelTrainingError as exc:
-            raise FullModelTrainingError(
-                "plan094_terminal_checkpoint_missing"
-            ) from exc
-        if (
-            selected_checkpoint["content_sha256"]
-            != selected_result["checkpoint"]["content_sha256"]
-        ):
-            raise FullModelTrainingError("plan094_terminal_checkpoint_missing")
-        owned = store.verified_checkpoint_ids()
-        if len(owned) > contract["retention"]["maximum_owned_full_checkpoints"]:
-            raise FullModelTrainingError("plan094_terminal_retention_exceeded")
-        hard_role_ids = [
-            roles.get("material_candidate"),
-            roles.get("latest"),
-            roles.get("fresh_process_recovery"),
-            *roles.get("turning_points", []),
-        ]
-        for checkpoint_id in {
-            identifier
-            for identifier in hard_role_ids
-            if isinstance(identifier, str)
-        }:
-            retained_result = results_by_checkpoint.get(checkpoint_id)
-            if (
-                retained_result is None
-                or retained_result["checkpoint"].get("source_external") is not False
-            ):
-                raise FullModelTrainingError(
-                    "plan094_terminal_retained_checkpoint_missing"
-                )
-            try:
-                retained_checkpoint = store.verify_checkpoint(checkpoint_id)
-            except FullModelTrainingError as exc:
-                raise FullModelTrainingError(
-                    "plan094_terminal_retained_checkpoint_missing"
-                ) from exc
-            if (
-                retained_checkpoint["content_sha256"]
-                != retained_result["checkpoint"]["content_sha256"]
-            ):
-                raise FullModelTrainingError(
-                    "plan094_terminal_retained_checkpoint_missing"
-                )
-        for checkpoint_id, digest in state["plan094"][
-            "recovery_proven_checkpoints"
-        ].items():
-            try:
-                recovered_checkpoint = store.verify_checkpoint(checkpoint_id)
-            except FullModelTrainingError as exc:
-                raise FullModelTrainingError(
-                    "plan094_terminal_recovery_missing"
-                ) from exc
-            if recovered_checkpoint["content_sha256"] != digest:
-                raise FullModelTrainingError("plan094_terminal_recovery_missing")
+        if checkpoint_qualification is not None:
+            checkpoint_qualification = _validate_checkpoint_qualification(
+                checkpoint_qualification,
+                contract=contract,
+                state=state,
+                results_by_checkpoint=results_by_checkpoint,
+                selected_checkpoint_id=selected_checkpoint_id,
+            )
+        else:
+            _verify_live_terminal_checkpoints(
+                contract=contract,
+                state=state,
+                store=store,
+                results_by_checkpoint=results_by_checkpoint,
+                selected_checkpoint_id=selected_checkpoint_id,
+            )
     core = {
         "schema": TERMINAL_SCHEMA,
         "outcome": selected_outcome,
@@ -202,7 +165,256 @@ def finalize_terminal(
             "all_task_pods_released": True,
         },
     }
+    if checkpoint_qualification is not None:
+        core["checkpoint_qualification"] = checkpoint_qualification
     return {**core, "content_sha256": sha256_bytes(canonical_json_bytes(core))}
+
+
+def _verify_live_terminal_checkpoints(
+    *,
+    contract: Mapping[str, Any],
+    state: Mapping[str, Any],
+    store: Plan094ArtifactStore,
+    results_by_checkpoint: Mapping[str, Mapping[str, Any]],
+    selected_checkpoint_id: str,
+) -> None:
+    selected_result = results_by_checkpoint[selected_checkpoint_id]
+    try:
+        selected_checkpoint = store.verify_checkpoint(selected_checkpoint_id)
+    except FullModelTrainingError as exc:
+        raise FullModelTrainingError("plan094_terminal_checkpoint_missing") from exc
+    if (
+        selected_checkpoint["content_sha256"]
+        != selected_result["checkpoint"]["content_sha256"]
+    ):
+        raise FullModelTrainingError("plan094_terminal_checkpoint_missing")
+    owned = store.verified_checkpoint_ids()
+    if len(owned) > contract["retention"]["maximum_owned_full_checkpoints"]:
+        raise FullModelTrainingError("plan094_terminal_retention_exceeded")
+    roles = state["plan094"]["checkpoint_roles"]
+    hard_role_ids = [
+        roles.get("material_candidate"),
+        roles.get("latest"),
+        roles.get("fresh_process_recovery"),
+        *roles.get("turning_points", []),
+    ]
+    for checkpoint_id in {
+        identifier for identifier in hard_role_ids if isinstance(identifier, str)
+    }:
+        retained_result = results_by_checkpoint.get(checkpoint_id)
+        if (
+            retained_result is None
+            or retained_result["checkpoint"].get("source_external") is not False
+        ):
+            raise FullModelTrainingError(
+                "plan094_terminal_retained_checkpoint_missing"
+            )
+        try:
+            retained_checkpoint = store.verify_checkpoint(checkpoint_id)
+        except FullModelTrainingError as exc:
+            raise FullModelTrainingError(
+                "plan094_terminal_retained_checkpoint_missing"
+            ) from exc
+        if (
+            retained_checkpoint["content_sha256"]
+            != retained_result["checkpoint"]["content_sha256"]
+        ):
+            raise FullModelTrainingError(
+                "plan094_terminal_retained_checkpoint_missing"
+            )
+    for checkpoint_id, digest in state["plan094"][
+        "recovery_proven_checkpoints"
+    ].items():
+        try:
+            recovered_checkpoint = store.verify_checkpoint(checkpoint_id)
+        except FullModelTrainingError as exc:
+            raise FullModelTrainingError("plan094_terminal_recovery_missing") from exc
+        if recovered_checkpoint["content_sha256"] != digest:
+            raise FullModelTrainingError("plan094_terminal_recovery_missing")
+
+
+def qualify_terminal_checkpoints(
+    *,
+    freeze: Mapping[str, Any],
+    controller_state: Mapping[str, Any],
+    artifact_root: Path,
+) -> dict[str, Any]:
+    """Deep-verify retained weights before zero-Pod closure and freeze a small receipt."""
+
+    contract = validate_freeze(freeze)
+    store = Plan094ArtifactStore(Path(artifact_root))
+    state = _validate_controller_state(contract, controller_state, store)
+    decision = state["plan094"].get("stop_decision")
+    if (
+        state.get("status") != "terminal"
+        or not isinstance(decision, Mapping)
+        or decision.get("terminal") is not True
+        or decision.get("outcome") not in MODEL_OUTCOMES
+        or not state["plan094"].get("recovery_proven_checkpoints")
+        or state["plan094"].get("terminal_deferred_for_recovery") is not False
+    ):
+        raise FullModelTrainingError("plan094_terminal_model_closure_incomplete")
+    roles = state["plan094"]["checkpoint_roles"]
+    selected_checkpoint_id = (
+        roles.get("material_candidate")
+        if decision["outcome"] == "ROUTE_O_MATERIAL_CANDIDATE_RETAINED"
+        else roles.get("latest")
+    )
+    results_by_checkpoint = {
+        checkpoint_id: store.read_evaluation_result(checkpoint_id)
+        for checkpoint_id in state["plan094"]["evaluation_overlays"]
+    }
+    expected = _required_terminal_checkpoints(
+        state,
+        results_by_checkpoint=results_by_checkpoint,
+        selected_checkpoint_id=selected_checkpoint_id,
+    )
+    _verify_live_terminal_checkpoints(
+        contract=contract,
+        state=state,
+        store=store,
+        results_by_checkpoint=results_by_checkpoint,
+        selected_checkpoint_id=selected_checkpoint_id,
+    )
+    owned = store.verified_checkpoint_ids()
+    if any(checkpoint_id not in results_by_checkpoint for checkpoint_id in owned):
+        raise FullModelTrainingError(
+            "plan094_terminal_checkpoint_qualification_invalid"
+        )
+    verified = {
+        checkpoint_id: results_by_checkpoint[checkpoint_id]["checkpoint"][
+            "content_sha256"
+        ]
+        for checkpoint_id in owned
+    }
+    if any(
+        verified.get(identifier) != digest
+        for identifier, digest in expected.items()
+    ):
+        raise FullModelTrainingError(
+            "plan094_terminal_checkpoint_qualification_invalid"
+        )
+    core = {
+        "schema": CHECKPOINT_QUALIFICATION_SCHEMA,
+        "freeze_sha256": freeze_sha256(contract),
+        "controller_state_sha256": sha256_bytes(canonical_json_bytes(state)),
+        "artifact_namespace": state["plan094"]["run_spec"]["artifact_namespace"],
+        "owned_checkpoints": verified,
+        "required_checkpoint_ids": sorted(expected),
+    }
+    return {**core, "content_sha256": sha256_bytes(canonical_json_bytes(core))}
+
+
+def _required_terminal_checkpoints(
+    state: Mapping[str, Any],
+    *,
+    results_by_checkpoint: Mapping[str, Mapping[str, Any]],
+    selected_checkpoint_id: Any,
+) -> dict[str, str]:
+    if not isinstance(selected_checkpoint_id, str):
+        raise FullModelTrainingError("plan094_terminal_checkpoint_missing")
+    roles = state["plan094"]["checkpoint_roles"]
+    identifiers = {
+        identifier
+        for identifier in (
+            selected_checkpoint_id,
+            roles.get("material_candidate"),
+            roles.get("latest"),
+            roles.get("fresh_process_recovery"),
+            *roles.get("turning_points", []),
+            *state["plan094"]["recovery_proven_checkpoints"],
+        )
+        if isinstance(identifier, str)
+    }
+    expected: dict[str, str] = {}
+    for checkpoint_id in identifiers:
+        result = results_by_checkpoint.get(checkpoint_id)
+        if (
+            result is None
+            or result["checkpoint"].get("source_external") is not False
+        ):
+            raise FullModelTrainingError("plan094_terminal_checkpoint_missing")
+        digest = result["checkpoint"].get("content_sha256")
+        recovered = state["plan094"]["recovery_proven_checkpoints"].get(
+            checkpoint_id
+        )
+        if recovered is not None and recovered != digest:
+            raise FullModelTrainingError("plan094_terminal_recovery_missing")
+        expected[checkpoint_id] = digest
+    return expected
+
+
+def _validate_checkpoint_qualification(
+    value: Any,
+    *,
+    contract: Mapping[str, Any],
+    state: Mapping[str, Any],
+    results_by_checkpoint: Mapping[str, Mapping[str, Any]],
+    selected_checkpoint_id: Any,
+) -> dict[str, Any]:
+    required_fields = {
+        "schema",
+        "freeze_sha256",
+        "controller_state_sha256",
+        "artifact_namespace",
+        "owned_checkpoints",
+        "required_checkpoint_ids",
+        "content_sha256",
+    }
+    if not isinstance(value, Mapping) or set(value) != required_fields:
+        raise FullModelTrainingError(
+            "plan094_terminal_checkpoint_qualification_invalid"
+        )
+    core = {key: item for key, item in value.items() if key != "content_sha256"}
+    owned = value.get("owned_checkpoints")
+    if (
+        value.get("schema") != CHECKPOINT_QUALIFICATION_SCHEMA
+        or value.get("content_sha256") != sha256_bytes(canonical_json_bytes(core))
+        or value.get("freeze_sha256") != freeze_sha256(contract)
+        or value.get("controller_state_sha256")
+        != sha256_bytes(canonical_json_bytes(state))
+        or value.get("artifact_namespace")
+        != state["plan094"]["run_spec"]["artifact_namespace"]
+        or not isinstance(owned, Mapping)
+        or len(owned) > contract["retention"]["maximum_owned_full_checkpoints"]
+        or any(
+            not isinstance(key, str) or not _sha256(digest)
+            for key, digest in owned.items()
+        )
+    ):
+        raise FullModelTrainingError(
+            "plan094_terminal_checkpoint_qualification_invalid"
+        )
+    expected = _required_terminal_checkpoints(
+        state,
+        results_by_checkpoint=results_by_checkpoint,
+        selected_checkpoint_id=selected_checkpoint_id,
+    )
+    if (
+        value.get("required_checkpoint_ids") != sorted(expected)
+        or any(
+            owned.get(identifier) != digest
+            for identifier, digest in expected.items()
+        )
+        or any(
+            checkpoint_id not in results_by_checkpoint
+            or results_by_checkpoint[checkpoint_id]["checkpoint"].get("content_sha256")
+            != digest
+            for checkpoint_id, digest in owned.items()
+        )
+    ):
+        raise FullModelTrainingError(
+            "plan094_terminal_checkpoint_qualification_invalid"
+        )
+    return json.loads(json.dumps(value))
+
+
+def _sha256(value: Any) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )
 
 
 def _validate_controller_state(
@@ -307,9 +519,11 @@ def _nonnegative(value: Any) -> bool:
 
 
 __all__ = [
+    "CHECKPOINT_QUALIFICATION_SCHEMA",
     "MODEL_OUTCOMES",
     "OUTCOMES",
     "TERMINAL_SCHEMA",
     "finalize_terminal",
+    "qualify_terminal_checkpoints",
     "validate_resource_state",
 ]

@@ -183,16 +183,23 @@ Retain permanent small overlays/receipts and at most six role-deduplicated full
 checkpoints, the complete trajectory's hard upper bound.  Large weights remain
 on the network volume.  Return only the
 small controller/result, budget/resource receipts, and concise logs.  Once no
-GPU-dependent check remains, immediately release every Plan 094 Pod with the
-Plan 087 terminal helper and live-query until Pod count is zero and compute
-rate is 0 USD/hour.  Keep the volume and record its ID, US-TX-3, size (57-80 GB)
+GPU-dependent check remains, run `qualify-terminal-checkpoints` once while the
+mounted full checkpoint trees remain readable.  Return its small receipt with
+the controller/evaluation overlays; it binds the exact controller-state hash,
+all live owned checkpoint hashes, and every terminal/recovery role.  Immediately
+release every Plan 094 Pod with the Plan 087 terminal helper and live-query
+until Pod count is zero and compute rate is 0 USD/hour.  Keep the volume and
+record its ID, US-TX-3, size (57-80 GB)
 and rate.  Do not cancel the detached lifecycle guard: its later idempotent
 terminal pass supplies a second exact zero-Pod confirmation if normal work
 finishes before the absolute trigger.
 
-Only after zero-compute closure run `finalize-terminal`.  Its positive/negative
-branches require a formal run, replayed overlay history, a fresh-process
-restore-and-continue proof, monotonic budget state, and the zero-Pod resource
-receipt.  `INCONCLUSIVE` cannot override an already valid material or negative
-model decision.  Local documentation and review never justify restarting a
-Pod.
+Only after zero-compute closure run `finalize-terminal`, passing the pre-release
+checkpoint qualification receipt when the local small handoff intentionally
+omits weights.  The finalizer replays the formal overlay history and binds that
+receipt to the exact controller state instead of pretending the retained volume
+is locally mounted after Pod deletion.  Its positive/negative branches still
+require a formal run, a fresh-process restore-and-continue proof, monotonic
+budget state, and the zero-Pod resource receipt.  `INCONCLUSIVE` cannot override
+an already valid material or negative model decision.  Local documentation and
+review never justify restarting a Pod.
