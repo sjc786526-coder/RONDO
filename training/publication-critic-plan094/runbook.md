@@ -188,8 +188,12 @@ mounted full checkpoint trees remain readable.  Return its small receipt with
 the controller/evaluation overlays; it binds the exact controller-state hash,
 all live owned checkpoint hashes, and every terminal/recovery role.  Immediately
 release every Plan 094 Pod with the Plan 087 terminal helper and live-query
-until Pod count is zero and compute rate is 0 USD/hour.  Keep the volume and
-record its ID, US-TX-3, size (57-80 GB)
+until Pod count is zero and compute rate is 0 USD/hour.  When the operator
+explicitly requires a pre-release review, first return the qualification receipt
+and final small handoff, run no further GPU-dependent work, and retain the Pod
+only until review acceptance or the immutable lifecycle trigger, whichever comes
+first; then perform the same release.  Keep the volume and record its ID,
+US-TX-3, size (57-80 GB)
 and rate.  Do not cancel the detached lifecycle guard: its later idempotent
 terminal pass supplies a second exact zero-Pod confirmation if normal work
 finishes before the absolute trigger.

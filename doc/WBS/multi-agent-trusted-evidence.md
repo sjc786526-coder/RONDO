@@ -1,8 +1,8 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
 最后更新：2026-08-27 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
-状态：**第一期、第二期已完成；Publication Critic 三期 Plan 094 阶段 A 已通过最终技术验收，用户与审查者已打开阶段 B，当前为
-`STAGE_B_APPROVED / PRECREATE_REFRESH_COMPLETE / ZERO_POD / WAITING_FOR_US_TX_3_L40S`。任务将沿 Route O 连续训练轨迹判断 Plan 090 的微弱重复信号能否扩大为实质
+状态：**第一期、第二期已完成；Publication Critic 三期 Plan 094 已形成
+`ROUTE_O_VALID_NO_MATERIAL_IMPROVEMENT / POD_RETAINED_PENDING_PRE_RELEASE_REVIEW`。Plan 090 的微弱重复信号没有沿连续轨迹扩大为实质
 better-than-base 候选；仍不验证独立 cohort、unseen 或产品资格，M3-D 保持锁定**
 
 ## 当前定位
@@ -86,7 +86,7 @@ M3-B1c 正式分阶段训练与工件回收          │
                        ↓
         Plan 090 Route O 干净复现与执行/数值重复确认（已完成；`ROUTE_O_CONFIRMATION_PASS`，0 Pod）
                        ↓
-        Plan 094 Route O 连续训练与实质增益候选形成（阶段 B 已批准；等待 US-TX-3 L40S）
+        Plan 094 Route O 连续训练与实质增益候选形成（有效负向终态；等待 Pod 预释放审查）
                        ↓
                  M3-D 端到端收口（未解锁）
 ```
@@ -376,7 +376,7 @@ Boundary `+0.00620638`，未通过同一 rubric；该单条完整精度路径对
 不授予随机 seed 稳定、独立 cohort 泛化、unseen、M3-C1/M3-C2、产品启用或 M3-D 资格。Plan 090 预算与外部动作授权已关闭；当前没有
 可继承授权。
 
-#### Plan 094：Route O 连续训练与实质增益候选形成（阶段 B 已批准；等待 US-TX-3 L40S）
+#### Plan 094：Route O 连续训练与实质增益候选形成（有效负向终态；等待 Pod 预释放审查）
 
 **任务合同**：[`Plan 094 ExecPlan`](../../plan/094-publication-critic-route-o-continuous-training-execplan.md)。
 
@@ -388,8 +388,8 @@ Boundary `+0.00620638`，未通过同一 rubric；该单条完整精度路径对
 
 **终态与授权**：合法终态为 `ROUTE_O_MATERIAL_CANDIDATE_RETAINED`、`ROUTE_O_VALID_NO_MATERIAL_IMPROVEMENT` 或诚实的
 `INCONCLUSIVE`；前两个都完成研究目标。非付费阶段 A 已通过最终技术验收；用户已解除付费暂停，审查者已明确批准阶段 B，US-TX-3 单 L40S、
-既有卷和不超过 5 USD 的条件授权已生效。全部任务 Pod在终态后立即释放并确认 compute `$0/h`，网络卷继续保留。该任务不释放 unseen、不授予独立
-cohort/产品资格，也不解锁 M3-D。
+既有卷和不超过 5 USD 的条件授权已生效。Pod 依赖工作和预释放审查完成后释放全部任务 Pod并确认 compute `$0/h`，网络卷继续保留；绝对
+lifecycle guard 始终提供硬止费上界。该任务不释放 unseen、不授予独立 cohort/产品资格，也不解锁 M3-D。
 
 ### D 阶段：端到端收口
 
@@ -407,11 +407,11 @@ cohort/产品资格，也不解锁 M3-D。
 - 相关正确性测试纳入既有测试体系，必要测评可复跑并自动归档；
 - 完成证据归档到 `doc/WBS-COMPLETED.md`，本页只保留最终产品事实和后续仍有效的边界。
 
-**当前状态**：Plan 094 已冻结 checkpoint-first、完整续训、material/停止/保留和预算/资源收口合同，并完成轻量 fake/focused
-阶段 A 门禁及宿主侧绝对 Pod lifecycle 止费兜底；最终小型 guard result 在 exact 0 Pod 校验后记录真实完成时刻并拒绝超期成功。尚未运行真实
-模型或形成新训练结果。阶段 A 只读 live 快照观察到 0 Pod、US-TX-3 的 57GB 卷 `mwemzrn33y`、余额
-`$5.4443864251`、账户卷费率 `$0.006/h`、Secure L40S `$0.99/h` 且当时无库存。阶段 B 创建前已重新刷新为余额 `$5.4333030917`、
-0 Pod、同一 57GB 卷与费率、Secure L40S `$0.99/h` 且仍无库存；现使用既有抢卡入口等待，尚未运行真实模型或形成研究终态。
+**当前状态**：Plan 094 commissioning 已证明真实 Route O update、checkpoint-first overlay 与 fresh-process 恢复继续。guarded Plan 090
+import 因历史 cursor 不兼容按合同拒绝，clean formal 使用预冻结 exact-base fallback；step 1--4 均无 material/strict/operating event，
+step 4 形成 `ROUTE_O_VALID_NO_MATERIAL_IMPROVEMENT`。卷上 steps 1/3/4 checkpoint 已深读资格化，小型无权重结果已回传；既有卷只按需
+从 57GB 扩到 70GB。唯一 Pod按用户顺序保留等待预释放审查，`$5` 硬上限和绝对 lifecycle guard 继续生效；接受后释放并完成 zero-Pod
+finalizer。正式结果不读取 unseen，也不改变产品或 M3-D 边界。
 
 ## 串并行与资源关系
 
@@ -426,8 +426,8 @@ cohort/产品资格，也不解锁 M3-D。
 - Plan 081 已在独立 worktree 内完成 Publication Critic Python/训练合同与三期 WBS，不运行 Cargo、Docker、真实模型/GPU或云计算，
   不写/清理共享 Cargo target，也不以 Plan 079 卷为前置。Plan 082 已完成真实正式轮、GPU 专项验收和大型资产交接，训练 Pod 与一次性
   transfer Pod 均已释放并确认 compute 止费；最终验收已通过，用户本人决定继续保留网络卷 `mwemzrn33y`，该卷当前仍未删除。
-- Plan 087/090 均已结束并释放全部 Pod，当前不占本地 Cargo build lock、Docker、真实本地模型或云 compute。用户决定保留的 57GB
-  `mwemzrn33y` 网络卷继续计费，未经授权不得删除；其中只保留 Plan 090 第二 BF16 恢复合格 checkpoint 与既有 Plan 082/087 正式资产。
+- Plan 087/090 均已结束并释放全部 Pod，当前不占本地 Cargo build lock、Docker、真实本地模型或云 compute。用户决定保留的
+  `mwemzrn33y` 网络卷已由 Plan 094 按需扩到 70GB 并继续计费，未经授权不得删除；Plan 082/087/090 既有根保持只读。
   真实本地模型、Docker 与重型 Cargo 仍按根 `AGENTS.md` 全局串行。
 - Plan 094 阶段 A 只运行轻量 Python/static/fake/focused 门禁，不使用 Plan 093 的共享 target、正式测试证据、构建锁、资源门或开发环境
   文档；可与 Plan 093 冷全 workspace 并行。审查者批准后的云端单 L40S 不占本地重型资源槽；若意外需要 Cargo、Docker 或本地真实模型，
@@ -521,8 +521,9 @@ cohort/产品资格，也不解锁 M3-D。
   再用后释放，任务网络卷删除还须用户本人另行明确人工批准。
 - Plan 087/090 外部动作授权均已随各自 `ZERO_POD` 终态关闭，剩余预算不转移。Plan 090 保守费用 `$0.71`，低于 `$6` 硬上限；
   换区/换卡、继续训练、独立 cohort、卷扩容/新建/删除、unseen 或产品动作仍须新的明确任务与授权。
-- Plan 094 非付费阶段 A 已通过最终技术验收；用户已解除付费暂停，审查者已明确批准阶段 B。5 USD 内单张 US-TX-3 L40S、既有卷、必要上传和
-  exact snapshot 只读下载的条件授权现已生效。不得新建第二卷、删除现有卷、充值、读取 unseen、发布或执行产品动作；全部任务 Pod完成即释放。
+- Plan 094 已形成有效负向研究终态，当前只保留唯一 Pod等待用户要求的预释放审查；5 USD、绝对 lifecycle、单张 US-TX-3 L40S 和既有卷
+  边界继续有效。用户后续允许卷按需扩到 120GB，实际只扩到 70GB；收口预算另保留至少 6 小时卷费用。不得新建第二卷、删除现有卷、充值、
+  读取 unseen、发布或执行产品动作；预释放审查接受后立即完成 0 Pod 收口。
 - Plan 068、Plan 071 与 Plan 073 的一次性授权已随本地交接、真实推理、资格/联合横评、独立验收和 exact winner 卷删除全部完成，
   不向后续任务延伸。M3-D、新候选或继续训练、云资源、远端上传、真实 API 与产品启用均须另建任务并取得相应授权。
 - 训练数据、权重、逐样本输出与私有运行材料留在 `eval-data/` 或仓库外；`training/` 只保存体积合规的轻量合同与数据。

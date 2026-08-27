@@ -337,24 +337,38 @@ XXX用以下内容代替：
   用户暂停阶段 B 的决定保持有效，付费门未开启，尚未运行真实模型或形成研究终态。
 - 2026-08-27：用户明确解除付费暂停，审查者按指定队列确认“Plan 094 阶段 A 验收通过，批准进入付费阶段”。创建资源前的 live 刷新确认
   余额 `$5.4333030917`、0 Pod、57GB 卷 `mwemzrn33y` 位于 US-TX-3、账户卷费率 `$0.006/h`、Secure L40S `$0.99/h`，当时 L40S 无库存。
+- 2026-08-27：通过根抢卡入口创建并独立核验唯一 Pod `0bsry5tbei7p4o`：Secure US-TX-3 NVIDIA L40S、`$0.99/h`、冻结 image、单 GPU
+  与既有卷挂载均符合合同；宿主 lifecycle guard 固定最晚 `2026-08-27T11:17:42.117Z` 止费。空间上界确有需要时仅把卷从 57GB 扩至
+  70GB；用户后续放宽到 120GB 未使用，`$0.82` closure reserve 含完成后至少 6 小时卷保留的 `$0.06` 保守余量。
+- 2026-08-27：commissioning 已证明真实 Route O update、完整 checkpoint、checkpoint 后测评、fresh-process 恢复继续和小型回传。
+  guarded Plan 090 import 因历史 controller cursor 不兼容按合同拒绝，formal 使用预冻结 exact-base fallback 在 clean namespace 重建 step 1，
+  未拼接部分历史状态。
+- 2026-08-27：正式 step 1--4 均完成 checkpoint-first train/validation overlay；step 1 只重复 Plan 090 微弱信号，step 2--4 raw Boundary
+  转负且所有 meaningful event 均为 false。step 4 按预冻结规则形成 `ROUTE_O_VALID_NO_MATERIAL_IMPROVEMENT` /
+  `prefrozen_three_checkpoint_no_material_plateau`。这是有效负向研究终态，不重跑规避。
+- 2026-08-27：steps 1/3/4 三份保留 checkpoint 已在挂载卷上完成 terminal deep qualification；step 3 为 fresh-process recovery，step 4
+  为 latest。2,017,280-byte / 181-member 小型包 SHA-256 `a0b227bdc606e76c0e17b1500e9770665631f576b9d409d66e30a2f9b32e9ea4`
+  已回传并复核不含权重或 source/data tar；大型资产留在约 13.22GB 的远端 Plan 094 root。
 
 ### 当前工作
 
-- 阶段 B 已获用户与审查者双门批准；正在准备 clean 输入与生命周期预算，随后按库存状态使用既有抢卡入口。
+- 正式研究轨迹与全部 Pod 依赖验证已完成。按用户最新顺序，唯一 Pod 保留等待预释放审查；绝对 lifecycle guard 不取消。
 
 ### 本任务剩余步骤
 
-- 按阶段 B 完成真实调通、正式连续轨迹、合法研究终态、恢复/资产/资源收口、提交和最终独立验收。
+- 预释放审查接受后立即释放唯一 Pod，实时确认 exact 0 Pod / compute `$0/h`，随后仅用已回传小包与 qualification receipt 在本地运行
+  terminal finalizer；大型 checkpoint/权重继续留卷。
+- 收口最终结果、当前 WBS、完成历史和实施日志，运行相称轻量门禁并提交，再申请最终独立验收。
 - 本任务完成后冻结本计划；不在此安排独立 cohort、unseen、产品资格或 M3-D。
 
 ### 阻塞项
 
-- 阶段 A 无已知实现阻塞。Plan 093 正在冷全 workspace；本任务只运行轻量本地门禁，不与其竞争重型资源。
-- 阶段 B 双门已打开；创建资源前刷新时 US-TX-3 Secure L40S 无库存，使用根规则指定的单一抢卡脚本等待，不改变区域、GPU 或并发边界。
+- 无实现阻塞。Plan 093 正在冷全 workspace；本任务只运行轻量本地门禁，不与其竞争重型资源。
+- 正常资源释放等待预释放审查；若审查未在绝对 guard trigger 前返回，guard 按 5 USD 硬边界优先自动释放 Pod，不等待人工操作。
 
 ### 当前验收状态
 
-- `STAGE_B_APPROVED / PRECREATE_REFRESH_COMPLETE / ZERO_POD / WAITING_FOR_US_TX_3_L40S`。
+- `ROUTE_O_VALID_NO_MATERIAL_IMPROVEMENT / POD_RETAINED_PENDING_PRE_RELEASE_REVIEW / PAID_GUARD_ARMED`。
 
 ### 交接边界
 
@@ -362,7 +376,8 @@ XXX用以下内容代替：
 - 阶段 A 完成全部变动和相称轻量门禁后，先提交并保持 clean，再按指定队列交付 commit、diff/实现摘要、聚焦测试、正式规则、运行入口、
   预算/资源收口方案、ignored 路径和未运行项；发送后立即停止会话。
 - 用户与审查者已共同打开阶段 B；执行者可在一次性授权内自主修复、续跑和必要重跑，原则边界变化才通过队列请示。
-- 最终形成合法终态并释放全部 Pod后，执行者收口 tracked 结果/文档/日志，提交并保持 clean，再按指定队列申请最终验收并停止。
+- 用户要求先完成全部 Pod 依赖工作并经预释放审查，再释放 Pod。执行者先提交当前小型结果/资格收据投影并保持 clean，通过队列申请预释放审查；
+  接受后完成 zero-Pod finalizer、最终 tracked 收口和第二次最终验收。
 - 本任务任何阶段都不自行合并、推送、归档分支或删除 worktree；等待用户后续批准。
 
 ## 6. 关键决策记录
@@ -378,8 +393,8 @@ XXX用以下内容代替：
 | 005 | 复用 Plan 081/082 底层能力，语义不契合时增加 Plan 094 薄适配，不放松历史 validator | 兼顾架构复用与 Route O 续训/checkpoint-first/material rubric 新语义 | architecture | 已采纳 |
 | 006 | 正式起点由阶段 A 基于 Plan 090 checkpoint 完整性选择：完整续训或 exact-base 重建 Route O 起步 | 不把部分恢复冒充连续状态，也不给实现路线不必要的预设 | recovery | 已采纳 |
 | 007 | `VALID_NO_MATERIAL_IMPROVEMENT` 是完成终态；普通问题可修复重跑，有效负面结果不可重跑规避 | 允许诚实研究结论，又不给窄故障过早终止任务 | terminal semantics | 已采纳 |
-| 008 | 单张 US-TX-3 L40S、同时最多一个计费 Pod、5 USD 硬上限，既有卷最多扩至 80GB | 在当前资产和预算内快速调通并控制费用/重复资源风险 | cloud resources | 已采纳 |
-| 009 | 只回传必要小结果，大权重留在既有卷；终态先释放全部 Pod，卷继续保留 | 不重建 Plan 082 大型 handoff 流程，及时止 compute 费 | retention/handoff | 已采纳 |
+| 008 | 单张 US-TX-3 L40S、同时最多一个计费 Pod、5 USD 硬上限；用户后续允许卷按需至 120GB，实际只扩到 70GB | 在当前资产和预算内控制费用/重复资源风险，不把上限当扩容目标 | cloud resources | 已采纳 |
+| 009 | 只回传必要小结果，大权重留在既有卷；先完成 Pod 依赖工作和预释放审查，再释放 Pod并本地 finalizer | 适配用户指定验收顺序，同时由绝对 guard 保留硬止费上界 | retention/handoff | 已采纳 |
 | 010 | 本地阶段不碰 Plan 093 的 Cargo/shared target/证据/资源门写集 | 允许云端训练准备与冷全 workspace 并行且不争用重型资源 | concurrency | 已采纳 |
 | 011 | tracked 工作只在 094 worktree；ignored 运行资产只落主物理根 Plan 094 namespace并单独汇报 | linked worktree 不共享 `eval-data`，同时保护主工作区 tracked 状态 | workspace | 已采纳 |
 | 012 | 额外请示、阶段 A 付费申请和最终验收只走指定 Codex 队列，消息主动表明身份并发送后停止 | 满足用户指定的批示、自动唤醒和独立验收方式 | coordination | 已采纳 |
@@ -393,3 +408,6 @@ XXX用以下内容代替：
 | 020 | 每个真实 Pod 在创建时冻结绝对 lifecycle trigger，并由宿主侧脱离会话的 Plan 094 guard 复用 Plan 087 helper 到点精确止费 | 覆盖 launch 间隙、会话中断和 worker 结束后的持续计费，不把职责塞进根抢卡脚本 | cloud safety | 已采纳 |
 | 021 | 用户暂停 Plan 094 付费阶段；阶段 A 技术复审不得转化为付费批准 | 遵循最新用户决定并保持所有外部写与新增费用关闭 | authorization | 已采纳 |
 | 022 | 用户解除付费暂停且审查者明确批准阶段 B；创建前 live 刷新后仅按冻结资源与 5 USD 上限执行 | 阶段 B 双门已满足，同时保留创建时的易变状态和硬预算重新核验 | authorization | 已采纳 |
+| 023 | guarded Plan 090 import 失败后按预冻结 exact-base fallback 重建 formal step 1，不修补历史 cursor 或拼接状态 | commissioning 证明历史 cursor 不满足精确续训门；fallback 保持模型、数据、Route O 与正式比较口径不变 | continuation | 已采纳 |
+| 024 | Pod 释放前生成绑定 controller state 和全部现存 checkpoint 哈希的 qualification receipt；zero-Pod finalizer 消费小型 receipt | 满足先做完挂载卷深读、权重留卷和审查后释放的顺序，不建设第二套 handoff/审计体系 | terminal handoff | 已采纳 |
+| 025 | closure reserve 提高到 `$0.82`，其中保守预留 `$0.06` 覆盖完成后至少 6 小时 70GB 卷保留 | 服从用户新增存储余量要求，同时仍使生命周期总上界低于 5 USD | budget | 已采纳 |
