@@ -1,10 +1,12 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
 最后更新：2026-08-27 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
-状态：**第一期、第二期已完成；Publication Critic 三期 Plan 095 云端参考 scorer backend 已完成全部窄修、最终代码真实 API smoke、
-Sol 最终复验、本地 main 集成与远端推送，当前为 `COMPLETED / FINAL_REVIEW_ACCEPTED / GOAL_COMPLETED / INTEGRATED / PUSHED`。Plan 094 的
-`ROUTE_O_VALID_NO_MATERIAL_IMPROVEMENT / ZERO_POD / VOLUME_RETAINED / FINAL_REVIEW_ACCEPTED` 终态保持有效；Plan 095 与训练路线正交，
-不验证独立 cohort、unseen 或产品资格，M3-D 保持锁定**
+状态：**第一期、第二期已完成；Publication Critic 三期当前工作包为 Plan 096
+`PLANNED / NOT_EXECUTED / FORMAL_NOT_RUN`。它在 Plan 095 已验收并进入主线的 default-off 云端 reference scorer 上，对冻结 v8
+validation 55 条测定 DeepSeek V4 Flash 资格与任务 headroom；已获 30 RMB 与限定 packet 外发授权。Plan 094 的
+`ROUTE_O_VALID_NO_MATERIAL_IMPROVEMENT / ZERO_POD / VOLUME_RETAINED / FINAL_REVIEW_ACCEPTED` 和 Plan 095 的
+`COMPLETED / FINAL_REVIEW_ACCEPTED / INTEGRATED / PUSHED` 均保持有效；只有 Plan 096 的 `CLOUD_SCORER_QUALIFIED` 才解锁 Plan 097
+另行立项入口，M3-D 与产品启用仍锁定**
 
 ## 当前定位
 
@@ -21,7 +23,8 @@ Multi-Agent 作为存在前提。预期团队规模为 2–8 个 Agent，通常�
 三期建设一个专用本地 **Publication Critic**：Producer 提交 `team_publish` 前，由小模型审查拟发布内容是否达到最低公共状态
 质量。稳定产品语义见 [`doc/rondo-multi-publication-critic-product-contract.md`](../rondo-multi-publication-critic-product-contract.md)；
 Producer、Critic、Harness、Root 的职责及现行 Team State 不变量以该合同为共同前置。
-Plan 095 已在同一服务边界增加 eval/reference-only 的云端 scorer backend，不改变上述本地产品目标或默认关闭姿态。
+Plan 095 已在同一服务边界增加 eval/reference-only 的云端 scorer backend，不改变上述本地产品目标或默认关闭姿态。Plan 096 只为该
+backend 增加 validation 质量测量与 scalar/curve 接缝，不把 reference score 扩成产品 API。
 
 四期 Durable Team Runtime 已正式收口，终态为 `M4_W1_PASS / PHASE_4_COMPLETE`，没有后续必需工作包；完整历史见
 `doc/WBS-COMPLETED.md`，简要归档入口见 [`doc/WBS/durable-team-runtime.md`](durable-team-runtime.md)，本页只继续维护三期路线。
@@ -104,7 +107,9 @@ M3-B1c 正式分阶段训练与工件回收          │
                        ↓
                  M3-D 端到端收口（未解锁）
 
-并列 reference 支线：M3-B2a 已有可替换 service → Plan 095 云端参考 scorer backend（最终验收通过，已集成本地 main；不解锁 M3-D）
+并列 reference 支线：M3-B2a 已有可替换 service → Plan 095 云端参考 scorer backend（已完成）
+                                              ↓
+                         Plan 096 validation 资格与 headroom（当前；仅 QUALIFIED 解锁 Plan 097 立项）
 ```
 
 四阶段叙事保持不变：A 阶段收口产品合同并建立轻量基准；B 阶段让模型链与产品链接力并行；C 阶段串行完成本地资格和
@@ -439,6 +444,25 @@ clean smoke 两个正反 packet 分别得到 `PASS` 与 `REWRITE`，另有 HTTP 
 11 USD。未使用 Docker。任务不做批量测评、最终 threshold、v8/unseen、GPU、真实本地模型或项目数据上传，C: 余量停止线仅在本任务
 命令上下文临时为 30GB，不改默认值。该 backend 是 eval/reference-only，不改变产品默认 backend，也不解锁 M3-D。
 
+#### Plan 096：Validation 云端 Scorer 资格与任务对齐参考上界测定（当前）
+
+**任务合同**：[`Plan 096 ExecPlan`](../../plan/096-validation-cloud-scorer-qualification-and-headroom-execplan.md)。
+
+**目标与顺序**：使用强通用模型 `deepseek-v4-flash` 与 Plan 095 已验证的 Chat Completions、cloud template/projection，在
+synthetic/非正式输入上完整打通 provider、typed scalar、usage/cost、恢复、curve、归档和独立复算，随后冻结 clean source、非密钥配置、
+模型/scorer identity、采样、
+validation release、质量门与 headroom 规则，从新空 namespace 完成唯一 55 条正式轮。沿用 Plan 073/079 的发布质量门；新 headroom
+规则只看 ROC AUC 与 Boundary strict win 两个既有 threshold-free 门：都过为 HIGH、都不过为 LOW、一过一不过为 INCONCLUSIVE。
+
+**当前状态与依赖**：`PLANNED / NOT_EXECUTED / FORMAL_NOT_RUN`。任务已获 30 RMB 硬上限和 55 份 bounded
+`PublicationPacket` 外发授权，不发送 labels/pairs/split、unseen、训练集、源码或密钥。历史 exact 1.7B 与 4B tracked 结果已确认绑定同一
+canonical validation release，默认无需本地重跑；cloud/local template 与 raw score 天然不等价的部分明确披露。四种研究终态只在 55/55
+有效完整时产生；只有 `CLOUD_SCORER_QUALIFIED` 解锁 Plan 097 的另行立项入口，Plan 096 本身不执行 097。
+
+**边界**：保持 Publication Critic default-off、本地 scorer、产品 wire/verdict、Team State 与发布行为不变；不修改数据/标签/split/pair/
+rubric/quality floor，不读取 unseen，不训练/微调/量化，不使用 Docker/GPU/RunPod，不启用产品或 M3-D。Plan 095 产品 client 只返回 verdict，
+因此允许增加职责明确的 eval/reference-only scalar/usage 接缝，但不得把 raw scalar 扩成产品 API 或复制第二套 scorer/eval 平台。
+
 ### D 阶段：端到端收口
 
 #### M3-D：端到端收口
@@ -576,7 +600,12 @@ step 4 形成 `ROUTE_O_VALID_NO_MATERIAL_IMPROVEMENT`。卷上 steps 1/3/4 check
 - Plan 095 的一次性真实 API 使用低于 50 USD 上限：按实际可能计费的 provider HTTP request 计数共 11 次（首轮 8 次，返修后以最终代码
   重跑 clean smoke 与负向对照 3 次），金额未知按 1 USD/次保守计为 11 USD。未使用 Docker、GPU、RunPod、真实本地模型、v8/unseen，
   也未上传项目数据。Windows `C:` 停止线只在本任务运行时临时为 30GB，受跟踪默认阈值未改。后续继续用真实 API 做批量测评、
-  threshold 标定或产品启用，必须另立任务并重新授权。
+  threshold 标定或产品启用，必须另立任务并重新授权；Plan 096 已作为新的独立任务取得其中仅 validation 55 条 reference 测量所需授权，
+  不继承 Plan 095 余额或其它外部动作许可。
+- Plan 096 真实 API、commissioning、正式 55 条与基础设施重试共用 30 RMB 硬上限，按 provider 可核验价卡/usage/账单保守累计；仍无法
+  可靠核验时，每个实际发出的可能计费 provider HTTP request/attempt 按 1 RMB/次计入。授权仅覆盖冻结 bounded packet 的 cloud
+  projection；Docker、GPU、RunPod、unseen、训练、产品启用、远端发布与数据/权重上传均不在范围内。只有正式终态
+  `CLOUD_SCORER_QUALIFIED` 解锁 Plan 097 的另行立项入口，具体执行仍需新计划与相应授权。
 - Plan 068、Plan 071 与 Plan 073 的一次性授权已随本地交接、真实推理、资格/联合横评、独立验收和 exact winner 卷删除全部完成，
   不向后续任务延伸。M3-D、新候选或继续训练、云资源、远端上传、真实 API 与产品启用均须另建任务并取得相应授权。
 - 训练数据、权重、逐样本输出与私有运行材料留在 `eval-data/` 或仓库外；`training/` 只保存体积合规的轻量合同与数据。
