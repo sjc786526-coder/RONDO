@@ -143,7 +143,7 @@ publish_candidate "$data_receipt_tmp" "$data_receipt"
 
 venv="$task_root/venv"
 if [ ! -x "$venv/bin/python" ]; then
-  python3 -B -m venv --system-site-packages "$venv"
+  python3 -B -m venv --copies --system-site-packages "$venv"
 fi
 "$venv/bin/python" -B -m pip install --disable-pip-version-check \
   --upgrade-strategy only-if-needed -r \

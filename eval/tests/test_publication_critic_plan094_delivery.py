@@ -117,6 +117,10 @@ class Plan094DeliveryTests(unittest.TestCase):
             bootstrap.index('existing_model="${RONDO_PLAN094_EXISTING_MODEL_ROOT:-}"'),
         )
         launcher = (SCRIPT_ROOT / "runpod-launch.sh").read_text()
+        self.assertIn(
+            'python3 -B -m venv --copies --system-site-packages "$venv"',
+            bootstrap,
+        )
         self.assertLess(
             launcher.index("authorize-segment"), launcher.index("nohup setsid")
         )
