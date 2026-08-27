@@ -281,24 +281,39 @@ XXX用以下内容代替：
 - 2026-08-27：首轮真实合成 commissioning 在冻结的 4096 output-token 上限下完成 55 次单 attempt：54 个成功 scalar，1 个响应恰好
   `completion_tokens=4096` 并因截断成为 `provider_malformed_response`，累计 `0.3987545 RMB`。该轮作为无效 commissioning 保留且不拼接；
   模型、prompt、默认 thinking/high effort 与严格 parser 不变，仅把 output 上限提升到 8192 后重新验证并使用新 clean commit/namespace。
+- 2026-08-27：在 source commit `7bdcad9196d4e7a2de39f6618e0d193476b0d6e6` 与新 8192 namespace 上完整重跑真实合成
+  commissioning：55/55 成功、55 attempts、零 typed failure，费用 `0.3548550 RMB`；随后冻结 validation release、descriptor、静态合同、
+  binary/environment 与价卡，formal freeze SHA-256 为 `4497883159a2d278ca6611b6b6ce4101efec09d56f319e357c9214fbfd31836b`。
+- 2026-08-27：从全新空 namespace `plan096-formal-20260827T201304Z-validation-55` 完成唯一正式轮：55/55 有限 scalar、零最终
+  typed failure、56 次 provider attempts。`pc064-rpg-webhook-mask-rewrite` 首次出现冻结 retry policy 允许的
+  `ProviderTransientFailure` 且无 usage，保守计 `1 RMB` 后同一 logical call 第二次成功；没有选择性重跑有效模型结果。
+- 2026-08-27：正式轮独立复算与 archived result 逐字段一致，终态为
+  `CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH`。选定 fallback threshold `0.9`：False PASS `8/21`、False REWRITE `0/34`、
+  balanced accuracy `0.809524`；ROC AUC `0.840336` 与 Boundary strict win `15/19` 均过 threshold-free 门，但不存在满足全部质量门的
+  admissible operating point，因此 Plan 097 不解锁。正式费用 `1.3855704 RMB`，Plan 096 三轮真实调用累计 `2.1391799 RMB`，预算余量
+  `27.8608201 RMB`。
+- 2026-08-27：生成 tracked JSON/Markdown 结果与精炼实施日志；task-owned ignored archive 位于主物理根
+  `eval-data/publication-critic/plan096/`，不含 provider 正文、credential 或 unseen。首次独立审查接受前不写
+  `doc/WBS-COMPLETED.md`。
 
 ### 当前工作
 
-- `COMMISSIONING_REMEDIATION`：首轮真实合成完整跑到 55 项后暴露 4096 output-token 截断；正在定向提升到 8192 并复验。该轮费用与
-  54 个有效进度均保留为 commissioning 证据但不进入新配置结果；尚未产生 formal score。
+- `FIRST_REVIEW_PENDING`：实现、commissioning、formal、独立复算、tracked result 与当前状态同步均已完成；正在闭合最终定向门禁、
+  task branch clean commit 与首次独立审查请求。
 
 ### 本任务剩余步骤
 
-- 完成本计划第 4 节建议步骤 1–7；若采用更优实现路线，可自主调整任务内步骤，但不得违反第 1–3 节。
+- 提交待审状态并通过指定 queue 请求首次独立审查后停止；被唤醒时自主收敛 finding。首次审查接受后，按 decision 013 追加
+  `doc/WBS-COMPLETED.md`、WBS 最终状态与最终日志，提交全部变动并发送用户指定的最终完成消息。
 
 ### 阻塞项
 
-- 当前无已确认阻塞。DeepSeek credential 将在离线门禁闭合后通过既有严格 loader 静默核验；不可用时按本计划自主修复，涉及换模型或扩大授权
-  才通过 queue 请求批示。
+- 当前无已确认阻塞；只等待本计划要求的首次独立审查。
 
 ### 当前验收状态
 
-- `OFFLINE_VERIFIED / REAL_COMMISSIONING_REMEDIATING / FORMAL_NOT_RUN / REVIEW_NOT_REQUESTED`。
+- `OFFLINE_VERIFIED / REAL_COMMISSIONING_COMPLETE / FORMAL_COMPLETE /
+  CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH / FIRST_REVIEW_PENDING`。
 
 ### 交接边界
 
@@ -330,3 +345,5 @@ XXX用以下内容代替：
 | 015 | Plan 096 不为形式完整改变 Plan 095 已验证请求：Chat Completions 继续省略 `thinking`/`reasoning_effort`，freeze 绑定 provider 官方当前默认 enabled/high，并把实际 serving 语义记为不可验证 | 省略值正是已 commissioning 的 scorer stack；显式补发虽可能等价，却会无必要地改变正式被测请求 | provider、freeze、解释 | 已采纳 |
 | 016 | 价卡在首次真实请求前重新刷新并冻结当前北京时间谷时档 `0.05/1.5/4.5 RMB/M`；官方文档版本 `DeepSeek-V4-Flash-0731` 只作说明，实际 serving revision 仍不可验证 | 官方价格发生了时变更新且引入峰谷档；不能沿用早期快照，也不能把公开版本标签误写成单次响应证明 | 费用、identity、formal | 已采纳 |
 | 017 | 真实合成 commissioning 证明默认 high thinking 会偶发吃满 4096；保持 scorer 语义不变，仅把 `max_output_tokens` 与允许上限提升到 8192，并从新 clean commit/namespace 完整重跑 | 截断有完整 usage 且严格 parser 正确拒绝，属于 formal 前应修复的请求容量兼容性问题；不能重试该有效失败后与旧成功拼接冒充同配置结果 | provider、descriptor、commissioning | 已采纳 |
+| 018 | 正式轮只对一次 `ProviderTransientFailure` 按冻结 retry policy 在同一 logical call 内重试；无 usage 的首次 attempt 按 1 RMB fallback 计费，不重跑任何有效 scalar 或负向质量结果 | 区分获准的基础设施恢复与禁止的结果选择；保留完整 attempt provenance 与 55 个唯一最终 observation | formal、费用、恢复 | 已采纳 |
+| 019 | 正式终态冻结为 `CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH`，不解锁 Plan 097；tracked 结果同时保留资格失败与高 headroom 两层事实 | 完整 curve 无 admissible operating point，但两个预冻结 threshold-free 门均通过，不能把校准/error trade-off 问题误写为低任务分辨能力 | 结论、WBS、交接 | 已采纳 |
