@@ -1,8 +1,8 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
 最后更新：2026-08-27 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
-状态：**第一期、第二期已完成；Publication Critic 三期 Plan 095 云端参考 scorer backend 已完成全部窄修、最终代码真实 API smoke 与
-Sol 最终复验，当前为 `COMPLETED / FINAL_REVIEW_ACCEPTED / GOAL_COMPLETED / MAIN_INTEGRATION_PENDING`。Plan 094 的
+状态：**第一期、第二期已完成；Publication Critic 三期 Plan 095 云端参考 scorer backend 已完成全部窄修、最终代码真实 API smoke、
+Sol 最终复验与本地 main 集成，当前为 `COMPLETED / FINAL_REVIEW_ACCEPTED / GOAL_COMPLETED / INTEGRATED_LOCAL / NOT_PUSHED`。Plan 094 的
 `ROUTE_O_VALID_NO_MATERIAL_IMPROVEMENT / ZERO_POD / VOLUME_RETAINED / FINAL_REVIEW_ACCEPTED` 终态保持有效；Plan 095 与训练路线正交，
 不验证独立 cohort、unseen 或产品资格，M3-D 保持锁定**
 
@@ -104,7 +104,7 @@ M3-B1c 正式分阶段训练与工件回收          │
                        ↓
                  M3-D 端到端收口（未解锁）
 
-并列 reference 支线：M3-B2a 已有可替换 service → Plan 095 云端参考 scorer backend（最终验收通过，待 main 集成；不解锁 M3-D）
+并列 reference 支线：M3-B2a 已有可替换 service → Plan 095 云端参考 scorer backend（最终验收通过，已集成本地 main；不解锁 M3-D）
 ```
 
 四阶段叙事保持不变：A 阶段收口产品合同并建立轻量基准；B 阶段让模型链与产品链接力并行；C 阶段串行完成本地资格和
@@ -406,7 +406,7 @@ Boundary `+0.00620638`，未通过同一 rubric；该单条完整精度路径对
 阶段 B 外部动作授权已随全部任务 Pod释放而关闭，剩余预算不转移；网络卷继续保留。后续训练、扩容/新建/删除云资源、独立 cohort、unseen、
 发布或产品动作均须另立任务并重新授权，本任务不授予产品资格或 M3-D 解锁。
 
-#### Plan 095：云端参考 Scorer 后端接入（最终验收通过，待 main 集成）
+#### Plan 095：云端参考 Scorer 后端接入（最终验收通过，已集成本地 main）
 
 **任务合同**：[`Plan 095 ExecPlan`](../../plan/095-publication-critic-cloud-reference-scorer-backend-execplan.md)。
 
@@ -424,7 +424,7 @@ descriptor 校验中强制：声明的 model 名必须等于 provider 实际请�
 全部递增 backoff（`backoff × (n−1)n/2`）必须装进 service 的 job deadline，因此立即开始执行的调用通常先收敛为 typed backend failure；
 service 的 job deadline 始终是外层兜底，排队或外层取消时可以先发生。
 
-**当前状态**：`COMPLETED / FINAL_REVIEW_ACCEPTED / GOAL_COMPLETED / MAIN_INTEGRATION_PENDING`。离线以确定性 loopback provider 通过真实启动器与真实 typed client 覆盖 readiness、
+**当前状态**：`COMPLETED / FINAL_REVIEW_ACCEPTED / GOAL_COMPLETED / INTEGRATED_LOCAL / NOT_PUSHED`。离线以确定性 loopback provider 通过真实启动器与真实 typed client 覆盖 readiness、
 `PASS`/`REWRITE`、malformed 与 out-of-domain、两种模式下的 served-model drift、429 重试与 401 不重试、慢 provider、在途 HTTP 取消
 （含丢弃 retry future）、在途请求下的 active shutdown/force-cancel、并发 1/队列 1 的 queue-full、fail-closed 启动，以及非 cloud
 backend 零 provider 请求；`codex-publication-critic` 全绿 `57/57`。真实证据以合成 packet 在 DeepSeek chat-completions 上取得：
@@ -432,7 +432,8 @@ clean smoke 两个正反 packet 分别得到 `PASS` 与 `REWRITE`，另有 HTTP 
 探针；因 model revision 字面量变更，已用最终代码与最终 descriptor 重跑该轮。首轮 finding 与返修证据见
 `agent_log/2026-08-27-071711-plan095-review.md` 与 `agent_log/2026-08-27-075500-plan095-review-remediation.md`。Sol 审查者独立重跑
 `codex-publication-critic` `57/57` 与 core 定向 `17/17` 并最终验收通过；用户确认远端 backup ref 是其本人备份并明确授权删除，删除后
-095 实现分支保持本地，详见 `agent_log/2026-08-27-110223-plan095-sol-re-review.md`。
+095 分支按授权以 merge commit `06cfcfc` 合入本地 main，`origin/main` 尚未推送。复验与集成分别见
+`agent_log/2026-08-27-110223-plan095-sol-re-review.md`、`agent_log/2026-08-27-111225-plan095-main-integration.md`。
 
 **授权与边界**：真实 API、可选 Docker/smoke 合计 50 USD 硬上限；按实际可能计费的 provider HTTP request 计数共 11 次，保守计
 11 USD。未使用 Docker。任务不做批量测评、最终 threshold、v8/unseen、GPU、真实本地模型或项目数据上传，C: 余量停止线仅在本任务

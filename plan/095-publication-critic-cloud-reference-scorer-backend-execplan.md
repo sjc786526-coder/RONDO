@@ -282,14 +282,17 @@ XXX用以下内容代替：
   `agent_log/2026-08-27-110223-plan095-sol-re-review.md`。
 - 2026-08-27：用户确认上述 ref 是其本人创建的备份，并明确授权删除该精确远端 backup 分支；删除后远端授权边界闭合。Sol 最终复验
   结论转为 `FINAL_REVIEW_ACCEPTED / GOAL_COMPLETED`，完成记录追加到 `doc/WBS-COMPLETED.md`。
+- 2026-08-27：用户批准合并主工作区。确认 main、095 与 093 worktree clean 后，以 merge commit `06cfcfc` 将 095 合入本地 main，
+  无冲突并保留 main 独有的 `10697c0` README 提交；只做 diff/状态复核，不重复刚通过的重型门禁。`origin/main` 未推送，分支归档与
+  worktree 删除也未执行，记录见 `agent_log/2026-08-27-111225-plan095-main-integration.md`。
 
 ### 当前工作
 
-- Plan 095 实现、返修、真实 smoke、定向门禁、Bazel lock 与 Sol 最终复验均已完成；计划冻结，等待用户决定是否合并并推送 main。
+- Plan 095 实现、返修、真实 smoke、定向门禁、Bazel lock、Sol 最终复验与本地 main 集成均已完成；计划冻结。
 
 ### 本任务剩余步骤
 
-- 无任务内剩余步骤。工作树合并、main 推送、分支归档和 worktree 删除仍等待用户后续批准。
+- 无任务内剩余步骤。`origin/main` 推送、分支归档和 worktree 删除仍等待用户后续批准。
 - 本任务完成后冻结此计划；不在此安排 threshold 标定、批量测评、v8/unseen、产品启用或 M3-D。
 
 ### 阻塞项
@@ -299,7 +302,7 @@ XXX用以下内容代替：
 ### 当前验收状态
 
 - `COMPLETED / FINAL_REVIEW_ACCEPTED / GOAL_COMPLETED / OFFLINE_PASS_57 / CORE_PASS_17 / REAL_SMOKE_RERUN_PASS /
-  BAZEL_LOCK_NO_DRIFT / COST_11USD_OF_50 / MAIN_INTEGRATION_PENDING`。
+  BAZEL_LOCK_NO_DRIFT / COST_11USD_OF_50 / INTEGRATED_LOCAL / NOT_PUSHED`。
 
 ### 交接边界
 
@@ -310,7 +313,7 @@ XXX用以下内容代替：
 - 云端调用的 deadline 关系准确表述为：descriptor 校验保证 backend 最坏预算装进 job deadline，立即执行的调用通常先得到 typed
   backend failure；service 的 job deadline 始终是外层兜底，排队或外层取消时可以先发生。
 - 用户本人创建的远端 backup ref 已按其明确授权删除；095 实现分支未推送。
-- 本任务不自行合并、推送、归档/重命名分支或删除 worktree，等待用户批准。
+- 本地 main 已按用户授权完成合并；不自行推送、归档/重命名分支或删除 worktree，等待用户批准。
 
 ## 6. 关键决策记录
 
@@ -328,7 +331,7 @@ XXX用以下内容代替：
 | 008 | 共享 Cargo target、必要的主根 machine config/secret loader、可选 task-owned ignored smoke 目录单独汇报 | linked worktree 不复制这些 ignored/宿主资产，且构建必须复用共享 target | workspace、交付 | 已采纳 |
 | 009 | Docker 可用但非必选；C: floor 仅本任务临时为 30GB，不改 tracked 默认 | 授权与实际必要性分离，避免为形式完整扩大重型操作 | Docker、资源 | 已采纳 |
 | 010 | 额外请示与最终验收只走指定 Codex queue，消息表明身份、发送后停止且不重复 | 遵循用户指定的跨会话审查方式 | 协调、交付 | 已采纳 |
-| 011 | 最终只提交 095 worktree；合并、推送、归档和删除等待用户批准 | 遵循本次明确 Git 停止点 | Git | 已采纳 |
+| 011 | 最终先提交 095 worktree；本地 main 合并已按用户后续授权完成，推送、归档和删除继续等待批准 | 遵循逐阶段明确 Git 授权与停止点 | Git | 已执行本地合并 |
 | 012 | 显式选择路径实现为独立 binary `codex-publication-critic-cloud-service`，不改 `codex-core` | `PublicationCriticConfig` 只认 endpoint + expected descriptor，本就 backend-neutral；换 backend 即换启动哪个 service，default-off 成为结构性事实 | 架构、允许写集 | 已采纳 |
 | 013 | identity 诚实由 descriptor 校验强制而非约定：tokenizer 恒为 `provider-managed-tokenizer@unverifiable`，模板/投影身份与 `[0,1]` domain 绑定模板版本，definition 必须带 `rondo-cloud-reference-` 前缀 | 让“不冒充本地 exact identity / 不冒充最终标定”成为不可绕过的启动前门禁 | identity、启动器、测试 | 已采纳 |
 | 014 | descriptor 校验强制最坏 `attempt×timeout + backoff×(n−1)n/2 ≤ job_timeout`；立即执行时 backend 通常先收敛，排队或外层取消时 service deadline 仍可先发生 | 保证云端调用始终收敛在既有 `RuntimeLimits` 内，同时不对具体 failure 胜出顺序作过满承诺 | 资源、测试 | 首轮审查后修正 |
