@@ -281,10 +281,18 @@ XXX用以下内容代替：
   `/home/sjc/desktop/RONDO/eval-data/publication-critic/plan090/stage-a-final/`（约 4.0 MiB）：source archive
   `c6cd3670…` 绑定 `847301d` 并通过 extract/exact-tree；data archive `6d98c163…` 复验 content `2247dd09…`、train
   `128/58`、validation `55/26`、unseen `0`。Plan 087 输入保持只读。
+- 2026-08-26：阶段 A 首轮审查结论 `1 High / 3 Medium`；按审查决定不制造 dropout/shuffle，而把第二次 BF16 诚实降格为不同 seed 元数据下的
+  独立 clean repeat，并补齐 no-update objective/identity、Plan 090 task-root namespace 和恢复故障 INCONCLUSIVE 闭环。
+- 2026-08-26：整改提交 `a2f8aa1`；聚焦测试 `16 passed`、相邻回归 `85 passed, 34 subtests passed`、定向 static/format/shell/diff 门通过，
+  独立只读整改复核为 `0 High / 0 Medium`。WBS 按审查决定保持不变。
+- 2026-08-26：整改后正式 ignored namespace 为主物理根
+  `/home/sjc/desktop/RONDO/eval-data/publication-critic/plan090/rondo-plan090-stage-a-a2f8aa1/`（约 `6.6 MiB`）。source archive `22bbfd70…`
+  绑定 `a2f8aa1` 并通过提取/exact-tree；data archive `6d98c163…` 重新生成并复验 content `2247dd09…`、unseen `0`。旧 `stage-a-final/`
+  保留为历史资产，不再作为正式执行源。
 
 ### 当前工作
 
-- 阶段 A 已实现、冻结、提交并保持付费门关闭；等待审查者验收与明确付费阶段批准。
+- 阶段 A 审查 finding 已整改、重新提交并重建正式 source/data 资产；付费门保持关闭，等待审查者复验与明确付费阶段批准。
 
 ### 本任务剩余步骤
 
@@ -299,7 +307,7 @@ XXX用以下内容代替：
 
 ### 当前验收状态
 
-- `STAGE_A_COMPLETE / REVIEW_PENDING / PAID_GATE_CLOSED`。
+- `STAGE_A_REMEDIATED / REVIEW_PENDING / PAID_GATE_CLOSED`。
 
 ### 交接边界
 
