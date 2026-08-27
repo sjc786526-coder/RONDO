@@ -2,7 +2,7 @@
 
 最后更新：2026-08-27 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
 状态：**第一期、第二期已完成；Publication Critic 三期 Plan 094 已形成
-`ROUTE_O_VALID_NO_MATERIAL_IMPROVEMENT / ZERO_POD / VOLUME_RETAINED / FINAL_REVIEW_PENDING`。Plan 090 的微弱重复信号没有沿连续轨迹扩大为实质
+`ROUTE_O_VALID_NO_MATERIAL_IMPROVEMENT / ZERO_POD / VOLUME_RETAINED / FINAL_REVIEW_ACCEPTED`。Plan 090 的微弱重复信号没有沿连续轨迹扩大为实质
 better-than-base 候选；仍不验证独立 cohort、unseen 或产品资格，M3-D 保持锁定**
 
 ## 当前定位
@@ -86,7 +86,7 @@ M3-B1c 正式分阶段训练与工件回收          │
                        ↓
         Plan 090 Route O 干净复现与执行/数值重复确认（已完成；`ROUTE_O_CONFIRMATION_PASS`，0 Pod）
                        ↓
-        Plan 094 Route O 连续训练与实质增益候选形成（有效负向终态；zero-Pod 收口完成，等待最终验收）
+        Plan 094 Route O 连续训练与实质增益候选形成（有效负向终态；zero-Pod 收口及最终验收完成）
                        ↓
                  M3-D 端到端收口（未解锁）
 ```
@@ -376,7 +376,7 @@ Boundary `+0.00620638`，未通过同一 rubric；该单条完整精度路径对
 不授予随机 seed 稳定、独立 cohort 泛化、unseen、M3-C1/M3-C2、产品启用或 M3-D 资格。Plan 090 预算与外部动作授权已关闭；当前没有
 可继承授权。
 
-#### Plan 094：Route O 连续训练与实质增益候选形成（有效负向终态；zero-Pod 收口完成，等待最终验收）
+#### Plan 094：Route O 连续训练与实质增益候选形成（有效负向终态；zero-Pod 收口及最终验收完成）
 
 **任务合同**：[`Plan 094 ExecPlan`](../../plan/094-publication-critic-route-o-continuous-training-execplan.md)。
 
@@ -411,7 +411,7 @@ lifecycle guard 始终提供硬止费上界。该任务不释放 unseen、不授
 import 因历史 cursor 不兼容按合同拒绝，clean formal 使用预冻结 exact-base fallback；step 1--4 均无 material/strict/operating event，
 step 4 形成 `ROUTE_O_VALID_NO_MATERIAL_IMPROVEMENT`。卷上 steps 1/3/4 checkpoint 已深读资格化，小型无权重结果已回传；既有卷只按需
 从 57GB 扩到 70GB。预释放审查通过后，唯一 Pod 已精确 stop/delete，并独立确认账户 0 Pod、compute `$0/h`；本地 zero-Pod finalizer
-保持同一有效负向终态。卷以 `$0.007/h` 继续保留，现等待整体最终验收。正式结果不读取 unseen，也不改变产品或 M3-D 边界。
+保持同一有效负向终态，并已通过整体最终验收。卷以 `$0.007/h` 继续保留。正式结果不读取 unseen，也不改变产品或 M3-D 边界。
 
 ## 串并行与资源关系
 

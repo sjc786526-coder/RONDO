@@ -1,6 +1,6 @@
 {
   "schema": "rondo-publication-critic-plan094-continuous-summary-v1",
-  "phase": "FINAL_REVIEW_PENDING",
+  "phase": "FINAL_REVIEW_ACCEPTED",
   "outcome": "ROUTE_O_VALID_NO_MATERIAL_IMPROVEMENT",
   "reason": "prefrozen_three_checkpoint_no_material_plateau",
   "source": {

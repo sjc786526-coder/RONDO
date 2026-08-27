@@ -82,7 +82,7 @@ Plan 094 只有两个授权阶段：
       资产位置明确。
 - [x] 相关轻量 Python 聚焦测试、必要 static/format/compile、改动 shell 的 `bash -n` 与 `git diff --check` 通过；不运行 Cargo、Docker、
       全 workspace、本地真实模型或 CI，fake、调试、正式、skip 和未运行项如实区分。
-- [ ] 最终独立审查没有遗留 High/Medium correctness 或 functionality finding，并分别报告“验收通过/不通过”和“任务目标完成/失败”；
+- [x] 最终独立审查没有遗留 High/Medium correctness 或 functionality finding，并分别报告“验收通过/不通过”和“任务目标完成/失败”；
       正向候选不越界为随机 seed 稳定、独立 cohort、unseen、产品资格或 M3-D。
 
 ## 2. 范围
@@ -356,15 +356,16 @@ XXX用以下内容代替：
 - 2026-08-27：本地 finalizer 只消费已回传小包、qualification receipt、zero-Pod resource state 和 terminal budget，生成 content SHA-256
   `7dead9d3c180fae468fa1e0bf2bd19b069158f3016a232d446ced1ecf6447ce6`；终态保持
   `ROUTE_O_VALID_NO_MATERIAL_IMPROVEMENT / prefrozen_three_checkpoint_no_material_plateau`。
+- 2026-08-27：整体最终独立验收未发现 High/Medium correctness 或 functionality finding，结论为“验收通过 / 任务目标完成”；Plan 094
+  以有效负向、zero-Pod 和卷保留终态完成。
 
 ### 当前工作
 
-- 阶段 B 实现、正式研究轨迹、资产保留、资源止费和本地终态收口均已完成；正在完成 tracked 交付门禁和最终提交。
+- Plan 094 实现、正式研究轨迹、资产保留、资源止费、本地终态收口与整体最终验收均已完成；本计划冻结。
 
 ### 本任务剩余步骤
 
-- 提交最终 tracked 结果/文档/日志并保持 clean，通过指定队列申请整体最终独立验收。
-- 最终验收后冻结本计划；不在此安排独立 cohort、unseen、产品资格或 M3-D。
+- 无。本任务完成；后续状态与新工作包只以 WBS 为准，本计划不安排独立 cohort、unseen、产品资格或 M3-D。
 
 ### 阻塞项
 
@@ -372,7 +373,7 @@ XXX用以下内容代替：
 
 ### 当前验收状态
 
-- `ROUTE_O_VALID_NO_MATERIAL_IMPROVEMENT / ZERO_POD / VOLUME_RETAINED / FINAL_REVIEW_PENDING`。
+- `ROUTE_O_VALID_NO_MATERIAL_IMPROVEMENT / ZERO_POD / VOLUME_RETAINED / FINAL_REVIEW_ACCEPTED`。
 
 ### 交接边界
 
@@ -381,7 +382,7 @@ XXX用以下内容代替：
   预算/资源收口方案、ignored 路径和未运行项；发送后立即停止会话。
 - 用户与审查者已共同打开阶段 B；执行者可在一次性授权内自主修复、续跑和必要重跑，原则边界变化才通过队列请示。
 - 用户要求先完成全部 Pod 依赖工作并经预释放审查，再释放 Pod。执行者先提交当前小型结果/资格收据投影并保持 clean，通过队列申请预释放审查；
-  预释放审查已接受，zero-Pod finalizer 已完成；最终提交后再申请整体最终验收。
+  预释放审查、zero-Pod finalizer 与整体最终验收均已完成；后续 agent 以 WBS 和最终结果为交接入口。
 - 本任务任何阶段都不自行合并、推送、归档分支或删除 worktree；等待用户后续批准。
 
 ## 6. 关键决策记录
