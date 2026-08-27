@@ -352,7 +352,10 @@ def next_action(
         if fp32_budget_snapshot is None:
             raise FullModelTrainingError("plan090_fp32_budget_snapshot_required")
         budget = validate_budget_snapshot(fp32_budget_snapshot)
-        if budget["complete_branch_authorized"]:
+        if (
+            budget["complete_branch_authorized"]
+            and budget["projected_complete_branch_usd"] > 0.0
+        ):
             return {"action": "run", "run_id": FP32_CONTROL_RUN, "budget": budget}
         return {
             "action": "finalize",
@@ -409,9 +412,31 @@ def finalize_terminal(
         and all(row["assessment"]["passed"] is True for row in rows)
         and rows[1]["selected_checkpoint"]["fresh_process_recovery"] is False
     )
+    fp32_branch_incomplete = False
+    fp32_incomplete_budget = None
     if outcome == "INCONCLUSIVE_INFRASTRUCTURE":
+        if (
+            len(rows) == 2
+            and positive_bf16_repeats
+            and rows[1]["selected_checkpoint"]["fresh_process_recovery"] is True
+            and fp32_budget_snapshot is not None
+        ):
+            decision = next_action(
+                contract, rows, fp32_budget_snapshot=fp32_budget_snapshot
+            )
+            fp32_branch_incomplete = (
+                decision.get("action") == "run"
+                and decision.get("run_id") == FP32_CONTROL_RUN
+            )
+            if fp32_branch_incomplete:
+                fp32_incomplete_budget = decision["budget"]
+                fp32 = {
+                    "status": "incomplete_infrastructure",
+                    "budget": fp32_incomplete_budget,
+                }
         if any(row["assessment"]["passed"] is not True for row in rows) or (
-            len(rows) >= 2 and not recovery_closure_incomplete
+            len(rows) >= 2
+            and not (recovery_closure_incomplete or fp32_branch_incomplete)
         ):
             raise FullModelTrainingError(
                 "plan090_infrastructure_cannot_override_model_result"
@@ -431,6 +456,8 @@ def finalize_terminal(
     run_budgets = [row["launch_budget_snapshot"] for row in rows]
     if fp32 is not None and fp32.get("status") == "skipped":
         run_budgets.append(validate_budget_snapshot(fp32["budget"]))
+    if fp32_incomplete_budget is not None:
+        run_budgets.append(fp32_incomplete_budget)
     baseline = (
         budget["stage_b_baseline_balance_usd"],
         budget["stage_b_baseline_known_unsettled_usd"],
@@ -491,8 +518,10 @@ def finalize_terminal(
             "positive_bf16_clean_repeats_observed": positive_bf16_repeats,
             "seed_sensitive_stability_tested": False,
             "confirmation_closure_incomplete": (
-                outcome == "INCONCLUSIVE_INFRASTRUCTURE" and recovery_closure_incomplete
+                outcome == "INCONCLUSIVE_INFRASTRUCTURE"
+                and (recovery_closure_incomplete or fp32_branch_incomplete)
             ),
+            "fp32_branch_incomplete": fp32_branch_incomplete,
             "route_o_failed": outcome == "ROUTE_O_CONFIRMATION_NO_GO",
             "model_question_unanswered": (
                 outcome == "INCONCLUSIVE_INFRASTRUCTURE" and not positive_bf16_repeats

@@ -826,6 +826,47 @@ class Plan090TrainingTests(unittest.TestCase):
         )
         self.assertFalse(terminal["claims"]["seed_sensitive_stability_tested"])
 
+        zero_projected = _budget(projected=0.0)
+        self.assertEqual(
+            next_action(
+                frozen_contract(),
+                [passed, second],
+                fp32_budget_snapshot=zero_projected,
+            )["outcome"],
+            "ROUTE_O_CONFIRMATION_PASS",
+        )
+        with self.assertRaisesRegex(
+            FullModelTrainingError,
+            "plan090_infrastructure_cannot_override_model_result",
+        ):
+            finalize_terminal(
+                freeze=frozen_contract(),
+                run_results=[passed, second],
+                outcome="INCONCLUSIVE_INFRASTRUCTURE",
+                reason="zero projected cost never authorizes an FP32 start",
+                resource_state=terminal["resource_state"],
+                terminal_budget_snapshot=_budget(projected=0.0),
+                fp32_budget_snapshot=zero_projected,
+            )
+
+        fp32_infrastructure = finalize_terminal(
+            freeze=frozen_contract(),
+            run_results=[passed, second],
+            outcome="INCONCLUSIVE_INFRASTRUCTURE",
+            reason="exact Pod was lost before the authorized FP32 branch",
+            resource_state=terminal["resource_state"],
+            terminal_budget_snapshot=_budget(projected=0.0),
+            fp32_budget_snapshot=_budget(),
+        )
+        self.assertEqual(
+            fp32_infrastructure["fp32"]["status"],
+            "incomplete_infrastructure",
+        )
+        self.assertTrue(fp32_infrastructure["claims"]["fp32_branch_incomplete"])
+        self.assertTrue(
+            fp32_infrastructure["claims"]["confirmation_closure_incomplete"]
+        )
+
         unrecovered_second = _completed_result(BF16_SECONDARY_RUN, recovered=False)
         inconclusive = finalize_terminal(
             freeze=frozen_contract(),
