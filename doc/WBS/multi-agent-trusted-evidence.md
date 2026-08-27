@@ -1,8 +1,8 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
 最后更新：2026-08-27 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
-状态：**第一期、第二期已完成；Publication Critic 三期 Plan 095 云端参考 scorer backend 已提交并通过真实 API clean smoke，但首次独立
-验收发现 identity 错绑与 retry/lifecycle/Bazel lock 缺口，当前为 `REVIEW_REJECTED / REMEDIATION_REQUIRED`。Plan 094 的
+状态：**第一期、第二期已完成；Publication Critic 三期 Plan 095 云端参考 scorer backend 已完成首轮独立验收的全部窄修，并以最终代码
+重跑真实 API clean smoke，当前为 `REMEDIATED / PENDING_RE_REVIEW`。Plan 094 的
 `ROUTE_O_VALID_NO_MATERIAL_IMPROVEMENT / ZERO_POD / VOLUME_RETAINED / FINAL_REVIEW_ACCEPTED` 终态保持有效；Plan 095 与训练路线正交，
 不验证独立 cohort、unseen 或产品资格，M3-D 保持锁定**
 
@@ -104,7 +104,7 @@ M3-B1c 正式分阶段训练与工件回收          │
                        ↓
                  M3-D 端到端收口（未解锁）
 
-并列 reference 支线：M3-B2a 已有可替换 service → Plan 095 云端参考 scorer backend（首次验收未通过，待窄修；不解锁 M3-D）
+并列 reference 支线：M3-B2a 已有可替换 service → Plan 095 云端参考 scorer backend（首轮窄修完成，待复验；不解锁 M3-D）
 ```
 
 四阶段叙事保持不变：A 阶段收口产品合同并建立轻量基准；B 阶段让模型链与产品链接力并行；C 阶段串行完成本地资格和
@@ -406,7 +406,7 @@ Boundary `+0.00620638`，未通过同一 rubric；该单条完整精度路径对
 阶段 B 外部动作授权已随全部任务 Pod释放而关闭，剩余预算不转移；网络卷继续保留。后续训练、扩容/新建/删除云资源、独立 cohort、unseen、
 发布或产品动作均须另立任务并重新授权，本任务不授予产品资格或 M3-D 解锁。
 
-#### Plan 095：云端参考 Scorer 后端接入（首次验收未通过，待窄修）
+#### Plan 095：云端参考 Scorer 后端接入（首轮窄修完成，待复验）
 
 **任务合同**：[`Plan 095 ExecPlan`](../../plan/095-publication-critic-cloud-reference-scorer-backend-execplan.md)。
 
@@ -417,20 +417,23 @@ backend 时没有 secret 读取或网络出口。
 
 **当前实现事实**：唯一的云端选择路径是新增的 `codex-publication-critic-cloud-service` 启动器；不启动它就不读取 secret、不解析
 provider endpoint、不产生任何出网请求。云端身份由 `cloud_reference_scoring_identity` / `provider_managed_model_identity` 构造并在
-descriptor 校验中强制：tokenizer 恒为 `provider-managed-tokenizer@unverifiable`，input_template 为独立的
+descriptor 校验中强制：声明的 model 名必须等于 provider 实际请求的 model（否则可请求模型 A 而把结果标成模型 B），model revision 恒为
+`serving-revision-unverifiable`，tokenizer 恒为 `provider-managed-tokenizer@unverifiable`，input_template 为独立的
 `rondo-publication-cloud-template@v1`，scalar_projection 为 `rondo-cloud-json-quality-scalar@v1`，scoring definition 必须带
-`rondo-cloud-reference-` 前缀，domain 恒为 `[0,1]`；threshold 是显式非最终的参考 operating point。首次验收确认 default-off 方向成立，
-但发现 provider 请求 model 尚未与声明 model identity 交叉绑定，递增 backoff 的最坏预算也被少算，需在同一 descriptor/backend 内窄修。
+`rondo-cloud-reference-` 前缀，domain 恒为 `[0,1]`；threshold 是显式非最终的参考 operating point。每次调用的最坏 attempt×timeout 加上
+全部递增 backoff（`backoff × (n−1)n/2`）必须装进 service 的 job deadline，因此立即开始执行的调用通常先收敛为 typed backend failure；
+service 的 job deadline 始终是外层兜底，排队或外层取消时可以先发生。
 
-**当前状态**：`REVIEW_REJECTED / REMEDIATION_REQUIRED / REAL_SMOKE_EVIDENCE_RETAINED`。离线以确定性 loopback provider 通过真实启动器与
-真实 typed client 覆盖 readiness、`PASS`/`REWRITE`、malformed 与 out-of-domain、served-model drift、429 重试与 401 不重试、
-慢 provider 与取消、并发 1/队列 1 的 queue-full、fail-closed 启动，以及非 cloud backend 零 provider 请求。真实证据以合成 packet
-在 DeepSeek chat-completions 上取得：clean smoke 两个正反 packet 分别得到 `PASS` 与 `REWRITE`，另有 HTTP 400 负向对照证明请求确实
-到达选定 provider。readiness 不发付费探针。返修只需补 identity 绑定、retry 预算、cloud-specific 在途取消/active shutdown 和 Bazel
-lock；详细 finding 与无需重跑真实 API 等决策见 `agent_log/2026-08-27-071711-plan095-review.md`。
+**当前状态**：`REMEDIATED / PENDING_RE_REVIEW`。离线以确定性 loopback provider 通过真实启动器与真实 typed client 覆盖 readiness、
+`PASS`/`REWRITE`、malformed 与 out-of-domain、两种模式下的 served-model drift、429 重试与 401 不重试、慢 provider、在途 HTTP 取消
+（含丢弃 retry future）、在途请求下的 active shutdown/force-cancel、并发 1/队列 1 的 queue-full、fail-closed 启动，以及非 cloud
+backend 零 provider 请求；`codex-publication-critic` 全绿 `57/57`。真实证据以合成 packet 在 DeepSeek chat-completions 上取得：
+clean smoke 两个正反 packet 分别得到 `PASS` 与 `REWRITE`，另有 HTTP 400 负向对照证明请求确实到达选定 provider，readiness 不发付费
+探针；因 model revision 字面量变更，已用最终代码与最终 descriptor 重跑该轮。首轮 finding 与返修证据见
+`agent_log/2026-08-27-071711-plan095-review.md` 与 `agent_log/2026-08-27-075500-plan095-review-remediation.md`。
 
-**授权与边界**：真实 API、可选 Docker/smoke 合计 50 USD 硬上限；执行者初报 5 USD，首次审查要求按实际可能计费请求重算，但无需重新
-调用真实 API。未使用 Docker。任务不做批量测评、最终 threshold、v8/unseen、GPU、真实本地模型或项目数据上传，C: 余量停止线仅在本任务
+**授权与边界**：真实 API、可选 Docker/smoke 合计 50 USD 硬上限；按实际可能计费的 provider HTTP request 计数共 11 次，保守计
+11 USD。未使用 Docker。任务不做批量测评、最终 threshold、v8/unseen、GPU、真实本地模型或项目数据上传，C: 余量停止线仅在本任务
 命令上下文临时为 30GB，不改默认值。该 backend 是 eval/reference-only，不改变产品默认 backend，也不解锁 M3-D。
 
 ### D 阶段：端到端收口
@@ -567,9 +570,10 @@ step 4 形成 `ROUTE_O_VALID_NO_MATERIAL_IMPROVEMENT`。卷上 steps 1/3/4 check
 - Plan 094 已形成有效负向研究终态并完成 0 Pod / compute `$0/h` 收口；用户后续允许卷按需扩到 120GB，实际只扩到 70GB并继续保留，
   收口预算另保留至少 6 小时卷费用，整体最终验收已通过。阶段 B 外部动作授权已经关闭；不得沿用本任务重建 Pod、继续训练、新建第二卷、
   删除现有卷、充值、读取 unseen、发布或执行产品动作。
-- Plan 095 的一次性真实 API 使用低于 50 USD 上限；执行者初报保守计 5 USD，首次审查要求按实际可能计费 provider request/attempt 重算或
-  采用诚实上界，不为此重跑真实 API。未使用 Docker、GPU、RunPod、真实本地模型、v8/unseen，也未上传项目数据。Windows `C:` 停止线只在本任务运行时临时为 30GB，受跟踪默认阈值未改。
-  后续继续用真实 API 做批量测评、threshold 标定或产品启用，必须另立任务并重新授权。
+- Plan 095 的一次性真实 API 使用低于 50 USD 上限：按实际可能计费的 provider HTTP request 计数共 11 次（首轮 8 次，返修后以最终代码
+  重跑 clean smoke 与负向对照 3 次），金额未知按 1 USD/次保守计为 11 USD。未使用 Docker、GPU、RunPod、真实本地模型、v8/unseen，
+  也未上传项目数据。Windows `C:` 停止线只在本任务运行时临时为 30GB，受跟踪默认阈值未改。后续继续用真实 API 做批量测评、
+  threshold 标定或产品启用，必须另立任务并重新授权。
 - Plan 068、Plan 071 与 Plan 073 的一次性授权已随本地交接、真实推理、资格/联合横评、独立验收和 exact winner 卷删除全部完成，
   不向后续任务延伸。M3-D、新候选或继续训练、云资源、远端上传、真实 API 与产品启用均须另建任务并取得相应授权。
 - 训练数据、权重、逐样本输出与私有运行材料留在 `eval-data/` 或仓库外；`training/` 只保存体积合规的轻量合同与数据。

@@ -102,7 +102,7 @@ fn service_descriptor(options: DescriptorOptions) -> TestResult<ServiceDescripto
             ComponentIdentity::new("rondo-publication-packet", "v1")?,
             ComponentIdentity::new("rondo-publication-qualification", "v1")?,
         ),
-        provider_managed_model_identity(PROVIDER_MODEL, "reference")?,
+        provider_managed_model_identity(PROVIDER_MODEL)?,
         cloud_reference_scoring_identity(PROVIDER_MODEL, "v1", options.threshold)?,
     )?;
     Ok(ServiceDescriptor::new(
@@ -202,6 +202,20 @@ impl FakeProvider {
 
     async fn requests(&self) -> Vec<wiremock::Request> {
         self.server.received_requests().await.unwrap_or_default()
+    }
+
+    /// Waits until the provider has actually received `count` requests. wiremock records an
+    /// incoming request before it applies any response delay, so this returns while a delayed
+    /// call is still in flight.
+    async fn wait_for_requests(&self, count: usize) -> TestResult {
+        timeout(PROCESS_TIMEOUT, async {
+            while self.requests().await.len() < count {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .map_err(|_| format!("provider did not receive {count} requests"))?;
+        Ok(())
     }
 }
 
@@ -514,27 +528,35 @@ async fn replies_that_are_not_one_in_domain_scalar_stay_typed_failures() -> Test
 
 #[tokio::test(flavor = "current_thread")]
 async fn served_model_drift_becomes_a_typed_model_identity_mismatch() -> TestResult {
-    let provider = FakeProvider::start().await;
-    provider
-        .mount(ResponseTemplate::new(200).set_body_json(completion(
-            "rondo-plan095-substituted-model",
-            r#"{"quality":0.83}"#,
-        )))
-        .await;
-    let fixture = Fixture::new(&provider.base_url(), DescriptorOptions::default())?;
-    let service = CloudService::spawn(&fixture, Duration::from_millis(500)).await?;
-    assert_probe_failure(
-        &service
-            .probe(&["review", "--packet", path_text(&fixture.packet_path)?])
-            .await?,
-        "code=identity_mismatch",
-    );
-    assert_probe_success(
-        &service.probe(&["shutdown"]).await?,
-        "\"result\":\"accepted\"",
-    );
-    let (status, _, _) = service.finish().await?;
-    assert!(status.success(), "cloud service failed: {status}");
+    // A reply naming a different model is real drift in both modes: `provider_managed` only
+    // tolerates a reply that names no model at all.
+    for served_model in ["echoed", "provider_managed"] {
+        let provider = FakeProvider::start().await;
+        provider
+            .mount(ResponseTemplate::new(200).set_body_json(completion(
+                "rondo-plan095-substituted-model",
+                r#"{"quality":0.83}"#,
+            )))
+            .await;
+        let options = DescriptorOptions {
+            served_model,
+            ..DescriptorOptions::default()
+        };
+        let fixture = Fixture::new(&provider.base_url(), options)?;
+        let service = CloudService::spawn(&fixture, Duration::from_millis(500)).await?;
+        assert_probe_failure(
+            &service
+                .probe(&["review", "--packet", path_text(&fixture.packet_path)?])
+                .await?,
+            "code=identity_mismatch",
+        );
+        assert_probe_success(
+            &service.probe(&["shutdown"]).await?,
+            "\"result\":\"accepted\"",
+        );
+        let (status, _, _) = service.finish().await?;
+        assert!(status.success(), "cloud service failed: {status}");
+    }
     Ok(())
 }
 
@@ -650,9 +672,10 @@ async fn a_slow_provider_stays_inside_the_service_deadline_and_can_be_cancelled(
     let service = CloudService::spawn(&fixture, Duration::from_millis(500)).await?;
     let client = service.client(Duration::from_secs(5))?;
 
-    // The backend's own bounded attempt deadline is validated to fit inside the service job
-    // deadline, so a hung provider surfaces a typed backend failure well before the service
-    // deadline that still bounds it.
+    // Descriptor validation keeps the backend's own worst-case attempt budget inside the service
+    // job deadline, so a request that starts executing immediately normally converges to a typed
+    // backend failure first. The service deadline stays the outer bound and can still fire first
+    // when a call waits in the queue, so this asserts the bound, not which failure wins.
     let started = Instant::now();
     assert_eq!(
         client.review(fixture.packet()?).await,
@@ -729,6 +752,113 @@ async fn concurrency_and_queue_capacity_bound_the_cloud_backend() -> TestResult 
     client.shutdown().await?;
     let (status, _, _) = service.finish().await?;
     assert!(status.success(), "cloud service failed: {status}");
+    Ok(())
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn cancelling_an_in_flight_provider_call_drops_its_retry_and_frees_the_backend() -> TestResult
+{
+    let provider = FakeProvider::start().await;
+    let options = DescriptorOptions {
+        job_timeout: Duration::from_millis(1_500),
+        request_timeout: Duration::from_millis(300),
+        max_attempts: 2,
+        retry_backoff: Duration::from_millis(100),
+        ..DescriptorOptions::default()
+    };
+    // Without cancellation the first attempt would time out after 300 ms and a second provider
+    // request would follow ~100 ms later, so a stable count of one proves the retry was dropped.
+    provider
+        .mount_sequence(
+            ResponseTemplate::new(200)
+                .set_body_json(completion(PROVIDER_MODEL, r#"{"quality":0.83}"#))
+                .set_delay(Duration::from_secs(30)),
+            ResponseTemplate::new(200)
+                .set_body_json(completion(PROVIDER_MODEL, r#"{"quality":0.83}"#)),
+        )
+        .await;
+    let fixture = Fixture::new(&provider.base_url(), options)?;
+    let service = CloudService::spawn(&fixture, Duration::from_millis(500)).await?;
+    let client = service.client(Duration::from_secs(5))?;
+
+    let cancellation = CancellationToken::new();
+    let review = tokio::spawn({
+        let client = client.clone();
+        let packet = fixture.packet()?;
+        let cancellation = cancellation.clone();
+        async move { client.review_with_cancellation(packet, cancellation).await }
+    });
+    provider.wait_for_requests(1).await?;
+    cancellation.cancel();
+    assert_eq!(
+        timeout(PROCESS_TIMEOUT, review).await??,
+        Err(CriticFailure::Cancelled)
+    );
+
+    tokio::time::sleep(Duration::from_millis(800)).await;
+    assert_eq!(
+        provider.requests().await.len(),
+        1,
+        "a cancelled review must not leave a detached provider retry running"
+    );
+    assert_eq!(client.review(fixture.packet()?).await, Ok(Verdict::Pass));
+
+    client.shutdown().await?;
+    let (status, _, _) = service.finish().await?;
+    assert!(status.success(), "cloud service failed: {status}");
+    Ok(())
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn shutdown_during_an_in_flight_provider_call_exits_within_its_bounded_budget() -> TestResult
+{
+    let provider = FakeProvider::start().await;
+    let options = DescriptorOptions {
+        job_timeout: Duration::from_millis(4_000),
+        request_timeout: Duration::from_millis(3_000),
+        max_attempts: 1,
+        retry_backoff: Duration::ZERO,
+        ..DescriptorOptions::default()
+    };
+    provider
+        .mount(
+            ResponseTemplate::new(200)
+                .set_body_json(completion(PROVIDER_MODEL, r#"{"quality":0.83}"#))
+                .set_delay(Duration::from_secs(30)),
+        )
+        .await;
+    let fixture = Fixture::new(&provider.base_url(), options)?;
+    let service = CloudService::spawn(&fixture, Duration::from_millis(300)).await?;
+    let client = service.client(Duration::from_secs(8))?;
+
+    let review = tokio::spawn({
+        let client = client.clone();
+        let packet = fixture.packet()?;
+        async move { client.review(packet).await }
+    });
+    provider.wait_for_requests(1).await?;
+
+    // A second client issues the shutdown so the in-flight review is not short-circuited by the
+    // caller's own shutting-down flag.
+    let started = Instant::now();
+    service.client(Duration::from_secs(5))?.shutdown().await?;
+    assert_eq!(
+        timeout(PROCESS_TIMEOUT, review).await??,
+        Err(CriticFailure::Infrastructure(
+            InfrastructureFailure::ShuttingDown
+        ))
+    );
+    let (status, _, _) = service.finish().await?;
+    assert!(status.success(), "cloud service failed: {status}");
+    assert!(
+        started.elapsed() < options.request_timeout,
+        "forced shutdown did not preempt the in-flight provider call"
+    );
+    assert_eq!(
+        provider.requests().await.len(),
+        1,
+        "no provider work continued after shutdown"
+    );
     Ok(())
 }
 

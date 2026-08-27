@@ -34,6 +34,13 @@ pub const CLOUD_BACKEND_PROTOCOL: &str = "rondo-publication-critic-cloud-v1";
 pub(crate) const PROVIDER_MANAGED_TOKENIZER_NAME: &str = "provider-managed-tokenizer";
 pub(crate) const PROVIDER_MANAGED_TOKENIZER_REVISION: &str = "unverifiable";
 
+/// The only model revision a cloud descriptor may declare.
+///
+/// A chat-completions request names a model but carries no serving revision, and the provider
+/// exposes none, so the revision component says exactly that instead of inventing a value that
+/// looks like a pinned deployment.
+pub(crate) const PROVIDER_MANAGED_MODEL_REVISION: &str = "serving-revision-unverifiable";
+
 /// Every cloud scalar definition declares itself a non-final reference scorer.
 pub(crate) const CLOUD_DEFINITION_PREFIX: &str = "rondo-cloud-reference-";
 
@@ -134,12 +141,21 @@ impl CloudProviderConfig {
     }
 
     /// Every attempt plus every backoff must still fit inside one service job deadline, so a
-    /// retrying call can never outlive the deadline the service already advertises.
+    /// retrying call cannot outlive the deadline the service already advertises.
+    ///
+    /// The backoff grows linearly with the attempt index, so `n` attempts sleep
+    /// `retry_backoff_ms × (1 + 2 + … + (n-1))`, not `retry_backoff_ms × (n-1)`.
     fn worst_case_budget_ms(&self) -> Option<u64> {
         let attempts = u64::from(self.max_attempts);
+        let sleeps = attempts.checked_sub(1)?;
+        let total_backoff = self
+            .retry_backoff_ms
+            .checked_mul(sleeps)?
+            .checked_mul(attempts)?
+            / 2;
         self.request_timeout_ms
             .checked_mul(attempts)?
-            .checked_add(self.retry_backoff_ms.checked_mul(attempts - 1)?)
+            .checked_add(total_backoff)
     }
 
     /// The exact URL this backend posts to.
@@ -168,7 +184,7 @@ impl CloudScorerDescriptor {
         self.service_descriptor
             .validate()
             .map_err(|_| CloudScorerConfigError::InvalidDescriptor)?;
-        validate_cloud_identity(&self.service_descriptor)?;
+        validate_cloud_identity(&self.service_descriptor, &self.provider)?;
         self.provider
             .validate(self.service_descriptor.limits.job_timeout_ms())
     }
@@ -258,17 +274,15 @@ pub fn cloud_reference_scoring_identity(
     )
 }
 
-/// Builds the model identity of a hosted model whose tokenizer cannot be verified.
+/// Builds the model identity of a hosted model whose serving details cannot be verified.
 ///
-/// The tokenizer component is a fixed `provider-managed-tokenizer@unverifiable` marker, not a
-/// checked tokenizer revision. `model` and `revision` describe what this backend requests from the
-/// provider; they are not proof of what the provider served.
-pub fn provider_managed_model_identity(
-    model: &str,
-    revision: &str,
-) -> Result<ModelIdentity, ContractFailure> {
+/// `model` must be the exact model id this backend will request; descriptor validation rejects any
+/// descriptor whose provider requests a different one, so the identity can never label model A's
+/// output as model B. Both the revision and the tokenizer components are fixed unverifiable
+/// markers: they state what the backend asked for, not what the provider proved it served.
+pub fn provider_managed_model_identity(model: &str) -> Result<ModelIdentity, ContractFailure> {
     Ok(ModelIdentity::new(
-        ComponentIdentity::new(model, revision)?,
+        ComponentIdentity::new(model, PROVIDER_MANAGED_MODEL_REVISION)?,
         ComponentIdentity::new(
             PROVIDER_MANAGED_TOKENIZER_NAME,
             PROVIDER_MANAGED_TOKENIZER_REVISION,
@@ -317,7 +331,18 @@ fn is_env_name(value: &str) -> bool {
 }
 
 /// Keeps a cloud descriptor from claiming local-artifact identity or a final calibration.
-fn validate_cloud_identity(descriptor: &ServiceDescriptor) -> Result<(), CloudScorerConfigError> {
+///
+/// The model component must name the exact model the provider request will carry. Without that
+/// cross-check a descriptor could request model A while declaring model B, and the service would
+/// then accept A's score under B's identity because both sides of its equality check are B.
+fn validate_cloud_identity(
+    descriptor: &ServiceDescriptor,
+    provider: &CloudProviderConfig,
+) -> Result<(), CloudScorerConfigError> {
+    let model = &descriptor.identity.model.model;
+    if model.name() != provider.model || model.revision() != PROVIDER_MANAGED_MODEL_REVISION {
+        return Err(CloudScorerConfigError::DishonestIdentity);
+    }
     let tokenizer = &descriptor.identity.model.tokenizer;
     if tokenizer.name() != PROVIDER_MANAGED_TOKENIZER_NAME
         || tokenizer.revision() != PROVIDER_MANAGED_TOKENIZER_REVISION

@@ -73,11 +73,11 @@ provider 零请求；非 cloud backend（controlled service）不需 cloud 凭�
 
 | 门禁 | 结果 |
 |---|---|
-| `just test -p codex-publication-critic` | `54/54` passed（新增 10 单测 + 8 集成，既有全部无回归） |
+| `just test -p codex-publication-critic` | `54/54` passed（新增 11 单测 + 9 集成，既有全部无回归） |
 | `just test -p codex-core --lib -E 'test(publication_review)'` | `17/17` passed（含 default-off 与 measurement-freeze 身份门） |
 | `just clippy -p codex-publication-critic` / `just fmt-check` | 通过 |
 | 全 workspace | **未运行**（按合同只跑受影响模块） |
-| `just bazel-lock-update` | **未运行**：本机无 bazel。`Cargo.lock` 只新增到已有 workspace crate 的依赖边，`codex-http-client`/`url`/`wiremock` 已分别被 25/20/15 个 crate 使用且已在 `MODULE.bazel.lock` 中，预期无 lock 漂移 |
+| `just bazel-lock-update` | 本批次**未运行**（`bazel` 不在 PATH）。该门禁已在返修批次闭合，见 `agent_log/2026-08-27-075500-plan095-review-remediation.md` |
 
 真实 API（合成 packet，DeepSeek chat-completions，frozen commit `5b1d3b0` + frozen descriptor，全新 `/tmp` 运行空间）：
 
@@ -142,6 +142,9 @@ provider 零请求；非 cloud backend（controlled service）不需 cloud 凭�
 }
 ```
 
+上表与上述 JSON 是本批次的事实。返修后 model revision 冻结为 `serving-revision-unverifiable`，
+retry 预算公式改为三角和，最终 descriptor 与重跑的真实证据见返修日志。
+
 复现方式：用仓库既有严格 loader `eval/rondo_eval/config.py` 的 `load_allowlisted_secret_values(paths, ("DEEPSEEK_API_KEY",))`
 取值并只注入到子进程，运行
 `codex-publication-critic-cloud-service --descriptor <上述 JSON>`，再用
@@ -150,8 +153,9 @@ provider 零请求；非 cloud backend（controlled service）不需 cloud 凭�
 
 ## 5. 费用与副作用
 
-- 可能计费事件 5 次（首轮 commissioning、裸请求诊断、第二轮 commissioning、clean smoke、负向对照）。DeepSeek 计费金额未知，
-  按合同每次保守计 1 USD，合计 **5 USD**，低于 50 USD 上限。未使用 Docker、GPU、RunPod、真实本地模型。
+- 本批次实际发出 8 次 provider HTTP request：首轮 commissioning 2 次、裸请求诊断 1 次、第二轮 commissioning 2 次、
+  clean smoke 2 次、负向对照 1 次。DeepSeek 计费金额未知，按合同每次可能计费的请求保守计 1 USD，本批次 **8 USD**。
+  未使用 Docker、GPU、RunPod、真实本地模型。任务累计见返修日志。
 - 未读取 `.env.local` 内容，只经既有严格 loader 取用单个 allowlisted 变量并注入目标子进程；`.env.local` 与
   `rondo.local.toml` 均未修改。
 - 所有重型 Cargo 经仓库共享 `scripts/with-build-lock.sh`（`just` 配方）运行，`CARGO_TARGET_DIR` 为主物理根
@@ -163,7 +167,13 @@ provider 零请求；非 cloud backend（controlled service）不需 cloud 凭�
 - 主工作区与 093 worktree 全程无 tracked diff。真实 provider 的 request/response 正文、Authorization、API key
   未进入任何日志、提交或本报告。
 
-## 6. 未做的事
+## 6. 返修
+
+本批次经独立审查后判定不通过，返修记录见
+`agent_log/2026-08-27-075500-plan095-review-remediation.md`。本文件保留本批次的原始事实，
+上表中的测试计数与费用为对本批次的准确计数。
+
+## 7. 未做的事
 
 不做质量横评、threshold 标定、operating point 选择、批量测评、产品启用或默认 backend 变更；不读取 v8/unseen；
 不延续 Plan 094 训练路线；不解锁 M3-D。合并、推送、分支归档与 worktree 删除等待用户批准。

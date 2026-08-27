@@ -16,7 +16,9 @@ fn reference_provider() -> CloudProviderConfig {
         temperature: 0.0,
         request_timeout_ms: 8_000,
         max_attempts: 3,
-        retry_backoff_ms: 400,
+        // 3 attempts sleep (1+2)×300 ms, so the worst case is 24,900 ms of the 25,000 ms
+        // production job deadline.
+        retry_backoff_ms: 300,
     }
 }
 
@@ -31,7 +33,7 @@ fn reference_service_descriptor() -> ServiceDescriptor {
                 ComponentIdentity::new("rondo-publication-qualification", "v1")
                     .expect("component is valid"),
             ),
-            provider_managed_model_identity("example-cloud-model", "reference")
+            provider_managed_model_identity("example-cloud-model")
                 .expect("provider-managed model identity is valid"),
             cloud_reference_scoring_identity("example-cloud-model", "v1", /*threshold*/ 0.5)
                 .expect("cloud reference scoring identity is valid"),
@@ -80,6 +82,20 @@ fn cloud_identity_cannot_claim_a_verified_tokenizer_or_local_template() {
 
     let mut tokenizer_claim = reference_descriptor();
     tokenizer_claim.service_descriptor.identity.model.tokenizer = exact_looking_tokenizer;
+
+    // Requesting model A while declaring model B would let the service accept A's score under B.
+    let mut substituted_model = reference_descriptor();
+    substituted_model.provider.model = "example-cheaper-model".to_string();
+
+    // A pinned-looking serving revision would imply the provider proved which deployment served
+    // the request, which a chat-completions reply never does.
+    let mut pinned_serving_revision = reference_descriptor();
+    pinned_serving_revision
+        .service_descriptor
+        .identity
+        .model
+        .model =
+        ComponentIdentity::new("example-cloud-model", "2026-08-01").expect("component is valid");
 
     let mut template_claim = reference_descriptor();
     template_claim
@@ -131,6 +147,8 @@ fn cloud_identity_cannot_claim_a_verified_tokenizer_or_local_template() {
 
     for descriptor in [
         tokenizer_claim,
+        substituted_model,
+        pinned_serving_revision,
         template_claim,
         projection_claim,
         final_definition_claim,
@@ -199,6 +217,49 @@ fn the_worst_case_retry_budget_must_fit_the_service_job_deadline() {
         backoff_overrun.validate(),
         Err(CloudScorerConfigError::InvalidDescriptor)
     );
+}
+
+/// The runtime sleeps `backoff × attempt` after each failure, so the accepted budget must be the
+/// triangular sum rather than one flat backoff per retry.
+#[test]
+fn the_retry_budget_accounts_for_every_increasing_backoff() {
+    // `RuntimeLimits::production()` advertises a 25,000 ms job deadline.
+    for (max_attempts, request_timeout_ms, retry_backoff_ms, expected) in [
+        // 2 attempts sleep 1×backoff: 24,000 + 1,000 = 25,000.
+        (2_u8, 12_000_u64, 1_000_u64, Ok(())),
+        (
+            2,
+            12_000,
+            1_001,
+            Err(CloudScorerConfigError::InvalidDescriptor),
+        ),
+        // 3 attempts sleep (1+2)×backoff: 21,000 + 3,000 = 24,000.
+        (3, 7_000, 1_000, Ok(())),
+        (
+            3,
+            7_000,
+            1_400,
+            Err(CloudScorerConfigError::InvalidDescriptor),
+        ),
+        // 4 attempts sleep (1+2+3)×backoff: 22,000 + 3,000 = 25,000.
+        (4, 5_500, 500, Ok(())),
+        (
+            4,
+            5_500,
+            600,
+            Err(CloudScorerConfigError::InvalidDescriptor),
+        ),
+    ] {
+        let mut descriptor = reference_descriptor();
+        descriptor.provider.max_attempts = max_attempts;
+        descriptor.provider.request_timeout_ms = request_timeout_ms;
+        descriptor.provider.retry_backoff_ms = retry_backoff_ms;
+        assert_eq!(
+            descriptor.validate(),
+            expected,
+            "attempts={max_attempts} timeout={request_timeout_ms} backoff={retry_backoff_ms}"
+        );
+    }
 }
 
 #[test]

@@ -214,14 +214,21 @@ impl CloudScorerInner {
     /// Reports the configured identity when the served model still matches, and the observed one
     /// when it does not, so the service emits its typed model-identity mismatch instead of a
     /// generic backend failure.
+    ///
+    /// Descriptor validation already pinned the configured identity to the requested model, so a
+    /// reply that names any other model is real drift regardless of the configured mode. The mode
+    /// only decides whether a reply that names no model at all is acceptable.
     fn observed_model(&self, served: Option<&str>) -> Result<ModelIdentity, ScorerError> {
-        match self.provider.served_model {
-            ServedModelCheck::ProviderManaged => return Ok(self.model.clone()),
-            ServedModelCheck::Echoed => {
-                if served == Some(self.provider.model.as_str()) {
-                    return Ok(self.model.clone());
-                }
+        match served {
+            Some(model) if model == self.provider.model => return Ok(self.model.clone()),
+            None if matches!(
+                self.provider.served_model,
+                ServedModelCheck::ProviderManaged
+            ) =>
+            {
+                return Ok(self.model.clone());
             }
+            _ => {}
         }
         let observed = ComponentIdentity::new(
             served.unwrap_or(SERVED_MODEL_ABSENT),

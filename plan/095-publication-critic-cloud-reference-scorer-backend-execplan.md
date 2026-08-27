@@ -265,32 +265,42 @@ XXX用以下内容代替：
   并同步顶层/三期 WBS、`doc/WBS-COMPLETED.md` 与 `agent_log/2026-08-27-071500-plan095-cloud-reference-scorer-backend.md`。
 - 2026-08-27：首次独立验收完成，定向重跑 `codex-publication-critic` `54/54` 仍通过，但发现 1 High、3 Medium、2 Low finding；
   结论为 `REVIEW_REJECTED / REMEDIATION_REQUIRED`，报告见 `agent_log/2026-08-27-071711-plan095-review.md`。
+- 2026-08-27：全部 finding 复核成立并完成窄修。High：descriptor 校验新增 `provider.model == identity.model.model.name()` 交叉绑定，
+  model revision 冻结为 `serving-revision-unverifiable`，`provider_managed_model_identity` 收窄为单参数；`observed_model` 改为
+  「回复带 model 就必须等于请求 model」，`provider_managed` 只放宽「完全不带 model」。Medium：retry 最坏预算改为三角和
+  `backoff × (n−1)n/2`（该修正立即暴露并修正了越界的单测 fixture）；补 cloud 在途 HTTP 取消与在途请求下 active
+  shutdown/force-cancel 两条测试；用机器上已缓存、与 `.bazelversion` 一致的 bazel `9.0.0`（无下载、任务局部软链、经共享构建锁）
+  跑通 `just bazel-lock-update` 与 `--lockfile_mode=error`，`MODULE.bazel.lock` 逐字节无漂移。Low：测试计数与费用记账更正。
+- 2026-08-27：返修后门禁全绿——`codex-publication-critic` `57/57`、`codex-core --lib -E 'test(publication_review)'` `17/17`、
+  clippy 与 fmt-check 通过。因 model revision 字面量变更，用最终代码与最终 descriptor 在全新 `/tmp` 空间重跑真实 clean smoke
+  （`PASS` / `REWRITE`）与 HTTP 400 负向对照，并同步更正 ExecPlan/两份 WBS/实施日志中的过满与错误事实。
 
 ### 当前工作
 
-- 首次验收未通过，095 worktree 返回执行者按审查报告做窄修；已有真实 API smoke 证据保留。
+- 首轮审查窄修与重新验证全部完成，095 worktree 已提交并保持 clean，等待复验。
 
 ### 本任务剩余步骤
 
-- 绑定 provider requested model 与 expected model identity，并显式表达不可验证 serving revision。
-- 统一 retry 实际退避与最坏预算公式，补 N=3/4 边界测试并修正文档中的 deadline 陈述。
-- 复用 loopback fixture 补 cloud in-flight cancel 与 active shutdown/force-cancel；闭合 Bazel lock update/check。
-- 更正新增测试数量，按实际 provider request/attempt 重算保守费用；提交 clean worktree 后重新请求验收。
+- 无。复验若提出新意见，在本 worktree 内窄修并重跑受影响门禁后回报。
+- 复验通过后再由验收方决定是否向 `doc/WBS-COMPLETED.md` 追加完成记录（首次验收已删除该段，返修期间不重复提前声明完成）。
 - 本任务完成后冻结此计划；不在此安排 threshold 标定、批量测评、v8/unseen、产品启用或 M3-D。
 
 ### 阻塞项
 
-- 无外部原则阻塞；上述均可在既有范围内窄修。只有确实必须改变公共 identity/service wire 时才按 queue 请示。
+- 无。
 
 ### 当前验收状态
 
-- `REVIEW_REJECTED / REMEDIATION_REQUIRED / REAL_SMOKE_EVIDENCE_RETAINED / COST_RECOUNT_REQUIRED`。
+- `REMEDIATED / OFFLINE_PASS_57 / REAL_SMOKE_RERUN_PASS / BAZEL_LOCK_NO_DRIFT / COST_11USD_OF_50 / PENDING_RE_REVIEW`。
 
 ### 交接边界
 
-- 首次审查决定不改 service/public identity 体系、不复制整套 Plan 055 测试，也不要求重新付费跑真实 API；具体最小返修和证据继承条件见
-  `agent_log/2026-08-27-071711-plan095-review.md`。
-- 必须用任务局部 Bazel/Bazelisk 或其它不改全局工具链的方式闭合既有 Bazel lock update/check；不得再以依赖已存在推断无漂移。
+- 返修全部落在 cloud descriptor/config/scorer 与 cloud 测试内，没有改动 `ServiceIdentity`、wire、`service.rs` 或任何公共 service
+  合同；唯一的公共 API 形状变化是 `provider_managed_model_identity` 由两参数收窄为一参数，`codex-core` 不引用该符号。
+- Bazel lock 门禁已实跑闭合：`MODULE.bazel.lock` 的 `moduleExtensions` 只记录 6 个扩展，`@@rules_rs//rs:extensions.bzl%crate`
+  不在其中，因此 `Cargo.lock` 变化结构性地不进入该 lock。
+- 云端调用的 deadline 关系准确表述为：descriptor 校验保证 backend 最坏预算装进 job deadline，立即执行的调用通常先得到 typed
+  backend failure；service 的 job deadline 始终是外层兜底，排队或外层取消时可以先发生。
 - 本任务不自行合并、推送、归档/重命名分支或删除 worktree，等待用户批准。
 
 ## 6. 关键决策记录
@@ -315,3 +325,9 @@ XXX用以下内容代替：
 | 014 | descriptor 校验强制最坏 `attempt×timeout + backoff ≤ job_timeout`；副作用是 service `ExecutionTimeout` 被 backend 自身 deadline 结构性抢先 | 保证云端调用始终收敛在既有 `RuntimeLimits` 内；差异如实记录而不是放宽校验去凑断言 | 资源、测试 | 已采纳 |
 | 015 | loopback provider 走 `build_direct()`，真实 HTTPS 走 `RespectSystemProxy` | 本机 `NO_PROXY` 使用 reqwest 不识别的 `127.*` 通配符，会把 hermetic fixture 路由进代理；`build_direct` 的文档用途正是本地 fixture | HTTP 客户端、离线测试 | 已采纳 |
 | 016 | 严格解析器只判 shape/有限性，domain 归属交回既有 service | finite 但越界是真实 provider 观测，应得到 typed `ScoreOutOfDomain` 而非伪装成解析失败 | scoring、失败分型 | 已采纳 |
+| 017 | descriptor 校验强制声明 model 名等于 provider 请求的 model，且 model revision 冻结为 `serving-revision-unverifiable` | 否则可请求模型 A 而把结果标成模型 B，service 的 equality check 两侧都是 B 因而无法察觉；chat-completions 也不携带可验证的 serving revision | identity、公共构造函数 | 首轮审查后采纳 |
+| 018 | `observed_model` 改为「回复带 model 就必须等于请求 model」，`served_model` 模式只决定「完全不带 model」是否可接受 | 交叉绑定成立后，`provider_managed` 再无条件相信声明身份就会掩盖 provider 明确回报的替换 | 失败分型、测试 | 首轮审查后采纳 |
+| 019 | retry 最坏预算按递增 backoff 的三角和校验，保留递增退避而不改成固定退避 | 递增退避对限流更有用，缺陷只在校验一侧；修正后立即暴露并修正了本来越界的测试 fixture | 资源校验 | 首轮审查后采纳 |
+| 020 | 云端只补 in-flight HTTP cancel 与 active shutdown 两条测试，不复制 Plan 055 整套矩阵 | 既有通用 queued cancel/job timeout/forced shutdown 已覆盖 service 核心，只有 reqwest/retry future 是 cloud 独有 | 测试范围 | 首轮审查后采纳 |
+| 021 | 用机器上已缓存且与 `.bazelversion` 一致的 bazel 9.0.0 闭合 lock 门禁，不安装全局工具、不接触 BuildBuddy | 审查要求实跑而非推断；`bazel mod deps` 无 `--config` 即不使用外部服务，任务局部软链用完即删 | 门禁、宿主副作用 | 首轮审查后采纳 |
+| 022 | 因 model revision 字面量变更，主动以最终代码重跑真实 clean smoke 与负向对照 | 审查未要求重跑，但原 descriptor 已不通过校验，重跑可避免留下无法复现的正式证据；成本 3 次请求 | 真实证据、费用 | 首轮审查后采纳 |
