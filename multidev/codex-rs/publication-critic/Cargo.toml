@@ -18,6 +18,10 @@ name = "codex-publication-critic-real-service"
 path = "src/bin/codex-publication-critic-real-service.rs"
 
 [[bin]]
+name = "codex-publication-critic-cloud-service"
+path = "src/bin/codex-publication-critic-cloud-service.rs"
+
+[[bin]]
 name = "codex-publication-critic-probe"
 path = "src/bin/codex-publication-critic-probe.rs"
 
@@ -26,6 +30,7 @@ workspace = true
 
 [dependencies]
 clap = { workspace = true, features = ["derive"] }
+codex-http-client = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
@@ -40,7 +45,9 @@ tokio = { workspace = true, features = [
     "time",
 ] }
 tokio-util = { workspace = true, features = ["rt"] }
+url = { workspace = true }
 
 [dev-dependencies]
 codex-utils-cargo-bin = { workspace = true }
 pretty_assertions = { workspace = true }
+wiremock = { workspace = true }

@@ -1,10 +1,13 @@
+use clap::Args as ClapArgs;
 use clap::Parser;
 use clap::Subcommand;
 use codex_publication_critic::ClientConfig;
+use codex_publication_critic::CloudScorerDescriptor;
 use codex_publication_critic::CriticFailure;
 use codex_publication_critic::PublicationCriticClient;
 use codex_publication_critic::PublicationPacket;
 use codex_publication_critic::RealScorerDescriptor;
+use codex_publication_critic::ServiceDescriptor;
 use serde::Serialize;
 use std::net::SocketAddr;
 use std::path::Path;
@@ -18,14 +21,47 @@ const MAX_INPUT_BYTES: u64 = 1024 * 1024;
 struct Args {
     #[arg(long)]
     endpoint: SocketAddr,
-    #[arg(long)]
-    expected_descriptor: PathBuf,
+    #[command(flatten)]
+    expected: ExpectedDescriptor,
     #[arg(long, default_value_t = 30_000)]
     call_timeout_ms: u64,
     #[arg(long, default_value_t = 60_000)]
     startup_timeout_ms: u64,
     #[command(subcommand)]
     command: ProbeCommand,
+}
+
+/// Exactly one backend descriptor names the service this probe expects to be talking to.
+#[derive(Debug, ClapArgs)]
+#[group(required = true, multiple = false)]
+struct ExpectedDescriptor {
+    #[arg(long)]
+    expected_descriptor: Option<PathBuf>,
+    #[arg(long)]
+    expected_cloud_descriptor: Option<PathBuf>,
+}
+
+impl ExpectedDescriptor {
+    fn resolve(&self) -> Result<ServiceDescriptor, ProbeFailure> {
+        if let Some(path) = &self.expected_descriptor {
+            let descriptor: RealScorerDescriptor =
+                read_json_file(path, ProbeFailure::InvalidDescriptor)?;
+            descriptor
+                .validate()
+                .map_err(|_| ProbeFailure::InvalidDescriptor)?;
+            return Ok(descriptor.service_descriptor().clone());
+        }
+        let path = self
+            .expected_cloud_descriptor
+            .as_ref()
+            .ok_or(ProbeFailure::InvalidDescriptor)?;
+        let descriptor: CloudScorerDescriptor =
+            read_json_file(path, ProbeFailure::InvalidDescriptor)?;
+        descriptor
+            .validate()
+            .map_err(|_| ProbeFailure::InvalidDescriptor)?;
+        Ok(descriptor.service_descriptor().clone())
+    }
 }
 
 #[derive(Debug, Subcommand)]
@@ -82,15 +118,11 @@ async fn main() {
 }
 
 async fn run(args: Args) -> Result<(), ProbeFailure> {
-    let descriptor: RealScorerDescriptor =
-        read_json_file(&args.expected_descriptor, ProbeFailure::InvalidDescriptor)?;
-    descriptor
-        .validate()
-        .map_err(|_| ProbeFailure::InvalidDescriptor)?;
+    let expected = args.expected.resolve()?;
     let client = PublicationCriticClient::new(
         ClientConfig::new(
             args.endpoint,
-            descriptor.service_descriptor().clone(),
+            expected,
             Duration::from_millis(args.call_timeout_ms),
             Duration::from_millis(args.startup_timeout_ms),
         )

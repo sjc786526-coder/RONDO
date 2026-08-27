@@ -3888,6 +3888,7 @@ name = "codex-publication-critic"
 version = "0.147.0"
 dependencies = [
  "clap",
+ "codex-http-client",
  "codex-utils-cargo-bin",
  "pretty_assertions",
  "serde",
@@ -3895,6 +3896,8 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tokio-util",
+ "url",
+ "wiremock",
 ]
 
 [[package]]
