@@ -1,6 +1,6 @@
 # RONDO 长程规划（WBS）
 
-最后更新：2026-08-27（方向 3 Publication Critic 三期 Plan 094 的非付费阶段 A 技术实现与第二轮窄整改已完成、待复审；
+最后更新：2026-08-27（方向 3 Publication Critic 三期 Plan 094 的非付费阶段 A 技术实现、生命周期整改及真实终止确认时刻窄修已完成、待复审；
 当前处于 `STAGE_A_TECHNICALLY_COMPLETE / REREVIEW_PENDING / PAID_GATE_CLOSED / PAID_STAGE_PAUSED_BY_USER`，Plan 090 已确认的同一 validation 微弱重复信号只作为待越过的历史包络，
 M3-D 保持锁定）
 
@@ -115,8 +115,8 @@ validation，不回答独立 cohort 或产品资格，M3-D 继续锁定。
   必须另立任务而不是沿用 Plan 090 授权。
 - Plan 094 非付费阶段 A 已实现 checkpoint-first 训练/测评分责、完整 Plan 090 checkpoint 精确导入与 exact-base fallback、同轮 base、
   预冻结 material/停止/最多六个完整 checkpoint 的角色去重保留、fresh-process 恢复并继续、5 USD 单调预算和 0 Pod 终态门。轻量 fake/focused
-  门禁已覆盖正向、有效负向、评测幂等恢复和 clean source bundle；两轮审查指出的付费 segment、历史角色/摘要、Hub 凭据和 Pod 绝对计费寿命
-  边界均已窄修，当前待技术复审。付费阶段由用户暂停且门关闭，不读取 unseen、不授予产品资格或
+  门禁已覆盖正向、有效负向、评测幂等恢复和 clean source bundle；连续审查指出的付费 segment、历史角色/摘要、Hub 凭据、Pod 绝对计费寿命
+  与真实终止确认时刻边界均已窄修，当前待技术复审。付费阶段由用户暂停且门关闭，不读取 unseen、不授予产品资格或
   M3-D 解锁。任务合同见
   `plan/094-publication-critic-route-o-continuous-training-execplan.md`。
 

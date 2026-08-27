@@ -243,6 +243,7 @@ class Plan094DeliveryTests(unittest.TestCase):
 
         def terminate(receipt, captured_at, timeout):
             calls.append((receipt["pod_id"], captured_at, timeout))
+            clock[0] += timedelta(seconds=250)
             return {
                 "deleted_pod": {
                     "id": receipt["pod_id"],
@@ -258,9 +259,38 @@ class Plan094DeliveryTests(unittest.TestCase):
             now=lambda: clock[0],
             sleeper=sleeper,
         )
-        self.assertEqual(clock[0], now + timedelta(seconds=120))
+        confirmed = now + timedelta(seconds=370)
+        self.assertEqual(clock[0], confirmed)
         self.assertEqual(calls[0][0], "pod-094")
+        self.assertEqual(calls[0][1], now + timedelta(seconds=120))
         self.assertEqual(result["status"], "pod_absent_confirmed")
+        self.assertEqual(
+            result["confirmed_at"],
+            confirmed.isoformat().replace("+00:00", "Z"),
+        )
+
+        clock[0] = now
+
+        def terminate_too_late(receipt, _captured_at, _timeout):
+            clock[0] += timedelta(seconds=361)
+            return {
+                "deleted_pod": {
+                    "id": receipt["pod_id"],
+                    "name": receipt["pod_name"],
+                },
+                "pod_count": 0,
+                "compute_rate_usd_per_hour": 0.0,
+            }
+
+        with self.assertRaisesRegex(
+            guard.LifecycleGuardError, "terminal_succeeded_late"
+        ):
+            guard.enforce_lifecycle(
+                authorization,
+                terminator=terminate_too_late,
+                now=lambda: clock[0],
+                sleeper=sleeper,
+            )
 
     def test_source_archive_round_trip_is_clean_narrow_and_secret_free(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

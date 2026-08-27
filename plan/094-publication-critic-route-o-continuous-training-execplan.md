@@ -329,10 +329,14 @@ XXX用以下内容代替：
   stop/delete 并确认 0 Pod；创建时总预算和每个 paid segment 都计入 60 秒 worker kill grace 与 360 秒终止确认余量，后续 launch 不得延长
   trigger。Plan 094 focused 17/17、相邻 Plan 090 与 Plan 087 terminal 20/20 及 compile/static 门禁通过；未修改根抢卡脚本，也未建设通用预算或
   云编排设施。用户同时暂停付费阶段。
+- 2026-08-27：第二轮整改复审确认 lifecycle High 已闭合，仅余 0 High / 1 Medium：最终 receipt 误用 terminal helper 调用前时刻作为
+  `confirmed_at`。窄修在 exact 0 Pod 校验成功后重取完成时刻，超过 360 秒 confirmation deadline 则拒绝发布成功结果；推进 250 秒及越界
+  361 秒的 fake-clock 回归分别覆盖真实确认时刻与 fail-closed，Plan 094 delivery 加 Plan 087 terminal 定向测试 9/9 通过。Plan 087 历史 helper
+  保持不变。
 
 ### 当前工作
 
-- 阶段 A 技术实现与第二轮窄整改已完成，正在提交并通过指定队列申请纯技术复审；付费阶段由用户暂停，付费门保持关闭。
+- 阶段 A 技术实现、第二轮整改及终止确认时刻窄修已完成，正在提交并通过指定队列申请纯技术复审；付费阶段由用户暂停，付费门保持关闭。
 
 ### 本任务剩余步骤
 

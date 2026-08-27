@@ -1,7 +1,7 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
 最后更新：2026-08-27 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
-状态：**第一期、第二期已完成；Publication Critic 三期 Plan 094 阶段 A 技术实现与第二轮窄整改已完成、待复审，当前为
+状态：**第一期、第二期已完成；Publication Critic 三期 Plan 094 阶段 A 技术实现、生命周期整改及真实终止确认时刻窄修已完成、待复审，当前为
 `STAGE_A_TECHNICALLY_COMPLETE / REREVIEW_PENDING / PAID_GATE_CLOSED / PAID_STAGE_PAUSED_BY_USER`。任务将沿 Route O 连续训练轨迹判断 Plan 090 的微弱重复信号能否扩大为实质
 better-than-base 候选；仍不验证独立 cohort、unseen 或产品资格，M3-D 保持锁定**
 
@@ -387,7 +387,7 @@ Boundary `+0.00620638`，未通过同一 rubric；该单条完整精度路径对
 看到正式结果前冻结；训练强度、观察/checkpoint 密度和调度不在 WBS 锁死。
 
 **终态与授权**：合法终态为 `ROUTE_O_MATERIAL_CANDIDATE_RETAINED`、`ROUTE_O_VALID_NO_MATERIAL_IMPROVEMENT` 或诚实的
-`INCONCLUSIVE`；前两个都完成研究目标。非付费阶段 A 技术实现与第二轮窄整改已完成并等待复审；用户已暂停付费阶段，付费门仍关闭，
+`INCONCLUSIVE`；前两个都完成研究目标。非付费阶段 A 技术实现、生命周期整改及真实终止确认时刻窄修已完成并等待复审；用户已暂停付费阶段，付费门仍关闭，
 即使阶段 A 技术验收通过也不得进入阶段 B。未来只有用户明确恢复且原审查批准条件同时满足，US-TX-3 单 L40S、既有卷和不超过 5 USD 的
 条件授权才可能生效。全部任务 Pod在终态后立即释放并确认 compute `$0/h`，网络卷继续保留。该任务不释放 unseen、不授予独立
 cohort/产品资格，也不解锁 M3-D。
@@ -409,7 +409,8 @@ cohort/产品资格，也不解锁 M3-D。
 - 完成证据归档到 `doc/WBS-COMPLETED.md`，本页只保留最终产品事实和后续仍有效的边界。
 
 **当前状态**：Plan 094 已冻结 checkpoint-first、完整续训、material/停止/保留和预算/资源收口合同，并完成轻量 fake/focused
-阶段 A 门禁及宿主侧绝对 Pod lifecycle 止费兜底；尚未运行真实模型或形成新训练结果。阶段 A 只读 live 快照观察到 0 Pod、US-TX-3 的 57GB 卷 `mwemzrn33y`、余额
+阶段 A 门禁及宿主侧绝对 Pod lifecycle 止费兜底；最终小型 guard result 在 exact 0 Pod 校验后记录真实完成时刻并拒绝超期成功。尚未运行真实
+模型或形成新训练结果。阶段 A 只读 live 快照观察到 0 Pod、US-TX-3 的 57GB 卷 `mwemzrn33y`、余额
 `$5.4443864251`、账户卷费率 `$0.006/h`、Secure L40S `$0.99/h` 且当时无库存；这些易变事实须在阶段 B 创建资源前重新刷新。本阶段仍未
 解锁或启动，三期没有最终模型、threshold、本地运行配置或产品资格。
 

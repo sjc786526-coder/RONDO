@@ -71,11 +71,18 @@ def enforce_lifecycle(
             last_failure = str(exc)
             sleeper(min(RETRY_SECONDS, remaining))
             continue
+        confirmed = _now(now)
+        if confirmed < observed:
+            raise LifecycleGuardError("guard_clock_moved_backwards")
+        if confirmed.timestamp() > confirmation_deadline:
+            raise LifecycleGuardError(
+                "terminal_confirmation_deadline_exceeded:terminal_succeeded_late"
+            )
         return {
             "schema": RESULT_SCHEMA,
             "status": "pod_absent_confirmed",
             "termination_trigger_at": receipt["termination_trigger_at"],
-            "confirmed_at": observed.isoformat().replace("+00:00", "Z"),
+            "confirmed_at": confirmed.isoformat().replace("+00:00", "Z"),
             "pod_id": receipt["pod_id"],
             "pod_name": receipt["pod_name"],
             "authorization_content_sha256": receipt["content_sha256"],
