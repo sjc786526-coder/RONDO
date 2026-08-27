@@ -42,7 +42,7 @@ OpenAI Codex issue [#37421](https://github.com/openai/codex/issues/37421) / PR
       不重新裁决或改写其完成结论。
 - [x] **聚焦门禁通过**：根因回归、相邻 prompt-edit/backtrack/pagination/resume 测试、受影响 `codex-tui` 必要测试、scoped fix/lint、
       `just fmt`/格式检查和 `git diff --check` 通过；按实际写集选择必要门禁，不要求 full workspace 或 `--all-features`。
-- [ ] **独立验收与本地交付**：独立审查关闭范围内高/中等级 correctness finding；Plan 091 动态状态、精炼日志和完成记录准确，091 分支形成
+- [x] **独立验收与本地交付**：独立审查关闭范围内高/中等级 correctness finding；Plan 091 动态状态、精炼日志和完成记录准确，091 分支形成
       clean 本地提交。执行者按本计划指定的跨会话队列交付并在每条消息中主动表明 Plan 091 执行者身份。验收通过可记录
       `COMPLETED / ACCEPTED / UPSTREAM_37421_BACKPORT_PASS / MAIN_INTEGRATION_PENDING / NOT_PUSHED`；只有用户另行批准并实际完成后才记录
       `INTEGRATED / PUSHED`。
@@ -233,12 +233,11 @@ XXX用以下内容代替：
 
 ### 当前工作
 
-- 执行者实现、正式聚焦验证、scoped fix、格式检查、资源退出检查、精炼日志和最终 diff 自审均已完成；本地交付内容已冻结，等待计划制定者
-  独立验收。
+- 实现、正式聚焦验证、scoped fix、格式检查、资源退出检查、执行日志、独立验收和完成记录均已完成；Plan 091 已在专用分支本地接受。
 
 ### 本任务剩余步骤
 
-- 计划制定者完成独立验收；若有真实 finding，由执行者在同一 worktree 闭合并复验，验收通过后记录本地接受结论。
+- 无任务内剩余步骤。合并本地 `main`、推送、分支归档和 worktree 清理等待用户另行批准，不影响本轮完成结论。
 
 ### 阻塞项
 
@@ -247,15 +246,15 @@ XXX用以下内容代替：
 
 ### 当前验收状态
 
-- `EXECUTOR_COMPLETE / FOCUSED_TESTS_PASS / SCOPED_FIX_PASS / REVIEW_PENDING`；任务内正式证据有效，完整 `codex-tui` crate 额外批次因 3 项
-  durable-session 基线 fixture/snapshot 欠账未全绿，尚待计划制定者独立验收，不提前记录 `UPSTREAM_37421_BACKPORT_PASS`。
+- `COMPLETED / ACCEPTED / UPSTREAM_37421_BACKPORT_PASS / MAIN_INTEGRATION_PENDING / NOT_PUSHED`。独立验收未发现高、中等级 correctness
+  finding；完整 `codex-tui` crate 额外批次的 3 项 durable-session 基线 fixture/snapshot 欠账经复核与 Plan 091 无差异，不阻断本任务。
 
 ### 交接边界
 
-- 执行者只在 091 worktree 实现、验证和提交，并按指定队列向计划制定者交付 commit、diff、测试/资源证据、未运行项和 ignored 路径清单；
-  每条消息主动表明 Plan 091 执行者身份，发送后停止会话，不自行等待或轮询。
-- 独立验收通过即可在本地分支记录 `COMPLETED / ACCEPTED / UPSTREAM_37421_BACKPORT_PASS`；主线合并、推送、分支归档和 worktree 清理
-  仍等待用户批准，不在本计划自动执行。
+- 091 worktree 已完成实现、验证、提交和独立验收；实现提交为 `d68db9743e6208b5cdcc062c05a1c1094740a355`，独立验收见
+  `agent_log/2026-08-26-183420-plan091-independent-acceptance.md`。
+- 本地分支已记录 `COMPLETED / ACCEPTED / UPSTREAM_37421_BACKPORT_PASS`；主线合并、推送、分支归档和 worktree 清理仍等待用户批准，
+  不在本计划自动执行。
 
 ## 6. 关键决策记录
 
@@ -274,3 +273,4 @@ XXX用以下内容代替：
 | 009 | Plan 091 重型命令只以进程级环境变量把 Windows `C:` 停止线临时设为 30GB，其余门禁和长期配置不变 | 执行用户补充授权，同时把例外严格限制在本计划单批受监督 Cargo 命令 | 资源 | 已采纳 |
 | 010 | fake loopback WebSocket 测试仅以命令级 `NO_PROXY=127.0.0.1,localhost` 绕过宿主代理；不改 fixture 产品语义或全局配置 | 环境代理变量原先截获 loopback 连接，listener 始终未收到握手；命令级例外恢复 deterministic/offline 路径 | 测试环境 | 已采纳 |
 | 011 | 完整 crate 门禁中 3 项 durable-session 基线 fixture/snapshot 失败如实保留，不在 091 代修 | 失败文件相对 `HEAD` 无 091 差异且根因是既有 `setRootState` 欠账，扩修会越出 #37421 窄适配 | 范围/验收 | 已采纳 |
+| 012 | 独立验收接受实现与正式聚焦证据，记录 `UPSTREAM_37421_BACKPORT_PASS`；不为三项既有 crate 欠账新增重型复跑 | 代码、测试、JUnit、资源和范围复核均无高/中 correctness finding，现有证据足以裁决本任务 | 验收/交付 | 已采纳 |

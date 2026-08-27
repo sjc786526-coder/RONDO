@@ -2354,3 +2354,17 @@ formal retry 整改为 `d29e857`，最终独立验收提交为 `43cf0eeb3e1b4826
   `AGENTS.md` / `CLAUDE.md` 固定“先创建、后独立核验、不符立即释放”。相邻聚焦测试 91 项、34 个 subtests 通过；最终审查 High 0、
   Medium 0。结果见 `eval/results/publication-critic/plan087-adaptive-search-v1.{json,md}`，原因研究见
   `doc/research/2026-08-26-publication-critic-training-route-outcome-analysis.md`。
+
+## Esc-Esc 历史提示词编辑回归窄适配（Plan 091，2026-08-26）
+
+**状态**：`#37421` 的 RONDO 窄适配、正式聚焦验证与独立验收均已完成；验收通过、任务目标完成，结论为
+`UPSTREAM_37421_BACKPORT_PASS`。实现提交为 `d68db9743e6208b5cdcc062c05a1c1094740a355`；当前尚未合入本地 `main` 或推送。
+
+- prompt-edit 分叉定位以一次性只读投影合并已加载 turn snapshot 与当前 replay buffer，只消费必要的 turn/user/review/completion
+  通知，按 turn/item ID 去重且不写回 store；既有 fork-before 裁决、持久格式和源线程保持不变。
+- buffer-only completed/interrupted、snapshot/buffer 去重、正确分叉、源 rollout 不变、文本/attachment/mention、拒绝边界、Esc/Vim、
+  首提示词和分页路径的正式聚焦稳定轮为 20/20 passed；scoped fix、fmt 与 diff 门禁通过。
+- 完整 `codex-tui` 额外批次如实为 3436 passed、3 failed、4 skipped；三项失败均是 Plan 091 未修改的 durable-session
+  `setRootState` fixture/snapshot 既有欠账，独立验收裁定不阻断且不跨范围代修。未运行 full workspace、真实 API/模型、Docker、训练或测评。
+- 重型批次均经共享 lock/watchdog 复用 Plan 069 target；30GB Windows `C:` 停止线仅按用户临时批准用于 Plan 091 命令，未改变长期门禁。
+  独立验收见 `agent_log/2026-08-26-183420-plan091-independent-acceptance.md`。
