@@ -2472,3 +2472,38 @@ formal retry 整改为 `d29e857`，最终独立验收提交为 `43cf0eeb3e1b4826
 - 主线整合以当时 `main@05021a8572` 为基准，完整保留 Plan 093 全 workspace 基线与 `training/` 目录规则，只把三份共享 WBS 文档中的
   Plan 094 部分更新为最终状态；merge commit 为 `08bbf3e35c1668234f73de0dae7a776aeb6a126c`。main 复验 Plan 094/Plan 087 定向测试
   `21/21` 及 compile/static/diff 门禁通过，没有重复重型流程。整合记录见 `agent_log/2026-08-27-024733-plan094-main-integration.md`。
+
+## Plan 095：Publication Critic 云端参考 Scorer 后端接入（2026-08-27）
+
+方案：`plan/095-publication-critic-cloud-reference-scorer-backend-execplan.md`；
+日志：`agent_log/2026-08-27-071500-plan095-cloud-reference-scorer-backend.md`。
+
+在 Plan 055/057/068 已有的 `PublicationScorer → service → typed client → team_publish` 边界内，新增一个与本地 worker backend
+并列、显式选择且默认关闭的云端 eval/reference-only scorer backend。既有 trait、`RawScorerOutput`/`ScorerError` 合同、
+`service.rs` 核心、transport/client/resource 合同、`PublicationPacket`/render、`team_publish` 接入与 `real_scorer.rs`
+本地 worker 路径均未改变；没有第二套服务协议、客户端或控制面。
+
+**实现**：新增 `cloud_template.rs`（冻结的云端模板身份、qualification rubric v1 系统消息、既有 typed packet 的稳定 JSON 投影、
+严格单标量解析）、`cloud_config.rs`（`CloudScorerDescriptor` 与身份诚实/endpoint 安全/retry 预算校验）、`cloud_scorer.rs`
+（复用 `codex-http-client` 的有界 provider 调用、有限 retry、body-free 摘要）与启动器
+`codex-publication-critic-cloud-service`；probe 增加互斥的 `--expected-cloud-descriptor`。库 API 只新增
+`CloudScorerDescriptor`/`CloudScorerConfig`/`CloudScorerConfigError`/`CloudPublicationScorer`/`CLOUD_BACKEND_PROTOCOL` 与两个
+身份构造函数。
+
+**身份诚实**：云端 identity 的 tokenizer 恒为 `provider-managed-tokenizer@unverifiable`，input_template 为独立的
+`rondo-publication-cloud-template@v1`，scalar_projection 为 `rondo-cloud-json-quality-scalar@v1`，scoring definition 必须带
+`rondo-cloud-reference-` 前缀，domain 恒为 `[0,1]`；descriptor 校验强制上述全部条件，因此云端描述符无法冒充本地 reward-model
+render 或最终标定。service 的 equality check 只验证配置一致，不被当作 provider 身份证明；provider 回显的 served model 变化会被
+转成 typed `BackendModelIdentityMismatch`。
+
+**验证**：`just test -p codex-publication-critic` 全绿 `54/54`（新增 10 项单元测试 + 8 项 `tests/cloud_process.rs` 集成测试，
+其余为既有测试无回归）；`just test -p codex-core --lib -E 'test(publication_review)'` 全绿 `17/17`，含
+`off_path_keeps_original_contract_and_makes_zero_service_calls` 与 `measurement_freeze_v4_matches_typed_publication_critic_identities`；
+`just clippy -p codex-publication-critic` 与 `just fmt-check` 通过。真实证据以合成 packet 在 DeepSeek chat-completions 上取得：
+frozen commit `5b1d3b0` + frozen descriptor 的 clean smoke 得到 `PASS`（9,715 ms，935/896 tokens）与 `REWRITE`（2,388 ms，
+873/153 tokens），readiness 5 ms 且零 provider 请求；HTTP 400 负向对照证明请求确实到达选定 provider 且终端状态不重试。
+
+**边界与费用**：真实 smoke 只发送本任务合成、无密钥、无项目数据的 packet；未使用 Docker、GPU、RunPod、真实本地模型、v8/unseen，
+未上传项目数据，未修改 `.env.local` 或 `rondo.local.toml`。5 次可能计费事件按 1 USD/次保守计为 5 USD，低于 50 USD 上限。
+所有 Cargo 经共享构建锁复用主物理根 `.codex/cargo-target/rondo-multi`；临时真实 API 工件只在 `/tmp` 且已清理，未创建主物理根
+ignored 任务目录。该 backend 不改变产品默认 backend，不冻结最终 threshold，不解锁 M3-D。

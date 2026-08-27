@@ -251,34 +251,41 @@ XXX用以下内容代替：
   `.claude/worktrees/095-publication-critic-cloud-reference-scorer` / `worktree-095-publication-critic-cloud-reference-scorer`。
 - 2026-08-27：只读核对根/`multidev/` 规则、README、顶层/三期 WBS、plan 模板、Plan 055/057/068/073/094、相关日志、
   Publication Critic trait/service/identity/resource/local worker/配置与测试边界，并完成三路并行只读分析和两轮合同复核；最终复核为 `ACCEPT`。
-- 2026-08-27：编制本 ExecPlan 并精炼同步顶层/三期 WBS 的 active 工作包、reference-only 定位、一次性授权与边界。规划阶段未运行测试、
-  Cargo、Docker、真实 API/模型或网络查询，未读取 `.env.local`、v8/unseen、权重或其它任务 ignored payload，也未创建主物理 ignored 工件。
+- 2026-08-27：编制本 ExecPlan 并精炼同步顶层/三期 WBS 的 active 工作包、reference-only 定位、一次性授权与边界。
+- 2026-08-27：实现云端 backend 与显式选择路径。新增 `cloud_template.rs` / `cloud_config.rs` / `cloud_scorer.rs` 与启动器
+  `codex-publication-critic-cloud-service`，probe 增加互斥的 `--expected-cloud-descriptor`；既有 trait、service 核心、
+  packet/render、`team_publish` 与 `real_scorer.rs` 未改。
+- 2026-08-27：离线门禁通过。`just test -p codex-publication-critic` `54/54`（新增 10 单测 + 8 项 loopback provider 集成测试），
+  `just test -p codex-core --lib -E 'test(publication_review)'` `17/17`，clippy 与 fmt-check 通过。
+- 2026-08-27：真实 API commissioning。第一轮暴露两个接缝问题（本机代理拦截 loopback fixture；reasoning 模型把 `max_tokens`
+  全部用于 `reasoning_content` 导致 `finish_reason=length`），均在范围内自行修复并续跑。
+- 2026-08-27：冻结 clean commit `5b1d3b0` 与正式 descriptor 后，从全新 `/tmp` 运行空间完成 clean 真实 smoke：
+  ready 零 provider 请求，正反合成 packet 分别得到 `PASS` 与 `REWRITE`，另有 HTTP 400 负向对照证明请求确实到达选定 provider。
+- 2026-08-27：完成费用与副作用收口（保守 5 USD / 50 USD；无 Docker/GPU/本地模型；`/tmp` 工件已清理；主根未新增 ignored 资产），
+  并同步顶层/三期 WBS、`doc/WBS-COMPLETED.md` 与 `agent_log/2026-08-27-071500-plan095-cloud-reference-scorer-backend.md`。
 
 ### 当前工作
 
-- Plan 095 任务合同与 WBS 立项同步完成；规划提交后由执行者继续使用本 worktree 实施。
+- 实现、验证与文档收口全部完成，095 worktree 已提交并保持 clean，等待审查者验收。
 
 ### 本任务剩余步骤
 
-- 实现云端 backend 与显式选择路径，完成 fake/loopback 全生命周期和相邻回归。
-- 在离线门通过后完成真实 API commissioning、clean 小型 smoke、费用/副作用收口和相称定向门禁。
-- 更新动态状态、完成历史/WBS 与精炼实施日志，提交 worktree并通过指定队列请求最终验收。
+- 无。验收若提出返修意见，在本 worktree 内窄修并重跑受影响门禁后回报。
 - 本任务完成后冻结此计划；不在此安排 threshold 标定、批量测评、v8/unseen、产品启用或 M3-D。
 
 ### 阻塞项
 
-- 当前无已知原则阻塞。真实 provider/model 非密钥配置和 allowlisted credential 是否已就绪尚未在规划阶段检查；执行者只能通过安全入口核对。
+- 无。
 
 ### 当前验收状态
 
-- `PLANNED / EXECUTION_NOT_STARTED / OFFLINE_NOT_RUN / REAL_API_NOT_CALLED / READY_FOR_IMPLEMENTATION`。
+- `IMPLEMENTED / OFFLINE_PASS / REAL_SMOKE_PASS / COST_5USD_OF_50 / PENDING_REVIEW`。
 
 ### 交接边界
 
-- 执行者继续使用现有 095 worktree，不另建工作树，不在主工作区修改 tracked 文件。
-- 一次性外部授权已经生效，不需要新增付费阶段审批；必须先通过离线全链再进入真实 API，范围/预算内普通问题自主修复续跑。
-- 需要额外授权、计划变更或不确定原则事项时只通过指定队列联系审查者；每条消息主动表明 Plan 095 执行者身份，发送后停止、不轮询。
-- 最终完成全部变动与验证后，先提交并保持 clean，再按用户给定的固定正文拼接原始 TUI 完成汇报发送审查者，随后停止会话。
+- 已知并如实记录的边界：云端 descriptor 校验强制“最坏 retry 预算 ≤ service job deadline”，因此 backend 自身的 attempt
+  deadline 总先于 service `ExecutionTimeout` 触发，慢 provider 表现为 typed `BackendFailed`；service job deadline 仍是外层兜底。
+- `just bazel-lock-update` 未运行（本机无 bazel）。`Cargo.lock` 只新增到已有 workspace crate 的依赖边，预期无 `MODULE.bazel.lock` 漂移。
 - 本任务不自行合并、推送、归档/重命名分支或删除 worktree，等待用户批准。
 
 ## 6. 关键决策记录
@@ -298,3 +305,8 @@ XXX用以下内容代替：
 | 009 | Docker 可用但非必选；C: floor 仅本任务临时为 30GB，不改 tracked 默认 | 授权与实际必要性分离，避免为形式完整扩大重型操作 | Docker、资源 | 已采纳 |
 | 010 | 额外请示与最终验收只走指定 Codex queue，消息表明身份、发送后停止且不重复 | 遵循用户指定的跨会话审查方式 | 协调、交付 | 已采纳 |
 | 011 | 最终只提交 095 worktree；合并、推送、归档和删除等待用户批准 | 遵循本次明确 Git 停止点 | Git | 已采纳 |
+| 012 | 显式选择路径实现为独立 binary `codex-publication-critic-cloud-service`，不改 `codex-core` | `PublicationCriticConfig` 只认 endpoint + expected descriptor，本就 backend-neutral；换 backend 即换启动哪个 service，default-off 成为结构性事实 | 架构、允许写集 | 已采纳 |
+| 013 | identity 诚实由 descriptor 校验强制而非约定：tokenizer 恒为 `provider-managed-tokenizer@unverifiable`，模板/投影身份与 `[0,1]` domain 绑定模板版本，definition 必须带 `rondo-cloud-reference-` 前缀 | 让“不冒充本地 exact identity / 不冒充最终标定”成为不可绕过的启动前门禁 | identity、启动器、测试 | 已采纳 |
+| 014 | descriptor 校验强制最坏 `attempt×timeout + backoff ≤ job_timeout`；副作用是 service `ExecutionTimeout` 被 backend 自身 deadline 结构性抢先 | 保证云端调用始终收敛在既有 `RuntimeLimits` 内；差异如实记录而不是放宽校验去凑断言 | 资源、测试 | 已采纳 |
+| 015 | loopback provider 走 `build_direct()`，真实 HTTPS 走 `RespectSystemProxy` | 本机 `NO_PROXY` 使用 reqwest 不识别的 `127.*` 通配符，会把 hermetic fixture 路由进代理；`build_direct` 的文档用途正是本地 fixture | HTTP 客户端、离线测试 | 已采纳 |
+| 016 | 严格解析器只判 shape/有限性，domain 归属交回既有 service | finite 但越界是真实 provider 观测，应得到 typed `ScoreOutOfDomain` 而非伪装成解析失败 | scoring、失败分型 | 已采纳 |
