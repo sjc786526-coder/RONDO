@@ -314,14 +314,18 @@ XXX用以下内容代替：
 - 2026-08-27：terminal helper 停止并删除 exact task Pod，live 复核 0 Pod、compute `$0/h`；57GB 卷保留、未扩容或删除。终态余额
   `$5.4566316335`，保守 Plan 090 费用 `$0.71`，低于 `$6` 硬上限。完整终态与 handoff 保留在主物理根
   `/home/sjc/desktop/RONDO/eval-data/publication-critic/plan090/rondo-plan090-stage-b-20260827/`（约 `5.5 MiB`）。
+- 2026-08-26：用户批准后，以当时 `main@93685f5` 为底合并最终验收提交 `7a6904e`，保留 Plan 091、Plan 092 与第四期收口，
+  只叠加 Plan 090 的三期结果；合并提交 `1362e0a` 已推送 `origin/main`。主线复验为 Plan 090 `16/16`、相邻 Plan 081/082/087
+  `85/85`，三个 shell `bash -n`、freeze、结果终态和 `git diff --check` 均通过。已合并任务分支按规范归档为
+  `zz-done/worktree-090-publication-critic-route-o-confirmation`，专用 worktree 保留且 clean。
 
 ### 当前工作
 
-- 实现、云端正式确认、资产回传、止费、tracked 结果、权威文档和最终独立验收均已完成；Plan 090 在专用分支本地接受。
+- 无。实现、云端正式确认、资产回传、止费、tracked 结果、权威文档、最终独立验收和 main 整合均已完成并推送。
 
 ### 本任务剩余步骤
 
-- 无任务内剩余步骤。合并 main、推送、分支归档和 worktree 清理等待用户批准，不影响本轮完成结论。
+- 无。
 
 ### 阻塞项
 
@@ -329,14 +333,12 @@ XXX用以下内容代替：
 
 ### 当前验收状态
 
-- `ROUTE_O_CONFIRMATION_PASS / ZERO_POD / FINAL_REVIEW_ACCEPTED`。
+- `COMPLETED / ACCEPTED / INTEGRATED / PUSHED / ROUTE_O_CONFIRMATION_PASS / ZERO_POD`。
 
 ### 交接边界
 
-- 执行者直接使用本计划创建的 Plan 090 worktree，不另建工作树，不在主工作区修改 tracked 文件。
-- 因 linked-worktree/gitignore 必须使用主物理根的 Plan 090 ignored 资产时，严格限制在本计划列明 namespace，并在阶段/最终汇报单独说明。
-- 阶段 A 与最终交付都只提交 task branch；合并、推送、分支归档和 worktree 删除均等待用户明确批准。
-- 本任务完成后冻结本计划；独立 confirmation cohort、unseen、产品资格或 M3-D 只链接 WBS，不在此安排。
+- Plan 090 已合并并推送；归档分支与 clean worktree 仅保留历史，不再用于开发。ignored 资产仍按本计划既有 namespace 保留。
+- 本计划现已冻结；独立 confirmation cohort、unseen、产品资格或 M3-D 只链接 WBS，不在此安排。
 
 ## 6. 关键决策记录
 
@@ -361,3 +363,4 @@ XXX用以下内容代替：
 | 015 | FP32 全条件对照的 raw Boundary 为负、projected 指标为正时，保留预冻结“诊断性、非自动 veto”语义，Plan 090 仍以两个 BF16 clean repeat 和恢复闭环形成 PASS | FP32 同时改变完整精度路径，不能把单条 raw/projected 分歧升级为严格因果反证 | 最终研究解释 | 已采纳 |
 | 016 | 终态只保留第二 BF16 恢复合格 checkpoint；确认替代后的 debug、首个 BF16 与 FP32 checkpoint 在小结果回传后清理 | 在 57GB 不扩容边界内保留唯一后续有效大资产，避免重复占用 | 远端资产保留 | 已采纳 |
 | 017 | 最终独立验收接受 `ROUTE_O_CONFIRMATION_PASS / ZERO_POD`，不新增训练或云端动作；后续独立 cohort、unseen 或产品资格须另立任务 | 冻结合同、raw results、terminal 重算、费用/资源终态与文档一致，四路复核无 High/Medium finding | 验收与后续边界 | 已采纳 |
+| 018 | 获批整合时以当时 main 为底，仅追加 Plan 090 三期结果并保留 Plan 091/092 与第四期收口 | 防止较早工作树中的文档状态覆盖后续主线进展 | 主线整合 | 已采纳 |

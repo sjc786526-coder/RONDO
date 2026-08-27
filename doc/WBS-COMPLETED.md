@@ -2388,8 +2388,8 @@ formal retry 整改为 `d29e857`，最终独立验收提交为 `43cf0eeb3e1b4826
 
 ## Publication Critic Route O 干净复现与执行/数值重复确认（Plan 090，2026-08-26）
 
-**状态**：阶段 A 预冻结与付费前验收、阶段 B 云端正式确认、候选恢复、资产回传、阶段 C 止费和最终独立验收均已完成；验收通过、
-任务目标完成，终态为 `ROUTE_O_CONFIRMATION_PASS / ZERO_POD / FINAL_REVIEW_ACCEPTED`。
+**状态**：`COMPLETED / ACCEPTED / INTEGRATED / PUSHED / ROUTE_O_CONFIRMATION_PASS / ZERO_POD`。阶段 A 预冻结与付费前验收、阶段 B
+云端正式确认、候选恢复、资产回传、阶段 C 止费、最终独立验收和 main 整合均已完成；合并提交 `1362e0a` 已推送 `origin/main`。
 
 - 在 exact `Skywork/Skywork-Reward-V2-Qwen3-1.7B@e51ea3e08fb81326c3b812a7ff0cb9cee83e59cc`、冻结 v8
   train `128/58`、validation `55/26`、物理无 unseen、同一 US-TX-3 L40S 与 Route O 九张量/`33,558,784` 原参数配方下，
@@ -2414,3 +2414,6 @@ formal retry 整改为 `d29e857`，最终独立验收提交为 `43cf0eeb3e1b4826
   须另立任务、冻结相称合同并重新授权。
 - 最终独立验收复跑 16 项 Plan 090 聚焦测试、两份 handoff exact-tree、预算 validator 和 terminal 逐字节重算，并只读确认 RunPod 仍为
   0 Pod、57GB 卷仍保留；四路独立复核均为 High 0、Medium 0。验收见 `agent_log/2026-08-26-210809-plan090-final-review.md`。
+- 主线整合以当时 main 为底，保留已完成的 Plan 091、Plan 092 与第四期收口，只追加 Plan 090 三期事实；主线复验 Plan 090 `16/16`、
+  相邻 Plan 081/082/087 `85/85`，三个 shell syntax、freeze、终态结果和 diff 门均通过。整合记录见
+  `agent_log/2026-08-26-212140-plan090-main-integration.md`。
