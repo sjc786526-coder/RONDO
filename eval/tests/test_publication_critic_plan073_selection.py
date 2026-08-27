@@ -62,6 +62,7 @@ from rondo_eval.publication_critic.selection.lock import (  # noqa: E402
 )
 from rondo_eval.publication_critic.selection.metrics import (  # noqa: E402
     build_labeled_rows,
+    build_score_only_labeled_rows,
     candidate_metrics,
     operating_points,
     select_threshold,
@@ -492,6 +493,28 @@ class ThresholdSearchTest(unittest.TestCase):
         self.assertEqual(metrics["boundary_pairs"]["strict_wins"], 1)
         self.assertIn("synthetic", metrics["by_slice"])
         self.assertEqual(metrics["by_slice"]["synthetic"]["count"], 4)
+
+    def test_score_only_metrics_do_not_invent_raw_logits(self) -> None:
+        release = _release("validation", ["PASS", "REWRITE"])
+        score_only = {
+            candidate_id: {"score": values["score"]}
+            for candidate_id, values in _separable(release).items()
+        }
+        rows = build_score_only_labeled_rows(release, score_only)
+        metrics = candidate_metrics(release, rows, 0.5)
+        self.assertIsNone(metrics["raw_logit_distribution"])
+        self.assertNotIn("raw_logit", metrics["rows"][0])
+
+    def test_score_only_metrics_reject_raw_logit_mixing(self) -> None:
+        release = _release("validation", ["PASS", "REWRITE"])
+        values = _separable(release)
+        score_only = {
+            candidate_id: {"score": row["score"]}
+            for candidate_id, row in values.items()
+        }
+        score_only[release["items"][0]["candidate_id"]]["raw_logit"] = 0.0
+        with self.assertRaises(SelectionError):
+            build_score_only_labeled_rows(release, score_only)
 
 
 class JudgeExchangeTest(unittest.TestCase):

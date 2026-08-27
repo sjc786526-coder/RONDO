@@ -269,10 +269,20 @@ XXX用以下内容代替：
   本任务继续采用 typed scalar + curve，而不增加自由文本 Judge。
 - 2026-08-27：编制本 ExecPlan，预冻结既有质量门与新的 headroom 三分规则，并最小同步顶层/三期 WBS 的 Plan 096 当前工作包与 Plan 097
   条件依赖；没有运行 API、构建、测试、Docker、GPU、RunPod 或本地模型。
+- 2026-08-27：执行者完成 live code 与允许资产复核：Plan 079 canonical validation release 的 canonical SHA-256 为
+  `757dd624c3d47f87dd5683d24f9f1753b1dbbffb42fdeff567c9e3e5e0b71a91`，Plan 066 bundle verifier 确认 55/26 validation、
+  unseen row/body 为 0；exact 1.7B/4B tracked 结果足以同口径比较，不触发 1.7B 重跑。
+- 2026-08-27：核对 DeepSeek 官方 Chat Completions、thinking 与人民币价卡：`deepseek-v4-flash` 当前支持 JSON output，thinking 默认
+  enabled、effort 默认 high；首次实时刷新发现价卡已改为北京时间峰谷分档，谷时每百万 cache-hit input `0.05 RMB`、cache-miss input
+  `1.5 RMB`、output `4.5 RMB`，峰时为其两倍。当前谷时窗口适用，首次真实调用尚未发生；freeze 将绑定来源 URL、核对时点与实际 descriptor。
+- 2026-08-27：完成 eval-only Rust scalar/usage observation、one-shot binary、Python freeze/cost/archive/runner/recompute/history 接缝；
+  94 项相关 Python 测试、62 项 crate 测试、Clippy、fmt 与 55 条 compiled-binary loopback commissioning 均通过，loopback 为 55/55、
+  零 typed failure、55 HTTP attempts。严格 secret loader 的零输出 credential 门禁通过，仍未发送真实请求。
 
 ### 当前工作
 
-- `PLANNED / NOT_EXECUTED`：等待执行者按本计划实施、正式测评、提交并通过 queue 请求审查者验收。
+- `OFFLINE_COMPLETE / REAL_COMMISSIONING_NEXT`：实现和离线全链已闭合，credential 仅经严格 loader 完成可用性门禁；下一步提交 clean
+  commissioning source、运行少量真实合成输入，再冻结全新 formal namespace。尚未发送真实请求或产生 formal score。
 
 ### 本任务剩余步骤
 
@@ -280,12 +290,12 @@ XXX用以下内容代替：
 
 ### 阻塞项
 
-- 当前无已确认阻塞。DeepSeek credential、thinking/reasoning 条件与当前价格只在执行期按安全入口核验；不可用时按本计划自主修复，涉及换模型或
-  扩大授权才通过 queue 请求批示。
+- 当前无已确认阻塞。DeepSeek credential 将在离线门禁闭合后通过既有严格 loader 静默核验；不可用时按本计划自主修复，涉及换模型或扩大授权
+  才通过 queue 请求批示。
 
 ### 当前验收状态
 
-- `PLAN_READY / IMPLEMENTATION_NOT_STARTED / FORMAL_NOT_RUN / REVIEW_NOT_REQUESTED`。
+- `OFFLINE_VERIFIED / REAL_API_NOT_STARTED / FORMAL_NOT_RUN / REVIEW_NOT_REQUESTED`。
 
 ### 交接边界
 
@@ -313,3 +323,6 @@ XXX用以下内容代替：
 | 011 | 完成后只提交 task branch；合并、推送、归档和 worktree 删除等待用户批准 | 本轮授权明确停在本地工作树提交与审查 | Git | 已采纳 |
 | 012 | headroom 是 DeepSeek V4 Flash scorer stack 在同一冻结任务上的模型条件参考上界，不称所有强模型的理论极限 | cloud/local template 与具体模型共同构成被测 scorer，需避免过度外推 | 结论解释、历史比较 | 已采纳 |
 | 013 | WBS-COMPLETED 与最终完成状态只在首次独立审查接受后同步 | 保持完成历史只记录已接受结果；执行细节与待审状态先留在 plan/WBS/实施日志 | 文档、审查顺序 | 已采纳 |
+| 014 | Rust 侧在同一 `CloudPublicationScorer` 增加 eval-only body-free scalar/usage observation 与 one-shot binary；Python 侧建设薄的 Plan 096 runner/archive/recompute，复用既有 release、metrics 与 write-once 基元 | 保持 prompt/retry/parser/identity 单一来源和产品 wire 不变，同时让费用、恢复、curve 与独立复算各归其职责 | 架构、测试、归档 | 已采纳 |
+| 015 | Plan 096 不为形式完整改变 Plan 095 已验证请求：Chat Completions 继续省略 `thinking`/`reasoning_effort`，freeze 绑定 provider 官方当前默认 enabled/high，并把实际 serving 语义记为不可验证 | 省略值正是已 commissioning 的 scorer stack；显式补发虽可能等价，却会无必要地改变正式被测请求 | provider、freeze、解释 | 已采纳 |
+| 016 | 价卡在首次真实请求前重新刷新并冻结当前北京时间谷时档 `0.05/1.5/4.5 RMB/M`；官方文档版本 `DeepSeek-V4-Flash-0731` 只作说明，实际 serving revision 仍不可验证 | 官方价格发生了时变更新且引入峰谷档；不能沿用早期快照，也不能把公开版本标签误写成单次响应证明 | 费用、identity、formal | 已采纳 |

@@ -1,0 +1,120 @@
+{
+  "schema": "rondo-publication-critic-plan096-cloud-quality-contract-v1",
+  "purpose": "validation_only_cloud_reference_scorer_qualification_and_task_headroom",
+  "product_effect": "none_default_off_eval_reference_only",
+  "descriptor_path": "eval/locks/publication-critic-plan096-cloud-descriptor-v1.json",
+  "provider": {
+    "name": "deepseek_official",
+    "api_shape": "chat_completions",
+    "base_url": "https://api.deepseek.com",
+    "request_path": "/chat/completions",
+    "requested_model": "deepseek-v4-flash",
+    "documented_model_version": "DeepSeek-V4-Flash-0731",
+    "response_model_policy": "required_exact_echo_of_requested_model",
+    "serving_revision": "provider_managed_unverifiable",
+    "tokenizer": "provider_managed_unverifiable"
+  },
+  "request": {
+    "stream": false,
+    "response_format": "json_object",
+    "max_output_tokens": 4096,
+    "temperature": 0.0,
+    "temperature_effect": "documented_ignored_under_default_thinking_mode",
+    "thinking_request": "omitted_provider_default",
+    "documented_default_thinking": "enabled",
+    "reasoning_effort_request": "omitted_provider_default",
+    "documented_default_reasoning_effort": "high",
+    "effective_thinking_and_effort": "provider_managed_unverifiable",
+    "top_p": "omitted_provider_default",
+    "seed": "omitted",
+    "tools": "omitted",
+    "n": 1
+  },
+  "retry": {
+    "request_timeout_ms": 60000,
+    "max_attempts": 2,
+    "retry_backoff_ms": 1000,
+    "retryable_http_statuses": [408, 425, 429, 500, 502, 503],
+    "retry_transport_failures": true,
+    "retry_malformed_or_model_failures": false
+  },
+  "scorer": {
+    "definition": "rondo-cloud-reference-deepseek-v4-flash@v1",
+    "template": "rondo-publication-cloud-template@v1",
+    "projection": "rondo-cloud-json-quality-scalar@v1",
+    "score_domain": [0.0, 1.0],
+    "direction": "higher_is_better",
+    "product_threshold": "non_final_not_used_for_plan096_curve"
+  },
+  "input": {
+    "dataset_revision": "publication-critic-v8",
+    "manifest_content_sha256": "a9a31a61e0a1e070ee8d076dd313b7efabb5e01ffa42773a841b123a2686cb98",
+    "manifest_file_sha256": "70cbbbd1b754227b3c84f9117c1e74ee630713ae12d7041e48522bd751ea5661",
+    "plan066_bundle_manifest_sha256": "2970c693fa32d1118d3b8e949a04231970bf96dfc27f7c7d14a22f98a4ed2252",
+    "plan066_projection_sha256": "5b887f60ec803c29b7711b98614863876df4e60087e942b84f6bdc202af851cf",
+    "validation_release_sha256": "757dd624c3d47f87dd5683d24f9f1753b1dbbffb42fdeff567c9e3e5e0b71a91",
+    "candidate_count": 55,
+    "pass_count": 34,
+    "rewrite_count": 21,
+    "boundary_pair_count": 19,
+    "within_pass_pair_count": 7,
+    "unseen_rows_available": 0,
+    "provider_projection": "one_bounded_publication_packet_only_no_supervision"
+  },
+  "quality": {
+    "threshold_search": "validation_score_endpoints_and_adjacent_midpoints_v1",
+    "threshold_rule": "feasible_floors_then_max_balanced_accuracy_then_min_false_pass_then_max_threshold_v1",
+    "max_false_pass_rate": 0.25,
+    "max_false_rewrite_rate": 0.35,
+    "min_balanced_accuracy": 0.75,
+    "min_roc_auc": 0.8,
+    "min_boundary_pair_strict_win_rate": 0.7,
+    "max_typed_failures": 0,
+    "within_pass_role": "report_only"
+  },
+  "headroom": {
+    "high": "not_qualified_and_auc_pass_and_boundary_pass",
+    "low": "not_qualified_and_auc_fail_and_boundary_fail",
+    "inconclusive": "not_qualified_and_exactly_one_threshold_free_floor_passes"
+  },
+  "pricing": {
+    "currency": "RMB",
+    "unit_tokens": 1000000,
+    "price_tier": "off_peak",
+    "price_tier_rule": "beijing_weekdays_09:00-12:00_and_14:00-18:00_peak_otherwise_off_peak",
+    "cache_hit_input_per_unit": "0.05",
+    "cache_miss_input_per_unit": "1.50",
+    "output_per_unit": "4.50",
+    "peak_multiplier": "2.00",
+    "unclassified_prompt_tokens": "charge_as_cache_miss",
+    "unverifiable_billable_attempt_fallback_rmb": "1.00",
+    "total_budget_cap_rmb": "30.00",
+    "price_snapshot_date": "2026-08-27",
+    "price_source_url": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/"
+  },
+  "namespace": {
+    "commissioning": "exact_freeze_resumable_success_rows",
+    "formal": "new_empty_write_once_one_row_per_candidate",
+    "formal_authority": "first_complete_55_of_55_zero_failure_result_only",
+    "cross_namespace_or_config_merge": false
+  },
+  "history": {
+    "exact_1_7b": "eval/results/publication-critic/m3-c2-joint-selection-v1.json",
+    "exact_4b": "eval/results/publication-critic/skywork-reward-v2-qwen3-4b-base-quality-v1.json",
+    "comparable": [
+      "false_pass",
+      "false_rewrite",
+      "balanced_accuracy",
+      "roc_auc",
+      "boundary_pair_strict_win_rate",
+      "within_pass_pair_strict_win_rate",
+      "typed_failures"
+    ],
+    "not_comparable": [
+      "raw_logit",
+      "absolute_threshold_or_calibration",
+      "template_or_tokenizer",
+      "latency_or_resources"
+    ]
+  }
+}
