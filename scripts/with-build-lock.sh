@@ -21,9 +21,9 @@
 #   RONDO_BUILD_MEMORY_MAX=<size>           (default 22G)
 #   RONDO_BUILD_SWAP_MAX=<size>             (default 5G)
 #   RONDO_BUILD_CARGO_PRODUCT=rondo-local|rondo-multi
-#   RONDO_BUILD_PROJECT_WARN_BYTES=<bytes>  (default 270 GB decimal)
-#   RONDO_BUILD_PROJECT_STOP_BYTES=<bytes>  (default 285 GB decimal)
-#   RONDO_BUILD_PROJECT_MAX_BYTES=<bytes>   (default 290 GB decimal)
+#   RONDO_BUILD_PROJECT_WARN_BYTES=<bytes>  (default 350 GB decimal)
+#   RONDO_BUILD_PROJECT_STOP_BYTES=<bytes>  (default 365 GB decimal)
+#   RONDO_BUILD_PROJECT_MAX_BYTES=<bytes>   (default 370 GB decimal)
 #   RONDO_BUILD_WINDOWS_C_FREE_STOP_BYTES=<bytes> (default 50 GB decimal)
 #   RONDO_BUILD_RESIDUAL_GRACE_SECONDS=<s>  (default 5)
 #   RONDO_BUILD_METRICS_DIR=<path>
@@ -170,9 +170,9 @@ done
 memory_high="${RONDO_BUILD_MEMORY_HIGH:-21G}"
 memory_max="${RONDO_BUILD_MEMORY_MAX:-22G}"
 swap_max="${RONDO_BUILD_SWAP_MAX:-5G}"
-project_warn_bytes="${RONDO_BUILD_PROJECT_WARN_BYTES:-270000000000}"
-project_stop_bytes="${RONDO_BUILD_PROJECT_STOP_BYTES:-285000000000}"
-project_max_bytes="${RONDO_BUILD_PROJECT_MAX_BYTES:-290000000000}"
+project_warn_bytes="${RONDO_BUILD_PROJECT_WARN_BYTES:-350000000000}"
+project_stop_bytes="${RONDO_BUILD_PROJECT_STOP_BYTES:-365000000000}"
+project_max_bytes="${RONDO_BUILD_PROJECT_MAX_BYTES:-370000000000}"
 windows_c_free_stop_bytes="${RONDO_BUILD_WINDOWS_C_FREE_STOP_BYTES:-50000000000}"
 nonreclaimable_stop_bytes="${RONDO_BUILD_NONRECLAIMABLE_STOP_BYTES:-20401094656}"
 swap_sustained_stop_bytes="${RONDO_BUILD_SWAP_SUSTAINED_STOP_BYTES:-4294967296}"

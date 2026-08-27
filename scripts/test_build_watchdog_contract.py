@@ -51,6 +51,7 @@ def init_repository(repository: Path) -> None:
 class BuildWatchdogContractTests(unittest.TestCase):
     def test_persistent_concurrency_defaults_and_conservative_entry(self) -> None:
         config = tomllib.loads(CARGO_CONFIG.read_text(encoding="utf-8"))
+        wrapper = WRAPPER.read_text(encoding="utf-8")
         self.assertEqual(config["build"]["jobs"], 2)
         self.assertEqual(
             config["target"]['cfg(all(target_os = "linux", target_env = "gnu"))'][
@@ -61,6 +62,18 @@ class BuildWatchdogContractTests(unittest.TestCase):
         self.assertIn(
             'slots="${RONDO_RUSTC_SLOTS:-2}"',
             RUSTC_THROTTLE.read_text(encoding="utf-8"),
+        )
+        self.assertIn(
+            'project_warn_bytes="${RONDO_BUILD_PROJECT_WARN_BYTES:-350000000000}"',
+            wrapper,
+        )
+        self.assertIn(
+            'project_stop_bytes="${RONDO_BUILD_PROJECT_STOP_BYTES:-365000000000}"',
+            wrapper,
+        )
+        self.assertIn(
+            'project_max_bytes="${RONDO_BUILD_PROJECT_MAX_BYTES:-370000000000}"',
+            wrapper,
         )
         for justfile in PRODUCT_JUSTFILES:
             contents = justfile.read_text(encoding="utf-8")
@@ -247,16 +260,16 @@ esac
             )
 
         equal = run_helper(
-            "rondo_project_limits_are_valid 270000000000 270000000000 "
-            "290000000000 5"
+            "rondo_project_limits_are_valid 350000000000 350000000000 "
+            "370000000000 5"
         )
         reversed_limits = run_helper(
-            "rondo_project_limits_are_valid 290000000000 285000000000 "
-            "270000000000 5"
+            "rondo_project_limits_are_valid 370000000000 365000000000 "
+            "350000000000 5"
         )
         zero_interval = run_helper(
-            "rondo_project_limits_are_valid 270000000000 285000000000 "
-            "290000000000 0"
+            "rondo_project_limits_are_valid 350000000000 365000000000 "
+            "370000000000 0"
         )
         self.assertNotEqual(unknown.returncode, 0)
         self.assertNotEqual(non_git.returncode, 0)
@@ -268,7 +281,7 @@ esac
         summary = run_helper(
             "rondo_write_effective_run_summary_fields "
             "/repo rondo-multi /repo/.codex/cargo-target/rondo-multi "
-            "270000000000 285000000000 290000000000 50000000000"
+            "350000000000 365000000000 370000000000 50000000000"
         )
 
         self.assertEqual(summary.returncode, 0, summary.stderr)
@@ -278,9 +291,9 @@ esac
                 "project_root=/repo",
                 "cargo_product=rondo-multi",
                 "cargo_target_dir=/repo/.codex/cargo-target/rondo-multi",
-                "project_warn_bytes=270000000000",
-                "project_stop_bytes=285000000000",
-                "project_max_bytes=290000000000",
+                "project_warn_bytes=350000000000",
+                "project_stop_bytes=365000000000",
+                "project_max_bytes=370000000000",
                 "windows_c_free_stop_bytes=50000000000",
             ],
         )

@@ -38,7 +38,7 @@
 
 - （重要）重型 Cargo 构建与测试必须走仓库根的共享 `scripts/with-build-lock.sh`（优先使用已接入的 `just` 配方），
   主工作区与任何 worktree 不得同时构建。默认看门狗采用 `MemoryHigh=21G`、`MemoryMax=22G`、
-  `MemorySwapMax=5G`，项目存储在 270/285/290GB 告警/主动停/绝对停；宿主容量以 Windows `C:`
+  `MemorySwapMax=5G`，项目存储在 350/365/370GB 告警/主动停/绝对停；宿主容量以 Windows `C:`
   盘实际剩余空间为准，低于 50GB 停止。WSL 文件系统显示的约 1TB 虚拟容量/余量不得用于满足该门禁。
   日常 Cargo 构建默认 `jobs=2`，GNU/Linux LLD 默认单线程；要求尽量一次跑完的完整 workspace 使用产品
   Justfile 中受跟踪的 `test-with-codex-v8-conservative` 入口（`jobs=1`、LLD 单线程），不得用临时命令放宽并发。
