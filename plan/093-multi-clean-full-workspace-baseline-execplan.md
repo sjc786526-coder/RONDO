@@ -24,40 +24,40 @@ binding，也不替代既有 binary freeze/manifest 身份。
 
 ### 完成/验收标准
 
-- [ ] **旧现场安全释放**：069/087/089/091/092 worktree 在释放前均为 clean，任务提交与应有 tracked plan/log/完成记录均可从
+- [x] **旧现场安全释放**：069/087/089/091/092 worktree 在释放前均为 clean，任务提交与应有 tracked plan/log/完成记录均可从
       当前 `main` 定位；069、091 分支按惯例归档为 `zz-done/*`，既有归档分支保持，所有历史分支和提交均保留。
-- [ ] **旧 target 精确删除**：
+- [x] **旧 target 精确删除**：
       `/home/sjc/desktop/RONDO/.claude/worktrees/069-m4-s1-durable-team-session/multidev/codex-rs/target`
       已在确认非符号链接、069 clean、无使用者后，持续持有 canonical 构建锁完成删除与紧邻复核；没有用重命名或搬运冒充冷基准。
-- [ ] **并行现场保持隔离**：Plan 090 的路径、分支、tracked/untracked/ignored 资产未被本任务读取内容、改写、整理或删除；状态级快照允许其
+- [x] **并行现场保持隔离**：Plan 090 的路径、分支、tracked/untracked/ignored 资产未被本任务读取内容、改写、整理或删除；状态级快照允许其
       自身执行者继续推进，不要求它在任务期间静止。
-- [ ] **共享 target 合同成立**：主工作区和任意 RONDO Multi linked worktree 的受支持 Unix 正式重型 Cargo 入口默认解析到同一个物理
+- [x] **共享 target 合同成立**：主工作区和任意 RONDO Multi linked worktree 的受支持 Unix 正式重型 Cargo 入口默认解析到同一个物理
       `rondo-multi` target；RONDO Local 的默认映射是独立 `rondo-local` 叶子但本任务不创建它。产品叶子不混用，worktree 内不再生成大型
       `codex-rs/target`；显式专用 target 仍须由未来具体任务单独授权。
-- [ ] **永久资源门准确**：watchdog 默认项目线为十进制
+- [x] **永久资源门准确**：watchdog 默认项目线为十进制
       `270000000000 / 285000000000 / 290000000000` bytes，永久 Windows `C:` 停止线仍为 `50000000000` bytes；脚本说明、
       `AGENTS.md`、`CLAUDE.md`、`doc/development-environment.md` 和相称轻量回归一致。每轮 summary 能明确记录实际 warn/stop/max 与
       Windows `C:` 停止线。
-- [ ] **路由与门限回归通过**：纯测试/fake 验证主工作区与 linked worktree 的同产品 target 一致、两产品叶子隔离、错误门限顺序拒绝、
+- [x] **路由与门限回归通过**：纯测试/fake 验证主工作区与 linked worktree 的同产品 target 一致、两产品叶子隔离、错误门限顺序拒绝、
       项目根外 target 拒绝、必要资源计数器不可读继续 fail-closed；测试不创建或加热 `rondo-local`。
-- [ ] **冷全量完整结束**：新 `rondo-multi` target 从空目录开始，候选实现绑定 clean exact commit，以 checksum-verified V8 入口在
+- [x] **冷全量完整结束**：新 `rondo-multi` target 从空目录开始，候选实现绑定 clean exact commit，以 checksum-verified V8 入口在
       `multidev/codex-rs` 完成 Linux、default features、standard local Nextest 的完整 workspace 枚举与执行；不使用
       `--all-features`，不全跑 `#[ignore]`。
-- [ ] **最终 HEAD 全量通过**：若冷全量后发生修复，最终实现与配置冻结后在 clean exact HEAD 上再次完成同口径全 workspace；最终正式轮
+- [x] **最终 HEAD 全量通过**：若冷全量后发生修复，最终实现与配置冻结后在 clean exact HEAD 上再次完成同口径全 workspace；最终正式轮
       为零 terminal failure、零 error、零 timeout。若冷轮已经对应最终代码且全绿，可由同一轮同时满足冷轮与最终轮。
-- [ ] **失败、retry、skip 诚实闭合**：范围内稳定复现问题已修复；每项 retry 记录测试名、首次现象与最终状态，并按性质完成定点复核或
+- [x] **失败、retry、skip 诚实闭合**：范围内稳定复现问题已修复；每项 retry 记录测试名、首次现象与最终状态，并按性质完成定点复核或
       finding 处理；skip 按类别和数量记录且不计 passed，新增 skip 有解释。Plan 091 prompt-edit 与 Plan 092 Durable Session TUI 保护项
       在最终全量中通过。
-- [ ] **正式证据稳定保留**：Plan 093 自身各次完整 workspace 原始 run 直接保存在主物理仓库
+- [x] **正式证据稳定保留**：Plan 093 自身各次完整 workspace 原始 run 直接保存在主物理仓库
       `test-data/_retained-test-evidence/plan093-clean-full-workspace-baseline/runs/`，至少保留 JUnit、`summary.env`、`metrics.csv`、实际
       Nextest 配置和足以还原 V8/命令结果的运行输出或简明记录；另以一个轻量 manifest/摘要记录 exact commit、Cargo.lock SHA-256、
       工具链、V8 identity、命令、测试计数、耗时、retry/skip、资源峰值及 JUnit SHA-256。无需建设新的审计或可信体系。
-- [ ] **仓库收口干净**：无 `.snap.new`、锁文件漂移或未解释生成物；tracked 文档职责正确，独立审查无未关闭高、中等级 correctness
+- [x] **仓库收口干净**：无 `.snap.new`、锁文件漂移或未解释生成物；tracked 文档职责正确，独立审查无未关闭高、中等级 correctness
       finding；新共享 target 与 Plan 093 正式证据均保留，不做成功后清理。
-- [ ] **Git 停止点正确**：执行者完成实现、验证、动态 Plan 和精炼 `agent_log` 后只提交 093 分支并保持 worktree clean，交由计划制定者
+- [x] **Git 停止点正确**：执行者完成实现、验证、动态 Plan 和精炼 `agent_log` 后只提交 093 分支并保持 worktree clean，交由计划制定者
       独立验收，不自行合并或推送；验收通过后再在同一 093 分支补充 `doc/WBS-COMPLETED.md` 与验收收口提交。未获后续集成授权时只记录
       `COMPLETED / ACCEPTED / MAIN_INTEGRATION_PENDING / NOT_PUSHED`；集成授权完成后才归档并释放 093，使 `git worktree list` 只剩
-      主工作区与仍在开发的 090。
+      主工作区与届时由其他 owner 保留的独立并行 worktree；不得为收口 093 清理 090/094 或其它并行现场。
 
 ## 2. 范围
 
@@ -243,16 +243,35 @@ XXX用以下内容代替：
 - 2026-08-26：共享 watchdog 已用显式产品 identity 把受支持 Unix 正式重型入口默认路由到物理 common root 下的产品叶子，
   永久默认更新为 270/285/290GB + C50，并在全部已创建 summary 形态统一记录产品、target 与四条实际资源线。两产品
   helper/Just/V8 轻量回归、门限顺序与根外 target 拒绝均通过，且未创建 `rondo-local` 或 `rondo-multi`。
+- 2026-08-27：共享 target/永久门候选提交 `e485067ea9bf` 和 watchdog kill-status 修复 `129655246103` 已形成；新
+  `rondo-multi` 从空目录开始冷构建，并在保留增量进度后完成 14657 项完整枚举与执行，真实暴露 20 项 terminal failure、4 项
+  retry-pass 与 24 项 skip。原始 JUnit SHA-256 为
+  `96b43074c33661fe6be7b1ab672f416e42242f6bab7dcadfaf5d43e5f98e09c0`。
+- 2026-08-27：20 项失败按 Publication Critic binary setup、非 hermetic fixture、Realtime handshake timeout 产品缺口和窄
+  app-server 并发组完成修复；聚焦轮 29/29 通过，冷轮四项 retry 在新进程 `retries=0` 下 4/4 通过。两轮独立只读复核关闭
+  Realtime 时序与 Windows setup finding，最终无未关闭 High/Medium。
+- 2026-08-27：最终实现提交 `b25b5bb2e57490b8615a8c5c1c432c0fe39440db` 上按第 3.8 节保留共享缓存完成正式全 workspace：
+  14660/14660 passed、0 failure/error/timeout、24 skipped、4 slow、1 retry-pass，另有 1/1 setup passed，359.431s；watchdog
+  `run_rc=0 / stop=none / cleanup=none`，JUnit SHA-256
+  `ef2d16c4e1f4d1bfb411ddf7fe47127a0b7832cf7f35e649d1fe239e44f55e4b`。
+- 2026-08-27：正式唯一 retry 为 loopback proxy 首次 HTTP 502、第二次通过；新进程 `retries=0` 1/1 一次通过。24 skip 与冷轮
+  数量一致，分为平台 7、手工/生成/property 5、child helper 6、已延后不稳定 4、真实 API smoke 2；Plan 091 prompt-edit 与
+  Plan 092 三项 Durable Session TUI 保护均在最终全量通过。
+- 2026-08-27：正式 manifest、console、JUnit、summary、metrics 和实际 Nextest 配置保存在
+  `test-data/_retained-test-evidence/plan093-clean-full-workspace-baseline/runs/final-b25b5bb2e574-20260827T071344Z/`；最终共享
+  target allocated size 为 `196718948352` bytes，`rondo-local` 不存在。
+- 2026-08-27：退出保护性元数据复核显示并行 owner 已把 090 推进到 `7a6904e5` 并归档为 `zz-done/*`，另创建 clean 的 094
+  worktree；main 也已推进到 `e30c8a3d`。本任务未参与这些变化，未读取其内容/diff/ignored 资产，也不清理 090/094；093 仍独立且未进入
+  main。
 
 ### 当前工作
 
-- 冻结并提交共享 target/永久门候选；随后从空 `rondo-multi` 启动 checksum-verified V8 冷全 workspace。
+- 执行者实现、验证、动态 Plan 与实施日志已完成并提交 093 分支；等待计划制定者独立验收。
 
 ### 本任务剩余步骤
 
-- 提交共享 target/永久门候选，按第 4 节 C–D 完成冷全量、有界修复与最终正式轮。
-- 按第 4 节 E 整理证据、动态 Plan 与实施日志并提交 093；随后由计划制定者独立验收。合并、推送、093 归档和
-  worktree 释放等待用户另行批准。
+- 执行者无剩余实现或验证步骤。计划制定者按队列合同独立验收；验收日志、`doc/WBS-COMPLETED.md` 与 Plan 验收收口由审查者在
+  093 分支处理。合并、推送、093 归档和 worktree 释放等待用户另行批准。
 
 ### 阻塞项
 
@@ -260,7 +279,7 @@ XXX用以下内容代替：
 
 ### 当前验收状态
 
-- `IN_PROGRESS / LIGHTWEIGHT_GATES_PASS / FULL_WORKSPACE_PENDING / MAIN_INTEGRATION_PENDING / NOT_PUSHED`。
+- `EXECUTOR_COMPLETE / REVIEW_PENDING / MAIN_INTEGRATION_PENDING / NOT_PUSHED`。
 
 ### 交接边界
 
@@ -281,3 +300,9 @@ XXX用以下内容代替：
 | 006 | 执行者本轮只提交 093 分支；最终 PASS 必须等待独立验收和用户另行批准的集成/推送/清理 | 服从用户最新 Git 停止点，不提前冒充主线状态 | Git、终态标识 | 已采纳 |
 | 007 | 执行者的额外授权请示、完成交审和整改反馈只通过用户指定的 Codex 跨会话队列传递，发送后停止且不轮询 | 让计划制定者在独立会话中统一批示和验收，避免重复或旁路消息 | 沟通、验收 | 已采纳 |
 | 008 | 正式入口只传内部 `RONDO_BUILD_CARGO_PRODUCT` 身份；watchdog 统一解析、导出默认 target，并在启动 payload 前移除该内部变量；显式 `CARGO_TARGET_DIR` 保持优先 | 避免按 cwd 猜产品，修复 linked/no-cd/manifest 入口偏差，同时保留未来单任务专用 target 能力且不影响生产 watchdog lease 环境 | watchdog、Just 入口、测试 | 已采纳 |
+| 009 | 冷构建从空共享 target 开始；普通源码、fixture、测试与 Nextest 配置修复后不再次清空，最终在冻结 clean exact HEAD 上复用缓存做增量全量 | 冷阶段已经完成完整 workspace 枚举/执行，后续未改变 Cargo.lock、features、build script、依赖图、构建拓扑或 target 路由，符合第 3.8 节 | 构建缓存、正式结果 | 已采纳 |
+| 010 | 资源调试依次降低 Cargo/LLD 并发，最终正式轮使用 `CARGO_BUILD_JOBS=1` 与 LLD `--threads=1`；不改 memory cgroup、PSI 阈值或磁盘门 | 多组较高并发在重型链接阶段持续触发正确的 PSI stop；保留相同 fingerprint 与冷编译进度后最终稳定完成 | 重型命令、资源 | 已采纳 |
+| 011 | Publication Critic process tests 使用 Nextest host-specific setup script 构建并注入本轮精确 service binary | 进程测试需要正式 Cargo/Nextest 路径下可靠取得 binary，不能让 stale artifact 冒充证据；Unix/Windows 生命周期和 target 规则复用 Nextest 既有合同 | Multi 测试辅助、Nextest | 已采纳 |
+| 012 | Realtime provider 的 websocket connect timeout 只限定每次 handshake，session 初始化与 sideband retry 保持原生命周期 | 冷全量暴露真实 pending connect 无上界；把 timeout 放在更外层会错误限制 Frameless session start 并改变 retry 语义 | codex-api、core | 已采纳 |
+| 013 | 正式唯一 HTTP 502 retry 在同轮第二次及新进程 `retries=0` 均通过，分类为瞬时 loopback proxy/调度波动；24 个 skip 按既有 ignore 原因保留 | 符合第 3.10 节对可接受环境波动的定点稳定复核要求，且冷/最终 skip 数量一致、无新增 skip | 结果判定、证据 | 已采纳 |
+| 014 | 093 的后续释放只移除 093 自身，不假设并行 worktree 集合静止；当前 090/094 均由其 owner 决定生命周期 | 执行期间 090 已归档并新增 094，证明最初“只剩 main/090”的现场假设会漂移；收口必须继续保护未知并行工作 | Git、并行隔离 | 已采纳 |
