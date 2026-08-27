@@ -1,0 +1,147 @@
+{
+  "schema": "rondo-publication-critic-plan094-continuous-summary-v1",
+  "phase": "FINAL_REVIEW_ACCEPTED",
+  "outcome": "ROUTE_O_VALID_NO_MATERIAL_IMPROVEMENT",
+  "reason": "prefrozen_three_checkpoint_no_material_plateau",
+  "source": {
+    "formal_commit": "c6b50690a68a1891154888ef0c253a9c9bb89751",
+    "formal_archive_sha256": "61dfbce1c376897ba7c26fa23db7842848807260011af6ff207fa5f82ec0b4ef",
+    "qualification_commit": "ff4052db45da746d63681efff9a099cabf630d2d",
+    "qualification_archive_sha256": "24fd317f291112f8467b261e2d318d5efff81cdae1859a16ed0919b1286396cb"
+  },
+  "freeze": {
+    "content_sha256": "d409c400e9107b0899cef62d590668ebee79ce662da56f04e0e20d83aceea2dd",
+    "model_revision": "e51ea3e08fb81326c3b812a7ff0cb9cee83e59cc",
+    "model_snapshot_content_sha256": "18d9edf7132d9c5e13bb0e59e3c2c6a42f82007fa17de464e20783755a171360",
+    "data_bundle_content_sha256": "2247dd09c168900a47d37a50ecd6511d66d62d3f2ec8056ea3bc829c93de8b46",
+    "train_candidates": 128,
+    "train_pairs": 58,
+    "validation_candidates": 55,
+    "validation_pairs": 26,
+    "unseen_rows": 0,
+    "trainable_parameter_elements": 33558784
+  },
+  "runtime": {
+    "image": "runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404",
+    "python": "3.12.3",
+    "torch": "2.8.0+cu128",
+    "transformers": "4.52.3",
+    "gpu": "NVIDIA L40S",
+    "gpu_count": 1,
+    "region": "US-TX-3",
+    "provider_pod_id": "0bsry5tbei7p4o",
+    "provider_pod_name": "rondo-plan094-20260827-stageb01"
+  },
+  "continuation": {
+    "primary": "guarded_plan090_full_checkpoint_import",
+    "formal_mode": "exact_base_rebuild_of_route_o_step_1",
+    "fallback_reason": "commissioning rejected the historical controller cursor; the frozen exact-base fallback was used without stitching partial state"
+  },
+  "trajectory": [
+    {
+      "global_step": 1,
+      "checkpoint_id": "checkpoint-attempt-000-step-000001",
+      "material": false,
+      "raw_boundary_delta": 0.00390625,
+      "projected_boundary_delta": 0.0008611324539553877,
+      "raw_within_pass_delta": -0.0033482142857143016,
+      "projected_within_pass_delta": 0.0001389426001098884,
+      "roc_auc_delta": 0.0014005602240896309,
+      "meaningful_event_count": 0
+    },
+    {
+      "global_step": 2,
+      "checkpoint_id": "checkpoint-attempt-000-step-000002",
+      "material": false,
+      "raw_boundary_delta": -0.005139802631578982,
+      "projected_boundary_delta": 0.0009140888128635477,
+      "raw_within_pass_delta": -0.011160714285714302,
+      "projected_within_pass_delta": -0.000038189853590275824,
+      "roc_auc_delta": 0.0007002801120448154,
+      "meaningful_event_count": 0
+    },
+    {
+      "global_step": 3,
+      "checkpoint_id": "checkpoint-attempt-001-step-000003",
+      "material": false,
+      "raw_boundary_delta": -0.010074013157894801,
+      "projected_boundary_delta": 0.001316549007591608,
+      "raw_within_pass_delta": -0.01004464285714285,
+      "projected_within_pass_delta": 0.00018258106972325779,
+      "roc_auc_delta": 0.0014005602240896309,
+      "meaningful_event_count": 0
+    },
+    {
+      "global_step": 4,
+      "checkpoint_id": "checkpoint-attempt-002-step-000004",
+      "material": false,
+      "raw_boundary_delta": -0.010690789473684292,
+      "projected_boundary_delta": 0.001419241722937073,
+      "raw_within_pass_delta": -0.006696428571428548,
+      "projected_within_pass_delta": 0.00047980146818523903,
+      "roc_auc_delta": 0.0007002801120448154,
+      "meaningful_event_count": 0
+    }
+  ],
+  "recovery": {
+    "fresh_process_recovery_checkpoint_id": "checkpoint-attempt-001-step-000003",
+    "restored_to_global_step": 3,
+    "continued_to_global_step": 4,
+    "source_process_instance_id": "050a61cce2b541928ffce48baea3d440",
+    "continuation_process_instance_id": "0ee15753a7b1495491b90a9bfecce008"
+  },
+  "retention": {
+    "remote_task_root": "/workspace/rondo-plan094-20260827-stageb01",
+    "retained_checkpoint_ids": [
+      "checkpoint-attempt-000-step-000001",
+      "checkpoint-attempt-001-step-000003",
+      "checkpoint-attempt-002-step-000004"
+    ],
+    "checkpoint_qualification_content_sha256": "0f0d91331886fafd474371ec13baa6cd4e98cbc8dcdcaf3b304d364a36f7933b",
+    "checkpoint_qualification_controller_state_sha256": "58558c50ec8693e35a79f2d354f5361adcad168990a0667a6790958f403fdc01",
+    "small_handoff_sha256": "a0b227bdc606e76c0e17b1500e9770665631f576b9d409d66e30a2f9b32e9ea4",
+    "small_handoff_bytes": 2017280,
+    "small_handoff_member_count": 181,
+    "remote_task_root_bytes": 13217761792,
+    "terminal_result_content_sha256": "7dead9d3c180fae468fa1e0bf2bd19b069158f3016a232d446ced1ecf6447ce6",
+    "terminal_result_file_sha256": "5e93f57a9607027fb0669737826fc38f7e4e298015440fda0d86dc01f3dc4a95"
+  },
+  "budget": {
+    "hard_cap_usd": 5.0,
+    "stage_b_baseline_balance_usd": 5.4333030917,
+    "observed_at": "2026-08-27T09:27:44Z",
+    "live_balance_usd": 3.8187601459,
+    "known_unsettled_usd": 0.07,
+    "conservative_task_cost_usd": 1.69,
+    "closure_reserve_usd": 0.82,
+    "minimum_post_completion_volume_reserve_hours": 6,
+    "minimum_post_completion_volume_reserve_usd": 0.06
+  },
+  "resource_state": {
+    "captured_at": "2026-08-27T09:27:44Z",
+    "pod_count": 0,
+    "compute_rate_usd_per_hour": 0.0,
+    "account_current_spend_per_hour_usd": 0.007,
+    "release_state": "POD_STOPPED_DELETED_AND_ACCOUNT_ZERO_CONFIRMED",
+    "terminal_receipt_sha256": "25d3377e69ce6b55174ab3b304b17ac5b9ccc6d49c58985060a069e93c30ca6f",
+    "volume": {
+      "id": "mwemzrn33y",
+      "region": "US-TX-3",
+      "size_gb": 70,
+      "deleted": false
+    }
+  },
+  "claims": {
+    "research_outcome_complete": true,
+    "task_delivery_complete": true,
+    "resource_closure_complete": true,
+    "material_candidate_observed": false,
+    "valid_negative_observed": true,
+    "seed_sensitive_stability_tested": false,
+    "independent_cohort_generalization": false,
+    "unseen_evidence": false,
+    "product_go": false,
+    "m3_c1_or_m3_c2": false,
+    "m3_d_unlocked": false
+  }
+}
