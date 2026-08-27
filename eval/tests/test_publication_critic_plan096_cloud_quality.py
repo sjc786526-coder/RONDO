@@ -100,7 +100,7 @@ def _freeze(*, mode: str = "formal", suffix: str = "unit") -> dict[str, object]:
             "request": {
                 "temperature": 0.0,
                 "top_p": None,
-                "max_completion_tokens": 4096,
+                "max_completion_tokens": 8192,
                 "seed": None,
                 "stream": False,
                 "response_format": "json_object",

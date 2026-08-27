@@ -50,7 +50,7 @@ const MAX_ENV_NAME_BYTES: usize = 64;
 const MAX_API_KEY_BYTES: usize = 1024;
 const MAX_ATTEMPTS: u8 = 4;
 const MAX_RETRY_BACKOFF_MS: u64 = 5_000;
-const MAX_OUTPUT_TOKENS: u32 = 4_096;
+const MAX_OUTPUT_TOKENS: u32 = 8_192;
 const MAX_TEMPERATURE: f64 = 2.0;
 
 #[derive(Clone, Copy, Debug, Eq, Error, PartialEq)]

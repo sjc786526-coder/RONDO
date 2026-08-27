@@ -17,7 +17,7 @@
   "request": {
     "stream": false,
     "response_format": "json_object",
-    "max_output_tokens": 4096,
+    "max_output_tokens": 8192,
     "temperature": 0.0,
     "temperature_effect": "documented_ignored_under_default_thinking_mode",
     "thinking_request": "omitted_provider_default",

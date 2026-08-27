@@ -7,7 +7,7 @@
     "model": "deepseek-v4-flash",
     "served_model": "echoed",
     "response_format": "json_object",
-    "max_output_tokens": 4096,
+    "max_output_tokens": 8192,
     "temperature": 0.0,
     "request_timeout_ms": 60000,
     "max_attempts": 2,

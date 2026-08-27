@@ -278,11 +278,14 @@ XXX用以下内容代替：
 - 2026-08-27：完成 eval-only Rust scalar/usage observation、one-shot binary、Python freeze/cost/archive/runner/recompute/history 接缝；
   94 项相关 Python 测试、62 项 crate 测试、Clippy、fmt 与 55 条 compiled-binary loopback commissioning 均通过，loopback 为 55/55、
   零 typed failure、55 HTTP attempts。严格 secret loader 的零输出 credential 门禁通过，仍未发送真实请求。
+- 2026-08-27：首轮真实合成 commissioning 在冻结的 4096 output-token 上限下完成 55 次单 attempt：54 个成功 scalar，1 个响应恰好
+  `completion_tokens=4096` 并因截断成为 `provider_malformed_response`，累计 `0.3987545 RMB`。该轮作为无效 commissioning 保留且不拼接；
+  模型、prompt、默认 thinking/high effort 与严格 parser 不变，仅把 output 上限提升到 8192 后重新验证并使用新 clean commit/namespace。
 
 ### 当前工作
 
-- `OFFLINE_COMPLETE / REAL_COMMISSIONING_NEXT`：实现和离线全链已闭合，credential 仅经严格 loader 完成可用性门禁；下一步提交 clean
-  commissioning source、运行少量真实合成输入，再冻结全新 formal namespace。尚未发送真实请求或产生 formal score。
+- `COMMISSIONING_REMEDIATION`：首轮真实合成完整跑到 55 项后暴露 4096 output-token 截断；正在定向提升到 8192 并复验。该轮费用与
+  54 个有效进度均保留为 commissioning 证据但不进入新配置结果；尚未产生 formal score。
 
 ### 本任务剩余步骤
 
@@ -295,7 +298,7 @@ XXX用以下内容代替：
 
 ### 当前验收状态
 
-- `OFFLINE_VERIFIED / REAL_API_NOT_STARTED / FORMAL_NOT_RUN / REVIEW_NOT_REQUESTED`。
+- `OFFLINE_VERIFIED / REAL_COMMISSIONING_REMEDIATING / FORMAL_NOT_RUN / REVIEW_NOT_REQUESTED`。
 
 ### 交接边界
 
@@ -326,3 +329,4 @@ XXX用以下内容代替：
 | 014 | Rust 侧在同一 `CloudPublicationScorer` 增加 eval-only body-free scalar/usage observation 与 one-shot binary；Python 侧建设薄的 Plan 096 runner/archive/recompute，复用既有 release、metrics 与 write-once 基元 | 保持 prompt/retry/parser/identity 单一来源和产品 wire 不变，同时让费用、恢复、curve 与独立复算各归其职责 | 架构、测试、归档 | 已采纳 |
 | 015 | Plan 096 不为形式完整改变 Plan 095 已验证请求：Chat Completions 继续省略 `thinking`/`reasoning_effort`，freeze 绑定 provider 官方当前默认 enabled/high，并把实际 serving 语义记为不可验证 | 省略值正是已 commissioning 的 scorer stack；显式补发虽可能等价，却会无必要地改变正式被测请求 | provider、freeze、解释 | 已采纳 |
 | 016 | 价卡在首次真实请求前重新刷新并冻结当前北京时间谷时档 `0.05/1.5/4.5 RMB/M`；官方文档版本 `DeepSeek-V4-Flash-0731` 只作说明，实际 serving revision 仍不可验证 | 官方价格发生了时变更新且引入峰谷档；不能沿用早期快照，也不能把公开版本标签误写成单次响应证明 | 费用、identity、formal | 已采纳 |
+| 017 | 真实合成 commissioning 证明默认 high thinking 会偶发吃满 4096；保持 scorer 语义不变，仅把 `max_output_tokens` 与允许上限提升到 8192，并从新 clean commit/namespace 完整重跑 | 截断有完整 usage 且严格 parser 正确拒绝，属于 formal 前应修复的请求容量兼容性问题；不能重试该有效失败后与旧成功拼接冒充同配置结果 | provider、descriptor、commissioning | 已采纳 |
