@@ -1,3 +1,11 @@
+experimental = ["setup-scripts"]
+
+[scripts.setup.publication-critic-service-unix]
+command = { command-line = "scripts/setup-publication-critic-service.sh", relative-to = "workspace-root" }
+
+[scripts.setup.publication-critic-service-windows]
+command = ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", "scripts/setup-publication-critic-service.ps1"]
+
 [profile.default]
 # RONDO 本机上限（WSL2：32 逻辑核 / 约 26 GiB 内存，按 25 GiB 保守估算）。
 # nextest 默认按逻辑 CPU 数并发，全量跑时大量会拉起子进程的集成测试会叠加。
@@ -13,6 +21,16 @@ test-threads = 10
 # stuck. Keep this aligned with the broader timeout budget we give sharded CI.
 slow-timeout = { period = "30s", terminate-after = 2 }
 retries = 1
+
+[[profile.default.scripts]]
+filter = 'package(codex-core) & test(publication_review::process_tests::)'
+platform = { host = "cfg(unix)" }
+setup = "publication-critic-service-unix"
+
+[[profile.default.scripts]]
+filter = 'package(codex-core) & test(publication_review::process_tests::)'
+platform = { host = "cfg(windows)" }
+setup = "publication-critic-service-windows"
 
 [profile.default.junit]
 path = "junit.xml"
@@ -57,6 +75,12 @@ test-group = 'app_server_protocol_codegen'
 # These integration tests spawn a fresh app-server subprocess per case.
 # Keep the library unit tests parallel.
 filter = 'package(codex-app-server) & kind(test)'
+test-group = 'app_server_integration'
+
+[[profile.local.overrides]]
+# These tests copy and start app-server plus zsh subprocesses. Starting all four in one wave can
+# exhaust their 10-second initialization deadline under host I/O pressure.
+filter = 'package(codex-app-server) & test(turn_start_shell_zsh_fork_)'
 test-group = 'app_server_integration'
 
 [[profile.local.overrides]]

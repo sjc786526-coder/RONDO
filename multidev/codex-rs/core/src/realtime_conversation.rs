@@ -467,6 +467,7 @@ struct ConversationState {
 struct RealtimeStart {
     api_provider: ApiProvider,
     realtime_sideband_base_url: Option<String>,
+    websocket_connect_timeout: Duration,
     extra_headers: Option<HeaderMap>,
     client_managed_handoffs: bool,
     flush_transcript_tail_on_session_end: bool,
@@ -539,6 +540,7 @@ impl RealtimeConversationManager {
         let RealtimeStart {
             api_provider,
             realtime_sideband_base_url,
+            websocket_connect_timeout,
             extra_headers,
             client_managed_handoffs,
             flush_transcript_tail_on_session_end,
@@ -589,7 +591,8 @@ impl RealtimeConversationManager {
             audio_rx,
         };
 
-        let client = RealtimeWebsocketClient::new(api_provider);
+        let client = RealtimeWebsocketClient::new(api_provider)
+            .with_websocket_connect_timeout(websocket_connect_timeout);
         let client = match realtime_sideband_base_url {
             Some(base_url) => client.with_webrtc_sideband_base_url(base_url),
             None => client,
@@ -1116,6 +1119,7 @@ pub(crate) async fn handle_start(
 struct PreparedRealtimeConversationStart {
     api_provider: ApiProvider,
     realtime_sideband_base_url: Option<String>,
+    websocket_connect_timeout: Duration,
     extra_headers: Option<HeaderMap>,
     client_managed_handoffs: bool,
     flush_transcript_tail_on_session_end: bool,
@@ -1155,6 +1159,7 @@ async fn prepare_realtime_start(
         .clone()
         .unwrap_or(ConversationStartTransport::Websocket);
     let mut api_provider = provider.to_api_provider(Some(AuthMode::ApiKey))?;
+    let websocket_connect_timeout = provider.websocket_connect_timeout();
     let realtime_sideband_base_url = config.experimental_realtime_ws_base_url.clone();
     if let Some(realtime_ws_base_url) = &realtime_sideband_base_url {
         api_provider.base_url = realtime_ws_base_url.clone();
@@ -1212,6 +1217,7 @@ async fn prepare_realtime_start(
     Ok(PreparedRealtimeConversationStart {
         api_provider,
         realtime_sideband_base_url,
+        websocket_connect_timeout,
         extra_headers: Some(extra_headers),
         client_managed_handoffs: params.client_managed_handoffs,
         flush_transcript_tail_on_session_end: params.flush_transcript_tail_on_session_end,
@@ -1434,6 +1440,7 @@ async fn handle_start_inner(
     let PreparedRealtimeConversationStart {
         api_provider,
         realtime_sideband_base_url,
+        websocket_connect_timeout,
         extra_headers,
         client_managed_handoffs,
         flush_transcript_tail_on_session_end,
@@ -1461,6 +1468,7 @@ async fn handle_start_inner(
     let start = RealtimeStart {
         api_provider,
         realtime_sideband_base_url,
+        websocket_connect_timeout,
         extra_headers,
         client_managed_handoffs,
         flush_transcript_tail_on_session_end,
