@@ -1,7 +1,10 @@
 # Plan 094 operator runbook
 
-Sections 2-6 are paid Stage B.  They must not run until the reviewer replies
-exactly: `Plan 094 阶段 A 验收通过，批准进入付费阶段`.
+Sections 2-6 are paid Stage B and are currently
+`PAID_STAGE_PAUSED_BY_USER`.  They must not run while that pause is in force,
+even if Stage A receives technical acceptance.  A future run requires the user
+to resume the paid stage and the reviewer to provide the ExecPlan's exact paid
+approval; technical Stage A acceptance alone is insufficient.
 
 ## 1. Stage A freeze and clean bundles
 
@@ -35,8 +38,12 @@ headroom is the smaller of remaining 5 USD task headroom and live account
 headroom after reserve.  Write the fresh snapshot inside the Plan 094 task root
 and set `RONDO_PLAN094_BUDGET_SNAPSHOT`, the independently verified aggregate
 compute and storage rates, and a finite `RONDO_PLAN094_MAX_SECONDS`.  The
-bootstrap/launch seam rejects a snapshot older than five minutes or a timeout
-whose full rate-bound cost plus closure reserve does not fit.  Do not recharge.
+snapshot that permits Pod creation must project the entire proposed absolute
+Pod lifetime from the provider start timestamp, plus the fixed 60-second worker
+kill grace, 360-second terminal-confirmation reserve, closure reserve, and all
+prior task cost.  The bootstrap/launch seam rejects a snapshot older than five
+minutes, a timeout whose full rate-bound cost does not fit, or a segment that
+would cross the Pod's immutable termination trigger.  Do not recharge.
 
 If no US-TX-3 L40S is immediately available, use only:
 
@@ -55,6 +62,53 @@ image/container disk and mounted volume immediately after creation.  Release a
 mismatch with the retained Plan 087 terminal helper using prefix
 `rondo-plan094-`, then confirm account-level zero Pods.  Never create a second
 volume/Pod, change region/GPU, or expose unseen.
+
+For a matching Pod, obtain its exact provider ID and start timestamp and arm the
+Plan 094 host guard immediately.  The lifecycle authorization must be created
+within five minutes of provider start and the detached guard within 60 seconds
+of authorization.  Use a new task-owned host directory under the allowed
+git-ignored `eval-data/publication-critic/plan094/` root.  The budget snapshot's
+projected segment must cover the complete lifecycle bound, not only the next
+bootstrap or worker:
+
+```bash
+authorization_tmp="$PLAN094_LIFECYCLE_AUTHORIZATION.tmp"
+RONDO_PLAN094_STAGE_B_APPROVED=1 \
+RONDO_PLAN094_TASK_ROOT="$PLAN094_HOST_TASK_ROOT" PYTHONPATH=eval \
+python3 -B -m \
+  rondo_eval.publication_critic.full_model_training.plan094_cli \
+  authorize-pod-lifecycle --snapshot "$PLAN094_BUDGET_SNAPSHOT" \
+  --pod-id "$PLAN094_POD_ID" --pod-name "$PLAN094_POD_NAME" \
+  --task-started-at "$PLAN094_POD_STARTED_AT" \
+  --maximum-lifecycle-seconds "$PLAN094_ABSOLUTE_LIFECYCLE_SECONDS" \
+  --compute-rate-usd-per-hour "$PLAN094_COMPUTE_RATE_USD_PER_HOUR" \
+  --storage-rate-usd-per-hour "$PLAN094_STORAGE_RATE_USD_PER_HOUR" \
+  > "$authorization_tmp"
+chmod 600 "$authorization_tmp"
+mv "$authorization_tmp" "$PLAN094_LIFECYCLE_AUTHORIZATION"
+
+guard_armed="$PLAN094_HOST_TASK_ROOT/pod-lifecycle-guard-armed.json"
+guard_result="$PLAN094_HOST_TASK_ROOT/pod-terminal.json"
+guard_log="$PLAN094_HOST_TASK_ROOT/pod-lifecycle-guard.log"
+nohup setsid env RONDO_PLAN094_STAGE_B_APPROVED=1 PYTHONPATH=eval \
+  python3 -B -P \
+  training/publication-critic-plan094/runpod-lifecycle-guard.py \
+  --authorization "$PLAN094_LIFECYCLE_AUTHORIZATION" \
+  --terminal-helper training/publication-critic-plan087/runpod-terminal.py \
+  --task-root "$PLAN094_HOST_TASK_ROOT" \
+  --armed-output "$guard_armed" --result "$guard_result" \
+  > "$guard_log" 2>&1 </dev/null &
+```
+
+Require the new armed receipt to report `status=armed` and its PID to match the
+live process before any upload, bootstrap, or other Pod use.  `nohup setsid`
+keeps that host process alive across operator-shell or TUI interruption, launch
+gaps, and worker exit.  At the fixed trigger it invokes the retained Plan 087
+helper with exact Pod identity, then records only a confirmed
+zero-Pod/zero-compute terminal receipt.  Failure to authorize or arm requires
+immediate synchronous release and zero-Pod confirmation; do not use the Pod.
+Copy the immutable lifecycle authorization into the new Pod task root and set
+`RONDO_PLAN094_POD_LIFECYCLE_AUTHORIZATION` to that task-owned copy.
 
 ## 3. Bootstrap and asset boundaries
 
@@ -107,7 +161,9 @@ exactly to `$RONDO_PLAN094_TASK_ROOT/<artifact_namespace>/artifacts`.
 Run inventory, commissioning, start/resume and post-check commands only through
 `runpod-launch.sh`; each unique launch consumes its own fresh budget snapshot
 and writes an authorization receipt before starting its bounded worker.  Use
-`--stop-after` to advance only to the next intended observation point.
+`--stop-after` to advance only to the next intended observation point.  Every
+launch and bootstrap consumes the same immutable Pod lifecycle authorization;
+a later budget refresh or launch cannot move its absolute termination trigger.
 
 The controller order is fixed: update, full atomic checkpoint, manifest/tree
 readback and independent restore qualification, then validation/train
@@ -132,7 +188,9 @@ small controller/result, budget/resource receipts, and concise logs.  Once no
 GPU-dependent check remains, immediately release every Plan 094 Pod with the
 Plan 087 terminal helper and live-query until Pod count is zero and compute
 rate is 0 USD/hour.  Keep the volume and record its ID, US-TX-3, size (57-80 GB)
-and rate.
+and rate.  Do not cancel the detached lifecycle guard: its later idempotent
+terminal pass supplies a second exact zero-Pod confirmation if normal work
+finishes before the absolute trigger.
 
 Only after zero-compute closure run `finalize-terminal`.  Its positive/negative
 branches require a formal run, replayed overlay history, a fresh-process

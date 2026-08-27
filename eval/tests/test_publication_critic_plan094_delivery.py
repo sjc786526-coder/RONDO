@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import os
 import shutil
 import subprocess
@@ -32,10 +33,18 @@ from rondo_eval.publication_critic.full_model_training.plan094_cli import (  # n
 )
 from rondo_eval.publication_critic.full_model_training.plan094_contract import (  # noqa: E402
     authorize_paid_segment,
+    authorize_pod_lifecycle,
     validate_budget_snapshot,
 )
 
 SCRIPT_ROOT = REPO_ROOT / "training/publication-critic-plan094"
+LIFECYCLE_GUARD = SCRIPT_ROOT / "runpod-lifecycle-guard.py"
+GUARD_SPEC = importlib.util.spec_from_file_location(
+    "plan094_runpod_lifecycle_guard", LIFECYCLE_GUARD
+)
+assert GUARD_SPEC is not None and GUARD_SPEC.loader is not None
+guard = importlib.util.module_from_spec(GUARD_SPEC)
+GUARD_SPEC.loader.exec_module(guard)
 SCRIPTS = tuple(
     SCRIPT_ROOT / name
     for name in ("runpod-bootstrap.sh", "runpod-launch.sh", "runpod-worker.sh")
@@ -111,6 +120,15 @@ class Plan094DeliveryTests(unittest.TestCase):
         self.assertLess(
             launcher.index("authorize-segment"), launcher.index("nohup setsid")
         )
+        runbook = (SCRIPT_ROOT / "runbook.md").read_text()
+        self.assertIn("nohup setsid env", runbook)
+        subprocess.run(
+            [sys.executable, "-B", str(LIFECYCLE_GUARD), "--help"],
+            check=True,
+            capture_output=True,
+            timeout=10,
+            env={**os.environ, "PYTHONPATH": str(EVAL_ROOT)},
+        )
 
     def test_paid_segment_is_fresh_rate_bound_and_hard_capped(self) -> None:
         now = datetime.now(timezone.utc)
@@ -126,26 +144,54 @@ class Plan094DeliveryTests(unittest.TestCase):
                     "stage_b_baseline_known_unsettled_usd": 0.1,
                     "conservative_task_cost_usd": 0.2,
                     "closure_reserve_usd": 0.5,
-                    "projected_segment_and_closure_usd": 1.1,
+                    "projected_segment_and_closure_usd": 2.0,
                 }
             )
 
+        started_at = now.isoformat().replace("+00:00", "Z")
+        lifecycle = authorize_pod_lifecycle(
+            budget(now),
+            pod_id="pod-094",
+            pod_name="rondo-plan094-fixture",
+            task_started_at=started_at,
+            maximum_lifecycle_seconds=3600,
+            compute_rate_usd_per_hour=0.99,
+            storage_rate_usd_per_hour=0.006,
+            now=now,
+        )
+        self.assertEqual(lifecycle["billable_seconds_upper_bound"], 4020)
         authorization = authorize_paid_segment(
             budget(now),
+            lifecycle_authorization=lifecycle,
             maximum_seconds=1800,
             compute_rate_usd_per_hour=0.99,
             storage_rate_usd_per_hour=0.006,
             now=now,
         )
+        self.assertEqual(authorization["billable_seconds_upper_bound"], 2220)
         self.assertLess(
             authorization["task_cost_and_closure_upper_bound_usd"], 5.0
         )
         with self.assertRaisesRegex(
-            FullModelTrainingError, "plan094_segment_budget_not_authorized"
+            FullModelTrainingError, "plan094_segment_outside_pod_lifecycle"
         ):
             authorize_paid_segment(
                 budget(now),
-                maximum_seconds=18000,
+                lifecycle_authorization=lifecycle,
+                maximum_seconds=3550,
+                compute_rate_usd_per_hour=0.99,
+                storage_rate_usd_per_hour=0.006,
+                now=now,
+            )
+        with self.assertRaisesRegex(
+            FullModelTrainingError, "plan094_pod_lifecycle_budget_not_authorized"
+        ):
+            authorize_pod_lifecycle(
+                budget(now),
+                pod_id="pod-094",
+                pod_name="rondo-plan094-fixture",
+                task_started_at=started_at,
+                maximum_lifecycle_seconds=18000,
                 compute_rate_usd_per_hour=0.99,
                 storage_rate_usd_per_hour=0.006,
                 now=now,
@@ -155,11 +201,66 @@ class Plan094DeliveryTests(unittest.TestCase):
         ):
             authorize_paid_segment(
                 budget(now - timedelta(seconds=301)),
+                lifecycle_authorization=lifecycle,
                 maximum_seconds=60,
                 compute_rate_usd_per_hour=0.99,
                 storage_rate_usd_per_hour=0.006,
                 now=now,
             )
+
+    def test_detached_lifecycle_guard_uses_absolute_trigger_and_exact_terminal(
+        self,
+    ) -> None:
+        now = datetime.now(timezone.utc)
+        budget = validate_budget_snapshot(
+            {
+                "schema": "rondo-publication-critic-plan094-budget-snapshot-v1",
+                "captured_at": now.isoformat().replace("+00:00", "Z"),
+                "live_balance_usd": 5.4,
+                "known_unsettled_usd": 0.1,
+                "stage_b_baseline_balance_usd": 5.4,
+                "stage_b_baseline_known_unsettled_usd": 0.1,
+                "conservative_task_cost_usd": 0.2,
+                "closure_reserve_usd": 0.5,
+                "projected_segment_and_closure_usd": 2.0,
+            }
+        )
+        authorization = authorize_pod_lifecycle(
+            budget,
+            pod_id="pod-094",
+            pod_name="rondo-plan094-fixture",
+            task_started_at=now.isoformat().replace("+00:00", "Z"),
+            maximum_lifecycle_seconds=120,
+            compute_rate_usd_per_hour=0.99,
+            storage_rate_usd_per_hour=0.006,
+            now=now,
+        )
+        clock = [now]
+        calls = []
+
+        def sleeper(seconds: float) -> None:
+            clock[0] += timedelta(seconds=seconds)
+
+        def terminate(receipt, captured_at, timeout):
+            calls.append((receipt["pod_id"], captured_at, timeout))
+            return {
+                "deleted_pod": {
+                    "id": receipt["pod_id"],
+                    "name": receipt["pod_name"],
+                },
+                "pod_count": 0,
+                "compute_rate_usd_per_hour": 0.0,
+            }
+
+        result = guard.enforce_lifecycle(
+            authorization,
+            terminator=terminate,
+            now=lambda: clock[0],
+            sleeper=sleeper,
+        )
+        self.assertEqual(clock[0], now + timedelta(seconds=120))
+        self.assertEqual(calls[0][0], "pod-094")
+        self.assertEqual(result["status"], "pod_absent_confirmed")
 
     def test_source_archive_round_trip_is_clean_narrow_and_secret_free(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

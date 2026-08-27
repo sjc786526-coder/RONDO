@@ -51,6 +51,7 @@ REQUIRED_SOURCE_MEMBERS = {
     "training/publication-critic-plan094/continuous-freeze-v1.json",
     "training/publication-critic-plan094/runbook.md",
     "training/publication-critic-plan094/runpod-bootstrap.sh",
+    "training/publication-critic-plan094/runpod-lifecycle-guard.py",
     "training/publication-critic-plan094/runpod-launch.sh",
     "training/publication-critic-plan094/runpod-worker.sh",
 }

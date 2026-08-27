@@ -9,6 +9,7 @@ if [ "${RONDO_PLAN094_STAGE_B_APPROVED:-}" != "1" ]; then exit 2; fi
 : "${RONDO_PLAN094_LAUNCH_NAME:?set unique launch name}"
 : "${RONDO_PLAN094_MAX_SECONDS:?set a finite command timeout}"
 : "${RONDO_PLAN094_BUDGET_SNAPSHOT:?set a fresh task-owned budget snapshot}"
+: "${RONDO_PLAN094_POD_LIFECYCLE_AUTHORIZATION:?set the immutable Pod lifecycle authorization}"
 : "${RONDO_PLAN094_COMPUTE_RATE_USD_PER_HOUR:?set the verified compute rate}"
 : "${RONDO_PLAN094_STORAGE_RATE_USD_PER_HOUR:?set the verified storage rate}"
 if [ "$#" -lt 2 ] || [ "$1" != "--" ]; then exit 2; fi
@@ -22,7 +23,10 @@ case "$task_root" in /workspace/rondo-plan094-*) ;; *) exit 2 ;; esac
 source_root="$(realpath -e -- "$RONDO_PLAN094_SOURCE_ROOT")"
 case "$source_root" in "$task_root"/*) ;; *) exit 2 ;; esac
 budget_snapshot="$(realpath -e -- "$RONDO_PLAN094_BUDGET_SNAPSHOT")"
-case "$budget_snapshot" in "$task_root"/*) ;; *) exit 2 ;; esac
+lifecycle_authorization="$(realpath -e -- "$RONDO_PLAN094_POD_LIFECYCLE_AUTHORIZATION")"
+for path in "$budget_snapshot" "$lifecycle_authorization"; do
+  case "$path" in "$task_root"/*) ;; *) exit 2 ;; esac
+done
 controller="$task_root/controller"
 mkdir -m 700 -p "$controller"
 status="$controller/$RONDO_PLAN094_LAUNCH_NAME.status.json"
@@ -42,6 +46,7 @@ trap 'rm -f -- "$authorization_tmp"' EXIT
 PYTHONPATH="$source_root/eval" "$python" -B -P -m \
   rondo_eval.publication_critic.full_model_training.plan094_cli \
   authorize-segment --snapshot "$RONDO_PLAN094_BUDGET_SNAPSHOT" \
+  --lifecycle-authorization "$RONDO_PLAN094_POD_LIFECYCLE_AUTHORIZATION" \
   --maximum-seconds "$RONDO_PLAN094_MAX_SECONDS" \
   --compute-rate-usd-per-hour "$RONDO_PLAN094_COMPUTE_RATE_USD_PER_HOUR" \
   --storage-rate-usd-per-hour "$RONDO_PLAN094_STORAGE_RATE_USD_PER_HOUR" \

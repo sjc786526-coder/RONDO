@@ -6,7 +6,7 @@ import json
 import math
 import statistics
 from collections.abc import Mapping, Sequence
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from .contract import (
@@ -36,6 +36,12 @@ BUDGET_SCHEMA = "rondo-publication-critic-plan094-budget-snapshot-v1"
 SEGMENT_AUTHORIZATION_SCHEMA = (
     "rondo-publication-critic-plan094-segment-authorization-v1"
 )
+POD_LIFECYCLE_AUTHORIZATION_SCHEMA = (
+    "rondo-publication-critic-plan094-pod-lifecycle-authorization-v1"
+)
+WORKER_KILL_GRACE_SECONDS = 60
+TERMINAL_HELPER_TIMEOUT_SECONDS = 300
+TERMINAL_CONFIRMATION_SECONDS = 360
 
 PLAN090_SOURCE_CHECKPOINT_ID = "checkpoint-attempt-000-step-000001"
 PLAN090_SOURCE_CHECKPOINT_SHA256 = (
@@ -605,14 +611,16 @@ def validate_budget_snapshot(value: Any) -> dict[str, Any]:
 def authorize_paid_segment(
     budget_snapshot: Any,
     *,
+    lifecycle_authorization: Any,
     maximum_seconds: int,
     compute_rate_usd_per_hour: Any,
     storage_rate_usd_per_hour: Any,
     now: datetime | None = None,
 ) -> dict[str, Any]:
-    """Bind one bounded paid command to a fresh budget and observed rates."""
+    """Bind one command to fresh budget and the Pod's fixed stop deadline."""
 
     budget = validate_budget_snapshot(budget_snapshot)
+    lifecycle = validate_pod_lifecycle_authorization(lifecycle_authorization)
     if (
         not isinstance(maximum_seconds, int)
         or isinstance(maximum_seconds, bool)
@@ -628,7 +636,9 @@ def authorize_paid_segment(
         ) from exc
     if compute_rate <= 0.0:
         raise FullModelTrainingError("plan094_segment_authorization_invalid")
-    captured = _utc_datetime(budget["captured_at"])
+    captured = _utc_datetime(
+        budget["captured_at"], "plan094_segment_authorization_invalid"
+    )
     observed_now = now or datetime.now(timezone.utc)
     if observed_now.tzinfo is None:
         raise FullModelTrainingError("plan094_segment_authorization_invalid")
@@ -636,10 +646,27 @@ def authorize_paid_segment(
     age_seconds = (observed_now - captured).total_seconds()
     if age_seconds < -30.0 or age_seconds > 300.0:
         raise FullModelTrainingError("plan094_segment_budget_snapshot_stale")
+    termination_trigger = _utc_datetime(
+        lifecycle["termination_trigger_at"],
+        "plan094_segment_authorization_invalid",
+    )
+    remaining_lifecycle_seconds = (termination_trigger - observed_now).total_seconds()
+    if (
+        abs(compute_rate - lifecycle["compute_rate_usd_per_hour"]) > 1e-12
+        or abs(storage_rate - lifecycle["storage_rate_usd_per_hour"]) > 1e-12
+        or maximum_seconds + WORKER_KILL_GRACE_SECONDS
+        > remaining_lifecycle_seconds + 1e-9
+    ):
+        raise FullModelTrainingError("plan094_segment_outside_pod_lifecycle")
 
     try:
+        billable_seconds = (
+            maximum_seconds
+            + WORKER_KILL_GRACE_SECONDS
+            + TERMINAL_CONFIRMATION_SECONDS
+        )
         segment_cost = (
-            (compute_rate + storage_rate) * float(maximum_seconds) / 3600.0
+            (compute_rate + storage_rate) * float(billable_seconds) / 3600.0
         )
     except OverflowError as exc:
         raise FullModelTrainingError(
@@ -669,7 +696,14 @@ def authorize_paid_segment(
         "authorized_at": observed_now.isoformat().replace("+00:00", "Z"),
         "budget_snapshot_content_sha256": budget["content_sha256"],
         "budget_snapshot_captured_at": budget["captured_at"],
+        "pod_lifecycle_authorization_content_sha256": lifecycle["content_sha256"],
+        "pod_id": lifecycle["pod_id"],
+        "pod_name": lifecycle["pod_name"],
+        "termination_trigger_at": lifecycle["termination_trigger_at"],
         "maximum_seconds": maximum_seconds,
+        "worker_kill_grace_seconds": WORKER_KILL_GRACE_SECONDS,
+        "terminal_confirmation_seconds": TERMINAL_CONFIRMATION_SECONDS,
+        "billable_seconds_upper_bound": billable_seconds,
         "compute_rate_usd_per_hour": compute_rate,
         "storage_rate_usd_per_hour": storage_rate,
         "segment_cost_upper_bound_usd": segment_cost,
@@ -677,6 +711,202 @@ def authorize_paid_segment(
         "task_cost_and_closure_upper_bound_usd": upper_bound,
     }
     return {**core, "content_sha256": sha256_bytes(canonical_json_bytes(core))}
+
+
+def authorize_pod_lifecycle(
+    budget_snapshot: Any,
+    *,
+    pod_id: str,
+    pod_name: str,
+    task_started_at: str,
+    maximum_lifecycle_seconds: int,
+    compute_rate_usd_per_hour: Any,
+    storage_rate_usd_per_hour: Any,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Authorize one Plan 094 Pod's absolute lifetime from provider start time."""
+
+    budget = validate_budget_snapshot(budget_snapshot)
+    if (
+        not _identifier(pod_id)
+        or not isinstance(pod_name, str)
+        or not pod_name.startswith("rondo-plan094-")
+        or pod_name == "rondo-plan094-"
+        or not isinstance(maximum_lifecycle_seconds, int)
+        or isinstance(maximum_lifecycle_seconds, bool)
+        or maximum_lifecycle_seconds <= 0
+    ):
+        raise FullModelTrainingError("plan094_pod_lifecycle_authorization_invalid")
+    try:
+        compute_rate = _nonnegative(compute_rate_usd_per_hour)
+        storage_rate = _nonnegative(storage_rate_usd_per_hour)
+    except FullModelTrainingError as exc:
+        raise FullModelTrainingError(
+            "plan094_pod_lifecycle_authorization_invalid"
+        ) from exc
+    if compute_rate <= 0.0:
+        raise FullModelTrainingError("plan094_pod_lifecycle_authorization_invalid")
+    observed_now = now or datetime.now(timezone.utc)
+    if observed_now.tzinfo is None:
+        raise FullModelTrainingError("plan094_pod_lifecycle_authorization_invalid")
+    observed_now = observed_now.astimezone(timezone.utc)
+    captured = _utc_datetime(
+        budget["captured_at"], "plan094_pod_lifecycle_authorization_invalid"
+    )
+    started = _utc_datetime(
+        task_started_at, "plan094_pod_lifecycle_authorization_invalid"
+    )
+    snapshot_age = (observed_now - captured).total_seconds()
+    pod_age = (observed_now - started).total_seconds()
+    if snapshot_age < -30.0 or snapshot_age > 300.0:
+        raise FullModelTrainingError("plan094_pod_lifecycle_budget_snapshot_stale")
+    if pod_age < -30.0 or pod_age > 300.0:
+        raise FullModelTrainingError("plan094_pod_lifecycle_not_armed_immediately")
+    termination_trigger = started + timedelta(seconds=maximum_lifecycle_seconds)
+    if termination_trigger <= observed_now:
+        raise FullModelTrainingError("plan094_pod_lifecycle_authorization_invalid")
+    billable_seconds = (
+        maximum_lifecycle_seconds
+        + WORKER_KILL_GRACE_SECONDS
+        + TERMINAL_CONFIRMATION_SECONDS
+    )
+    lifecycle_cost = (
+        (compute_rate + storage_rate) * float(billable_seconds) / 3600.0
+    )
+    if not math.isfinite(lifecycle_cost):
+        raise FullModelTrainingError("plan094_pod_lifecycle_authorization_invalid")
+    closure = float(budget["closure_reserve_usd"])
+    upper_bound = (
+        float(budget["conservative_task_cost_usd"])
+        + lifecycle_cost
+        + closure
+    )
+    live_available = float(budget["live_balance_usd"]) - float(
+        budget["known_unsettled_usd"]
+    )
+    projected = float(budget["projected_segment_and_closure_usd"])
+    if (
+        budget["segment_authorized"] is not True
+        or projected + 1e-12 < lifecycle_cost + closure
+        or upper_bound > 5.0 + 1e-12
+        or lifecycle_cost + closure > live_available + 1e-12
+    ):
+        raise FullModelTrainingError("plan094_pod_lifecycle_budget_not_authorized")
+    core = {
+        "schema": POD_LIFECYCLE_AUTHORIZATION_SCHEMA,
+        "authorized_at": observed_now.isoformat().replace("+00:00", "Z"),
+        "budget_snapshot_content_sha256": budget["content_sha256"],
+        "budget_snapshot_captured_at": budget["captured_at"],
+        "pod_id": pod_id,
+        "pod_name": pod_name,
+        "task_started_at": started.isoformat().replace("+00:00", "Z"),
+        "maximum_lifecycle_seconds": maximum_lifecycle_seconds,
+        "termination_trigger_at": termination_trigger.isoformat().replace(
+            "+00:00", "Z"
+        ),
+        "worker_kill_grace_seconds": WORKER_KILL_GRACE_SECONDS,
+        "terminal_helper_timeout_seconds": TERMINAL_HELPER_TIMEOUT_SECONDS,
+        "terminal_confirmation_seconds": TERMINAL_CONFIRMATION_SECONDS,
+        "billable_seconds_upper_bound": billable_seconds,
+        "compute_rate_usd_per_hour": compute_rate,
+        "storage_rate_usd_per_hour": storage_rate,
+        "lifecycle_cost_upper_bound_usd": lifecycle_cost,
+        "closure_reserve_usd": closure,
+        "task_cost_and_closure_upper_bound_usd": upper_bound,
+    }
+    return {**core, "content_sha256": sha256_bytes(canonical_json_bytes(core))}
+
+
+def validate_pod_lifecycle_authorization(value: Any) -> dict[str, Any]:
+    """Validate the immutable receipt consumed by the detached host guard."""
+
+    fields = {
+        "schema",
+        "authorized_at",
+        "budget_snapshot_content_sha256",
+        "budget_snapshot_captured_at",
+        "pod_id",
+        "pod_name",
+        "task_started_at",
+        "maximum_lifecycle_seconds",
+        "termination_trigger_at",
+        "worker_kill_grace_seconds",
+        "terminal_helper_timeout_seconds",
+        "terminal_confirmation_seconds",
+        "billable_seconds_upper_bound",
+        "compute_rate_usd_per_hour",
+        "storage_rate_usd_per_hour",
+        "lifecycle_cost_upper_bound_usd",
+        "closure_reserve_usd",
+        "task_cost_and_closure_upper_bound_usd",
+        "content_sha256",
+    }
+    if (
+        not isinstance(value, Mapping)
+        or set(value) != fields
+        or value.get("schema") != POD_LIFECYCLE_AUTHORIZATION_SCHEMA
+        or not _sha256(value.get("budget_snapshot_content_sha256"))
+        or not _sha256(value.get("content_sha256"))
+        or not _identifier(value.get("pod_id"))
+        or not isinstance(value.get("pod_name"), str)
+        or not value["pod_name"].startswith("rondo-plan094-")
+        or value["pod_name"] == "rondo-plan094-"
+        or not isinstance(value.get("maximum_lifecycle_seconds"), int)
+        or isinstance(value["maximum_lifecycle_seconds"], bool)
+        or value["maximum_lifecycle_seconds"] <= 0
+        or value.get("worker_kill_grace_seconds") != WORKER_KILL_GRACE_SECONDS
+        or value.get("terminal_helper_timeout_seconds")
+        != TERMINAL_HELPER_TIMEOUT_SECONDS
+        or value.get("terminal_confirmation_seconds")
+        != TERMINAL_CONFIRMATION_SECONDS
+    ):
+        raise FullModelTrainingError("plan094_pod_lifecycle_authorization_invalid")
+    core = {key: item for key, item in value.items() if key != "content_sha256"}
+    if sha256_bytes(canonical_json_bytes(core)) != value["content_sha256"]:
+        raise FullModelTrainingError("plan094_pod_lifecycle_authorization_invalid")
+    started = _utc_datetime(
+        value["task_started_at"], "plan094_pod_lifecycle_authorization_invalid"
+    )
+    trigger = _utc_datetime(
+        value["termination_trigger_at"],
+        "plan094_pod_lifecycle_authorization_invalid",
+    )
+    authorized = _utc_datetime(
+        value["authorized_at"], "plan094_pod_lifecycle_authorization_invalid"
+    )
+    captured = _utc_datetime(
+        value["budget_snapshot_captured_at"],
+        "plan094_pod_lifecycle_authorization_invalid",
+    )
+    billable_seconds = (
+        value["maximum_lifecycle_seconds"]
+        + WORKER_KILL_GRACE_SECONDS
+        + TERMINAL_CONFIRMATION_SECONDS
+    )
+    try:
+        compute_rate = _nonnegative(value["compute_rate_usd_per_hour"])
+        storage_rate = _nonnegative(value["storage_rate_usd_per_hour"])
+        lifecycle_cost = _nonnegative(value["lifecycle_cost_upper_bound_usd"])
+        closure = _nonnegative(value["closure_reserve_usd"])
+        upper_bound = _nonnegative(value["task_cost_and_closure_upper_bound_usd"])
+    except FullModelTrainingError as exc:
+        raise FullModelTrainingError(
+            "plan094_pod_lifecycle_authorization_invalid"
+        ) from exc
+    expected_cost = (compute_rate + storage_rate) * billable_seconds / 3600.0
+    if (
+        trigger != started + timedelta(seconds=value["maximum_lifecycle_seconds"])
+        or not -30.0 <= (authorized - started).total_seconds() <= 300.0
+        or not -30.0 <= (authorized - captured).total_seconds() <= 300.0
+        or trigger <= authorized
+        or value.get("billable_seconds_upper_bound") != billable_seconds
+        or compute_rate <= 0.0
+        or abs(lifecycle_cost - expected_cost) > 1e-12
+        or upper_bound + 1e-12 < lifecycle_cost + closure
+        or upper_bound > 5.0 + 1e-12
+    ):
+        raise FullModelTrainingError("plan094_pod_lifecycle_authorization_invalid")
+    return json.loads(json.dumps(value))
 
 
 def _summarize_observation(
@@ -913,17 +1143,15 @@ def _nonnegative(value: Any) -> float:
     return float(value)
 
 
-def _utc_datetime(value: Any) -> datetime:
+def _utc_datetime(value: Any, error_code: str) -> datetime:
     if not isinstance(value, str) or not value.strip():
-        raise FullModelTrainingError("plan094_segment_authorization_invalid")
+        raise FullModelTrainingError(error_code)
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError as exc:
-        raise FullModelTrainingError(
-            "plan094_segment_authorization_invalid"
-        ) from exc
+        raise FullModelTrainingError(error_code) from exc
     if parsed.tzinfo is None:
-        raise FullModelTrainingError("plan094_segment_authorization_invalid")
+        raise FullModelTrainingError(error_code)
     return parsed.astimezone(timezone.utc)
 
 
@@ -955,10 +1183,15 @@ __all__ = [
     "PLAN090_SOURCE_CHECKPOINT_ID",
     "PLAN090_SOURCE_CHECKPOINT_PATH",
     "PLAN090_SOURCE_CHECKPOINT_SHA256",
+    "POD_LIFECYCLE_AUTHORIZATION_SCHEMA",
     "RUN_SPEC_SCHEMA",
     "SEGMENT_AUTHORIZATION_SCHEMA",
     "STOP_DECISION_SCHEMA",
+    "TERMINAL_CONFIRMATION_SECONDS",
+    "TERMINAL_HELPER_TIMEOUT_SECONDS",
+    "WORKER_KILL_GRACE_SECONDS",
     "authorize_paid_segment",
+    "authorize_pod_lifecycle",
     "assess_material",
     "decide_stop",
     "freeze_sha256",
@@ -967,5 +1200,6 @@ __all__ = [
     "validate_assessment",
     "validate_budget_snapshot",
     "validate_freeze",
+    "validate_pod_lifecycle_authorization",
     "validate_run_spec",
 ]

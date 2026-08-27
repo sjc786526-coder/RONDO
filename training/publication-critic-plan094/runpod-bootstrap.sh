@@ -14,6 +14,7 @@ if [ "${RONDO_PLAN094_STAGE_B_APPROVED:-}" != "1" ]; then exit 2; fi
 : "${RONDO_PLAN094_LAUNCH_NAME:?set a unique bootstrap segment name}"
 : "${RONDO_PLAN094_MAX_SECONDS:?set a finite bootstrap timeout}"
 : "${RONDO_PLAN094_BUDGET_SNAPSHOT:?set a fresh task-owned budget snapshot}"
+: "${RONDO_PLAN094_POD_LIFECYCLE_AUTHORIZATION:?set the immutable Pod lifecycle authorization}"
 : "${RONDO_PLAN094_COMPUTE_RATE_USD_PER_HOUR:?set the verified compute rate}"
 : "${RONDO_PLAN094_STORAGE_RATE_USD_PER_HOUR:?set the verified storage rate}"
 case "$RONDO_PLAN094_LAUNCH_NAME" in ''|*[!a-zA-Z0-9._-]*) exit 2 ;; esac
@@ -33,7 +34,9 @@ source_root="$(realpath -m -- "$RONDO_PLAN094_SOURCE_ROOT")"
 source_archive="$(realpath -e -- "$RONDO_PLAN094_SOURCE_ARCHIVE")"
 data_archive="$(realpath -e -- "$RONDO_PLAN094_DATA_ARCHIVE")"
 budget_snapshot="$(realpath -e -- "$RONDO_PLAN094_BUDGET_SNAPSHOT")"
-for path in "$source_root" "$source_archive" "$data_archive" "$budget_snapshot"; do
+lifecycle_authorization="$(realpath -e -- "$RONDO_PLAN094_POD_LIFECYCLE_AUTHORIZATION")"
+for path in "$source_root" "$source_archive" "$data_archive" "$budget_snapshot" \
+  "$lifecycle_authorization"; do
   case "$path" in "$task_root"/*) ;; *) exit 2 ;; esac
 done
 export HF_HOME="$task_root/hf-home"
@@ -114,6 +117,7 @@ authorization_tmp="$authorization.tmp.$$"
 python3 -B -P -m \
   rondo_eval.publication_critic.full_model_training.plan094_cli \
   authorize-segment --snapshot "$RONDO_PLAN094_BUDGET_SNAPSHOT" \
+  --lifecycle-authorization "$RONDO_PLAN094_POD_LIFECYCLE_AUTHORIZATION" \
   --maximum-seconds "$RONDO_PLAN094_MAX_SECONDS" \
   --compute-rate-usd-per-hour "$RONDO_PLAN094_COMPUTE_RATE_USD_PER_HOUR" \
   --storage-rate-usd-per-hour "$RONDO_PLAN094_STORAGE_RATE_USD_PER_HOUR" \
