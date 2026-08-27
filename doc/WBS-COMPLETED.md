@@ -2475,8 +2475,8 @@ formal retry 整改为 `d29e857`，最终独立验收提交为 `43cf0eeb3e1b4826
 
 ## Publication Critic 云端参考 Scorer 后端接入（Plan 095，2026-08-27）
 
-**状态**：`COMPLETED / FINAL_REVIEW_ACCEPTED / GOAL_COMPLETED / INTEGRATED_LOCAL / NOT_PUSHED`。实现提交为 `5b1d3b0`，首轮审查返修
-提交为 `6d118fc`，Sol 验收提交为 `19160ce`；已通过 merge commit `06cfcfc` 合入本地 main，`origin/main` 尚未推送。
+**状态**：`COMPLETED / FINAL_REVIEW_ACCEPTED / GOAL_COMPLETED / INTEGRATED / PUSHED`。实现提交为 `5b1d3b0`，首轮审查返修
+提交为 `6d118fc`，Sol 验收提交为 `19160ce`；已通过 merge commit `06cfcfc` 合入本地 main，并随主线推送至 `origin/main`。
 
 - 在既有 `PublicationScorer → service → typed client → team_publish` 边界内新增
   `codex-publication-critic-cloud-service`，与本地 worker 并列且显式选择、产品 default-off；既有 trait、service 核心、packet/render、
@@ -2495,4 +2495,4 @@ formal retry 整改为 `d29e857`，最终独立验收提交为 `43cf0eeb3e1b4826
 - 首轮审查与返修分别见 `agent_log/2026-08-27-071711-plan095-review.md`、
   `agent_log/2026-08-27-075500-plan095-review-remediation.md`；Sol 最终复验见
   `agent_log/2026-08-27-110223-plan095-sol-re-review.md`。用户本人创建的临时远端 backup ref 已按其明确授权删除；本地 main 集成无冲突并
-  保留 main 独有 README 提交，记录见 `agent_log/2026-08-27-111225-plan095-main-integration.md`。main 推送、分支归档和 worktree 删除仍待批准。
+  保留 main 独有 README 提交，记录见 `agent_log/2026-08-27-111225-plan095-main-integration.md`。main 已推送；分支归档和 worktree 删除仍待批准。
