@@ -264,25 +264,34 @@ XXX用以下内容代替：
   保持不变。
 - 2026-08-26：Plan 090 ExecPlan 与当前 WBS 窄同步已完成；规划阶段未访问 live RunPod/Hugging Face，未创建 Pod/卷或 ignored task
   namespace，未上传、下载或运行模型，未训练、产生费用、运行 Cargo/Docker或修改主工作区 tracked 文件。
+- 2026-08-26：阶段 A 实现已提交为 `847301d`。新增预结果 confirmation freeze、固定三分支/预算准入、同 scorer 的 train/validation
+  objective 诊断、exact-base 单更新控制器、checkpoint/不同进程恢复、整体 rubric/终态、clean bundle 与窄 RunPod 入口；既有 Plan 081
+  validation schema 和 Plan 082/087 入口保持兼容。
+- 2026-08-26：聚焦测试 `15 passed`，相邻 Plan 081/082/087 回归 `85 passed, 34 subtests passed`；定向 Ruff、Plan 090 format、三个
+  shell `bash -n`、freeze exact JSON、`git diff --check` 均通过。独立只读整改复核从首轮 `1 High / 6 Medium` 收口为 `0 High / 0 Medium`。
+- 2026-08-26：主物理根仅创建
+  `/home/sjc/desktop/RONDO/eval-data/publication-critic/plan090/stage-a-final/`（约 4.0 MiB）：source archive
+  `c6cd3670…` 绑定 `847301d` 并通过 extract/exact-tree；data archive `6d98c163…` 复验 content `2247dd09…`、train
+  `128/58`、validation `55/26`、unseen `0`。Plan 087 输入保持只读。
 
 ### 当前工作
 
-- 无。规划交付完成，等待执行者在本 worktree 开始阶段 A。
+- 阶段 A 已实现、冻结、提交并保持付费门关闭；等待审查者验收与明确付费阶段批准。
 
 ### 本任务剩余步骤
 
-- 阶段 A：实现轻量准备、预冻结、聚焦测试和首次提交，通过指定队列申请审查者验收与付费阶段批准。
+- 阶段 A：通过指定队列申请审查者验收；若有 finding，只做相称非付费整改并重新提交。
 - 阶段 B：在批准后完成真实链路打通与冻结确认序列，生成小型结果并释放 Pod。
 - 阶段 C：0 Pod 本地结果/WBS/完成记录/日志收口，聚焦复验、提交并申请最终审查。
 
 ### 阻塞项
 
-- 阶段 B 付费门关闭；需阶段 A 提交通过审查者验收后才可打开。
+- 阶段 B 付费门关闭；需审查者明确回复“阶段 A 验收通过，批准进入付费阶段”后才可打开。
 - live 余额、未结费用、US-TX-3 L40S 库存/价格和卷可用 bytes 仅能在执行期刷新；历史快照不能当作当前准入证据。
 
 ### 当前验收状态
 
-- `PLAN_READY / STAGE_A_NOT_STARTED / PAID_GATE_CLOSED`。
+- `STAGE_A_COMPLETE / REVIEW_PENDING / PAID_GATE_CLOSED`。
 
 ### 交接边界
 
@@ -304,3 +313,9 @@ XXX用以下内容代替：
 | 005 | 只复用 57GB 现有卷，不授权新建、扩容或删除 | 用户授权只覆盖现有卷，且任务可通过最小保留与清理自有中间资产控容 | 云资源 | 已采纳 |
 | 006 | WBS 在规划分支只窄指向 Plan 090，COMPLETED 待最终验收后更新 | 保持当前规划与历史职责分离 | 文档 | 已采纳 |
 | 007 | 额外授权请示、阶段 A 付费审批和最终验收只使用用户指定的 Codex 跨会话队列 | 保证审查批示进入正确会话且不依赖文件或人工转述 | 协作与审批 | 已采纳 |
+| 008 | 在现有 scorer/artifact/checkpoint 设施上新增 Plan 090 confirmation 薄层，不复用 Plan 087 自适应 search/finalizer | 搜索职责与固定复现职责不同；强行复用会扭曲分支、终态和恢复语义 | 训练与结果架构 | 已采纳 |
+| 009 | FP32 采用整模型 FP32 参数训练条件对照并记录实际参数、forward、gradient、optimizer 与 safetensors 存储 dtype | 现有 adapter 的整模型 dtype 路径更可靠；结论明确不冒充 update-only 因果证明 | 精度对照 | 已采纳 |
+| 010 | rubric 以历史 BF16 signature 的 raw Boundary 半格增益为主门，并联合 projected、ROC、pair 分布、strict/operating、Within-PASS 与 span 非塌缩 | 微弱格点信号不适合 bitwise 或单指标判断，整体口径在新结果前冻结 | 研究判断 | 已采纳 |
+| 011 | start 在 CLI 边界强制前序结果、完整分支预算、冻结 artifact namespace，并把 Stage B 基线、累计费用和 provider Pod id/name/hostname 带入正式结果 | 防止绕过条件分支、低报费用、混用 namespace 或跨 Pod 拼接；只绑定现有操作事实，不建设云编排/receipt 平台 | 执行与资源边界 | 已采纳 |
+| 012 | 继续复用已审查的小型 handoff envelope、通用抢卡脚本和 Plan 087 terminal helper，不新增 Plan 090 Pod 创建器或创建 receipt | 职责契合且可减少重复设施；实际 Pod 属性仍由执行者创建后独立核验 | 云端接缝 | 已采纳 |
+| 013 | checkpoint 前故障使用新的空 attempt namespace；checkpoint 后只恢复 exact checkpoint，PASS 最终候选要求同 hostname 的不同 OS 新进程恢复 | 同时保持 clean-base 语义、恢复可用性与同一 formal Pod 约束 | 恢复与保留 | 已采纳 |
