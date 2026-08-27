@@ -235,23 +235,32 @@ XXX用以下内容代替：
   删除任何旧 target/worktree，或运行任何 Cargo/Docker/模型/API 任务。
 - 2026-08-26：用户指定 Plan 093 执行者与审查者的跨会话队列合同；额外授权请示、完成交审和整改反馈统一发送到审查会话
   `01a04122-ac9d-7973-a4a7-37a504e45b69`，发送后停止且不轮询。
+- 2026-08-26：在宿主上下文持续持有 canonical 构建锁，复核 069 clean、HEAD 已进入 main、exact target 为非 symlink、
+  无 Cargo/Nextest/active heavy scope 或路径使用者后，精确删除 069 target `212729303040` bytes；项目占用从
+  `272558923776` 降至 `59829633024` bytes，删除后紧邻复核无 active scope。
+- 2026-08-26：069/091 分支已无 force 地归档为 `zz-done/*`；069/087/089/091/092 均在逐个 clean 与 main 包含复核后
+  释放，历史分支与提交保留。当前 `git worktree list` 只剩 main、并行 090 与本任务 093。
+- 2026-08-26：共享 watchdog 已用显式产品 identity 把受支持 Unix 正式重型入口默认路由到物理 common root 下的产品叶子，
+  永久默认更新为 270/285/290GB + C50，并在全部已创建 summary 形态统一记录产品、target 与四条实际资源线。两产品
+  helper/Just/V8 轻量回归、门限顺序与根外 target 拒绝均通过，且未创建 `rondo-local` 或 `rondo-multi`。
 
 ### 当前工作
 
-- ExecPlan 已形成；等待用户将执行提示词交给执行者。
+- 冻结并提交共享 target/永久门候选；随后从空 `rondo-multi` 启动 checksum-verified V8 冷全 workspace。
 
 ### 本任务剩余步骤
 
-- 按第 4 节 A–E 完成旧现场释放、共享 target/永久门、冷全量、有界修复、最终正式轮和本地提交。
-- 执行者完成后由计划制定者独立验收；合并、推送、093 归档和 worktree 释放等待用户另行批准。
+- 提交共享 target/永久门候选，按第 4 节 C–D 完成冷全量、有界修复与最终正式轮。
+- 按第 4 节 E 整理证据、动态 Plan 与实施日志并提交 093；随后由计划制定者独立验收。合并、推送、093 归档和
+  worktree 释放等待用户另行批准。
 
 ### 阻塞项
 
-- 当前无规划阻塞。实际执行在 069 target 安全删除、项目降至永久主动停止线以下前，不得启动普通重型 Cargo 批次。
+- 当前无执行阻塞；069 target 与旧 worktree 释放前置已闭合。
 
 ### 当前验收状态
 
-- `PLANNED / NOT_STARTED / NOT_TESTED / MAIN_INTEGRATION_PENDING / NOT_PUSHED`。
+- `IN_PROGRESS / LIGHTWEIGHT_GATES_PASS / FULL_WORKSPACE_PENDING / MAIN_INTEGRATION_PENDING / NOT_PUSHED`。
 
 ### 交接边界
 
@@ -271,3 +280,4 @@ XXX用以下内容代替：
 | 005 | Plan 093 自身完整 workspace 证据与共享 target 直接保存在主物理 ignored 路径，成功后不清理 | 093 worktree 最终会释放，这两类资产需要供后续任务复用 | ignored 写入、交付 | 已采纳 |
 | 006 | 执行者本轮只提交 093 分支；最终 PASS 必须等待独立验收和用户另行批准的集成/推送/清理 | 服从用户最新 Git 停止点，不提前冒充主线状态 | Git、终态标识 | 已采纳 |
 | 007 | 执行者的额外授权请示、完成交审和整改反馈只通过用户指定的 Codex 跨会话队列传递，发送后停止且不轮询 | 让计划制定者在独立会话中统一批示和验收，避免重复或旁路消息 | 沟通、验收 | 已采纳 |
+| 008 | 正式入口只传内部 `RONDO_BUILD_CARGO_PRODUCT` 身份；watchdog 统一解析、导出默认 target，并在启动 payload 前移除该内部变量；显式 `CARGO_TARGET_DIR` 保持优先 | 避免按 cwd 猜产品，修复 linked/no-cd/manifest 入口偏差，同时保留未来单任务专用 target 能力且不影响生产 watchdog lease 环境 | watchdog、Just 入口、测试 | 已采纳 |

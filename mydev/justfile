@@ -9,6 +9,7 @@ python := if os_family() == "windows" { "python" } else { "python3" }
 # The build lock and resource watchdog are shared by every RONDO product line,
 # so they live at the repository root rather than inside one product tree.
 watchdog := justfile_directory() / ".." / "scripts" / "with-build-lock.sh"
+cargo_product := "rondo-local"
 
 # Display help
 help:
@@ -57,7 +58,7 @@ fmt-check:
 # for why the lock exists.
 [unix]
 fix *args:
-    {{ watchdog }} cargo clippy --fix --tests --allow-dirty {args}
+    RONDO_BUILD_CARGO_PRODUCT={{ cargo_product }} {{ watchdog }} cargo clippy --fix --tests --allow-dirty {args}
 
 [windows]
 fix *args:
@@ -65,7 +66,7 @@ fix *args:
 
 [unix]
 clippy *args:
-    {{ watchdog }} cargo clippy --tests {args}
+    RONDO_BUILD_CARGO_PRODUCT={{ cargo_product }} {{ watchdog }} cargo clippy --tests {args}
 
 [windows]
 clippy *args:
@@ -95,7 +96,7 @@ install:
 # same single-build lock and fail-closed resource gate as `just test`.
 [unix]
 build-codex-cli *args:
-    RUST_MIN_STACK={{ rust_min_stack }} {{ watchdog }} cargo build -p codex-cli --bin codex "$@"
+    RONDO_BUILD_CARGO_PRODUCT={{ cargo_product }} RUST_MIN_STACK={{ rust_min_stack }} {{ watchdog }} cargo build -p codex-cli --bin codex "$@"
 
 [windows]
 build-codex-cli *args:
@@ -108,7 +109,7 @@ build-codex-cli *args:
 # there should be no need to add `--all-features`.
 [unix]
 test *args:
-    RUST_MIN_STACK={{ rust_min_stack }} NEXTEST_PROFILE=local {{ watchdog }} cargo nextest run --no-fail-fast "$@"
+    RONDO_BUILD_CARGO_PRODUCT={{ cargo_product }} RUST_MIN_STACK={{ rust_min_stack }} NEXTEST_PROFILE=local {{ watchdog }} cargo nextest run --no-fail-fast "$@"
 
 [windows]
 test *args:
@@ -118,7 +119,7 @@ test *args:
 # retaining the same build lock, watchdog, and JUnit behavior as `just test`.
 [unix]
 test-with-codex-v8 *args:
-    RUST_MIN_STACK={{ rust_min_stack }} NEXTEST_PROFILE=local {{ python }} ../scripts/with_codex_v8_artifacts.py -- {{ watchdog }} cargo nextest run --no-fail-fast "$@"
+    RONDO_BUILD_CARGO_PRODUCT={{ cargo_product }} RUST_MIN_STACK={{ rust_min_stack }} NEXTEST_PROFILE=local {{ python }} ../scripts/with_codex_v8_artifacts.py -- {{ watchdog }} cargo nextest run --no-fail-fast "$@"
 
 # Run from the repository root so scripts that resolve paths from `cwd` see
 # the same layout they use in GitHub Actions.
@@ -129,7 +130,7 @@ test-github-scripts:
 # Run explicit workspace benchmark targets.
 [unix]
 bench *args:
-    {{ watchdog }} cargo bench --workspace --bench '*' {args}
+    RONDO_BUILD_CARGO_PRODUCT={{ cargo_product }} {{ watchdog }} cargo bench --workspace --bench '*' {args}
 
 [windows]
 bench *args:
@@ -143,7 +144,7 @@ bench-smoke:
 # benchmark does not expand to every workspace benchmark.
 [unix]
 plan062-hotpaths-bench-run *args:
-    {{ watchdog }} cargo bench -p codex-core --bench plan062_hotpaths -- "$@"
+    RONDO_BUILD_CARGO_PRODUCT={{ cargo_product }} {{ watchdog }} cargo bench -p codex-core --bench plan062_hotpaths -- "$@"
 
 plan062-hotpaths-bench-smoke:
     {{ python }} ../../eval/rondo_eval/plan062_hotpaths.py run smoke --smoke
@@ -225,7 +226,7 @@ mcp-server-run *args:
 # Regenerate the json schema for config.toml from the current config types.
 [unix]
 write-config-schema:
-    {{ watchdog }} cargo run -p codex-core --bin codex-write-config-schema
+    RONDO_BUILD_CARGO_PRODUCT={{ cargo_product }} {{ watchdog }} cargo run -p codex-core --bin codex-write-config-schema
 
 [windows]
 write-config-schema:
@@ -234,7 +235,7 @@ write-config-schema:
 # Regenerate vendored app-server protocol schema artifacts.
 [unix]
 write-app-server-schema *args:
-    {{ watchdog }} cargo run -p codex-app-server-protocol --bin write_schema_fixtures -- {args}
+    RONDO_BUILD_CARGO_PRODUCT={{ cargo_product }} {{ watchdog }} cargo run -p codex-app-server-protocol --bin write_schema_fixtures -- {args}
 
 [windows]
 write-app-server-schema *args:
@@ -243,7 +244,7 @@ write-app-server-schema *args:
 [no-cd]
 [unix]
 write-hooks-schema:
-    {{ watchdog }} cargo run --manifest-path {{ justfile_directory() }}/codex-rs/Cargo.toml -p codex-hooks --bin write_hooks_schema_fixtures
+    RONDO_BUILD_CARGO_PRODUCT={{ cargo_product }} {{ watchdog }} cargo run --manifest-path {{ justfile_directory() }}/codex-rs/Cargo.toml -p codex-hooks --bin write_hooks_schema_fixtures
 
 [no-cd]
 [windows]

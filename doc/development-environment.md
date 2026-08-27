@@ -222,21 +222,21 @@ jobs、test-threads 与 rustc 槽是容量防护；全局锁是跨入口串行�
 但没有持续 20 秒，未触发停止；这验证了持续窗口能容忍短波动。当次测量采用的 21G 硬上限与 5G swap 上限对
 26GB RAM / 10GB swap 的 WSL 配置是宽松但有边界的取值。
 
-#### 260 GB 项目存储看门狗
+#### 290 GB 项目存储看门狗
 
 `with-build-lock.sh` 对共享仓库根（包含主工作区、项目 worktree 与 git-ignored 项目 scratch）执行：
 
-- 240,000,000,000 B：一次告警；
-- 255,000,000,000 B：主动冻结并终止本次 scope；
-- 260,000,000,000 B：绝对停机线；
+- 270,000,000,000 B：一次告警；
+- 285,000,000,000 B：主动冻结并终止本次 scope；
+- 290,000,000,000 B：绝对停机线；
 - Windows `C:` 盘实际剩余空间低于 50,000,000,000 B：停机。
 
-磁盘每 5 秒采样一次，255GB 主动线为采样和进程冻结保留约 5GB 缓冲。完整 0.147.0 target 实测约
-126GB，距主动线仍有约 129GB 余量，因此 260GB 足以覆盖正常冷构建。宿主容量门禁必须读取 Windows
+磁盘每 5 秒采样一次，285GB 主动线为采样和进程冻结保留约 5GB 缓冲。完整 0.147.0 target 历史实测约
+126GB，当前 290GB 门可覆盖正常冷构建。宿主容量门禁必须读取 Windows
 `C:` 盘的实际余量；看门狗通过 `C:\` 的 WSL drvfs 挂载 `/mnt/c` 采样该值。WSL ext4 根文件系统
 `df` 显示的约 1TB 虚拟容量/余量只能作为诊断信息，不能代替该门禁。
 这是**受控构建看门狗**，不是 ext4 目录 quota；绕过脚本的直接写入不受其保护。
-为避免把项目 target 放到监控根之外绕过 260GB 计数，脚本要求 `CARGO_TARGET_DIR` 必须位于共享
+为避免把项目 target 放到监控根之外绕过 290GB 计数，脚本要求 `CARGO_TARGET_DIR` 必须位于共享
 RONDO 项目根内；外部 target 会在启动前被拒绝。
 
 #### 内存、swap 与 PSI 停机条件
@@ -257,6 +257,9 @@ cgroup 报告 OOM kill。短时 1–3GiB swap 只削峰，不会被当作故障�
   仓库根的 `just product-build` / `just product-default-off-test` 也一样；其他重型 Cargo 命令必须
   显式用 `scripts/with-build-lock.sh <command>` 包裹。主工作区与任一 worktree、两个 worktree、
   两条产品线之间均不得同时构建。
+- 这些受支持的 Unix 正式重型入口以产品 identity 解析物理 Git common root，默认把 RONDO Local 与
+  RONDO Multi 分别写入 `.codex/cargo-target/rondo-local` 和 `.codex/cargo-target/rondo-multi`。因此同一产品的
+  主工作区和 linked worktree 共享构建缓存，两产品叶子不混用；显式专用 target 仍需由具体任务单独授权。
 - 脚本启动前拒绝已有 `cargo` / `rustc` / `rust-lld` / `nextest`；运行中若发现 scope 外第二个构建，
   会停止受控构建。rustc wrapper 只保证跨入口最多 6 个 rustc，不等于 Cargo 互斥锁。
 - 直接 Cargo、Windows just 分支和 Bazel 不自动进入该 scope；这是明确未覆盖面。本机尚未安装 Bazel。
@@ -268,7 +271,7 @@ cgroup 报告 OOM kill。短时 1–3GiB swap 只削峰，不会被当作故障�
 ```bash
 RONDO_BUILD_MEMORY_HIGH=19G RONDO_BUILD_MEMORY_MAX=21G just test
 RONDO_BUILD_SWAP_MAX=4G just test          # 单次收紧 swap
-RONDO_BUILD_PROJECT_STOP_BYTES=250000000000 just test
+RONDO_BUILD_PROJECT_STOP_BYTES=280000000000 just test
 ```
 
 `RONDO_BUILD_WATCHDOG=0`、`RONDO_BUILD_LOCK=0` 与 `RONDO_RUSTC_THROTTLE=0` 是实现层的紧急
@@ -286,7 +289,8 @@ RONDO_BUILD_PROJECT_STOP_BYTES=250000000000 just test
 `junit_status=pending|retained|absent|unreadable|invalid|hash_failed|not_applicable|config_failed|unsupported_invocation`、
 路径与SHA-256；Nextest返回0但本轮报告未成功留存时，包装器以证据失败返回。`pending`只会出现在
 启动期summary，两个配置错误状态属于preflight路径；`retained`只证明归属和完整性，测试是否通过仍由
-命令返回码与XML内容决定。
+命令返回码与XML内容决定。每份已创建的 summary 同时记录实际 Cargo 产品/target、项目根以及本轮生效的
+项目告警/主动停/绝对线和 Windows `C:` 停止线。
 
 ## 4. Node 与 pnpm
 
@@ -452,8 +456,9 @@ linked worktree 不复制凭据。加载器已通过 `git rev-parse --git-common
 - Terminal-Bench 两侧静态 musl runtime bundle 位于 ignored `eval-data/bin/{rondo,codex}/`；
   内含 CLI、`codex-code-mode-host` 与同一官方 v0.147.0 musl bwrap，详细 SHA 在各 bundle
   `manifest.json` 和 `agent_log/` 的 P1 日志中。
-- 所有 Cargo target、baseline scratch 和废弃的 libcap 自建产物已按精确路径在看门狗内清理；
-  冻结 bundle、下载资产、预算账本与看门狗 summary 保留在 `eval-data/`。三条 API 前诊断 raw run
+- 历史 worktree Cargo target、baseline scratch 和废弃的 libcap 自建产物已按精确路径清理；受支持的正式
+  重型入口现在使用物理仓库根下的产品级共享 target，并按实际任务保留可再生缓存。冻结 bundle、下载资产、
+  预算账本与看门狗 summary 保留在 `eval-data/`。三条 API 前诊断 raw run
   已从正式结果库和私有发布目录移除，预算槽位不回收。
 
 ## 10. 快速健康检查

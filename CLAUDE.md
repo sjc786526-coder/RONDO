@@ -36,9 +36,11 @@
 
 - （重要）重型 Cargo 构建与测试必须走仓库根的共享 `scripts/with-build-lock.sh`（优先使用已接入的 `just` 配方），
   主工作区与任何 worktree 不得同时构建。默认看门狗采用 `MemoryHigh=21G`、`MemoryMax=22G`、
-  `MemorySwapMax=5G`，项目存储在 240/255/260GB 告警/主动停/绝对停；宿主容量以 Windows `C:`
+  `MemorySwapMax=5G`，项目存储在 270/285/290GB 告警/主动停/绝对停；宿主容量以 Windows `C:`
   盘实际剩余空间为准，低于 50GB 停止。WSL 文件系统显示的约 1TB 虚拟容量/余量不得用于满足该门禁。
-  `CARGO_TARGET_DIR` 必须位于受监控的 RONDO 项目根内。拿不到锁、cgroup、Windows `C:` 盘实际余量
+  受支持的 Unix 正式重型入口默认把 RONDO Local/Multi 分别路由到物理仓库根下的
+  `.codex/cargo-target/rondo-local` 与 `.codex/cargo-target/rondo-multi`；`CARGO_TARGET_DIR` 必须位于受监控的
+  RONDO 项目根内。拿不到锁、cgroup、Windows `C:` 盘实际余量
   或其他资源计数器时必须 fail-closed；直接 Cargo 入口不具备单构建与资源看门狗保证，不得用于正式重型任务。
 - （重要）Docker 拉取、构建和运行必须与重型 Cargo 任务及真实本地模型加载/推理互斥，默认只处理一个明确镜像或任务、并发为 1，禁止无边界拉取或运行完整数据集。执行前后必须记录 `docker system df` 和 Windows `C:` 盘实际剩余空间；以本次任务开始时为基线，Docker 新增占用达到 40GB 告警、达到 60GB 主动停止，Windows `C:` 盘实际剩余空间低于 80GiB 立即停止。不得用 WSL 文件系统显示的虚拟余量代替该宿主容量计数。不得清理来源不明的既有镜像、容器、卷或构建缓存；任务内清理只能针对本次明确创建的对象。
 - 不回退、覆盖、stash 或删除来源不明的现有修改，不使用未经要求的破坏性 Git 或递归删除命令。
