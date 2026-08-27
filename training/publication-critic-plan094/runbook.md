@@ -1,10 +1,8 @@
 # Plan 094 operator runbook
 
-Sections 2-6 are paid Stage B and are currently
-`PAID_STAGE_PAUSED_BY_USER`.  They must not run while that pause is in force,
-even if Stage A receives technical acceptance.  A future run requires the user
-to resume the paid stage and the reviewer to provide the ExecPlan's exact paid
-approval; technical Stage A acceptance alone is insufficient.
+Sections 2-6 are paid Stage B.  The user lifted the prior pause and the reviewer
+provided the ExecPlan's exact paid approval on 2026-08-27.  The operator must
+still refresh every live resource and budget input at the points required below.
 
 ## 1. Stage A freeze and clean bundles
 

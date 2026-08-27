@@ -18,9 +18,9 @@ stop-cost fallback: it detaches from the operator session, waits for one
 creation-time absolute deadline, then reuses the Plan 087 terminal helper for
 exact stop/delete and zero-Pod confirmation.  It does not create a Pod.  Stage
 B commands fail closed unless `RONDO_PLAN094_STAGE_B_APPROVED=1`; the operator
-may set it only after all current approval conditions are met.  The paid stage
-is presently paused by the user, so Stage A technical acceptance does not
-satisfy those conditions.  Bootstrap and every later paid command require a
+may set it only after all current approval conditions are met.  The user lifted
+the prior pause and the reviewer explicitly approved Stage B on 2026-08-27, so
+those conditions are now met for this task.  Bootstrap and every later paid command require a
 fresh task-owned budget snapshot, verified compute/storage rates, a finite
 timeout, and the same immutable lifecycle authorization.  Budget bounds include
 worker kill grace and terminal-confirmation reserve as well as active runtime.
