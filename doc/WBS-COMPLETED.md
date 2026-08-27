@@ -2358,7 +2358,8 @@ formal retry 整改为 `d29e857`，最终独立验收提交为 `43cf0eeb3e1b4826
 ## Esc-Esc 历史提示词编辑回归窄适配（Plan 091，2026-08-26）
 
 **状态**：`#37421` 的 RONDO 窄适配、正式聚焦验证与独立验收均已完成；验收通过、任务目标完成，结论为
-`UPSTREAM_37421_BACKPORT_PASS`。实现提交为 `d68db9743e6208b5cdcc062c05a1c1094740a355`；当前尚未合入本地 `main` 或推送。
+`UPSTREAM_37421_BACKPORT_PASS`。实现提交为 `d68db9743e6208b5cdcc062c05a1c1094740a355`，验收头为
+`9cf95b4d9a899df59c652ffde844776ace4151f2`；用户批准后已 fast-forward 进入本地 `main` 并随最终文档收口推送 `origin/main`。
 
 - prompt-edit 分叉定位以一次性只读投影合并已加载 turn snapshot 与当前 replay buffer，只消费必要的 turn/user/review/completion
   通知，按 turn/item ID 去重且不写回 store；既有 fork-before 裁决、持久格式和源线程保持不变。

@@ -230,6 +230,8 @@ XXX用以下内容代替：
 - 2026-08-26：退出资源核验 Windows `C:` 实际余量 `48,965,611,520` bytes、项目根 `262,085,918,121` bytes、069 target
   `203,508,220,866` bytes；canonical lock 可取得，无 Cargo/rustc/nextest 进程和活跃 RONDO build scope，watchdog 各正式批次均
   `stop=none cleanup=none`。
+- 2026-08-26：独立验收未发现高、中等级 correctness finding，记录 `UPSTREAM_37421_BACKPORT_PASS`；用户随后批准集成与推送，验收头
+  `9cf95b4` 已 fast-forward 进入本地 `main`，最终文档收口随同推送 `origin/main`。
 
 ### 当前工作
 
@@ -246,15 +248,14 @@ XXX用以下内容代替：
 
 ### 当前验收状态
 
-- `COMPLETED / ACCEPTED / UPSTREAM_37421_BACKPORT_PASS / MAIN_INTEGRATION_PENDING / NOT_PUSHED`。独立验收未发现高、中等级 correctness
-  finding；完整 `codex-tui` crate 额外批次的 3 项 durable-session 基线 fixture/snapshot 欠账经复核与 Plan 091 无差异，不阻断本任务。
+- `COMPLETED / ACCEPTED / INTEGRATED / PUSHED / UPSTREAM_37421_BACKPORT_PASS`。独立验收未发现高、中等级 correctness finding；完整
+  `codex-tui` crate 额外批次的 3 项 durable-session 基线 fixture/snapshot 欠账经复核与 Plan 091 无差异，不阻断本任务。
 
 ### 交接边界
 
 - 091 worktree 已完成实现、验证、提交和独立验收；实现提交为 `d68db9743e6208b5cdcc062c05a1c1094740a355`，独立验收见
   `agent_log/2026-08-26-183420-plan091-independent-acceptance.md`。
-- 本地分支已记录 `COMPLETED / ACCEPTED / UPSTREAM_37421_BACKPORT_PASS`；主线合并、推送、分支归档和 worktree 清理仍等待用户批准，
-  不在本计划自动执行。
+- 用户批准后，验收头已 fast-forward 进入本地 `main` 并推送 `origin/main`；分支归档和 worktree 清理未获本轮明确要求，保持现状。
 
 ## 6. 关键决策记录
 
@@ -274,3 +275,4 @@ XXX用以下内容代替：
 | 010 | fake loopback WebSocket 测试仅以命令级 `NO_PROXY=127.0.0.1,localhost` 绕过宿主代理；不改 fixture 产品语义或全局配置 | 环境代理变量原先截获 loopback 连接，listener 始终未收到握手；命令级例外恢复 deterministic/offline 路径 | 测试环境 | 已采纳 |
 | 011 | 完整 crate 门禁中 3 项 durable-session 基线 fixture/snapshot 失败如实保留，不在 091 代修 | 失败文件相对 `HEAD` 无 091 差异且根因是既有 `setRootState` 欠账，扩修会越出 #37421 窄适配 | 范围/验收 | 已采纳 |
 | 012 | 独立验收接受实现与正式聚焦证据，记录 `UPSTREAM_37421_BACKPORT_PASS`；不为三项既有 crate 欠账新增重型复跑 | 代码、测试、JUnit、资源和范围复核均无高/中 correctness finding，现有证据足以裁决本任务 | 验收/交付 | 已采纳 |
+| 013 | 用户批准后 fast-forward 合并本地 `main` 并推送 `origin/main`，不自动归档分支或删除 worktree | 完成本轮明确授权的集成与远端交付，同时不扩大到未要求的清理动作 | Git/交付 | 已采纳 |
