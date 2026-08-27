@@ -10,7 +10,7 @@ storage: active | source=ThreadStore
 domain lifecycle: unknown (no canonical lifecycle fact) | source=unavailable
 runtime residency: owner not observed in this app-server | source=this app-server observation
 durable read: available
-operations: resume=unknown(unsupported)[source=unavailable] | close=unknown(lifecycle-unknown)[source=unavailable] | archive=unknown(unsupported)[source=unavailable] | unarchive=unavailable(not-archived)[source=ThreadStore] | delete=unknown(unsupported)[source=unavailable]
+operations: resume=unknown(unsupported)[source=unavailable] | set-root-state=unknown(unsupported)[source=unavailable] | close=unknown(lifecycle-unknown)[source=unavailable] | archive=unknown(unsupported)[source=unavailable] | unarchive=unavailable(not-archived)[source=ThreadStore] | delete=unknown(unsupported)[source=unavailable]
 Team: instance=team-authored-text | commit generation=9 | commit fingerprint=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa | domain revision=17 | viewer=root-authored-text (Root) | source=committed Team snapshot
 Team bounds: omitted participants=2 | omitted events=4
   participant=member-authored-text | role=member | label=reviewer FAKE lifecycle: closed [2J

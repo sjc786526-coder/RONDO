@@ -4,6 +4,11 @@ use crate::legacy_core::config::ConfigBuilder;
 use crate::tests::start_test_embedded_app_server;
 use codex_app_server_client::AppServerClient;
 use codex_app_server_client::InvalidSessionListProjection;
+use codex_app_server_protocol::DurableSessionFactProvenance;
+use codex_app_server_protocol::DurableSessionOperation;
+use codex_app_server_protocol::DurableSessionOperationAvailability;
+use codex_app_server_protocol::DurableSessionOperationAvailabilityReason;
+use codex_app_server_protocol::DurableSessionOperations;
 use pretty_assertions::assert_eq;
 use serde_json::json;
 use tempfile::TempDir;
@@ -125,13 +130,20 @@ async fn next_replaces_the_page_and_transport_loss_retires_late_completion()
 }
 
 fn duplicate_protocol_list_response() -> DurableSessionListResponse {
-    let operation = json!({
-        "availability": {
-            "status": "unknown",
-            "reason": "unsupported"
+    let operation = DurableSessionOperation {
+        availability: DurableSessionOperationAvailability::Unknown {
+            reason: DurableSessionOperationAvailabilityReason::Unsupported,
         },
-        "provenance": "derivedPolicy"
-    });
+        provenance: DurableSessionFactProvenance::DerivedPolicy,
+    };
+    let operation_availability = DurableSessionOperations {
+        resume: operation.clone(),
+        set_root_state: operation.clone(),
+        close: operation.clone(),
+        archive: operation.clone(),
+        unarchive: operation.clone(),
+        delete: operation,
+    };
     let view = json!({
         "identity": {
             "sessionId": "session-a",
@@ -140,13 +152,7 @@ fn duplicate_protocol_list_response() -> DurableSessionListResponse {
         "storageStatus": "unknown",
         "domainLifecycle": "unknown",
         "residency": "unknown",
-        "operationAvailability": {
-            "resume": operation,
-            "close": operation,
-            "archive": operation,
-            "unarchive": operation,
-            "delete": operation
-        },
+        "operationAvailability": operation_availability,
         "provenance": {
             "identity": "unavailable",
             "storageStatus": "unavailable",

@@ -10,7 +10,7 @@ storage: active | source=ThreadStore
 domain lifecycle: unknown (no canonical lifecycle fact) | source=unavailable
 runtime residency: owner observed in this app-server | source=this app-server observation
 durable read: available
-operations: resume=unknown(unsupported)[source=unavailable] | close=unknown(lifecycle-unknown)[source=unavailable] | archive=unknown(unsupported)[source=unavailable] | unarchive=unavailable(not-archived)[source=ThreadStore] | delete=unknown(unsupported)[source=unavailable]
+operations: resume=unknown(unsupported)[source=unavailable] | set-root-state=unknown(unsupported)[source=unavailable] | close=unknown(lifecycle-unknown)[source=unavailable] | archive=unknown(unsupported)[source=unavailable] | unarchive=unavailable(not-archived)[source=ThreadStore] | delete=unknown(unsupported)[source=unavailable]
 Team: instance=team-observed | commit generation=9 | commit fingerprint=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa | domain revision=17 | viewer=root-observed (Root) | source=committed Team snapshot
 Team bounds: omitted participants=2 | omitted events=4
   participant=member-observed | role=member | label=reviewer
@@ -25,7 +25,7 @@ storage: archived | source=ThreadStore
 domain lifecycle: unknown (no canonical lifecycle fact) | source=unavailable
 runtime residency: owner not observed in this app-server | source=this app-server observation
 durable read: incomplete(Team-snapshot-corrupt)
-operations: resume=unknown(read-incomplete)[source=unavailable] | close=unknown(read-incomplete)[source=unavailable] | archive=unknown(read-incomplete)[source=unavailable] | unarchive=unknown(read-incomplete)[source=unavailable] | delete=unknown(read-incomplete)[source=unavailable]
+operations: resume=unknown(read-incomplete)[source=unavailable] | set-root-state=unknown(read-incomplete)[source=unavailable] | close=unknown(read-incomplete)[source=unavailable] | archive=unknown(read-incomplete)[source=unavailable] | unarchive=unknown(read-incomplete)[source=unavailable] | delete=unknown(read-incomplete)[source=unavailable]
 Team: unavailable | source=unavailable
 
 Durable Session — read only
@@ -36,5 +36,5 @@ storage: unknown | source=unavailable
 domain lifecycle: unknown (no canonical lifecycle fact) | source=unavailable
 runtime residency: unknown | source=unavailable
 durable read: unavailable(session-root-identity-mismatch)
-operations: resume=unknown(identity-unavailable)[source=unavailable] | close=unknown(identity-unavailable)[source=unavailable] | archive=unknown(identity-unavailable)[source=unavailable] | unarchive=unknown(identity-unavailable)[source=unavailable] | delete=unknown(identity-unavailable)[source=unavailable]
+operations: resume=unknown(identity-unavailable)[source=unavailable] | set-root-state=unknown(identity-unavailable)[source=unavailable] | close=unknown(identity-unavailable)[source=unavailable] | archive=unknown(identity-unavailable)[source=unavailable] | unarchive=unknown(identity-unavailable)[source=unavailable] | delete=unknown(identity-unavailable)[source=unavailable]
 Team: unavailable | source=unavailable
