@@ -333,15 +333,16 @@ XXX用以下内容代替：
   `confirmed_at`。窄修在 exact 0 Pod 校验成功后重取完成时刻，超过 360 秒 confirmation deadline 则拒绝发布成功结果；推进 250 秒及越界
   361 秒的 fake-clock 回归分别覆盖真实确认时刻与 fail-closed，Plan 094 delivery 加 Plan 087 terminal 定向测试 9/9 通过。Plan 087 历史 helper
   保持不变。
+- 2026-08-27：最终技术复审确认上述 Medium 已闭合，无遗留 High/Medium correctness 或 functionality finding；阶段 A 技术验收通过。
+  用户暂停阶段 B 的决定保持有效，付费门未开启，尚未运行真实模型或形成研究终态。
 
 ### 当前工作
 
-- 阶段 A 技术实现、第二轮整改及终止确认时刻窄修已完成，正在提交并通过指定队列申请纯技术复审；付费阶段由用户暂停，付费门保持关闭。
+- 阶段 A 技术实现、整改与最终技术验收已完成；付费阶段由用户暂停，付费门保持关闭。
 
 ### 本任务剩余步骤
 
-- 提交阶段 A 并由指定审查者完成技术验收；本次不得申请或批准进入付费阶段。
-- 只有用户以后明确恢复付费阶段且原审查批准条件同时满足，才按阶段 B 完成真实调通、正式连续轨迹、合法研究终态、恢复/资产/资源收口、
+- 等待用户明确恢复付费阶段；恢复后仍须满足原审查批准条件，才按阶段 B 完成真实调通、正式连续轨迹、合法研究终态、恢复/资产/资源收口、
   提交和最终独立验收。
 - 本任务完成后冻结本计划；不在此安排独立 cohort、unseen、产品资格或 M3-D。
 
@@ -352,7 +353,7 @@ XXX用以下内容代替：
 
 ### 当前验收状态
 
-- `STAGE_A_TECHNICALLY_COMPLETE / REREVIEW_PENDING / PAID_GATE_CLOSED / PAID_STAGE_PAUSED_BY_USER`。
+- `STAGE_A_TECHNICALLY_ACCEPTED / PAID_GATE_CLOSED / PAID_STAGE_PAUSED_BY_USER`。
 
 ### 交接边界
 
