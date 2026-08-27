@@ -2472,3 +2472,27 @@ formal retry 整改为 `d29e857`，最终独立验收提交为 `43cf0eeb3e1b4826
 - 主线整合以当时 `main@05021a8572` 为基准，完整保留 Plan 093 全 workspace 基线与 `training/` 目录规则，只把三份共享 WBS 文档中的
   Plan 094 部分更新为最终状态；merge commit 为 `08bbf3e35c1668234f73de0dae7a776aeb6a126c`。main 复验 Plan 094/Plan 087 定向测试
   `21/21` 及 compile/static/diff 门禁通过，没有重复重型流程。整合记录见 `agent_log/2026-08-27-024733-plan094-main-integration.md`。
+
+## Publication Critic 云端参考 Scorer 后端接入（Plan 095，2026-08-27）
+
+**状态**：`COMPLETED / FINAL_REVIEW_ACCEPTED / GOAL_COMPLETED / MAIN_INTEGRATION_PENDING`。实现提交为 `5b1d3b0`，首轮审查返修提交为
+`6d118fc`；当前只提交在 095 专用 worktree，尚未合并或推送实现分支。
+
+- 在既有 `PublicationScorer → service → typed client → team_publish` 边界内新增
+  `codex-publication-critic-cloud-service`，与本地 worker 并列且显式选择、产品 default-off；既有 trait、service 核心、packet/render、
+  `team_publish` 和本地 worker 路径未改，没有第二套协议、client、trace 或归档体系。
+- cloud descriptor 在监听前绑定 requested model 与声明 identity；model revision 固定为 `serving-revision-unverifiable`，tokenizer 固定为
+  `provider-managed-tokenizer@unverifiable`。独立 cloud prompt 严格投影一个 `[0,1]` 有限标量，既有 threshold/pass rule 继续产生
+  `PASS/REWRITE`，provider 明确回报不同 model 时形成 typed identity mismatch。
+- provider 调用使用现有 HTTP/proxy 设施、无 redirect/request logging、64 KiB 响应上限和 body-free failure；有限 retry 的最坏
+  `timeout × n + backoff × (n−1)n/2` 必须装进 service job deadline。离线进程测试覆盖 ready、两种 verdict、malformed/out-of-domain、
+  model drift、429/401、timeout/cancel、并发/queue-full、active shutdown、fail-closed 和非 cloud 零请求。
+- 最终定向门禁由执行者和 Sol 审查者分别验证：`codex-publication-critic` `57/57`、core publication review `17/17`；Bazel lock
+  update/error 模式均成功且 `MODULE.bazel.lock` 无漂移。未运行全 workspace。
+- 最终代码与最终 descriptor 使用合成 packet 完成真实 DeepSeek clean smoke，正反稿分别得到 `PASS` 与 `REWRITE`，另有 HTTP 400
+  负向对照；readiness 零 provider 请求。全任务 11 次可能计费请求，按用户口径保守计 11 USD / 50 USD。未使用 Docker/GPU/RunPod/
+  真实本地模型，未读取 v8/unseen，未上传项目数据。
+- 首轮审查与返修分别见 `agent_log/2026-08-27-071711-plan095-review.md`、
+  `agent_log/2026-08-27-075500-plan095-review-remediation.md`；Sol 最终复验见
+  `agent_log/2026-08-27-110223-plan095-sol-re-review.md`。用户本人创建的临时远端 backup ref 已按其明确授权删除；main 集成、main 推送、
+  分支归档和 worktree 删除仍待后续批准。

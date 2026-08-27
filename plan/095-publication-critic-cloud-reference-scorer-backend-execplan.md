@@ -255,13 +255,14 @@ XXX用以下内容代替：
 - 2026-08-27：实现云端 backend 与显式选择路径。新增 `cloud_template.rs` / `cloud_config.rs` / `cloud_scorer.rs` 与启动器
   `codex-publication-critic-cloud-service`，probe 增加互斥的 `--expected-cloud-descriptor`；既有 trait、service 核心、
   packet/render、`team_publish` 与 `real_scorer.rs` 未改。
-- 2026-08-27：离线门禁通过。`just test -p codex-publication-critic` `54/54`（新增 10 单测 + 8 项 loopback provider 集成测试），
+- 2026-08-27：离线门禁通过。`just test -p codex-publication-critic` `54/54`（新增 11 单测 + 9 项 loopback provider 集成测试），
   `just test -p codex-core --lib -E 'test(publication_review)'` `17/17`，clippy 与 fmt-check 通过。
 - 2026-08-27：真实 API commissioning。第一轮暴露两个接缝问题（本机代理拦截 loopback fixture；reasoning 模型把 `max_tokens`
   全部用于 `reasoning_content` 导致 `finish_reason=length`），均在范围内自行修复并续跑。
 - 2026-08-27：冻结 clean commit `5b1d3b0` 与正式 descriptor 后，从全新 `/tmp` 运行空间完成 clean 真实 smoke：
   ready 零 provider 请求，正反合成 packet 分别得到 `PASS` 与 `REWRITE`，另有 HTTP 400 负向对照证明请求确实到达选定 provider。
-- 2026-08-27：完成费用与副作用收口（保守 5 USD / 50 USD；无 Docker/GPU/本地模型；`/tmp` 工件已清理；主根未新增 ignored 资产），
+- 2026-08-27：完成首批费用与副作用收口（8 次可能计费请求，保守 8 USD / 50 USD；无 Docker/GPU/本地模型；`/tmp` 工件已清理；
+  主根未新增 ignored 资产），
   并同步顶层/三期 WBS、`doc/WBS-COMPLETED.md` 与 `agent_log/2026-08-27-071500-plan095-cloud-reference-scorer-backend.md`。
 - 2026-08-27：首次独立验收完成，定向重跑 `codex-publication-critic` `54/54` 仍通过，但发现 1 High、3 Medium、2 Low finding；
   结论为 `REVIEW_REJECTED / REMEDIATION_REQUIRED`，报告见 `agent_log/2026-08-27-071711-plan095-review.md`。
@@ -274,15 +275,21 @@ XXX用以下内容代替：
 - 2026-08-27：返修后门禁全绿——`codex-publication-critic` `57/57`、`codex-core --lib -E 'test(publication_review)'` `17/17`、
   clippy 与 fmt-check 通过。因 model revision 字面量变更，用最终代码与最终 descriptor 在全新 `/tmp` 空间重跑真实 clean smoke
   （`PASS` / `REWRITE`）与 HTTP 400 负向对照，并同步更正 ExecPlan/两份 WBS/实施日志中的过满与错误事实。
+- 2026-08-27：切换回 Sol 后从基线重新独立复验。代码与功能审查通过；审查者经共享锁/看门狗独立重跑
+  `codex-publication-critic` `57/57` 与 `codex-core --lib -E 'test(publication_review)'` `17/17`，均通过。Git 同时显示
+  `6d118fc` 已由一次 `update by push` 出现在远端 `origin/backup/20260827-worktree-095-publication-critic-cloud-reference-scorer`，
+  但现有记录没有对应推送授权且无法从 Git 归因操作者，因此最终流程验收等待用户裁定；详见
+  `agent_log/2026-08-27-110223-plan095-sol-re-review.md`。
+- 2026-08-27：用户确认上述 ref 是其本人创建的备份，并明确授权删除该精确远端 backup 分支；删除后远端授权边界闭合。Sol 最终复验
+  结论转为 `FINAL_REVIEW_ACCEPTED / GOAL_COMPLETED`，完成记录追加到 `doc/WBS-COMPLETED.md`。
 
 ### 当前工作
 
-- 首轮审查窄修与重新验证全部完成，095 worktree 已提交并保持 clean，等待复验。
+- Plan 095 实现、返修、真实 smoke、定向门禁、Bazel lock 与 Sol 最终复验均已完成；计划冻结，等待用户决定是否合并并推送 main。
 
 ### 本任务剩余步骤
 
-- 无。复验若提出新意见，在本 worktree 内窄修并重跑受影响门禁后回报。
-- 复验通过后再由验收方决定是否向 `doc/WBS-COMPLETED.md` 追加完成记录（首次验收已删除该段，返修期间不重复提前声明完成）。
+- 无任务内剩余步骤。工作树合并、main 推送、分支归档和 worktree 删除仍等待用户后续批准。
 - 本任务完成后冻结此计划；不在此安排 threshold 标定、批量测评、v8/unseen、产品启用或 M3-D。
 
 ### 阻塞项
@@ -291,7 +298,8 @@ XXX用以下内容代替：
 
 ### 当前验收状态
 
-- `REMEDIATED / OFFLINE_PASS_57 / REAL_SMOKE_RERUN_PASS / BAZEL_LOCK_NO_DRIFT / COST_11USD_OF_50 / PENDING_RE_REVIEW`。
+- `COMPLETED / FINAL_REVIEW_ACCEPTED / GOAL_COMPLETED / OFFLINE_PASS_57 / CORE_PASS_17 / REAL_SMOKE_RERUN_PASS /
+  BAZEL_LOCK_NO_DRIFT / COST_11USD_OF_50 / MAIN_INTEGRATION_PENDING`。
 
 ### 交接边界
 
@@ -301,6 +309,7 @@ XXX用以下内容代替：
   不在其中，因此 `Cargo.lock` 变化结构性地不进入该 lock。
 - 云端调用的 deadline 关系准确表述为：descriptor 校验保证 backend 最坏预算装进 job deadline，立即执行的调用通常先得到 typed
   backend failure；service 的 job deadline 始终是外层兜底，排队或外层取消时可以先发生。
+- 用户本人创建的远端 backup ref 已按其明确授权删除；095 实现分支未推送。
 - 本任务不自行合并、推送、归档/重命名分支或删除 worktree，等待用户批准。
 
 ## 6. 关键决策记录
@@ -322,7 +331,7 @@ XXX用以下内容代替：
 | 011 | 最终只提交 095 worktree；合并、推送、归档和删除等待用户批准 | 遵循本次明确 Git 停止点 | Git | 已采纳 |
 | 012 | 显式选择路径实现为独立 binary `codex-publication-critic-cloud-service`，不改 `codex-core` | `PublicationCriticConfig` 只认 endpoint + expected descriptor，本就 backend-neutral；换 backend 即换启动哪个 service，default-off 成为结构性事实 | 架构、允许写集 | 已采纳 |
 | 013 | identity 诚实由 descriptor 校验强制而非约定：tokenizer 恒为 `provider-managed-tokenizer@unverifiable`，模板/投影身份与 `[0,1]` domain 绑定模板版本，definition 必须带 `rondo-cloud-reference-` 前缀 | 让“不冒充本地 exact identity / 不冒充最终标定”成为不可绕过的启动前门禁 | identity、启动器、测试 | 已采纳 |
-| 014 | descriptor 校验强制最坏 `attempt×timeout + backoff ≤ job_timeout`；副作用是 service `ExecutionTimeout` 被 backend 自身 deadline 结构性抢先 | 保证云端调用始终收敛在既有 `RuntimeLimits` 内；差异如实记录而不是放宽校验去凑断言 | 资源、测试 | 已采纳 |
+| 014 | descriptor 校验强制最坏 `attempt×timeout + backoff×(n−1)n/2 ≤ job_timeout`；立即执行时 backend 通常先收敛，排队或外层取消时 service deadline 仍可先发生 | 保证云端调用始终收敛在既有 `RuntimeLimits` 内，同时不对具体 failure 胜出顺序作过满承诺 | 资源、测试 | 首轮审查后修正 |
 | 015 | loopback provider 走 `build_direct()`，真实 HTTPS 走 `RespectSystemProxy` | 本机 `NO_PROXY` 使用 reqwest 不识别的 `127.*` 通配符，会把 hermetic fixture 路由进代理；`build_direct` 的文档用途正是本地 fixture | HTTP 客户端、离线测试 | 已采纳 |
 | 016 | 严格解析器只判 shape/有限性，domain 归属交回既有 service | finite 但越界是真实 provider 观测，应得到 typed `ScoreOutOfDomain` 而非伪装成解析失败 | scoring、失败分型 | 已采纳 |
 | 017 | descriptor 校验强制声明 model 名等于 provider 请求的 model，且 model revision 冻结为 `serving-revision-unverifiable` | 否则可请求模型 A 而把结果标成模型 B，service 的 equality check 两侧都是 B 因而无法察觉；chat-completions 也不携带可验证的 serving revision | identity、公共构造函数 | 首轮审查后采纳 |

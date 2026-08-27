@@ -94,7 +94,8 @@ pinned 风格 `2026-08-01`，两者都必须是 `DishonestIdentity`。
 （`service.rs` 在取得 admission permit 后立即设定 deadline），排队等待也算在内，所以排队的调用仍可能先撞上外层
 `ExecutionTimeout`。准确表述是：descriptor 校验保证 backend 自身的最坏预算装得进 job deadline，因此**立即开始执行**的
 调用通常先收敛为 typed backend failure；service 的 deadline 始终是外层兜底，排队或外层取消时可以先发生。
-ExecPlan、两份 WBS、`WBS-COMPLETED` 与相关测试注释均按此改写，测试只断言外层界限而不冻结哪一种 failure 获胜。
+ExecPlan、两份 WBS 与相关测试注释均按此改写，测试只断言外层界限而不冻结哪一种 failure 获胜；`WBS-COMPLETED` 在首次审查删除
+Plan 095 段后保持无该段，等待最终验收再追加。
 
 ## 7. 返修后门禁
 
@@ -125,7 +126,8 @@ ExecPlan、两份 WBS、`WBS-COMPLETED` 与相关测试注释均按此改写，�
 
 - 主工作区、093 worktree 全程 clean；`.env.local` 与 `rondo.local.toml` 未修改；密钥只经既有严格 loader 取单个
   allowlisted 变量注入子进程。
-- 所有 Cargo 与 Bazel 命令走仓库共享构建锁；`CARGO_TARGET_DIR` 为主物理根 `.codex/cargo-target/rondo-multi`。
+- 所有 Cargo 与 Bazel update 命令走仓库共享构建锁；Bazel 的最终 `--lockfile_mode=error` 只读检查直接运行。
+  `CARGO_TARGET_DIR` 为主物理根 `.codex/cargo-target/rondo-multi`。
   Windows `C:` 停止线仅在本任务命令上下文临时 30 GB。
 - `/tmp/rondo-plan095-*` 三个临时运行空间（commissioning、两次 clean smoke、bazel 工具）已全部删除；
   未创建 `eval-data/publication-critic/plan095/`。未使用 Docker、GPU、RunPod、真实本地模型。
