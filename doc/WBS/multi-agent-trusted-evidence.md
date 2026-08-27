@@ -1,8 +1,8 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
 最后更新：2026-08-26 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
-状态：**第一期、第二期已完成；Publication Critic 三期 Plan 094 已立项，当前为
-`PLANNED / STAGE_A_NOT_STARTED / PAID_GATE_CLOSED`。任务将沿 Route O 连续训练轨迹判断 Plan 090 的微弱重复信号能否扩大为实质
+状态：**第一期、第二期已完成；Publication Critic 三期 Plan 094 非付费阶段 A 已实现、待独立验收，当前为
+`STAGE_A_IMPLEMENTED / REVIEW_PENDING / PAID_GATE_CLOSED`。任务将沿 Route O 连续训练轨迹判断 Plan 090 的微弱重复信号能否扩大为实质
 better-than-base 候选；仍不验证独立 cohort、unseen 或产品资格，M3-D 保持锁定**
 
 ## 当前定位
@@ -86,7 +86,7 @@ M3-B1c 正式分阶段训练与工件回收          │
                        ↓
         Plan 090 Route O 干净复现与执行/数值重复确认（已完成；`ROUTE_O_CONFIRMATION_PASS`，0 Pod）
                        ↓
-        Plan 094 Route O 连续训练与实质增益候选形成（已立项；非付费阶段 A，付费门关闭）
+        Plan 094 Route O 连续训练与实质增益候选形成（阶段 A 已实现、待审查；付费门关闭）
                        ╳
                  M3-D 端到端收口（未解锁）
 ```
@@ -376,7 +376,7 @@ Boundary `+0.00620638`，未通过同一 rubric；该单条完整精度路径对
 不授予随机 seed 稳定、独立 cohort 泛化、unseen、M3-C1/M3-C2、产品启用或 M3-D 资格。Plan 090 预算与外部动作授权已关闭；当前没有
 可继承授权。
 
-#### Plan 094：Route O 连续训练与实质增益候选形成（已立项）
+#### Plan 094：Route O 连续训练与实质增益候选形成（阶段 A 已实现、待审查）
 
 **任务合同**：[`Plan 094 ExecPlan`](../../plan/094-publication-critic-route-o-continuous-training-execplan.md)。
 
@@ -387,7 +387,7 @@ Boundary `+0.00620638`，未通过同一 rubric；该单条完整精度路径对
 看到正式结果前冻结；训练强度、观察/checkpoint 密度和调度不在 WBS 锁死。
 
 **终态与授权**：合法终态为 `ROUTE_O_MATERIAL_CANDIDATE_RETAINED`、`ROUTE_O_VALID_NO_MATERIAL_IMPROVEMENT` 或诚实的
-`INCONCLUSIVE`；前两个都完成研究目标。当前只允许非付费阶段 A。用户已一次性授权阶段 A，以及经指定审查者明确批准后才生效的阶段 B：
+`INCONCLUSIVE`；前两个都完成研究目标。非付费阶段 A 已完成实现并等待指定审查者验收，付费门仍关闭。用户已一次性授权阶段 A，以及经指定审查者明确批准后才生效的阶段 B：
 US-TX-3 至多一个同时计费的 L40S Pod、复用现有 `mwemzrn33y`、确需时从 57GB 有界扩容至最多 80GB、exact snapshot 必要只读下载，
 新增外部费用不超过 5 USD。全部任务 Pod在终态后立即释放并确认 compute `$0/h`，网络卷继续保留。该任务不释放 unseen、不授予独立
 cohort/产品资格，也不解锁 M3-D。
@@ -408,8 +408,10 @@ cohort/产品资格，也不解锁 M3-D。
 - 相关正确性测试纳入既有测试体系，必要测评可复跑并自动归档；
 - 完成证据归档到 `doc/WBS-COMPLETED.md`，本页只保留最终产品事实和后续仍有效的边界。
 
-**当前状态**：Plan 094 已立项但尚未形成新训练结果；Plan 090 仍只确认同一冻结 validation 上的微弱执行/数值重复性。本阶段仍未解锁或
-启动，三期没有最终模型、threshold、本地运行配置或产品资格。
+**当前状态**：Plan 094 已冻结 checkpoint-first、完整续训、material/停止/保留和预算/资源收口合同，并完成轻量 fake/focused
+阶段 A 门禁；尚未运行真实模型或形成新训练结果。阶段 A 只读 live 快照观察到 0 Pod、US-TX-3 的 57GB 卷 `mwemzrn33y`、余额
+`$5.4443864251`、账户卷费率 `$0.006/h`、Secure L40S `$0.99/h` 且当时无库存；这些易变事实须在阶段 B 创建资源前重新刷新。本阶段仍未
+解锁或启动，三期没有最终模型、threshold、本地运行配置或产品资格。
 
 ## 串并行与资源关系
 

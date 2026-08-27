@@ -1,0 +1,182 @@
+from __future__ import annotations
+
+import os
+import shutil
+import subprocess
+import sys
+import tarfile
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+EVAL_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = EVAL_ROOT.parent
+sys.path.insert(0, str(EVAL_ROOT))
+
+from rondo_eval.publication_critic.full_model_training.contract import (  # noqa: E402
+    FullModelTrainingError,
+)
+from rondo_eval.publication_critic.full_model_training.plan094_bundle import (  # noqa: E402
+    REQUIRED_SOURCE_MEMBERS,
+    SOURCE_PATHS,
+    create_source_archive,
+    extract_source_archive,
+    verify_source_archive,
+)
+from rondo_eval.publication_critic.full_model_training.plan094_cli import (  # noqa: E402
+    _record_optional,
+    _require_paid_gate,
+    _require_task_owned_paths,
+)
+
+SCRIPT_ROOT = REPO_ROOT / "training/publication-critic-plan094"
+SCRIPTS = tuple(
+    SCRIPT_ROOT / name
+    for name in ("runpod-bootstrap.sh", "runpod-launch.sh", "runpod-worker.sh")
+)
+
+
+class Plan094DeliveryTests(unittest.TestCase):
+    def test_stage_b_gate_and_task_root_are_fail_closed(self) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            with self.assertRaisesRegex(
+                FullModelTrainingError, "plan094_stage_b_approval_required"
+            ):
+                _require_paid_gate()
+        with patch.dict(os.environ, {"RONDO_PLAN094_STAGE_B_APPROVED": "1"}):
+            _require_paid_gate()
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            task = base / "rondo-plan094-fixture"
+            task.mkdir()
+            sibling = base / "rondo-plan090-history"
+            sibling.mkdir()
+            alias = task / "alias"
+            alias.symlink_to(sibling, target_is_directory=True)
+            with patch.dict(os.environ, {"RONDO_PLAN094_TASK_ROOT": str(task)}):
+                _require_task_owned_paths(task / "formal/result.json")
+                with self.assertRaises(FullModelTrainingError):
+                    _require_task_owned_paths(alias / "result.json")
+                value = {"schema": "fixture"}
+                output = task / "receipts/fixture.json"
+                self.assertEqual(_record_optional(value, output), value)
+                with self.assertRaisesRegex(
+                    FullModelTrainingError, "plan094_task_owned_path_required"
+                ):
+                    _record_optional(value, sibling / "result.json")
+
+    def test_shell_entries_parse_and_reject_unapproved_launch(self) -> None:
+        for script in SCRIPTS:
+            subprocess.run(["bash", "-n", str(script)], check=True, timeout=10)
+        self.assertEqual(
+            subprocess.run(
+                ["bash", str(SCRIPT_ROOT / "runpod-worker.sh")],
+                check=False,
+                timeout=10,
+            ).returncode,
+            2,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "rondo-plan094-fixture"
+            source = root / "source"
+            source.mkdir(parents=True)
+            result = subprocess.run(
+                ["bash", str(SCRIPT_ROOT / "runpod-launch.sh"), "--", "true"],
+                check=False,
+                timeout=10,
+                env={
+                    **os.environ,
+                    "RONDO_PLAN094_TASK_ROOT": str(root),
+                    "RONDO_PLAN094_SOURCE_ROOT": str(source),
+                    "RONDO_PLAN094_IMAGE_IDENTITY": "fixture",
+                    "RONDO_PLAN094_LAUNCH_NAME": "fixture",
+                    "RONDO_PLAN094_MAX_SECONDS": "60",
+                },
+            )
+            self.assertEqual(result.returncode, 2)
+
+    def test_source_archive_round_trip_is_clean_narrow_and_secret_free(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory)
+            repo = temporary / "repo"
+            repo.mkdir()
+            listed = subprocess.run(
+                [
+                    "git",
+                    "ls-files",
+                    "--cached",
+                    "--others",
+                    "--exclude-standard",
+                    "--",
+                    *SOURCE_PATHS,
+                ],
+                cwd=REPO_ROOT,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.splitlines()
+            for relative in listed:
+                source = REPO_ROOT / relative
+                destination = repo / relative
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source, destination)
+            subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+            subprocess.run(["git", "add", "."], cwd=repo, check=True)
+            subprocess.run(
+                [
+                    "git",
+                    "-c",
+                    "user.name=Plan094 Test",
+                    "-c",
+                    "user.email=plan094@example.invalid",
+                    "-c",
+                    "core.hooksPath=/dev/null",
+                    "commit",
+                    "-qm",
+                    "fixture",
+                ],
+                cwd=repo,
+                check=True,
+            )
+            commit = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=repo,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            archive = temporary / "source.tar"
+            receipt = create_source_archive(repo, archive, source_commit=commit)
+            with tarfile.open(archive, mode="r:") as handle:
+                members = {item.name for item in handle if item.isfile()}
+            self.assertTrue(members >= REQUIRED_SOURCE_MEMBERS)
+            self.assertFalse(
+                any(
+                    member.endswith((".bin", ".safetensors"))
+                    or ".env.local" in member
+                    or member.startswith("eval-data/")
+                    or "runpod-create" in member
+                    for member in members
+                )
+            )
+            extracted = temporary / "extracted"
+            self.assertEqual(
+                extract_source_archive(
+                    archive,
+                    extracted,
+                    expected_sha256=receipt["archive_sha256"],
+                    expected_commit=commit,
+                ),
+                receipt,
+            )
+            self.assertEqual(
+                verify_source_archive(
+                    archive, extracted, exact_tree=True, expected_commit=commit
+                ),
+                receipt,
+            )
+
+
+if __name__ == "__main__":
+    unittest.main()

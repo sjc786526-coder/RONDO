@@ -304,25 +304,41 @@ XXX用以下内容代替：
   correctness/functionality finding；未增加额外 GPU 审查门、审计或可信设施。
 - 2026-08-26：本次规划没有在主工作区直接创建 tracked 或 ignored 文件；后续执行若需要 worktree 不共享的运行资产，只使用并单独汇报
   主物理根 `eval-data/publication-critic/plan094/`。
+- 2026-08-26：阶段 A 已实现 Plan 094 专用薄控制层：每次 update 后先原子发布并深读回完整 checkpoint，再以永久小 overlay 完成
+  train/validation 测评；pending checkpoint 不参与清理，overlay 可在不重复 update 的情况下幂等补做。完整状态包含模型、实际 Route O
+  scope、optimizer/scheduler、RNG、data cursor、连续选择与恢复角色。
+- 2026-08-26：冻结 primary 起点为 Plan 090 第二 BF16 的精确完整 checkpoint 导入；导入门核对 ID、3,591,369,941 bytes、content
+  SHA-256、历史 controller/runtime、optimizer/scheduler/RNG/data cursor、同轮 exact base 和恢复后分数。若 commissioning 未打通该导入，
+  只允许从 exact base 在新 namespace 重建 Route O step 1，不拼接部分状态；Plan 090 历史 checkpoint 只作 previous、不能成为 Plan 094 候选。
+- 2026-08-26：在正式结果前冻结 material/停止/保留合同：候选须 raw Boundary 至少 `+0.005859375`、projected Boundary 越过
+  Plan 090 弱包络、pair 改变非统一 offset 且 Boundary 改善数比恶化数至少多 4，同时满足另一 family/strict/FPR/输出跨度 companion
+  和至少一个两-ordering、strict 或 operating 离散事件；首个 material 停止，否则 step 4 三点无信号平台或 step 6 有效负向停止。
+  永久保留小结果，完整 checkpoint 最多六个角色去重对象；六是本轨迹的理论总观察点上限，并优先保护 material/latest/recovery/turning。
+- 2026-08-26：轻量 fake/focused 门禁已覆盖 checkpoint-first 顺序、评测失败幂等恢复、Plan 090 完整导入 identity drift、新进程恢复后继续
+  update、material 终止延迟到恢复闭环、有效负向终态、5 USD 单调预算、0 Pod finalizer、Stage B fail-closed、task-root 写边界和 clean
+  source archive exact-tree/secret-free round trip；Plan 094 15/15、相邻 Plan 090 16/16 和独立复核的 Plan 081/082/090 fake training
+  64/64 通过，独立复核无遗留 High/Medium finding。未运行 Cargo、Docker、真实模型、训练或云写。
+- 2026-08-26：阶段 A 只读 RunPod 快照为余额 `$5.4443864251`、账户费率 `$0.006/h`、0 Pod、`mwemzrn33y` 位于 US-TX-3 且 57GB、
+  Secure L40S `$0.99/h` 且当时无库存。该快照只用于准备，阶段 B 创建资源前必须重新刷新。阶段 A 未创建主物理根 Plan 094 ignored namespace。
 
 ### 当前工作
 
-- Plan 094 任务合同与 WBS 立项同步完成；规划提交后由执行者继续使用本工作树进入阶段 A。
+- 阶段 A 实现、相称轻量门禁与提交前独立只读复核已完成，正在提交并通过指定队列交审；付费门保持关闭。
 
 ### 本任务剩余步骤
 
-- 按第 4 节阶段 A 完成非付费实现、轻量验证、正式规则预冻结、提交和审查者验收；审查者明确批准前付费门保持关闭。
+- 提交阶段 A 并由指定审查者验收；审查者明确批准前付费门保持关闭。
 - 获批后按阶段 B 完成真实调通、正式连续轨迹、合法研究终态、恢复/资产/资源收口、提交和最终独立验收。
 - 本任务完成后冻结本计划；不在此安排独立 cohort、unseen、产品资格或 M3-D。
 
 ### 阻塞项
 
-- 阶段 A 无已知阻塞。Plan 093 正在冷全 workspace；本任务只运行轻量本地门禁，不与其竞争重型资源。
-- 阶段 B 当前由审查者付费准入门阻塞；库存、余额、Pod 和网络卷 live 状态尚未刷新。
+- 阶段 A 无已知实现阻塞。Plan 093 正在冷全 workspace；本任务只运行轻量本地门禁，不与其竞争重型资源。
+- 阶段 B 当前由审查者付费准入门阻塞；阶段 A 只读 live 快照已形成，但库存、余额、Pod、价格和网络卷状态在创建资源前仍须重新刷新。
 
 ### 当前验收状态
 
-- `PLANNED / STAGE_A_NOT_STARTED / PAID_GATE_CLOSED / LIVE_RUNPOD_STATE_NOT_REFRESHED / READY_FOR_STAGE_A`。
+- `STAGE_A_IMPLEMENTED / REVIEW_PENDING / PAID_GATE_CLOSED / LIVE_READ_ONLY_REFRESHED`。
 
 ### 交接边界
 
@@ -352,3 +368,9 @@ XXX用以下内容代替：
 | 011 | tracked 工作只在 094 worktree；ignored 运行资产只落主物理根 Plan 094 namespace并单独汇报 | linked worktree 不共享 `eval-data`，同时保护主工作区 tracked 状态 | workspace | 已采纳 |
 | 012 | 额外请示、阶段 A 付费申请和最终验收只走指定 Codex 队列，消息主动表明身份并发送后停止 | 满足用户指定的批示、自动唤醒和独立验收方式 | coordination | 已采纳 |
 | 013 | 每个阶段只提交工作树；合并、推送、分支归档和 worktree 删除等待用户批准 | 遵循本次明确 Git 停止点 | delivery | 已采纳 |
+| 014 | 使用 Plan 094 两阶段 controller：完整 checkpoint 先资格化，测评结果再以 checkpoint hash 绑定的小型原子 overlay 发布 | 复用 Plan 081 原子 checkpoint/深恢复，同时让测评失败不报废训练进度或重复 update | architecture | 已采纳 |
+| 015 | primary 从精确 Plan 090 完整 checkpoint 接续；历史点只作 previous，导入失败则 commissioning 从 exact base 重建 step 1 | 保留真实 optimizer/RNG/data 连续性，同时避免把旧结果包装成新候选或拼接部分恢复 | continuation | 已采纳 |
+| 016 | 正式 model 终态必须已有本任务 checkpoint 被不同 OS 进程恢复并继续一次有效 update；若先出现 material，终止状态延迟到该闭环完成 | 满足“可恢复且可继续”而不因早停丢失恢复证据 | recovery | 已采纳 |
+| 017 | resume 只接受 artifact store 当前最新保留 checkpoint；terminal-deferred 立即停下且同一 controller 不得继续 update | 防止从旧 best/recovery 分叉重训规避已形成的有效正向或负向轨迹，并节省紧预算 | recovery | 已采纳 |
+| 018 | 新进程恢复要求完整 runtime core 精确一致，但允许任务自有 replacement Pod 的 provider ID/name 与 hostname 改变，并同时记录旧/新绑定 | 支持授权范围内替换失效 Pod，同时不放松模型、环境、recipe、precision 或数据连续性 | runtime | 已采纳 |
+| 019 | 完整 checkpoint 保留上限为全轨迹理论最大六个，material/latest/recovery/turning 先于 best 角色 | 消除四个槽位与最多两个 turning point 的硬保护冲突，仍保持严格有界且不建设第二套资产体系 | retention | 已采纳 |

@@ -1,0 +1,225 @@
+{
+  "claims": {
+    "independent_cohort_generalization": false,
+    "m3_c1_or_m3_c2": false,
+    "m3_d_unlocked": false,
+    "product_go": false,
+    "seed_sensitive_stability_tested": false,
+    "unseen_evidence": false,
+    "validation_is_selection_data": true
+  },
+  "comparison_policy": {
+    "direction": "higher_is_better",
+    "metric": "boundary_pair_mean_margin",
+    "tolerance": 0.0
+  },
+  "continuation": {
+    "commissioning_fallback": "exact_base_rebuild_of_route_o_step_1",
+    "formal_start": "guarded import only after commissioning proves step 1 to step 2 and fresh-process step 2 to step 3; otherwise clean exact-base rebuild",
+    "historical_selection_role": "previous_only_reassess_under_plan094_rubric",
+    "primary": "guarded_plan090_full_checkpoint_import",
+    "required_state": [
+      "model",
+      "optimizer",
+      "scheduler",
+      "rng",
+      "data_cursor",
+      "controller_selection"
+    ],
+    "source_checkpoint_bytes": 3591369941,
+    "source_checkpoint_content_sha256": "8b4b88b66a88cc50fa10d5f20c575b9a67c6f254f6e26350d38ce4896b949a69",
+    "source_checkpoint_id": "checkpoint-attempt-000-step-000001",
+    "source_checkpoint_remote_path": "/workspace/rondo-plan090-20260827-confirm01/formal/bf16-seed-20260902/artifacts/recovery-checkpoints/checkpoint-attempt-000-step-000001",
+    "source_global_step": 1,
+    "source_run_id": "bf16-seed-20260902"
+  },
+  "control_plan": {
+    "checkpoint_steps": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+    ],
+    "maximum_updates": 6,
+    "observation_steps": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+    ],
+    "turning_point_limit": 2
+  },
+  "data": {
+    "bundle_content_sha256": "2247dd09c168900a47d37a50ecd6511d66d62d3f2ec8056ea3bc829c93de8b46",
+    "dataset_revision": "v8",
+    "train_candidate_count": 128,
+    "train_pair_count": 58,
+    "unseen_physically_present": false,
+    "validation_candidate_count": 55,
+    "validation_pair_count": 26
+  },
+  "material_rubric": {
+    "all_companion_checks_required": true,
+    "maximum_false_pass_rate_delta": 0.0,
+    "meaningful_events": {
+      "minimum_best_balanced_accuracy_delta": 0.014705882352941176,
+      "minimum_best_false_pass_rate_reduction": 0.047619047619047616,
+      "minimum_boundary_strict_delta": 0.05263157894736842,
+      "minimum_frozen_balanced_accuracy_delta": 0.014705882352941176,
+      "minimum_roc_auc_delta": 0.0028011204481792717,
+      "minimum_within_pass_strict_delta": 0.14285714285714285
+    },
+    "minimum_balanced_accuracy_delta": 0.0,
+    "minimum_best_balanced_accuracy_delta": 0.0,
+    "minimum_boundary_raw_improvement_advantage": 4,
+    "minimum_boundary_strict_delta": 0.0,
+    "minimum_projected_boundary_delta": 0.0008611324539553877,
+    "minimum_projected_within_pass_delta": -0.00025,
+    "minimum_raw_boundary_delta": 0.005859375,
+    "minimum_raw_logit_span_ratio": 0.9,
+    "minimum_raw_within_pass_delta": -0.00390625,
+    "minimum_roc_auc_delta": -0.0014005602240896359,
+    "minimum_within_pass_strict_delta": 0.0,
+    "no_regression_only_is_material": false,
+    "projected_only_motion_is_material": false,
+    "single_bf16_grid_point_is_material": false,
+    "single_ordering_is_material": false,
+    "train_loss_only_is_material": false
+  },
+  "model": {
+    "parameter_elements": 1720577024,
+    "parameter_tensors": 311,
+    "repository": "Skywork/Skywork-Reward-V2-Qwen3-1.7B",
+    "revision": "e51ea3e08fb81326c3b812a7ff0cb9cee83e59cc",
+    "snapshot_content_sha256": "18d9edf7132d9c5e13bb0e59e3c2c6a42f82007fa17de464e20783755a171360"
+  },
+  "precision_contract": {
+    "forward": "model forward and activations use the BF16 model path",
+    "gradients": "selected-parameter gradient tensors are observed as BF16",
+    "interpretation": "Route O BF16 reproduction",
+    "model_load": "all model parameters loaded as torch.bfloat16",
+    "optimizer_state": "fused AdamW state follows the selected BF16 parameters",
+    "save": "save_pretrained persists the BF16 model state",
+    "updated_parameters": "nine selected original parameters remain BF16"
+  },
+  "recipe": {
+    "activation_checkpointing": true,
+    "attention_backend": "sdpa",
+    "binary_micro_batch_size": 1,
+    "gradient_clip_norm": 1.0,
+    "macro_update": "one_full_v8_train_cohort",
+    "objective": {
+      "binary_loss": "softplus(-signed_target*logits[:,0])",
+      "component_weights": {
+        "binary": 0.05,
+        "boundary": 0.25,
+        "within_pass": 0.7
+      },
+      "direction": "preferred_minus_dispreferred",
+      "pair_loss": "softplus(dispreferred-preferred)",
+      "pair_margin": 0.0,
+      "pair_temperature": 1.0,
+      "scalar": "logits[:,0]"
+    },
+    "optimizer": {
+      "betas": [
+        0.9,
+        0.999
+      ],
+      "epsilon": 1e-08,
+      "fused": true,
+      "learning_rate": 5e-06,
+      "name": "torch.optim.AdamW",
+      "weight_decay": 0.0
+    },
+    "pair_micro_batch_size": 1,
+    "parameter_dtype": "bfloat16",
+    "scheduler": {
+      "name": "constant"
+    },
+    "schema": "rondo-publication-critic-plan087-training-recipe-v1",
+    "seed": 20260902
+  },
+  "report_threshold": 0.5,
+  "resource": {
+    "cloud_type": "SECURE",
+    "data_center_id": "US-TX-3",
+    "gpu_count": 1,
+    "gpu_name": "NVIDIA L40S",
+    "hard_cost_limit_usd": 5.0,
+    "initial_network_volume_size_gb": 57,
+    "maximum_network_volume_size_gb": 80,
+    "maximum_simultaneous_billing_pods": 1,
+    "network_volume_id": "mwemzrn33y",
+    "network_volume_mount_path": "/workspace"
+  },
+  "retention": {
+    "maximum_owned_full_checkpoints": 6,
+    "pending_evaluation_is_prunable": false,
+    "permanent_small_results": true,
+    "role_overlap_reuses_checkpoint": true,
+    "roles_in_priority_order": [
+      "material_candidate",
+      "latest",
+      "fresh_process_recovery",
+      "turning_point",
+      "checkpoint_backed_best",
+      "training_best"
+    ],
+    "source_plan090_checkpoint_is_read_only": true
+  },
+  "runtime": {
+    "allow_tf32": false,
+    "attention_backend": "sdpa",
+    "container_image": "runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404",
+    "float32_matmul_precision": "highest",
+    "optimizer": "torch.optim.AdamW",
+    "optimizer_fused": true,
+    "python_version": "3.12.3",
+    "torch_version": "2.8.0+cu128",
+    "transformers_version": "4.52.3"
+  },
+  "schema": "rondo-publication-critic-plan094-continuous-freeze-v1",
+  "scope": {
+    "parameter_names": [
+      "model.layers.27.self_attn.q_proj.weight",
+      "model.layers.27.self_attn.k_proj.weight",
+      "model.layers.27.self_attn.v_proj.weight",
+      "model.layers.27.self_attn.q_norm.weight",
+      "model.layers.27.self_attn.k_norm.weight",
+      "model.layers.27.mlp.gate_proj.weight",
+      "model.layers.27.mlp.up_proj.weight",
+      "model.layers.27.input_layernorm.weight",
+      "model.layers.27.post_attention_layernorm.weight"
+    ],
+    "reason": "frozen Route O layer 27 input transformations and internal norms",
+    "scope_id": "plan094-route-o-layer27-internal-transformations",
+    "trainable_parameter_elements": 33558784,
+    "update_method": "direct_original_parameter_update"
+  },
+  "stop_rule": {
+    "early_no_material_condition": "three consecutive new evaluated checkpoints have no material event and never exceed the Plan 090 raw-boundary envelope",
+    "early_no_material_step": 4,
+    "infrastructure_failure_is_model_negative": false,
+    "material_candidate": "stop_after_first_complete_material_checkpoint",
+    "maximum_global_step": 6,
+    "maximum_qualified_observation_points": 6,
+    "valid_negative_at_maximum": true
+  },
+  "weak_signal_envelope": {
+    "balanced_accuracy_delta": 0.0,
+    "best_balanced_accuracy_delta": 0.0,
+    "boundary_strict_win_rate_delta": 0.0,
+    "false_pass_rate_delta": 0.0,
+    "projected_boundary_delta": 0.0008611324539553877,
+    "projected_within_pass_delta": 0.0001389426001098884,
+    "raw_boundary_delta": 0.00390625,
+    "raw_within_pass_delta": -0.0033482142857143016,
+    "roc_auc_delta": 0.0014005602240896359,
+    "within_pass_strict_win_rate_delta": 0.0
+  }
+}

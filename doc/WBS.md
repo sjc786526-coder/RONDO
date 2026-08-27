@@ -1,7 +1,7 @@
 # RONDO 长程规划（WBS）
 
-最后更新：2026-08-26（方向 3 Publication Critic 三期的 Plan 094 已立项，将沿 Route O 连续训练轨迹寻找实质 better-than-base 候选；
-当前处于 `PLANNED / STAGE_A_NOT_STARTED / PAID_GATE_CLOSED`，Plan 090 已确认的同一 validation 微弱重复信号只作为待越过的历史包络，
+最后更新：2026-08-26（方向 3 Publication Critic 三期 Plan 094 的非付费阶段 A 已实现并提交前待独立验收；
+当前处于 `STAGE_A_IMPLEMENTED / REVIEW_PENDING / PAID_GATE_CLOSED`，Plan 090 已确认的同一 validation 微弱重复信号只作为待越过的历史包络，
 M3-D 保持锁定）
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段指针、跨方向关系、
@@ -22,7 +22,7 @@ M3-D 保持锁定）
 | 0：量化测评基准 | 既有设施与首次 schema v7 正式 canary 已完成，当前无 active campaign | 保留设施；历史结果见 COMPLETED，新 campaign 须重新立项与授权 |
 | 1：Harness 优化 | **正式收口；当前无 active 工作包** | 当前不继续新增观测或内核/热路径优化；既有实现、设施与历史结果保留。未来可由用户另行决定是否重新立项，本次收口不作永久禁止 |
 | 2：本地审批模型 | **已收口，今后不再开启** | 最终结论为“保留为实验”；不改生产默认，不再规划后续工作包 |
-| 3：RONDO Multi | 第一、二期与第四期已完成；三期 Plan 094 已立项，非付费阶段 A 尚未开始，付费门关闭 | 保持 exact 1.7B 与 Route O 唯一更新范围，沿连续训练轨迹判断微弱信号能否扩大为实质候选；不释放 unseen 或产品资格，M3-D 不自动解锁。第四期历史统一见 COMPLETED |
+| 3：RONDO Multi | 第一、二期与第四期已完成；三期 Plan 094 非付费阶段 A 已实现、待审查，付费门关闭 | 保持 exact 1.7B 与 Route O 唯一更新范围，沿连续训练轨迹判断微弱信号能否扩大为实质候选；不释放 unseen 或产品资格，M3-D 不自动解锁。第四期历史统一见 COMPLETED |
 
 ### 方向命名口径
 
@@ -46,10 +46,10 @@ shuffle、有效 dropout 或其它 seed-sensitive consumer，因此该结果只�
 `-0.00659415`、projected Boundary `+0.00620638`，只支持精度路径敏感性诊断，不构成严格 update-only 因果反证。
 Plan 090 保守费用 `$0.71`，低于 `$6` 硬上限；任务 Pod 已删除并实时复核 0 Pod、compute `$0/h`。只保留恢复合格的第二 BF16
 checkpoint 于既有 57GB 卷 `mwemzrn33y`，卷未扩容或删除并继续按 `$0.006/h` 计费。Plan 087/090 的剩余预算与外部授权均不向后续转移。
-Plan 090 最终独立验收已通过，其授权已经关闭。Plan 094 已作为独立后继任务立项：保持 exact 1.7B、冻结数据/pair/input、unseen
-隔离和 Route O 九张量唯一更新范围，复用连续训练/checkpoint/恢复/测评能力，让训练轨迹在多个完整 checkpoint 上持续推进并判断是否形成
-实质 better-than-base 候选。当前只允许非付费阶段 A；用户一次性授权的单张 US-TX-3 L40S、既有卷最多扩至 80GB 和不超过 5 USD
-新增费用，只有阶段 A 经指定审查者验收并明确批准后才生效。该任务仍只使用开发 validation，不回答独立 cohort 或产品资格，M3-D 继续锁定。
+Plan 090 最终独立验收已通过，其授权已经关闭。Plan 094 已完成非付费阶段 A 的 checkpoint-first 连续控制、Plan 090 完整状态接续、
+新进程恢复并继续、material/停止/保留、预算/0 Pod 终态、clean bundle 和单任务运行入口实现，现待指定审查者验收。当前付费门仍关闭；
+用户一次性授权的单张 US-TX-3 L40S、既有卷最多扩至 80GB 和不超过 5 USD 新增费用，只有审查者明确批准后才生效。该任务仍只使用开发
+validation，不回答独立 cohort 或产品资格，M3-D 继续锁定。
 方向 1 已正式收口，不作为方向 3 的前置或旁支。
 
 ### 方向 3：Publication Critic 三期
@@ -112,9 +112,10 @@ Plan 090 最终独立验收已通过，其授权已经关闭。Plan 094 已作�
   `ROUTE_O_CONFIRMATION_PASS / ZERO_POD`。两个 BF16 结果在同一 validation 上完整重复 Plan 087 信号；FP32 的 raw/projected 方向分歧
   作为精度路径诊断保留。该结果不测试随机 seed 敏感性、独立 cohort 或 unseen，不授予产品 GO、M3-C1/M3-C2 或 M3-D 解锁；后续若继续，
   必须另立任务而不是沿用 Plan 090 授权。
-- Plan 094 已独立立项，目标是让 Route O 沿连续训练轨迹发展，并以 checkpoint 完整落盘后测评、同轮 exact base、多指标 pair margin/
-  ranking/strict/operating 观察和 fresh-process 恢复，判断 Plan 090 微弱包络能否扩大为实质候选。正向或有效 no-material-improvement
-  都可完成研究目标；当前付费门关闭，不读取 unseen、不授予产品资格或 M3-D 解锁。任务合同见
+- Plan 094 非付费阶段 A 已实现 checkpoint-first 训练/测评分责、完整 Plan 090 checkpoint 精确导入与 exact-base fallback、同轮 base、
+  预冻结 material/停止/最多六个完整 checkpoint 的角色去重保留、fresh-process 恢复并继续、5 USD 单调预算和 0 Pod 终态门。轻量 fake/focused
+  门禁已覆盖正向、有效负向、评测幂等恢复和 clean source bundle；当前待指定审查者验收，付费门关闭，不读取 unseen、不授予产品资格或
+  M3-D 解锁。任务合同见
   `plan/094-publication-critic-route-o-continuous-training-execplan.md`。
 
 Plan 094 的本地阶段只运行轻量 Python/static/fake/focused 门禁，可与 Plan 093 冷全 workspace 并行；不得使用、修改或清理 Plan 093 的
