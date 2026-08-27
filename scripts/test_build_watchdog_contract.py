@@ -196,6 +196,26 @@ class BuildWatchdogContractTests(unittest.TestCase):
             ],
         )
 
+    def test_oom_message_requires_cgroup_oom_evidence(self) -> None:
+        confirmed = run_helper(
+            "rondo_payload_was_confirmed_oom_killed 137 cgroup_reported_oom_kill"
+        )
+        psi_stop = run_helper(
+            "rondo_payload_was_confirmed_oom_killed 137 "
+            "memory_full_psi_sustained_above_limit"
+        )
+        unexplained_sigkill = run_helper(
+            "rondo_payload_was_confirmed_oom_killed 137 none"
+        )
+        ordinary_failure = run_helper(
+            "rondo_payload_was_confirmed_oom_killed 1 cgroup_reported_oom_kill"
+        )
+
+        self.assertEqual(confirmed.returncode, 0, confirmed.stderr)
+        self.assertNotEqual(psi_stop.returncode, 0)
+        self.assertNotEqual(unexplained_sigkill.returncode, 0)
+        self.assertNotEqual(ordinary_failure.returncode, 0)
+
 
 if __name__ == "__main__":
     unittest.main()

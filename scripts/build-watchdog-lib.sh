@@ -293,3 +293,10 @@ rondo_inspect_junit_report() {
   fi
   printf 'retained\t%s\n' "$junit_sha256"
 }
+
+rondo_payload_was_confirmed_oom_killed() {
+  local run_rc="$1"
+  local stop_reason="$2"
+
+  [[ "$run_rc" == "137" && "$stop_reason" == "cgroup_reported_oom_kill" ]]
+}

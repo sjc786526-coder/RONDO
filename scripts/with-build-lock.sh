@@ -849,7 +849,7 @@ fi
 systemctl --user reset-failed "$unit" >/dev/null 2>&1 || true
 echo "[rondo] finished status=${final_rc} command_status=${run_rc} stop=${stop_reason} cleanup=${cleanup_reason} project=${project_after} target=${target_after}; summary=${summary_file}" >&2
 
-if ((run_rc == 137)); then
+if rondo_payload_was_confirmed_oom_killed "$run_rc" "$stop_reason"; then
   echo "[rondo] the command was OOM-killed inside its ${memory_max} cgroup" >&2
 fi
 exit "$final_rc"
