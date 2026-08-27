@@ -323,7 +323,10 @@ impl App {
                     .await;
                 let config = self.fresh_session_config();
                 let turns = match self.thread_event_channels.get(&thread_id) {
-                    Some(channel) => Some(channel.store.lock().await.turns.clone()),
+                    Some(channel) => {
+                        let store = channel.store.lock().await;
+                        Some(prompt_edit_history::turns_for_prompt_edit(&store))
+                    }
                     None => None,
                 };
                 let started = match turns {

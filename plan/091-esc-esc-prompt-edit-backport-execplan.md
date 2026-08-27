@@ -24,23 +24,23 @@ OpenAI Codex issue [#37421](https://github.com/openai/codex/issues/37421) / PR
 
 ### 完成/验收标准
 
-- [ ] **根因回归成立**：在当前 RONDO 代码上稳定证明 transcript/turn 快照尚未含所选实时 turn、而 replay buffer 已含其有效通知时，
+- [x] **根因回归成立**：在当前 RONDO 代码上稳定证明 transcript/turn 快照尚未含所选实时 turn、而 replay buffer 已含其有效通知时，
       旧实现无法定位正确分叉点；验证排除普通输入状态、键盘路由或 overlay 选择错误等不同根因。
-- [ ] **快照与实时 turn 一致可见**：prompt-edit 分叉定位同时消费已加载 turn 快照和当前线程尚未归档的有效 buffered turn；快照中的旧
+- [x] **快照与实时 turn 一致可见**：prompt-edit 分叉定位同时消费已加载 turn 快照和当前线程尚未归档的有效 buffered turn；快照中的旧
       prompt 与只存在于 buffer 的新 prompt 都能恢复。
-- [ ] **正确分叉且源线程不变**：分叉发生在所选用户消息之前；新线程不重复包含所选 turn，源 rollout/thread 的内容、顺序、归属和状态
+- [x] **正确分叉且源线程不变**：分叉发生在所选用户消息之前；新线程不重复包含所选 turn，源 rollout/thread 的内容、顺序、归属和状态
       不因编辑操作改变。
-- [ ] **重建保真且去重**：同一 turn/item 同时出现在快照与 buffer、通知重复或完成状态随后到达时，不重复插入 turn/item，不覆盖已重建
+- [x] **重建保真且去重**：同一 turn/item 同时出现在快照与 buffer、通知重复或完成状态随后到达时，不重复插入 turn/item，不覆盖已重建
       的必要 items，不改变有效顺序或跨 turn 归属；完成状态、错误与相关时间信息按实际通知保留。
-- [ ] **生命周期场景一致**：正常新会话、resume、已加载分页历史、完成 turn 与代表性的 interrupted/terminated turn 获得相称覆盖；已有更老
+- [x] **生命周期场景一致**：正常新会话、resume、已加载分页历史、完成 turn 与代表性的 interrupted/terminated turn 获得相称覆盖；已有更老
       的分页 prompt 仍可编辑，分页合并后的 ordinal/选择不退化。
-- [ ] **诚实失败**：目标确实不存在、没有合法分叉点、目标 turn 仍进行中、所选 prompt 不是合法 turn 起点、当前线程已切换或既有状态禁止
+- [x] **诚实失败**：目标确实不存在、没有合法分叉点、目标 turn 仍进行中、所选 prompt 不是合法 turn 起点、当前线程已切换或既有状态禁止
       编辑时，继续返回现有明确失败/不可用结果，不启动伪分支、不修改源线程。
-- [ ] **相邻行为不退化**：普通输入、单次 Esc、Esc-Esc/方向键/Enter 之外的键盘行为、正常 TUI 启动，以及既有 review-hidden prompt、
+- [x] **相邻行为不退化**：普通输入、单次 Esc、Esc-Esc/方向键/Enter 之外的键盘行为、正常 TUI 启动，以及既有 review-hidden prompt、
       mention/attachment 恢复和 first-prompt 新线程行为保持不变；若没有用户可见 UI 文案/渲染变化，不制造无意义 snapshot churn。
-- [ ] **RONDO Multi 既有链不回归**：M4-S2/S/C/W1 已完成的 durable session、恢复、分页 transcript 和生命周期产品语义保持现状；本任务
+- [x] **RONDO Multi 既有链不回归**：M4-S2/S/C/W1 已完成的 durable session、恢复、分页 transcript 和生命周期产品语义保持现状；本任务
       不重新裁决或改写其完成结论。
-- [ ] **聚焦门禁通过**：根因回归、相邻 prompt-edit/backtrack/pagination/resume 测试、受影响 `codex-tui` 必要测试、scoped fix/lint、
+- [x] **聚焦门禁通过**：根因回归、相邻 prompt-edit/backtrack/pagination/resume 测试、受影响 `codex-tui` 必要测试、scoped fix/lint、
       `just fmt`/格式检查和 `git diff --check` 通过；按实际写集选择必要门禁，不要求 full workspace 或 `--all-features`。
 - [ ] **独立验收与本地交付**：独立审查关闭范围内高/中等级 correctness finding；Plan 091 动态状态、精炼日志和完成记录准确，091 分支形成
       clean 本地提交。执行者按本计划指定的跨会话队列交付并在每条消息中主动表明 Plan 091 执行者身份。验收通过可记录
@@ -214,25 +214,41 @@ XXX用以下内容代替：
 - 2026-08-26：资源只读快照为项目根 `256,008,237,056` bytes（`du -sh` 约 `239G`）、069 target `196,698,349,568` bytes
   （debug 约 `184G`，其中 incremental `30,305,673,216` bytes）；Windows `C:` 实际余量 `49,249,705,984` bytes，低于现行
   `50,000,000,000` bytes 停机线。canonical lock 无 holder，未发现 Cargo/rustc/nextest 进程；本次规划未运行或清理任何 Cargo 资产。
+- 2026-08-26：完成 prompt-edit 的只读 snapshot + replay-buffer 临时 turn 投影、buffer-only 端到端根因回归，以及 completed/interrupted、
+  去重、归属和 completion 元数据单测；`just fmt`、`just fmt-check` 与 `git diff --check` 通过，独立只读审查无高/中 correctness finding。
+- 2026-08-26：在 canonical lock 可取得、无 Cargo/rustc/nextest 进程且无活跃 RONDO heavy scope 时，精确清理 069 target 中 6 个可再生
+  `debug/incremental` 目录，共约 `5,031,600,128` bytes；target 降至 `191,791,996,928` bytes、项目根降至
+  `251,158,675,456` bytes，但 WSL 内清理未返还 Windows 宿主空间，未启动任何 Cargo payload。
+- 2026-08-26：用户补充授权 Plan 091 的 Windows `C:` 停止线临时降为 `30,000,000,000` bytes，仅允许按重型命令设置进程级
+  `RONDO_BUILD_WINDOWS_C_FREE_STOP_BYTES=30000000000`；其余资源门、共享 target 和安全边界不变，不修改任何长期配置。
+- 2026-08-26：最终聚焦稳定轮通过 20/20，覆盖 prompt-edit 临时投影、buffer-only completed/interrupted、snapshot/buffer 去重、正确
+  fork-before、源线程不变、既有拒绝边界、Esc/Vim、首提示词和分页路径；分页 fake WebSocket 仅在测试命令级设置 loopback
+  `NO_PROXY`，未改产品或全局代理配置。
+- 2026-08-26：`codex-tui` crate 批次实际为 3436 passed（其中 1 项重试后通过）、3 failed、4 skipped；3 项失败均来自相对 `HEAD` 无
+  Plan 091 差异的 durable-session 既有 fixture/snapshot（缺少 `setRootState`），该批不表述为通过，也不跨范围代修。scoped
+  `just fix -p codex-tui`、`just fmt`、`just fmt-check` 与 `git diff --check` 均通过。
+- 2026-08-26：退出资源核验 Windows `C:` 实际余量 `48,965,611,520` bytes、项目根 `262,085,918,121` bytes、069 target
+  `203,508,220,866` bytes；canonical lock 可取得，无 Cargo/rustc/nextest 进程和活跃 RONDO build scope，watchdog 各正式批次均
+  `stop=none cleanup=none`。
 
 ### 当前工作
 
-- ExecPlan 已建立，实现和测试尚未开始；等待执行者按本计划在 091 worktree 实施。
+- 执行者实现、正式聚焦验证、scoped fix、格式检查、资源退出检查、精炼日志和最终 diff 自审均已完成；本地交付内容已冻结，等待计划制定者
+  独立验收。
 
 ### 本任务剩余步骤
 
-- 建立并运行最小根因回归，在 RONDO 当前接缝完成窄适配。
-- 完成聚焦与相邻验证、最终稳定轮、格式/scoped fix/diff 门禁和资源退出检查。
-- 更新动态计划与精炼日志，提交 clean 091 分支并按指定队列交计划制定者独立验收；关闭 finding 后记录本地接受结论。
+- 计划制定者完成独立验收；若有真实 finding，由执行者在同一 worktree 闭合并复验，验收通过后记录本地接受结论。
 
 ### 阻塞项
 
-- 规划时 Windows `C:` 实际余量低于现行硬停线。执行者开始任何重型 Cargo 批次前必须重新读取真实余量；若仍低于门限，则该批次
-  fail-closed。091 授权的 069 target 窄清理不授权宿主机/项目外清理，也不能用 WSL 虚拟余量替代该门禁。
+- 当前无阻塞。每个 Plan 091 重型批次仍须重读 Windows `C:` 实际余量；低于用户临时授权的 `30,000,000,000` bytes 停止线时
+  fail-closed，不得使用 WSL 虚拟余量替代、继续无必要清理、下调其它门限或绕过 watchdog。
 
 ### 当前验收状态
 
-- `PLANNED / AUTHORIZED / IMPLEMENTATION_NOT_STARTED`；未运行测试，不具备 `UPSTREAM_37421_BACKPORT_PASS` 结论。
+- `EXECUTOR_COMPLETE / FOCUSED_TESTS_PASS / SCOPED_FIX_PASS / REVIEW_PENDING`；任务内正式证据有效，完整 `codex-tui` crate 额外批次因 3 项
+  durable-session 基线 fixture/snapshot 欠账未全绿，尚待计划制定者独立验收，不提前记录 `UPSTREAM_37421_BACKPORT_PASS`。
 
 ### 交接边界
 
@@ -254,3 +270,7 @@ XXX用以下内容代替：
 | 005 | 复用唯一 069 target，并只用命令级 270/285/290GB 临时门；Windows `C:` 等根门继续有效 | 避免第二套重型 target，同时不改长期资源政策或突破宿主容量边界 | 资源 | 已采纳 |
 | 006 | 普通问题自主修复重跑，稳定后再跑最终聚焦轮 | 保留调试进度并避免窄问题导致无意义中止，同时保证最终证据对应最终代码 | 执行/验收 | 已采纳 |
 | 007 | 本地独立验收可完成 Plan 091，但 `INTEGRATED/PUSHED` 只在用户另行批准并实际执行后记录 | 服从用户本轮明确的 Git 停止点，不提前冒充主线状态 | 交付/Git | 已采纳 |
+| 008 | 在 TUI app 内新增只读 `prompt_edit_history` 临时投影模块，handler 与既有 backtrack resolver 只负责原有编排/裁决 | 避免继续扩张 2680 行 event dispatcher，也不把投影写回 `ThreadEventStore` 或建设第二套历史 authority | 架构/测试 | 已采纳 |
+| 009 | Plan 091 重型命令只以进程级环境变量把 Windows `C:` 停止线临时设为 30GB，其余门禁和长期配置不变 | 执行用户补充授权，同时把例外严格限制在本计划单批受监督 Cargo 命令 | 资源 | 已采纳 |
+| 010 | fake loopback WebSocket 测试仅以命令级 `NO_PROXY=127.0.0.1,localhost` 绕过宿主代理；不改 fixture 产品语义或全局配置 | 环境代理变量原先截获 loopback 连接，listener 始终未收到握手；命令级例外恢复 deterministic/offline 路径 | 测试环境 | 已采纳 |
+| 011 | 完整 crate 门禁中 3 项 durable-session 基线 fixture/snapshot 失败如实保留，不在 091 代修 | 失败文件相对 `HEAD` 无 091 差异且根因是既有 `setRootState` 欠账，扩修会越出 #37421 窄适配 | 范围/验收 | 已采纳 |
