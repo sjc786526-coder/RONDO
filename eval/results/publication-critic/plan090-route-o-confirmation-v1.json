@@ -1,0 +1,209 @@
+{
+  "schema": "rondo-publication-critic-plan090-confirmation-summary-v1",
+  "outcome": "ROUTE_O_CONFIRMATION_PASS",
+  "reason": "Two independent clean BF16 executions passed the frozen whole rubric and the second checkpoint passed fresh-process recovery; the completed FP32 condition control was diagnostic and did not pass the same rubric.",
+  "source": {
+    "commit": "214f1379be44e066028f3166856b48098bbf695c",
+    "archive_sha256": "9f9685e9ae2eab38611a0efe834072ca5af3d6708a6e233f598417efe175fcd7",
+    "file_count": 125
+  },
+  "freeze": {
+    "content_sha256": "3d5ebd912d1e12803f0a7a30554ccd723a9d8d581b2e33e9a096d67f9db19370",
+    "model_revision": "e51ea3e08fb81326c3b812a7ff0cb9cee83e59cc",
+    "model_snapshot_content_sha256": "18d9edf7132d9c5e13bb0e59e3c2c6a42f82007fa17de464e20783755a171360",
+    "data_bundle_content_sha256": "2247dd09c168900a47d37a50ecd6511d66d62d3f2ec8056ea3bc829c93de8b46",
+    "train_candidates": 128,
+    "train_pairs": 58,
+    "validation_candidates": 55,
+    "validation_pairs": 26,
+    "unseen_rows": 0,
+    "trainable_parameter_elements": 33558784,
+    "seed_sensitive_stability_tested": false
+  },
+  "runtime": {
+    "image": "runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404",
+    "python": "3.12.3",
+    "torch": "2.8.0+cu128",
+    "transformers": "4.52.3",
+    "gpu": "NVIDIA L40S",
+    "gpu_count": 1,
+    "region": "US-TX-3",
+    "provider_pod_id": "d8ww33hasx894t",
+    "provider_pod_name": "rondo-plan090-20260827-confirm01",
+    "hostname": "59cc9b8e282b"
+  },
+  "runs": [
+    {
+      "run_id": "bf16-seed-20260901",
+      "seed_metadata": 20260901,
+      "precision": "bfloat16",
+      "rubric_passed": true,
+      "validation_deltas": {
+        "raw_boundary": 0.00390625,
+        "projected_boundary": 0.0008611324539553877,
+        "raw_within_pass": -0.0033482142857143016,
+        "projected_within_pass": 0.0001389426001098884,
+        "roc_auc": 0.0014005602240896309,
+        "balanced_accuracy": 0.0,
+        "best_balanced_accuracy": 0.0,
+        "false_pass_rate": 0.0,
+        "boundary_strict_win_rate": 0.0,
+        "within_pass_strict_win_rate": 0.0,
+        "objective_weighted": 0.00028008286107372715
+      },
+      "pair_distribution": {
+        "boundary_raw": {
+          "improved": 7,
+          "unchanged": 9,
+          "worsened": 3
+        },
+        "boundary_projected": {
+          "improved": 13,
+          "unchanged": 1,
+          "worsened": 5
+        },
+        "within_pass_raw": {
+          "improved": 1,
+          "unchanged": 4,
+          "worsened": 2
+        },
+        "within_pass_projected": {
+          "improved": 4,
+          "unchanged": 2,
+          "worsened": 1
+        }
+      },
+      "checkpoint": {
+        "content_sha256": "b646f686f7b00c8da623cac8908c24065a44fb62357b5a4dfae9f497489fa8e2",
+        "bytes": 3591370003,
+        "retained": false
+      }
+    },
+    {
+      "run_id": "bf16-seed-20260902",
+      "seed_metadata": 20260902,
+      "precision": "bfloat16",
+      "rubric_passed": true,
+      "validation_deltas": {
+        "raw_boundary": 0.00390625,
+        "projected_boundary": 0.0008611324539553877,
+        "raw_within_pass": -0.0033482142857143016,
+        "projected_within_pass": 0.0001389426001098884,
+        "roc_auc": 0.0014005602240896309,
+        "balanced_accuracy": 0.0,
+        "best_balanced_accuracy": 0.0,
+        "false_pass_rate": 0.0,
+        "boundary_strict_win_rate": 0.0,
+        "within_pass_strict_win_rate": 0.0,
+        "objective_weighted": 0.00028008286107372715
+      },
+      "pair_distribution": {
+        "boundary_raw": {
+          "improved": 7,
+          "unchanged": 9,
+          "worsened": 3
+        },
+        "boundary_projected": {
+          "improved": 13,
+          "unchanged": 1,
+          "worsened": 5
+        },
+        "within_pass_raw": {
+          "improved": 1,
+          "unchanged": 4,
+          "worsened": 2
+        },
+        "within_pass_projected": {
+          "improved": 4,
+          "unchanged": 2,
+          "worsened": 1
+        }
+      },
+      "checkpoint": {
+        "content_sha256": "8b4b88b66a88cc50fa10d5f20c575b9a67c6f254f6e26350d38ce4896b949a69",
+        "bytes": 3591369941,
+        "fresh_process_recovery": true,
+        "retained": true,
+        "remote_path": "/workspace/rondo-plan090-20260827-confirm01/formal/bf16-seed-20260902/artifacts/recovery-checkpoints/checkpoint-attempt-000-step-000001"
+      }
+    },
+    {
+      "run_id": "fp32-seed-20260901",
+      "seed_metadata": 20260901,
+      "precision": "float32",
+      "precision_interpretation": "FP32 parameter-training condition control, not a strict update-only causal comparison",
+      "rubric_passed": false,
+      "failed_checks": [
+        "raw_boundary_direction",
+        "boundary_raw_distribution"
+      ],
+      "validation_deltas": {
+        "raw_boundary": -0.006594146552838742,
+        "projected_boundary": 0.006206381959622642,
+        "raw_within_pass": -0.0032562187739780812,
+        "projected_within_pass": 0.002991120389576893,
+        "roc_auc": 0.0,
+        "balanced_accuracy": 0.0,
+        "best_balanced_accuracy": 0.0,
+        "false_pass_rate": 0.0,
+        "boundary_strict_win_rate": 0.0,
+        "within_pass_strict_win_rate": 0.0,
+        "objective_weighted": -0.0030291557928809887
+      },
+      "precision_evidence": {
+        "model_parameters": "torch.float32",
+        "forward_outputs": "torch.float32",
+        "selected_gradients": "torch.float32",
+        "optimizer_state": "torch.float32",
+        "saved_parameters": "torch.float32",
+        "autocast_enabled": false,
+        "tf32_enabled": false
+      },
+      "checkpoint": {
+        "content_sha256": "f43515c82561484c68c799f03a08e1d9643a0047b036a1466d6e37337d87f07a",
+        "bytes": 7166784626,
+        "retained": false
+      }
+    }
+  ],
+  "retention": {
+    "final_handoff_file_count": 27,
+    "final_handoff_total_bytes": 2116244,
+    "final_handoff_content_sha256": "94c41dcd77742bfce29924cbebc027861eb5c65793209c57890045b8bb151bd9",
+    "commissioning_handoff_file_count": 4,
+    "commissioning_handoff_total_bytes": 1233696,
+    "commissioning_handoff_content_sha256": "bb24469329580a660a6303f7da7a6610509947d82ebbd5eb1e2cf7643e5f5497",
+    "full_terminal_result_content_sha256": "5595c3f3bf05a87286310fb981e6f01dffbf4cb63c84b5915379471ed4426170"
+  },
+  "budget": {
+    "hard_cap_usd": 6.0,
+    "stage_b_baseline_balance_usd": 6.1495080272,
+    "terminal_balance_usd": 5.4566316335,
+    "balance_metered_cost_floor_usd": 0.7008763936999998,
+    "conservative_task_cost_usd": 0.71,
+    "remaining_task_headroom_usd": 5.29
+  },
+  "resource_state": {
+    "captured_at": "2026-08-27T03:45:47Z",
+    "pod_count": 0,
+    "compute_rate_usd_per_hour": 0.0,
+    "volume": {
+      "id": "mwemzrn33y",
+      "region": "US-TX-3",
+      "size_gb": 57,
+      "deleted": false,
+      "retained_rate_usd_per_hour": 0.006
+    }
+  },
+  "claims": {
+    "task_goal_complete": true,
+    "positive_bf16_clean_repeats_observed": true,
+    "route_o_repeated_on_same_validation_two_clean_runs": true,
+    "seed_sensitive_stability_tested": false,
+    "independent_cohort_generalization": false,
+    "unseen_evidence": false,
+    "product_go": false,
+    "m3_c1_or_m3_c2": false,
+    "m3_d_unlocked": false
+  }
+}

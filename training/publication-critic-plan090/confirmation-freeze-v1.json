@@ -1,0 +1,359 @@
+{
+  "branch_order": [
+    "bf16-seed-20260901",
+    "bf16-seed-20260902",
+    "fp32-seed-20260901"
+  ],
+  "budget": {
+    "balance_cost_floor": "max((stage_b_baseline_balance - baseline_unsettled) - (live_balance - known_unsettled), 0)",
+    "formula": "min(6 - conservative_task_cost, live_balance - known_unsettled - transfer_stop_and_short_volume_reserve)",
+    "full_branch_closure_required": true,
+    "hard_limit_usd": 6.0
+  },
+  "claims": {
+    "independent_cohort_generalization": false,
+    "m3_c1_or_m3_c2": false,
+    "m3_d_unlocked": false,
+    "product_go": false,
+    "seed_sensitive_stability_tested": false,
+    "unseen_evidence": false
+  },
+  "comparison_policy": {
+    "direction": "higher_is_better",
+    "metric": "boundary_pair_mean_margin",
+    "tolerance": 0.0
+  },
+  "control_plan": {
+    "checkpoint_steps": [
+      1
+    ],
+    "maximum_updates": 1,
+    "observation_steps": [
+      1
+    ],
+    "turning_point_limit": 1
+  },
+  "data": {
+    "bundle_content_sha256": "2247dd09c168900a47d37a50ecd6511d66d62d3f2ec8056ea3bc829c93de8b46",
+    "dataset_revision": "v8",
+    "train_candidate_count": 128,
+    "train_pair_count": 58,
+    "unseen_physically_present": false,
+    "validation_candidate_count": 55,
+    "validation_pair_count": 26
+  },
+  "fp32_trigger": {
+    "may_skip_only_for": "insufficient_safe_budget_for_complete_fp32_closure",
+    "requires_bf16_runs_passed": [
+      "bf16-seed-20260901",
+      "bf16-seed-20260902"
+    ]
+  },
+  "historical_reference": {
+    "base": {
+      "projected_boundary_pair_mean_margin": 0.08355612723605446,
+      "projected_within_pass_pair_mean_margin": 0.015236882517573793,
+      "raw_boundary_pair_mean_margin": 0.8104440789473685,
+      "raw_within_pass_pair_mean_margin": 0.375,
+      "roc_auc": 0.6204481792717087
+    },
+    "candidate": {
+      "projected_boundary_pair_mean_margin": 0.08441725969000985,
+      "projected_within_pass_pair_mean_margin": 0.015375825117683681,
+      "raw_boundary_pair_mean_margin": 0.8143503289473685,
+      "raw_within_pass_pair_mean_margin": 0.3716517857142857,
+      "roc_auc": 0.6218487394957983
+    },
+    "delta": {
+      "balanced_accuracy": 0.0,
+      "best_balanced_accuracy": 0.0,
+      "boundary_strict_win_rate": 0.0,
+      "false_pass_rate": 0.0,
+      "projected_boundary_pair_mean_margin": 0.0008611324539553877,
+      "projected_within_pass_pair_mean_margin": 0.0001389426001098884,
+      "raw_boundary_pair_mean_margin": 0.00390625,
+      "raw_within_pass_pair_mean_margin": -0.0033482142857143016,
+      "roc_auc": 0.0014005602240896309,
+      "within_pass_strict_win_rate": 0.0
+    },
+    "pair_distribution": {
+      "boundary": {
+        "count": 19,
+        "improved_projected": 13,
+        "improved_raw": 7,
+        "unchanged_projected": 1,
+        "unchanged_raw": 9,
+        "worsened_projected": 5,
+        "worsened_raw": 3
+      },
+      "within_pass": {
+        "count": 7,
+        "improved_projected": 4,
+        "improved_raw": 1,
+        "unchanged_projected": 2,
+        "unchanged_raw": 4,
+        "worsened_projected": 1,
+        "worsened_raw": 2
+      }
+    },
+    "run_id": "route-o-internal-transformations",
+    "source": "Plan 087 retained Route O matching-base validation evidence"
+  },
+  "legacy_checkpoint": {
+    "bytes": 3591448949,
+    "content_sha256": "d08ff2566d719b3aef4dd58158e86b1c374faf2021cc96a140d878b79857c923",
+    "relative_path": "formal-search/route-o-artifacts/recovery-checkpoints/checkpoint-attempt-000-step-000001",
+    "task_root": "/workspace/rondo-plan087-20260826-search01",
+    "training_initialization_allowed": false,
+    "use": "no_update_diagnostic_only"
+  },
+  "model": {
+    "historical_bf16_inventory_sha256": "13d07191838650bcb6a7a5b7e5ff39d52bf9f2173ff361c0a0e9ed49fa609bac",
+    "parameter_elements": 1720577024,
+    "parameter_tensors": 311,
+    "repository": "Skywork/Skywork-Reward-V2-Qwen3-1.7B",
+    "revision": "e51ea3e08fb81326c3b812a7ff0cb9cee83e59cc",
+    "snapshot_content_sha256": "18d9edf7132d9c5e13bb0e59e3c2c6a42f82007fa17de464e20783755a171360"
+  },
+  "namespaces": {
+    "bf16-seed-20260901": "formal/bf16-seed-20260901",
+    "bf16-seed-20260902": "formal/bf16-seed-20260902",
+    "fp32-seed-20260901": "formal/fp32-seed-20260901"
+  },
+  "precision": {
+    "bfloat16": {
+      "forward": "model forward and activations use the BF16 model path",
+      "gradients": "selected-parameter gradient tensors are observed as BF16",
+      "interpretation": "Route O BF16 reproduction",
+      "model_load": "all model parameters loaded as torch.bfloat16",
+      "optimizer_state": "fused AdamW state follows the selected BF16 parameters",
+      "save": "save_pretrained persists the BF16 model state",
+      "updated_parameters": "nine selected original parameters remain BF16"
+    },
+    "float32": {
+      "forward": "the full model forward and activations use the FP32 model path",
+      "gradients": "selected-parameter gradient tensors are observed as FP32",
+      "interpretation": "FP32 parameter-training condition control, not a strict update-only causal comparison",
+      "model_load": "the exact BF16 snapshot is materialized as torch.float32",
+      "optimizer_state": "fused AdamW state follows the selected FP32 parameters",
+      "save": "save_pretrained persists the FP32 materialized model state",
+      "updated_parameters": "nine selected original parameters are FP32"
+    }
+  },
+  "recipes": {
+    "bf16-seed-20260901": {
+      "activation_checkpointing": true,
+      "attention_backend": "sdpa",
+      "binary_micro_batch_size": 1,
+      "gradient_clip_norm": 1.0,
+      "macro_update": "one_full_v8_train_cohort",
+      "objective": {
+        "binary_loss": "softplus(-signed_target*logits[:,0])",
+        "component_weights": {
+          "binary": 0.05,
+          "boundary": 0.25,
+          "within_pass": 0.7
+        },
+        "direction": "preferred_minus_dispreferred",
+        "pair_loss": "softplus(dispreferred-preferred)",
+        "pair_margin": 0.0,
+        "pair_temperature": 1.0,
+        "scalar": "logits[:,0]"
+      },
+      "optimizer": {
+        "betas": [
+          0.9,
+          0.999
+        ],
+        "epsilon": 1e-08,
+        "fused": true,
+        "learning_rate": 5e-06,
+        "name": "torch.optim.AdamW",
+        "weight_decay": 0.0
+      },
+      "pair_micro_batch_size": 1,
+      "parameter_dtype": "bfloat16",
+      "scheduler": {
+        "name": "constant"
+      },
+      "schema": "rondo-publication-critic-plan087-training-recipe-v1",
+      "seed": 20260901
+    },
+    "bf16-seed-20260902": {
+      "activation_checkpointing": true,
+      "attention_backend": "sdpa",
+      "binary_micro_batch_size": 1,
+      "gradient_clip_norm": 1.0,
+      "macro_update": "one_full_v8_train_cohort",
+      "objective": {
+        "binary_loss": "softplus(-signed_target*logits[:,0])",
+        "component_weights": {
+          "binary": 0.05,
+          "boundary": 0.25,
+          "within_pass": 0.7
+        },
+        "direction": "preferred_minus_dispreferred",
+        "pair_loss": "softplus(dispreferred-preferred)",
+        "pair_margin": 0.0,
+        "pair_temperature": 1.0,
+        "scalar": "logits[:,0]"
+      },
+      "optimizer": {
+        "betas": [
+          0.9,
+          0.999
+        ],
+        "epsilon": 1e-08,
+        "fused": true,
+        "learning_rate": 5e-06,
+        "name": "torch.optim.AdamW",
+        "weight_decay": 0.0
+      },
+      "pair_micro_batch_size": 1,
+      "parameter_dtype": "bfloat16",
+      "scheduler": {
+        "name": "constant"
+      },
+      "schema": "rondo-publication-critic-plan087-training-recipe-v1",
+      "seed": 20260902
+    },
+    "fp32-seed-20260901": {
+      "activation_checkpointing": true,
+      "attention_backend": "sdpa",
+      "binary_micro_batch_size": 1,
+      "gradient_clip_norm": 1.0,
+      "macro_update": "one_full_v8_train_cohort",
+      "objective": {
+        "binary_loss": "softplus(-signed_target*logits[:,0])",
+        "component_weights": {
+          "binary": 0.05,
+          "boundary": 0.25,
+          "within_pass": 0.7
+        },
+        "direction": "preferred_minus_dispreferred",
+        "pair_loss": "softplus(dispreferred-preferred)",
+        "pair_margin": 0.0,
+        "pair_temperature": 1.0,
+        "scalar": "logits[:,0]"
+      },
+      "optimizer": {
+        "betas": [
+          0.9,
+          0.999
+        ],
+        "epsilon": 1e-08,
+        "fused": true,
+        "learning_rate": 5e-06,
+        "name": "torch.optim.AdamW",
+        "weight_decay": 0.0
+      },
+      "pair_micro_batch_size": 1,
+      "parameter_dtype": "float32",
+      "scheduler": {
+        "name": "constant"
+      },
+      "schema": "rondo-publication-critic-plan087-training-recipe-v1",
+      "seed": 20260901
+    }
+  },
+  "repeat_semantics": {
+    "active_dropout_modules": [],
+    "attention_dropout": 0.0,
+    "bf16_run_kind": "independent_clean_repeat_with_distinct_seed_metadata",
+    "bf16_seed_metadata": [
+      20260901,
+      20260902
+    ],
+    "data_ordering": "sorted_candidates_and_frozen_pair_order",
+    "data_shuffle": false,
+    "interpretation": "two independent clean executions test execution and numerical repeatability; they do not test sensitivity to random seed",
+    "seed_sensitive_consumers": [],
+    "seed_sensitive_stability_tested": false
+  },
+  "report_threshold": 0.5,
+  "resource": {
+    "cloud_type": "SECURE",
+    "data_center_id": "US-TX-3",
+    "gpu_count": 1,
+    "gpu_name": "NVIDIA L40S",
+    "maximum_simultaneous_billing_pods": 1,
+    "network_volume_id": "mwemzrn33y",
+    "network_volume_mount_path": "/workspace",
+    "network_volume_size_gb": 57
+  },
+  "retention": {
+    "inconclusive": [
+      "infrastructure_turning_point",
+      "small_logs_and_cost_state",
+      "resource_terminal_state"
+    ],
+    "no_go": [
+      "exact_base_reference",
+      "decisive_negative_small_result",
+      "small_metrics_and_pair_margins",
+      "resource_terminal_state"
+    ],
+    "pass": [
+      "exact_base_reference",
+      "final_effective_candidate_checkpoint",
+      "small_metrics_and_pair_margins",
+      "fresh_process_recovery_receipt",
+      "resource_terminal_state"
+    ]
+  },
+  "rubric": {
+    "all_checks_required": true,
+    "basis": {
+      "companion_metrics": "historical projected, pair-distribution, strict, operating, within-pass and span signals constrain offset or collapse",
+      "raw_boundary": "minimum is half the historical +0.00390625 BF16-grid delta",
+      "roc_auc": "allow at most one validation pair-ordering quantum of drift"
+    },
+    "matching_base_required": true,
+    "maximum_false_pass_rate_delta": 0.0,
+    "minimum_balanced_accuracy_delta": 0.0,
+    "minimum_best_balanced_accuracy_delta": 0.0,
+    "minimum_boundary_improved_raw_pairs": 5,
+    "minimum_boundary_projected_improvement_advantage": 1,
+    "minimum_boundary_raw_improvement_advantage": 2,
+    "minimum_boundary_strict_win_rate_delta": 0.0,
+    "minimum_projected_boundary_delta": 0.0,
+    "minimum_projected_within_pass_delta": -0.00025,
+    "minimum_raw_boundary_delta": 0.001953125,
+    "minimum_raw_logit_span_ratio": 0.9,
+    "minimum_raw_within_pass_delta": -0.005859375,
+    "minimum_roc_auc_delta": -0.002,
+    "minimum_within_pass_strict_win_rate_delta": 0.0,
+    "minimum_within_projected_improvement_advantage": 0,
+    "primary_metric": "raw_boundary_pair_mean_margin",
+    "train_before_after_required": true
+  },
+  "runtime": {
+    "allow_tf32": false,
+    "attention_backend": "sdpa",
+    "container_image": "runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404",
+    "float32_matmul_precision": "highest",
+    "optimizer": "torch.optim.AdamW",
+    "optimizer_fused": true,
+    "python_version": "3.12.3",
+    "torch_version": "2.8.0+cu128",
+    "transformers_version": "4.52.3"
+  },
+  "schema": "rondo-publication-critic-plan090-confirmation-freeze-v1",
+  "scope": {
+    "parameter_names": [
+      "model.layers.27.self_attn.q_proj.weight",
+      "model.layers.27.self_attn.k_proj.weight",
+      "model.layers.27.self_attn.v_proj.weight",
+      "model.layers.27.self_attn.q_norm.weight",
+      "model.layers.27.self_attn.k_norm.weight",
+      "model.layers.27.mlp.gate_proj.weight",
+      "model.layers.27.mlp.up_proj.weight",
+      "model.layers.27.input_layernorm.weight",
+      "model.layers.27.post_attention_layernorm.weight"
+    ],
+    "reason": "frozen Route O layer 27 input transformations and internal norms",
+    "scope_id": "plan090-route-o-layer27-internal-transformations",
+    "trainable_parameter_elements": 33558784,
+    "update_method": "direct_original_parameter_update"
+  }
+}

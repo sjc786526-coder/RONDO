@@ -51,6 +51,8 @@ _CHECKPOINT_ARTIFACT_ID = re.compile(
 class Plan081ArtifactStore:
     """A task-owned root with permanent observations and prunable large artifacts."""
 
+    observation_schemas = frozenset({OBSERVATION_SCHEMA})
+
     def __init__(self, root: Path) -> None:
         self.root = Path(root)
         self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -59,7 +61,7 @@ class Plan081ArtifactStore:
 
     def write_observation(self, observation_id: str, value: Mapping[str, Any]) -> dict[str, Any]:
         _require_artifact_id(observation_id)
-        if value.get("schema") != OBSERVATION_SCHEMA:
+        if value.get("schema") not in self.observation_schemas:
             raise FullModelTrainingError("plan081_observation_schema_invalid")
         namespace = WriteOnceNamespace(
             self.root / "observations",
@@ -85,7 +87,10 @@ class Plan081ArtifactStore:
         _require_artifact_id(observation_id)
         path = self.root / "observations" / observation_id / "observation.json"
         value = read_json(path)
-        if not isinstance(value, Mapping) or value.get("schema") != OBSERVATION_SCHEMA:
+        if (
+            not isinstance(value, Mapping)
+            or value.get("schema") not in self.observation_schemas
+        ):
             raise FullModelTrainingError("plan081_observation_invalid")
         return {
             "observation_id": observation_id,
