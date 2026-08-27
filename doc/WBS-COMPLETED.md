@@ -2417,3 +2417,25 @@ formal retry 整改为 `d29e857`，最终独立验收提交为 `43cf0eeb3e1b4826
 - 主线整合以当时 main 为底，保留已完成的 Plan 091、Plan 092 与第四期收口，只追加 Plan 090 三期事实；主线复验 Plan 090 `16/16`、
   相邻 Plan 081/082/087 `85/85`，三个 shell syntax、freeze、终态结果和 diff 门均通过。整合记录见
   `agent_log/2026-08-26-212140-plan090-main-integration.md`。
+
+## Publication Critic Route O 连续训练与实质增益判断（Plan 094，2026-08-27）
+
+**状态**：任务执行与资源收口完成，整体最终独立验收待定；研究终态为
+`ROUTE_O_VALID_NO_MATERIAL_IMPROVEMENT / ZERO_POD / VOLUME_RETAINED`。预释放审查提交 `a517820` 已确认全部 Pod 依赖工作正确并批准释放。
+
+- 保持 exact BF16 1.7B、冻结 v8 train `128/58`、validation `55/26`、物理无 unseen、Route O 九张量与 `33,558,784` 个原参数范围。
+  Plan 090 guarded import 因历史 controller cursor 不满足完整续训门而按合同拒绝；正式轮使用预冻结 exact-base fallback，在独立 clean namespace
+  重建 step 1，没有拼接部分状态。
+- 四个 checkpoint-first 正式观察点均无 material/strict/operating event。step 1 只重复 Plan 090 微弱信号；step 2--4 raw Boundary 转负，
+  projected margin 小幅上移但没有离散改善。step 4 按预冻结平台规则形成
+  `ROUTE_O_VALID_NO_MATERIAL_IMPROVEMENT / prefrozen_three_checkpoint_no_material_plateau`，有效负向结果未重跑规避。
+- step 2 与 step 3 均由新 OS 进程恢复并继续到下一有效 update。卷上保留 steps 1/3/4 三份角色去重 checkpoint；terminal qualification
+  深读并绑定 controller、recovery/latest 和全部现存 checkpoint 哈希。大型权重继续留在 70GB `mwemzrn33y` 的 Plan 094 独立 root。
+- 2,017,280-byte / 181-member 小型 handoff 已回传并复核无权重或 source/data tar。zero-Pod finalizer 只消费该小包、qualification receipt、
+  terminal budget/resource state，结果 content SHA-256 为 `7dead9d3c180fae468fa1e0bf2bd19b069158f3016a232d446ced1ecf6447ce6`；正式结果见
+  `eval/results/publication-critic/plan094-route-o-continuous-v1.{json,md}`。
+- 唯一 Secure US-TX-3 L40S Pod 已由 exact helper stop/delete，并经 helper receipt 与独立 live query 确认账户 0 Pod、compute `$0/h`。
+  既有卷仅按需从 57GB 扩到 70GB，继续以 `$0.007/h` 保留；保守任务成本 `$1.69`，低于 `$5` 硬上限，另有 `$0.82` closure reserve
+  覆盖至少 6 小时卷保留。
+- 没有重建 Pod、重复 qualification、重跑训练、读取 unseen、运行本地真实模型/Cargo/Docker/真实 API/Judge、上传发布、创建第二卷、
+  删除卷或执行产品动作。该有效负向结论不授予独立 cohort、产品 GO、M3-C1/M3-C2 或 M3-D 解锁。

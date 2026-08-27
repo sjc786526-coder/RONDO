@@ -2,7 +2,7 @@
 
 最后更新：2026-08-27 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
 状态：**第一期、第二期已完成；Publication Critic 三期 Plan 094 已形成
-`ROUTE_O_VALID_NO_MATERIAL_IMPROVEMENT / POD_RETAINED_PENDING_PRE_RELEASE_REVIEW`。Plan 090 的微弱重复信号没有沿连续轨迹扩大为实质
+`ROUTE_O_VALID_NO_MATERIAL_IMPROVEMENT / ZERO_POD / VOLUME_RETAINED / FINAL_REVIEW_PENDING`。Plan 090 的微弱重复信号没有沿连续轨迹扩大为实质
 better-than-base 候选；仍不验证独立 cohort、unseen 或产品资格，M3-D 保持锁定**
 
 ## 当前定位
@@ -86,7 +86,7 @@ M3-B1c 正式分阶段训练与工件回收          │
                        ↓
         Plan 090 Route O 干净复现与执行/数值重复确认（已完成；`ROUTE_O_CONFIRMATION_PASS`，0 Pod）
                        ↓
-        Plan 094 Route O 连续训练与实质增益候选形成（有效负向终态；等待 Pod 预释放审查）
+        Plan 094 Route O 连续训练与实质增益候选形成（有效负向终态；zero-Pod 收口完成，等待最终验收）
                        ↓
                  M3-D 端到端收口（未解锁）
 ```
@@ -376,7 +376,7 @@ Boundary `+0.00620638`，未通过同一 rubric；该单条完整精度路径对
 不授予随机 seed 稳定、独立 cohort 泛化、unseen、M3-C1/M3-C2、产品启用或 M3-D 资格。Plan 090 预算与外部动作授权已关闭；当前没有
 可继承授权。
 
-#### Plan 094：Route O 连续训练与实质增益候选形成（有效负向终态；等待 Pod 预释放审查）
+#### Plan 094：Route O 连续训练与实质增益候选形成（有效负向终态；zero-Pod 收口完成，等待最终验收）
 
 **任务合同**：[`Plan 094 ExecPlan`](../../plan/094-publication-critic-route-o-continuous-training-execplan.md)。
 
@@ -410,8 +410,8 @@ lifecycle guard 始终提供硬止费上界。该任务不释放 unseen、不授
 **当前状态**：Plan 094 commissioning 已证明真实 Route O update、checkpoint-first overlay 与 fresh-process 恢复继续。guarded Plan 090
 import 因历史 cursor 不兼容按合同拒绝，clean formal 使用预冻结 exact-base fallback；step 1--4 均无 material/strict/operating event，
 step 4 形成 `ROUTE_O_VALID_NO_MATERIAL_IMPROVEMENT`。卷上 steps 1/3/4 checkpoint 已深读资格化，小型无权重结果已回传；既有卷只按需
-从 57GB 扩到 70GB。唯一 Pod按用户顺序保留等待预释放审查，`$5` 硬上限和绝对 lifecycle guard 继续生效；接受后释放并完成 zero-Pod
-finalizer。正式结果不读取 unseen，也不改变产品或 M3-D 边界。
+从 57GB 扩到 70GB。预释放审查通过后，唯一 Pod 已精确 stop/delete，并独立确认账户 0 Pod、compute `$0/h`；本地 zero-Pod finalizer
+保持同一有效负向终态。卷以 `$0.007/h` 继续保留，现等待整体最终验收。正式结果不读取 unseen，也不改变产品或 M3-D 边界。
 
 ## 串并行与资源关系
 
@@ -521,9 +521,9 @@ finalizer。正式结果不读取 unseen，也不改变产品或 M3-D 边界。
   再用后释放，任务网络卷删除还须用户本人另行明确人工批准。
 - Plan 087/090 外部动作授权均已随各自 `ZERO_POD` 终态关闭，剩余预算不转移。Plan 090 保守费用 `$0.71`，低于 `$6` 硬上限；
   换区/换卡、继续训练、独立 cohort、卷扩容/新建/删除、unseen 或产品动作仍须新的明确任务与授权。
-- Plan 094 已形成有效负向研究终态，当前只保留唯一 Pod等待用户要求的预释放审查；5 USD、绝对 lifecycle、单张 US-TX-3 L40S 和既有卷
-  边界继续有效。用户后续允许卷按需扩到 120GB，实际只扩到 70GB；收口预算另保留至少 6 小时卷费用。不得新建第二卷、删除现有卷、充值、
-  读取 unseen、发布或执行产品动作；预释放审查接受后立即完成 0 Pod 收口。
+- Plan 094 已形成有效负向研究终态并完成 0 Pod / compute `$0/h` 收口；用户后续允许卷按需扩到 120GB，实际只扩到 70GB并继续保留，
+  收口预算另保留至少 6 小时卷费用。不得重建 Pod、继续训练、新建第二卷、删除现有卷、充值、读取 unseen、发布或执行产品动作；当前只等待
+  整体最终验收。
 - Plan 068、Plan 071 与 Plan 073 的一次性授权已随本地交接、真实推理、资格/联合横评、独立验收和 exact winner 卷删除全部完成，
   不向后续任务延伸。M3-D、新候选或继续训练、云资源、远端上传、真实 API 与产品启用均须另建任务并取得相应授权。
 - 训练数据、权重、逐样本输出与私有运行材料留在 `eval-data/` 或仓库外；`training/` 只保存体积合规的轻量合同与数据。

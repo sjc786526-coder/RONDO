@@ -1,7 +1,7 @@
 # RONDO 长程规划（WBS）
 
 最后更新：2026-08-27（方向 3 Publication Critic 三期 Plan 094 已形成正式有效负向研究终态；
-当前处于 `ROUTE_O_VALID_NO_MATERIAL_IMPROVEMENT / POD_RETAINED_PENDING_PRE_RELEASE_REVIEW`，Plan 090 已确认的同一 validation 微弱重复信号未扩大为实质候选，
+当前处于 `ROUTE_O_VALID_NO_MATERIAL_IMPROVEMENT / ZERO_POD / VOLUME_RETAINED / FINAL_REVIEW_PENDING`，Plan 090 已确认的同一 validation 微弱重复信号未扩大为实质候选，
 M3-D 保持锁定）
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段指针、跨方向关系、
@@ -22,7 +22,7 @@ M3-D 保持锁定）
 | 0：量化测评基准 | 既有设施与首次 schema v7 正式 canary 已完成，当前无 active campaign | 保留设施；历史结果见 COMPLETED，新 campaign 须重新立项与授权 |
 | 1：Harness 优化 | **正式收口；当前无 active 工作包** | 当前不继续新增观测或内核/热路径优化；既有实现、设施与历史结果保留。未来可由用户另行决定是否重新立项，本次收口不作永久禁止 |
 | 2：本地审批模型 | **已收口，今后不再开启** | 最终结论为“保留为实验”；不改生产默认，不再规划后续工作包 |
-| 3：RONDO Multi | 第一、二期与第四期已完成；三期 Plan 094 已形成有效无实质改善结果，等待 Pod 预释放审查 | 保持 exact 1.7B 与 Route O 唯一更新范围；审查接受 Pod 依赖工作后释放唯一 Pod并完成本地终态收口，不释放 unseen 或产品资格，M3-D 不自动解锁。第四期历史统一见 COMPLETED |
+| 3：RONDO Multi | 第一、二期与第四期已完成；三期 Plan 094 有效无实质改善结果与 zero-Pod 收口完成，等待最终验收 | 保持 exact 1.7B 与 Route O 唯一更新范围；保留卷上必要权重，不再训练或重建 Pod，不释放 unseen 或产品资格，M3-D 不自动解锁。第四期历史统一见 COMPLETED |
 
 ### 方向命名口径
 
@@ -49,8 +49,8 @@ checkpoint 于既有 57GB 卷 `mwemzrn33y`，卷未扩容或删除并继续按 `
 Plan 090 最终独立验收已通过，其授权已经关闭。Plan 094 阶段 B 已在唯一 Secure US-TX-3 L40S 上完成 commissioning 和 clean formal；
 Plan 090 guarded import 因历史 cursor 不兼容按合同拒绝，正式轮使用预冻结 exact-base fallback 干净重建。四个 checkpoint-first 观察点均无
 material/strict/operating event，step 4 按预冻结平台规则形成 `ROUTE_O_VALID_NO_MATERIAL_IMPROVEMENT`；step 2/3 均由新进程恢复并继续。
-三份保留 checkpoint 已在挂载卷上深读资格化，小型证据已回传，大型权重保留在 70GB 既有卷。按用户最新顺序，唯一 Pod 暂留等待预释放审查；
-接受后立即释放并完成 0 Pod / compute `$0/h` 与本地 finalizer 收口。该任务仍只使用开发 validation，不回答独立 cohort 或产品资格，M3-D 继续锁定。
+三份保留 checkpoint 已在挂载卷上深读资格化，小型证据已回传，大型权重保留在 70GB 既有卷。预释放审查通过后，唯一 Pod 已精确 stop/delete；
+账户 0 Pod、compute `$0/h` 与本地 finalizer 均完成，账户只剩卷费 `$0.007/h`。该任务仍只使用开发 validation，不回答独立 cohort 或产品资格，M3-D 继续锁定。
 方向 1 已正式收口，不作为方向 3 的前置或旁支。
 
 ### 方向 3：Publication Critic 三期
@@ -116,8 +116,8 @@ material/strict/operating event，step 4 按预冻结平台规则形成 `ROUTE_O
 - Plan 094 已在单张 US-TX-3 Secure L40S 上完成 clean Route O 连续正式轨迹。step 1 只重复 Plan 090 微弱信号，step 2--4 raw Boundary
   转负，projected margin 小幅上移但始终没有 material/strict/operating event；预冻结 step-4 平台规则形成有效负向终态
   `ROUTE_O_VALID_NO_MATERIAL_IMPROVEMENT`。fresh-process 恢复并继续与卷上 checkpoint 深读资格化均完成，大型权重保留在按需从 57GB
-  扩到 70GB 的既有卷，小型结果已回传。唯一 Pod按用户顺序等待预释放审查，绝对 guard 保持止费兜底；审查接受后释放并完成本地终态收口。
-  不读取 unseen、不授予产品资格或 M3-D 解锁。任务合同见
+  扩到 70GB 的既有卷，小型结果已回传。预释放审查通过后，唯一 Pod 已删除并独立复核账户 0 Pod / compute `$0/h`；本地 finalizer
+  保持同一有效负向终态，现等待整体最终验收。不读取 unseen、不授予产品资格或 M3-D 解锁。任务合同见
   `plan/094-publication-critic-route-o-continuous-training-execplan.md`。
 
 Plan 094 的本地阶段只运行轻量 Python/static/fake/focused 门禁，可与 Plan 093 冷全 workspace 并行；不得使用、修改或清理 Plan 093 的

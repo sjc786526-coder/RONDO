@@ -1,13 +1,13 @@
-# Plan 094 Route O continuous training — pre-release review v1
+# Plan 094 Route O continuous training — terminal v1
 
-**Research terminal: `ROUTE_O_VALID_NO_MATERIAL_IMPROVEMENT`.** The clean
-formal trajectory reached the pre-frozen step-4 no-material plateau. It is a valid
+**Terminal: `ROUTE_O_VALID_NO_MATERIAL_IMPROVEMENT`.** The clean formal
+trajectory reached the pre-frozen step-4 no-material plateau. It is a valid
 negative completion of the research trajectory, not an infrastructure failure.
-The Pod is intentionally retained only for the user-requested pre-release review;
-resource closure and the zero-Pod finalizer remain pending.
+The exact task Pod has been stopped and deleted, account-wide zero Pods and
+compute `$0/h` are confirmed, and the zero-Pod finalizer has completed.
 
 The machine-readable projection is
-[`plan094-route-o-continuous-prerelease-v1.json`](plan094-route-o-continuous-prerelease-v1.json).
+[`plan094-route-o-continuous-v1.json`](plan094-route-o-continuous-v1.json).
 
 | | |
 |---|---|
@@ -51,19 +51,27 @@ task root is about 13.22GB. The returned 2,017,280-byte small handoff contains 1
 members, has SHA-256 `a0b227bd…9ea4`, and contains no checkpoint weights or
 source/data tar.
 
-## Budget and pre-release state
+## Budget and resource closure
 
-The `2026-08-27T09:14:48Z` live snapshot gives a conservative Plan 094 cost of
-`$1.52`, below the `$5` hard cap. The `$0.82` closure reserve includes a conservative
+The `2026-08-27T09:27:44Z` terminal snapshot gives a conservative Plan 094 cost of
+`$1.69`, below the `$5` hard cap. The `$0.82` closure reserve includes a conservative
 `$0.06` for at least six hours of post-completion volume retention. The existing
 volume was expanded only when needed from 57GB to 70GB; the later authorization up
 to 120GB was not needed.
 
-The sole task Pod remains running at `$0.99/h` pending pre-release review, with the
-immutable lifecycle guard still armed for `2026-08-27T11:17:42.117Z`. After the
-reviewer accepts the Pod-dependent work, the executor will release it, confirm exact
-zero Pods and compute `$0/h`, then run the local terminal finalizer and replace this
-pre-release projection with the final result.
+Pre-release review accepted all Pod-dependent work at commit `a517820`. The exact
+terminal helper then stopped and deleted Pod `0bsry5tbei7p4o`; both its sanitized
+receipt and an independent live query observed an empty account Pod list. Account
+spend fell from `$1.00/h` to the retained 70GB volume rate of `$0.007/h`, so compute
+is `$0/h`. The volume remains in US-TX-3 and was not deleted or further resized.
+
+The local finalizer consumed only the returned small handoff, the checkpoint
+qualification receipt, the zero-Pod resource state, and the terminal budget. It
+replayed the four formal overlays and produced content SHA-256
+`7dead9d3c180fae468fa1e0bf2bd19b069158f3016a232d446ced1ecf6447ce6`, with
+`all_task_pods_released=true`, `fresh_process_restore_and_continue=true`, and the
+same valid-negative outcome. No Pod was rebuilt and no qualification or training
+was rerun.
 
 No local model, Cargo, or Docker ran. No Judge, real API, unseen row, HF upload,
 publication, product action, quantization, multi-GPU run, alternate GPU, region

@@ -51,36 +51,36 @@ Plan 094 只有两个授权阶段：
 
 ### 完成/验收标准
 
-- [ ] 阶段 A 与最终交付都只在 Plan 094 worktree 完成 tracked 修改并分别提交，worktree clean；未经用户批准不合并、不推送、不归档分支、
+- [x] 阶段 A 与最终交付都只在 Plan 094 worktree 完成 tracked 修改并分别提交，worktree clean；未经用户批准不合并、不推送、不归档分支、
       不删除 worktree。
-- [ ] 阶段 A 经审查者验收且审查者通过指定队列明确批准进入付费阶段；此前没有付费或外部写动作。
-- [ ] exact 模型 revision/snapshot、v8 train/validation、pair/input/label、preferred-minus-dispreferred、scalar/projection、objective 家族、
+- [x] 阶段 A 经审查者验收且审查者通过指定队列明确批准进入付费阶段；此前没有付费或外部写动作。
+- [x] exact 模型 revision/snapshot、v8 train/validation、pair/input/label、preferred-minus-dispreferred、scalar/projection、objective 家族、
       Route O 九张量范围和 unseen 隔离保持不变；没有回退到多路线或参数范围搜索。
-- [ ] 在看到本任务正式 checkpoint 结果前，冻结正式起点与连续语义、同轮 base、实质改善 rubric、停止规则、观察/checkpoint 策略和资产
+- [x] 在看到本任务正式 checkpoint 结果前，冻结正式起点与连续语义、同轮 base、实质改善 rubric、停止规则、观察/checkpoint 策略和资产
       保留原则；正式执行不事后改口径追逐正向结论。
-- [ ] 实质改善 rubric 明确越过 Plan 090 微弱信号包络，并要求有意义的 ranking、strict 或 operating 变化；单个 BF16 格点、统一 offset、
+- [x] 实质改善 rubric 明确越过 Plan 090 微弱信号包络，并要求有意义的 ranking、strict 或 operating 变化；单个 BF16 格点、统一 offset、
       单一 ordering、仅 projected 微动、仅 train loss 改善或单纯无退化均不足以形成候选。
-- [ ] 正式 base 与各 checkpoint 使用相同运行环境、模型输入、train/validation 和评价口径；只使用同轮 matching exact base delta，
+- [x] 正式 base 与各 checkpoint 使用相同运行环境、模型输入、train/validation 和评价口径；只使用同轮 matching exact base delta，
       不混用 Plan 082 FP32 base 或其它历史绝对值冒充可比基线。
-- [ ] checkpoint 覆盖模型、实际 trainable scope、optimizer/scheduler、RNG、data cursor 和连续选择状态；只有完整、原子发布并经读回资格化的
+- [x] checkpoint 覆盖模型、实际 trainable scope、optimizer/scheduler、RNG、data cursor 和连续选择状态；只有完整、原子发布并经读回资格化的
       checkpoint 才能进入测评或作为恢复点。
-- [ ] 训练进度和测评进度可分别恢复；测评或连接故障不报废已资格化 checkpoint，也不要求建设通用队列、registry 或第二套云编排平台。
-- [ ] 至少一个正式 checkpoint 经过另一新 OS 进程的实际恢复并继续训练或完成审查者接受的等强恢复验证。
-- [ ] 每个正式观察点永久保留 train/validation 聚合指标、raw/projected pair margin 与逐 pair 方向，以及足以判断 ranking、strict、
+- [x] 训练进度和测评进度可分别恢复；测评或连接故障不报废已资格化 checkpoint，也不要求建设通用队列、registry 或第二套云编排平台。
+- [x] 至少一个正式 checkpoint 经过另一新 OS 进程的实际恢复并继续训练或完成审查者接受的等强恢复验证。
+- [x] 每个正式观察点永久保留 train/validation 聚合指标、raw/projected pair margin 与逐 pair 方向，以及足以判断 ranking、strict、
       operating、pair 抵消和输出塌缩的既有指标。
-- [ ] base、previous、training-best、checkpoint-backed best、latest、material candidate 与必要 turning point 角色明确；角色重合时复用同一
+- [x] base、previous、training-best、checkpoint-backed best、latest、material candidate 与必要 turning point 角色明确；角色重合时复用同一
       checkpoint，不为形式完整复制权重或永久保存每个中间 checkpoint。
-- [ ] 调试/commissioning 与正式结果清楚分开；真实链路调通后才冻结正式条件，从干净 namespace 运行正式轨迹，不把调试权重或拼接结果
+- [x] 调试/commissioning 与正式结果清楚分开；真实链路调通后才冻结正式条件，从干净 namespace 运行正式轨迹，不把调试权重或拼接结果
       冒充正式证据。
-- [ ] 阶段 B 创建资源前刷新 RunPod 余额、未结费用、库存、实际价格、Pod 和 `mwemzrn33y` 状态/可用空间；同时最多一个计费 L40S Pod，
+- [x] 阶段 B 创建资源前刷新 RunPod 余额、未结费用、库存、实际价格、Pod 和 `mwemzrn33y` 状态/可用空间；同时最多一个计费 L40S Pod，
       本任务新增外部费用硬上限为 5 USD，且留有 checkpoint、结果回传和止费余量。
-- [ ] 只使用既有 `mwemzrn33y`；Plan 082/087/090 既有根保持只读，Plan 094 使用独立远端根。确需扩容时只可把该卷从 57GB 有界扩至
+- [x] 只使用既有 `mwemzrn33y`；Plan 082/087/090 既有根保持只读，Plan 094 使用独立远端根。确需扩容时只可把该卷从 57GB 有界扩至
       最多 80GB；不创建第二卷，不删除现有卷。
-- [ ] 完整权重只保留最终候选、latest、必要转折点和至少一个恢复合格 checkpoint；小型训练/测评指标永久保留。大型 checkpoint 保持在卷上，
+- [x] 完整权重只保留最终候选、latest、必要转折点和至少一个恢复合格 checkpoint；小型训练/测评指标永久保留。大型 checkpoint 保持在卷上，
       本地只回传验收和决策所需的小型结果。
-- [ ] 无论合法终态为何，全部本任务 Pod均已停止/删除，并经实时查询确认 0 Pod、compute `$0/h`；网络卷继续保留，状态、容量、费率和必要
+- [x] 无论合法终态为何，全部本任务 Pod均已停止/删除，并经实时查询确认 0 Pod、compute `$0/h`；网络卷继续保留，状态、容量、费率和必要
       资产位置明确。
-- [ ] 相关轻量 Python 聚焦测试、必要 static/format/compile、改动 shell 的 `bash -n` 与 `git diff --check` 通过；不运行 Cargo、Docker、
+- [x] 相关轻量 Python 聚焦测试、必要 static/format/compile、改动 shell 的 `bash -n` 与 `git diff --check` 通过；不运行 Cargo、Docker、
       全 workspace、本地真实模型或 CI，fake、调试、正式、skip 和未运行项如实区分。
 - [ ] 最终独立审查没有遗留 High/Medium correctness 或 functionality finding，并分别报告“验收通过/不通过”和“任务目标完成/失败”；
       正向候选不越界为随机 seed 稳定、独立 cohort、unseen、产品资格或 M3-D。
@@ -349,26 +349,30 @@ XXX用以下内容代替：
 - 2026-08-27：steps 1/3/4 三份保留 checkpoint 已在挂载卷上完成 terminal deep qualification；step 3 为 fresh-process recovery，step 4
   为 latest。2,017,280-byte / 181-member 小型包 SHA-256 `a0b227bdc606e76c0e17b1500e9770665631f576b9d409d66e30a2f9b32e9ea4`
   已回传并复核不含权重或 source/data tar；大型资产留在约 13.22GB 的远端 Plan 094 root。
+- 2026-08-27：预释放审查提交 `a517820` 结论为 `ACCEPT / RELEASE_APPROVED`，无 High/Medium finding；审查确认 formal 负向终态、两次
+  fresh-process 恢复继续、checkpoint qualification、小型 handoff 和 5 USD 边界均正确，不需要追加 GPU/Pod 验证。
+- 2026-08-27：既有 exact terminal helper 已 stop/delete 唯一 Pod；receipt 与独立 live query 均确认账户 0 Pod、compute `$0/h`。70GB
+  `mwemzrn33y` 继续保留于 US-TX-3，费率 `$0.007/h`；终态保守任务成本 `$1.69`，`$0.82` closure reserve 不变。
+- 2026-08-27：本地 finalizer 只消费已回传小包、qualification receipt、zero-Pod resource state 和 terminal budget，生成 content SHA-256
+  `7dead9d3c180fae468fa1e0bf2bd19b069158f3016a232d446ced1ecf6447ce6`；终态保持
+  `ROUTE_O_VALID_NO_MATERIAL_IMPROVEMENT / prefrozen_three_checkpoint_no_material_plateau`。
 
 ### 当前工作
 
-- 正式研究轨迹与全部 Pod 依赖验证已完成。按用户最新顺序，唯一 Pod 保留等待预释放审查；绝对 lifecycle guard 不取消。
+- 阶段 B 实现、正式研究轨迹、资产保留、资源止费和本地终态收口均已完成；正在完成 tracked 交付门禁和最终提交。
 
 ### 本任务剩余步骤
 
-- 预释放审查接受后立即释放唯一 Pod，实时确认 exact 0 Pod / compute `$0/h`，随后仅用已回传小包与 qualification receipt 在本地运行
-  terminal finalizer；大型 checkpoint/权重继续留卷。
-- 收口最终结果、当前 WBS、完成历史和实施日志，运行相称轻量门禁并提交，再申请最终独立验收。
-- 本任务完成后冻结本计划；不在此安排独立 cohort、unseen、产品资格或 M3-D。
+- 提交最终 tracked 结果/文档/日志并保持 clean，通过指定队列申请整体最终独立验收。
+- 最终验收后冻结本计划；不在此安排独立 cohort、unseen、产品资格或 M3-D。
 
 ### 阻塞项
 
 - 无实现阻塞。Plan 093 正在冷全 workspace；本任务只运行轻量本地门禁，不与其竞争重型资源。
-- 正常资源释放等待预释放审查；若审查未在绝对 guard trigger 前返回，guard 按 5 USD 硬边界优先自动释放 Pod，不等待人工操作。
 
 ### 当前验收状态
 
-- `ROUTE_O_VALID_NO_MATERIAL_IMPROVEMENT / POD_RETAINED_PENDING_PRE_RELEASE_REVIEW / PAID_GUARD_ARMED`。
+- `ROUTE_O_VALID_NO_MATERIAL_IMPROVEMENT / ZERO_POD / VOLUME_RETAINED / FINAL_REVIEW_PENDING`。
 
 ### 交接边界
 
@@ -377,7 +381,7 @@ XXX用以下内容代替：
   预算/资源收口方案、ignored 路径和未运行项；发送后立即停止会话。
 - 用户与审查者已共同打开阶段 B；执行者可在一次性授权内自主修复、续跑和必要重跑，原则边界变化才通过队列请示。
 - 用户要求先完成全部 Pod 依赖工作并经预释放审查，再释放 Pod。执行者先提交当前小型结果/资格收据投影并保持 clean，通过队列申请预释放审查；
-  接受后完成 zero-Pod finalizer、最终 tracked 收口和第二次最终验收。
+  预释放审查已接受，zero-Pod finalizer 已完成；最终提交后再申请整体最终验收。
 - 本任务任何阶段都不自行合并、推送、归档分支或删除 worktree；等待用户后续批准。
 
 ## 6. 关键决策记录
