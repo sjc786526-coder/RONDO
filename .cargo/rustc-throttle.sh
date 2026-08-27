@@ -21,7 +21,7 @@
 #
 # 逃生口：
 #   RONDO_RUSTC_THROTTLE=0        完全关闭
-#   RONDO_RUSTC_SLOTS=<n>         改并发槽数（默认 6，与 build.jobs 对齐）
+#   RONDO_RUSTC_SLOTS=<n>         改并发槽数（默认 2，与日常 build.jobs 对齐）
 #   RONDO_RUSTC_MEM_FLOOR_MB=<n>  改准入水位（默认 3072）
 set -uo pipefail
 
@@ -38,7 +38,7 @@ if ! command -v flock >/dev/null 2>&1; then
   exit 75
 fi
 
-slots="${RONDO_RUSTC_SLOTS:-6}"
+slots="${RONDO_RUSTC_SLOTS:-2}"
 floor_mb="${RONDO_RUSTC_MEM_FLOOR_MB:-3072}"
 
 if [[ ! "$slots" =~ ^[1-9][0-9]*$ ]] || [[ ! "$floor_mb" =~ ^[0-9]+$ ]]; then

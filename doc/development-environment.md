@@ -186,25 +186,26 @@ SHA-256 清单；默认 denoland 资产地址在本轮返回 404，不能作为�
 时开始杀进程，连 `systemd`、`sd-pam` 一起被 SIGKILL，于是 VS Code Remote 报 WebSocket 1006、
 所有 agent 会话一并丢失。根因是**并发度超过内存承载能力**，不是 CPU 不足，也不是 VS Code 或 WSL 网络问题。
 
-现在有七道固化在仓库里的闸门，不依赖人或 AI 记忆：
+现在有八道固化在仓库里的闸门，不依赖人或 AI 记忆：
 
 | 闸门 | 位置 | 作用维度 |
 | ---- | ---- | -------- |
-| `[build] jobs = 6` | 仓库根 `.cargo/config.toml` | 编译/链接阶段并发的 `rustc`、`rust-lld` 数量 |
+| `[build] jobs = 2` | 仓库根 `.cargo/config.toml` | 日常构建同时调度的 Cargo 编译单元数量 |
+| GNU/Linux LLD threads = 1 | 仓库根 `.cargo/config.toml` | 单个链接进程内部并发 |
 | `test-threads = 10` | 各产品 `codex-rs/.config/nextest.toml` 的 `[profile.default]` | 测试执行阶段并发的测试进程数量 |
-| rustc 总并发槽 = 6 | 仓库根 `.cargo/rustc-throttle.sh` | 所有 Cargo 入口、agent 与 worktree 共用同一组 rustc 槽 |
+| rustc 总并发槽 = 2 | 仓库根 `.cargo/rustc-throttle.sh` | 所有 Cargo 入口、agent 与 worktree 共用同一组 rustc 槽 |
 | 全局互斥锁 | `scripts/with-build-lock.sh`（仓库根共享） | 同一时刻只允许一个重量级构建 |
 | cgroup 内存边界 | 同上脚本 | `MemoryHigh=21G`、`MemoryMax=22G`、`MemorySwapMax=5G` |
 | 实时资源看门狗 | 同上脚本 | 磁盘、匿名/文件/内核内存、swap、PSI、宿主可用内存每秒采样 |
 | scope 残留清理 | 同上脚本 | 主命令退出后仍存活的测试子进程会在 5 秒宽限后被精确终止 |
 
-jobs、test-threads 与 rustc 槽是容量防护；全局锁是跨入口串行化；cgroup 与看门狗负责在估算错误时
+jobs、LLD threads、test-threads 与 rustc 槽是容量防护；全局锁是跨入口串行化；cgroup 与看门狗负责在估算错误时
 把损害限制在本次构建。脚本拿不到安全锁、systemd scope 或任一必要计数器时会拒绝启动，不再静默
 降级为无上限运行。
 
 #### 0.147.0 冷构建与全量测试实测
 
-在同一独立 worktree、同一 target、同一机器级锁中，以 `jobs=6` / `test-threads=10` 顺序完成冷编译
+这组历史测量在同一独立 worktree、同一 target、同一机器级锁中，以 `jobs=6` / `test-threads=10` 顺序完成冷编译
 与全量测试；主工作区和其他 worktree 没有并行构建。两次完整测量都没有触发资源停机：
 
 | 指标 | 纯上游 0.147.0 | RONDO 0.147.0 + P0 |
@@ -260,8 +261,11 @@ cgroup 报告 OOM kill。短时 1–3GiB swap 只削峰，不会被当作故障�
 - 这些受支持的 Unix 正式重型入口以产品 identity 解析物理 Git common root，默认把 RONDO Local 与
   RONDO Multi 分别写入 `.codex/cargo-target/rondo-local` 和 `.codex/cargo-target/rondo-multi`。因此同一产品的
   主工作区和 linked worktree 共享构建缓存，两产品叶子不混用；显式专用 target 仍需由具体任务单独授权。
+- 日常 Cargo 默认使用 `jobs=2` 与 GNU/Linux LLD 单线程，机器级 rustc 槽也默认为 2。要求尽量一次跑完的
+  完整 workspace 使用产品 Justfile 的 `test-with-codex-v8-conservative`，它是受跟踪的 `jobs=1` 备选且继续
+  继承 LLD 单线程、共享 target、全局锁和 watchdog；不要在临时命令中拼接并发设置。
 - 脚本启动前拒绝已有 `cargo` / `rustc` / `rust-lld` / `nextest`；运行中若发现 scope 外第二个构建，
-  会停止受控构建。rustc wrapper 只保证跨入口最多 6 个 rustc，不等于 Cargo 互斥锁。
+  会停止受控构建。rustc wrapper 只保证跨入口最多 2 个 rustc，不等于 Cargo 互斥锁。
 - 直接 Cargo、Windows just 分支和 Bazel 不自动进入该 scope；这是明确未覆盖面。本机尚未安装 Bazel。
 - 指标默认写入当前 worktree 的 `.codex/build-watchdog/`，原始全量日志和指标 git-ignored；结论摘要写
   `agent_log/`。

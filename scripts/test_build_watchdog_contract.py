@@ -2,6 +2,7 @@ import os
 import shlex
 import subprocess
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
 
@@ -9,14 +10,20 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 LIBRARY = REPO_ROOT / "scripts/build-watchdog-lib.sh"
 WRAPPER = REPO_ROOT / "scripts/with-build-lock.sh"
+CARGO_CONFIG = REPO_ROOT / ".cargo/config.toml"
+RUSTC_THROTTLE = REPO_ROOT / ".cargo/rustc-throttle.sh"
+PRODUCT_JUSTFILES = (REPO_ROOT / "multidev/justfile", REPO_ROOT / "mydev/justfile")
 
 
-def run_helper(command: str) -> subprocess.CompletedProcess[str]:
+def run_helper(
+    command: str, environment: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["bash", "-c", f"source {shlex.quote(str(LIBRARY))}; {command}"],
         check=False,
         capture_output=True,
         text=True,
+        env=environment,
     )
 
 
@@ -42,6 +49,27 @@ def init_repository(repository: Path) -> None:
 
 
 class BuildWatchdogContractTests(unittest.TestCase):
+    def test_persistent_concurrency_defaults_and_conservative_entry(self) -> None:
+        config = tomllib.loads(CARGO_CONFIG.read_text(encoding="utf-8"))
+        self.assertEqual(config["build"]["jobs"], 2)
+        self.assertEqual(
+            config["target"]['cfg(all(target_os = "linux", target_env = "gnu"))'][
+                "rustflags"
+            ],
+            ["-C", "link-arg=-Wl,--threads=1"],
+        )
+        self.assertIn(
+            'slots="${RONDO_RUSTC_SLOTS:-2}"',
+            RUSTC_THROTTLE.read_text(encoding="utf-8"),
+        )
+        for justfile in PRODUCT_JUSTFILES:
+            contents = justfile.read_text(encoding="utf-8")
+            self.assertIn("test-with-codex-v8-conservative *args:", contents)
+            self.assertIn(
+                "CARGO_BUILD_JOBS=1 RONDO_BUILD_CARGO_PRODUCT={{ cargo_product }}",
+                contents,
+            )
+
     def test_wrapper_exports_only_explicit_or_product_target(self) -> None:
         environment = dict(os.environ)
         environment.pop("CARGO_TARGET_DIR", None)
@@ -142,6 +170,67 @@ class BuildWatchdogContractTests(unittest.TestCase):
             self.assertEqual(linked_local.stdout, str(expected_local))
             self.assertFalse(expected_multi.exists())
             self.assertFalse(expected_local.exists())
+
+    def test_external_target_and_unreadable_scope_counter_fail_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            scratch = Path(directory)
+            external_target = scratch / "external-target"
+            environment = dict(os.environ)
+            environment.update(
+                {
+                    "CARGO_TARGET_DIR": str(external_target),
+                    "RONDO_BUILD_LOCK": "0",
+                    "RONDO_BUILD_WATCHDOG": "0",
+                }
+            )
+            outside = subprocess.run(
+                [str(WRAPPER), "python3", "-c", "print('must not run')"],
+                cwd=REPO_ROOT,
+                env=environment,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(outside.returncode, 82, outside.stderr)
+            self.assertIn("must stay inside", outside.stderr)
+            self.assertFalse(external_target.exists())
+
+            fake_bin = scratch / "bin"
+            fake_bin.mkdir()
+            fake_systemctl = fake_bin / "systemctl"
+            fake_systemctl.write_text(
+                """#!/usr/bin/env bash
+set -eu
+case " $* " in
+  *" list-units "*)
+    echo "rondo-build-1000-123-456.scope loaded active running fake"
+    ;;
+  *" show "*)
+    printf '%s\n' \
+      'LoadState=loaded' \
+      'ActiveState=active' \
+      'ControlGroup=/test.slice/rondo-build-1000-123-456.scope'
+    ;;
+  *) exit 1 ;;
+esac
+""",
+                encoding="utf-8",
+            )
+            fake_systemctl.chmod(0o700)
+            cgroup_mount = scratch / "cgroup"
+            unreadable_scope = (
+                cgroup_mount
+                / "test.slice"
+                / "rondo-build-1000-123-456.scope"
+            )
+            unreadable_scope.mkdir(parents=True)
+            fake_environment = dict(os.environ)
+            fake_environment["PATH"] = f"{fake_bin}:{fake_environment['PATH']}"
+            counter = run_helper(
+                f"rondo_active_heavy_scopes 1000 {shlex.quote(str(cgroup_mount))}",
+                fake_environment,
+            )
+            self.assertNotEqual(counter.returncode, 0)
 
     def test_invalid_product_non_git_checkout_and_limit_order_fail(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
