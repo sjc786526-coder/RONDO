@@ -1,8 +1,7 @@
 # RONDO 长程规划（WBS）
 
-最后更新：2026-08-26（方向 3 Publication Critic 三期的 Plan 090 已取得
-`ROUTE_O_CONFIRMATION_PASS / ZERO_POD`；Route O 在同一冻结 validation 上完成两次 clean BF16 数值/执行重复与恢复，但未测试随机
-seed 敏感性或独立 cohort 泛化，M3-D 保持锁定）
+最后更新：2026-08-27（方向 3 Publication Critic 三期的 Plan 090 已取得
+`ROUTE_O_CONFIRMATION_PASS / ZERO_POD`；Plan 093 已建立当前 RONDO Multi Linux 全 workspace 正确性基线；M3-D 保持锁定）
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段指针、跨方向关系、
 稳定工程边界和授权门；已完成成果与验收见 `doc/WBS-COMPLETED.md`，单次任务合同见 `plan/`，执行细节见
@@ -23,6 +22,10 @@ seed 敏感性或独立 cohort 泛化，M3-D 保持锁定）
 | 1：Harness 优化 | **正式收口；当前无 active 工作包** | 当前不继续新增观测或内核/热路径优化；既有实现、设施与历史结果保留。未来可由用户另行决定是否重新立项，本次收口不作永久禁止 |
 | 2：本地审批模型 | **已收口，今后不再开启** | 最终结论为“保留为实验”；不改生产默认，不再规划后续工作包 |
 | 3：RONDO Multi | 第一、二期与第四期已完成；三期 Plan 090 已通过最终独立验收，终态为 `ROUTE_O_CONFIRMATION_PASS / ZERO_POD`，当前无已授权后续工作包 | Route O 已在同一冻结 validation 上重复，但没有随机 seed 敏感性、独立 cohort、unseen 或产品资格证据。是否另立独立 cohort/产品资格任务由用户后续决定；M3-D 不自动解锁。第四期历史统一见 COMPLETED |
+
+方向 3 当前 Linux 正确性基线由 Plan 093 建立：default features、standard local Nextest、checksum-verified V8 的完整 workspace
+为 `14660/14660` passed、0 failure/error/timeout，另有 1/1 setup passed；24 个 skip 不计 passed。正式证据和精确边界见
+`doc/WBS/multi-agent-trusted-evidence.md` 与 `doc/WBS-COMPLETED.md`。
 
 ### 方向命名口径
 
@@ -153,10 +156,12 @@ RONDO/
 
 ### 4.3 磁盘与重型资源
 
-- 重型 Cargo 构建与测试必须经仓库根共享 `scripts/with-build-lock.sh` 或已接入它的 `just` 配方；
-  `CARGO_TARGET_DIR` 必须位于项目根内并受看门狗监督。
-- 两套产品的重型构建、Docker、真实本地模型加载/推理全局串行；同一时刻只保留一个产品的热 target。除具体 ExecPlan 已获得
-  一次性授权外，后续重型批次不自动排队，须由用户逐批明确批准并人工决定运行时机；历史授权不向后续任务转移。
+- 重型 Cargo 构建与测试必须经仓库根共享 `scripts/with-build-lock.sh` 或已接入它的 `just` 配方。受支持 Unix 入口按产品把
+  主工作区和 linked worktree 路由到物理仓库根的 `.codex/cargo-target/rondo-local` 或 `rondo-multi`；两产品叶子隔离，
+  `CARGO_TARGET_DIR` 必须位于项目根内并受看门狗监督。当前只保留已建立基线的 `rondo-multi`，`rondo-local` 当前不存在。
+- 日常 Cargo 默认 `jobs=2`、GNU/Linux LLD 单线程、机器级 rustc 槽为 2；要求尽量一次跑完的完整 workspace 使用产品 Justfile 的
+  `test-with-codex-v8-conservative`（`jobs=1`、LLD 单线程）。两套产品的重型构建、Docker、真实本地模型加载/推理仍全局串行。
+  除具体 ExecPlan 已获得一次性授权外，后续重型批次不自动排队，须由用户逐批明确批准并人工决定运行时机；历史授权不转移。
 - 具体磁盘、Windows `C:`、内存、swap、Docker 增量和 fail-closed 阈值以根 `AGENTS.md` 为准，不使用 WSL
   虚拟容量代替宿主容量。
 
