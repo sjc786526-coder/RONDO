@@ -107,6 +107,20 @@ def frozen_contract() -> dict[str, Any]:
             BF16_SECONDARY_RUN: _recipe(seed=20260902, parameter_dtype="bfloat16"),
             FP32_CONTROL_RUN: _recipe(seed=20260901, parameter_dtype="float32"),
         },
+        "repeat_semantics": {
+            "bf16_run_kind": "independent_clean_repeat_with_distinct_seed_metadata",
+            "bf16_seed_metadata": [20260901, 20260902],
+            "data_ordering": "sorted_candidates_and_frozen_pair_order",
+            "data_shuffle": False,
+            "attention_dropout": 0.0,
+            "active_dropout_modules": [],
+            "seed_sensitive_consumers": [],
+            "seed_sensitive_stability_tested": False,
+            "interpretation": (
+                "two independent clean executions test execution and numerical "
+                "repeatability; they do not test sensitivity to random seed"
+            ),
+        },
         "control_plan": {
             "maximum_updates": 1,
             "observation_steps": [1],
@@ -281,6 +295,7 @@ def frozen_contract() -> dict[str, Any]:
         "claims": {
             "unseen_evidence": False,
             "independent_cohort_generalization": False,
+            "seed_sensitive_stability_tested": False,
             "product_go": False,
             "m3_c1_or_m3_c2": False,
             "m3_d_unlocked": False,
@@ -330,6 +345,7 @@ def materialize_run_spec(
         "start_state": "exact_base",
         "artifact_namespace": contract["namespaces"][run_id],
         "recipe": contract["recipes"][run_id],
+        "repeat_semantics": contract["repeat_semantics"],
         "scope": contract["scope"],
         "control_plan": contract["control_plan"],
         "comparison_policy": contract["comparison_policy"],
@@ -351,6 +367,7 @@ def validate_run_spec(value: Any, *, freeze: Any) -> dict[str, Any]:
         "start_state",
         "artifact_namespace",
         "recipe",
+        "repeat_semantics",
         "scope",
         "control_plan",
         "comparison_policy",
@@ -368,6 +385,7 @@ def validate_run_spec(value: Any, *, freeze: Any) -> dict[str, Any]:
         or value.get("artifact_namespace") != contract["namespaces"].get(run_id)
         or validate_adaptive_recipe(value.get("recipe"))
         != contract["recipes"].get(run_id)
+        or value.get("repeat_semantics") != contract["repeat_semantics"]
         or TrainableScope.from_value(value.get("scope")).as_dict() != contract["scope"]
         or ControlPlan.from_value(value.get("control_plan")).as_dict()
         != contract["control_plan"]

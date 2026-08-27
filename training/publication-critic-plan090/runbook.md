@@ -153,6 +153,13 @@ Formal order is fixed:
 3. if both pass and the refreshed full-closure budget authorizes it,
    `fp32-seed-20260901` from exact base.
 
+The two BF16 entries are independent clean executions with distinct seed
+metadata.  The frozen path has no shuffle, active dropout, or other bound
+seed-sensitive consumer, so they test execution/numerical repeatability rather
+than random-seed stability.  Runtime and results must retain
+`seed_sensitive_stability_tested=false`; do not add randomization to manufacture
+a seed effect.
+
 For every run, regenerate the inventory in its declared model dtype and
 materialize its independent run spec.  Use the same exact Pod and an empty
 `formal/<run-id>/artifacts` root.  `start` performs exactly one full-cohort
@@ -188,7 +195,7 @@ directories are rejected.
 Finalize each valid run immediately and call `next-action`.  A valid negative
 BF16 result is terminal NO-GO: do not rerun it, change seed, tune a threshold or
 change the rubric.  FP32 is an entire-model FP32 parameter-training condition
-control and never automatically vetoes two passing BF16 seeds.
+control and never automatically vetoes two passing BF16 clean runs.
 
 ## 6. Recovery and retention
 
@@ -199,6 +206,11 @@ and returns the state to completed so `finalize-run` can bind the recovery
 receipt.  It also requires a refreshed positive complete-closure
 `--budget-snapshot`.  Negative intermediates do not need this candidate-level
 recovery.
+
+If both BF16 clean results are valid and positive but this mandatory
+fresh-process recovery or its infrastructure closure cannot complete, publish
+`INCONCLUSIVE_INFRASTRUCTURE`.  Never use that outcome to override any valid
+negative BF16 result.
 
 Retain only exact-base references, complete small observations/results/pair
 margins, budget/resource snapshots, the final effective candidate checkpoint

@@ -162,7 +162,7 @@ class Plan090ConfirmationController(_ContinuousTrainingControllerCore):
             policy=self.comparison_policy,
             report_threshold=self.report_threshold,
         )
-        observation["objective_diagnostic"] = _objective_diagnostic(
+        observation["objective_diagnostic"] = build_objective_diagnostic(
             self.training_dataset,
             receipt["raw_logits"],
             self.state["plan090"]["run_spec"]["recipe"]["objective"][
@@ -206,7 +206,7 @@ class Plan090ConfirmationController(_ContinuousTrainingControllerCore):
     def _augment_validation_observation(
         self, observation: dict[str, Any], *, raw_logits: Mapping[str, Any]
     ) -> dict[str, Any]:
-        observation["objective_diagnostic"] = _objective_diagnostic(
+        observation["objective_diagnostic"] = build_objective_diagnostic(
             self.validation_dataset,
             raw_logits,
             self.state["plan090"]["run_spec"]["recipe"]["objective"][
@@ -400,6 +400,7 @@ class Plan090ConfirmationController(_ContinuousTrainingControllerCore):
             "claims": {
                 "real_training_run": bool(self.state["updates"]),
                 "clean_exact_base_start": True,
+                "seed_sensitive_stability_tested": False,
                 "route_search": False,
                 "pre_result_rubric_bound": True,
                 "result_assessed": False,
@@ -433,10 +434,20 @@ def validate_runtime_identity(
         "provider_pod_id",
         "provider_pod_name",
         "precision_controls",
+        "repeat_semantics",
     }
     spec = run_spec
     environment = value.get("environment") if isinstance(value, Mapping) else None
     observed_environment = validate_environment_receipt(environment)
+    expected_repeat_semantics = {
+        "recipe_seed_metadata": int(spec["recipe"]["seed"]),
+        "data_ordering": "sorted_candidates_and_frozen_pair_order",
+        "data_shuffle": False,
+        "attention_dropout": 0.0,
+        "active_dropout_modules": [],
+        "seed_sensitive_consumers": [],
+        "seed_sensitive_stability_tested": False,
+    }
     if (
         not isinstance(value, Mapping)
         or set(value) != required
@@ -468,6 +479,7 @@ def validate_runtime_identity(
             "cudnn_allow_tf32": False,
             "autocast_enabled": False,
         }
+        or value.get("repeat_semantics") != expected_repeat_semantics
         or any(
             not isinstance(value.get(key), int)
             or isinstance(value[key], bool)
@@ -535,7 +547,7 @@ def validate_precision_receipt(
     return json.loads(json.dumps(value))
 
 
-def _objective_diagnostic(
+def build_objective_diagnostic(
     dataset: Any,
     raw_logits: Mapping[str, Any],
     component_weights: Mapping[str, Any],
@@ -607,8 +619,10 @@ def _identifier(value: Any) -> bool:
 
 __all__ = [
     "CONTROLLER_SCHEMA",
+    "OBJECTIVE_DIAGNOSTIC_SCHEMA",
     "Plan090ConfirmationController",
     "SUMMARY_SCHEMA",
+    "build_objective_diagnostic",
     "validate_precision_receipt",
     "validate_runtime_identity",
 ]

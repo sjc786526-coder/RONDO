@@ -66,6 +66,35 @@ class Plan090TorchTrainingAdapter(Plan087TorchTrainingAdapter):
             "provider_pod_id": os.getenv("RONDO_PLAN090_PROVIDER_POD_ID", ""),
             "provider_pod_name": os.getenv("RONDO_PLAN090_PROVIDER_POD_NAME", ""),
             "precision_controls": self._precision_controls(),
+            "repeat_semantics": self._repeat_semantics(),
+        }
+
+    def _repeat_semantics(self) -> dict[str, Any]:
+        try:
+            attention_dropout = float(self.model.config.attention_dropout)
+            active_dropout_modules = sorted(
+                name
+                for name, module in self.model.named_modules()
+                if module.__class__.__name__.lower().startswith("dropout")
+                and float(module.p) > 0.0
+            )
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise FullModelTrainingError(
+                "plan090_repeat_semantics_unavailable"
+            ) from exc
+        seed_sensitive_consumers = []
+        if attention_dropout > 0.0:
+            seed_sensitive_consumers.append("attention_dropout")
+        if active_dropout_modules:
+            seed_sensitive_consumers.append("active_dropout_modules")
+        return {
+            "recipe_seed_metadata": int(self.recipe["seed"]),
+            "data_ordering": "sorted_candidates_and_frozen_pair_order",
+            "data_shuffle": False,
+            "attention_dropout": attention_dropout,
+            "active_dropout_modules": active_dropout_modules,
+            "seed_sensitive_consumers": seed_sensitive_consumers,
+            "seed_sensitive_stability_tested": False,
         }
 
     def evaluate_training(self, dataset: PortableTrainingDataset) -> dict[str, Any]:

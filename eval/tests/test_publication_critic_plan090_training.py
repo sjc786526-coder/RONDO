@@ -48,6 +48,7 @@ from rondo_eval.publication_critic.full_model_training.plan090_artifacts import 
 from rondo_eval.publication_critic.full_model_training.plan090_contract import (  # noqa: E402
     BF16_PRIMARY_RUN,
     BF16_SECONDARY_RUN,
+    DATA_BUNDLE_CONTENT_SHA256,
     FP32_CONTROL_RUN,
     SCOPE_PARAMETER_ELEMENTS,
     SCOPE_PARAMETER_NAMES,
@@ -59,9 +60,12 @@ from rondo_eval.publication_critic.full_model_training.plan090_contract import (
 )
 from rondo_eval.publication_critic.full_model_training.plan090_controller import (  # noqa: E402
     Plan090ConfirmationController,
+    validate_runtime_identity,
 )
 from rondo_eval.publication_critic.full_model_training.plan090_cli import (  # noqa: E402
     _authorize_run_boundary,
+    _build_no_update_diagnostics,
+    _diagnose,
     _preflight_run_outputs,
     _run_with_adapter as _cli_run_with_adapter,
 )
@@ -164,6 +168,15 @@ def _runtime(spec: dict) -> dict:
             "cuda_matmul_allow_tf32": False,
             "cudnn_allow_tf32": False,
             "autocast_enabled": False,
+        },
+        "repeat_semantics": {
+            "recipe_seed_metadata": spec["recipe"]["seed"],
+            "data_ordering": "sorted_candidates_and_frozen_pair_order",
+            "data_shuffle": False,
+            "attention_dropout": 0.0,
+            "active_dropout_modules": [],
+            "seed_sensitive_consumers": [],
+            "seed_sensitive_stability_tested": False,
         },
     }
 
@@ -300,6 +313,9 @@ class _Plan090FakeAdapter(_FakeAdapter):
     def plan090_runtime_identity(self) -> dict:
         return _runtime(self.spec)
 
+    def close(self) -> None:
+        return None
+
     def evaluate_training(self, dataset: PortableTrainingDataset) -> dict:
         return {
             "raw_logits": dict(self.train_logits[self.step]),
@@ -362,6 +378,8 @@ class Plan090TrainingTests(unittest.TestCase):
         value = read_json(FREEZE_PATH)
         self.assertEqual(validate_freeze(value), frozen_contract())
         self.assertEqual(value["branch_order"][-1], FP32_CONTROL_RUN)
+        self.assertEqual(value["repeat_semantics"]["seed_sensitive_consumers"], [])
+        self.assertFalse(value["claims"]["seed_sensitive_stability_tested"])
         self.assertEqual(value["scope"]["parameter_names"], list(SCOPE_PARAMETER_NAMES))
         self.assertEqual(
             value["historical_reference"]["delta"]["raw_boundary_pair_mean_margin"],
@@ -383,6 +401,19 @@ class Plan090TrainingTests(unittest.TestCase):
             primary["artifact_namespace"], secondary["artifact_namespace"]
         )
         self.assertEqual(fp32["recipe"]["parameter_dtype"], "float32")
+        self.assertEqual(
+            secondary["repeat_semantics"]["bf16_run_kind"],
+            "independent_clean_repeat_with_distinct_seed_metadata",
+        )
+        self.assertFalse(
+            secondary["repeat_semantics"]["seed_sensitive_stability_tested"]
+        )
+        drifted_runtime = _runtime(secondary)
+        drifted_runtime["repeat_semantics"]["seed_sensitive_stability_tested"] = True
+        with self.assertRaisesRegex(
+            FullModelTrainingError, "plan090_runtime_identity_invalid"
+        ):
+            validate_runtime_identity(drifted_runtime, run_spec=secondary)
         with self.assertRaisesRegex(
             FullModelTrainingError, "plan090_scope_dtype_mismatch"
         ):
@@ -461,6 +492,122 @@ class Plan090TrainingTests(unittest.TestCase):
             FullModelTrainingError, "plan090_budget_snapshot_invalid"
         ):
             validate_budget_snapshot(malformed)
+
+    def test_base_and_legacy_no_update_diagnostics_share_objective_schema(self) -> None:
+        contract = frozen_contract()
+        spec = _run_spec()
+        validation, validation_logits = _cohort("validation")
+        training, train_logits = _cohort("train")
+        datasets = SimpleNamespace(train=training, validation=validation)
+        scope = TrainableScope.from_value(spec["scope"])
+        adapters = [
+            _Plan090FakeAdapter(spec, validation_logits, train_logits),
+            _Plan090FakeAdapter(spec, validation_logits, train_logits),
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            task = base / "rondo-plan090-fixture"
+            task.mkdir()
+            freeze_path = task / "freeze.json"
+            spec_path = task / "spec.json"
+            freeze_path.write_bytes(canonical_json_bytes(contract))
+            spec_path.write_bytes(canonical_json_bytes(spec))
+            checkpoint_id = Path(contract["legacy_checkpoint"]["relative_path"]).name
+            checkpoint_path = (
+                base
+                / "rondo-plan087-history"
+                / "route-o-artifacts"
+                / "recovery-checkpoints"
+                / checkpoint_id
+            )
+            payload = checkpoint_path / "payload"
+            payload.mkdir(parents=True)
+            (payload / "fake-model.json").write_text(
+                '{"scope": null, "step": 0}', encoding="utf-8"
+            )
+            checkpoint = {
+                "bytes": contract["legacy_checkpoint"]["bytes"],
+                "content_sha256": contract["legacy_checkpoint"]["content_sha256"],
+            }
+            common = {
+                "freeze": freeze_path,
+                "run_spec": spec_path,
+                "data_bundle": task / "data-bundle",
+                "snapshot": task / "snapshot",
+                "model_lock": task / "model-lock.json",
+            }
+            arguments = [
+                SimpleNamespace(
+                    **common,
+                    role="exact_base",
+                    legacy_checkpoint=None,
+                    output=task / "exact-base.json",
+                ),
+                SimpleNamespace(
+                    **common,
+                    role="legacy_route_o",
+                    legacy_checkpoint=checkpoint_path,
+                    output=task / "legacy-route-o.json",
+                ),
+            ]
+            module = "rondo_eval.publication_critic.full_model_training.plan090_cli"
+            with (
+                patch.dict(os.environ, {"RONDO_PLAN090_TASK_ROOT": str(task)}),
+                patch(
+                    f"{module}.verify_data_bundle",
+                    return_value={"content_sha256": DATA_BUNDLE_CONTENT_SHA256},
+                ),
+                patch(f"{module}.load_plan066_datasets", return_value=datasets),
+                patch(f"{module}._new_adapter", side_effect=adapters),
+                patch.object(
+                    Plan090ArtifactStore,
+                    "verify_checkpoint",
+                    return_value=checkpoint,
+                ),
+            ):
+                observed = [_diagnose(args) for args in arguments]
+            self.assertEqual(
+                [row["role"] for row in observed],
+                ["exact_base", "legacy_route_o"],
+            )
+            for result, adapter in zip(observed, adapters):
+                self.assertTrue(result["no_update"])
+                self.assertEqual(adapter.update_calls, 0)
+                for observation in (
+                    result["validation_observation"],
+                    result["train_observation"],
+                ):
+                    objective = observation["objective_diagnostic"]
+                    self.assertEqual(
+                        objective["schema"],
+                        "rondo-publication-critic-plan090-objective-diagnostic-v1",
+                    )
+                    self.assertFalse(objective["gradient_access"])
+                    self.assertEqual(
+                        set(objective["component_mean_loss"]),
+                        {"binary", "boundary", "within_pass"},
+                    )
+            self.assertEqual(
+                observed[0]["validation_observation"]["objective_diagnostic"],
+                observed[1]["validation_observation"]["objective_diagnostic"],
+            )
+            self.assertEqual(
+                observed[0]["train_observation"]["objective_diagnostic"],
+                observed[1]["train_observation"]["objective_diagnostic"],
+            )
+
+        drifted_adapter = _Plan090FakeAdapter(spec, validation_logits, train_logits)
+        drifted_adapter.wrong_validation_identity = True
+        with self.assertRaisesRegex(
+            FullModelTrainingError,
+            "plan090_no_update_diagnostic_receipt_invalid",
+        ):
+            _build_no_update_diagnostics(
+                adapter=drifted_adapter,
+                datasets=datasets,
+                spec=spec,
+                scope=scope,
+            )
 
     def test_same_scorer_train_diagnostic_and_frozen_rubric_pass_and_no_go(
         self,
@@ -658,7 +805,7 @@ class Plan090TrainingTests(unittest.TestCase):
             freeze=frozen_contract(),
             run_results=[passed, second],
             outcome="ROUTE_O_CONFIRMATION_PASS",
-            reason="both frozen BF16 seeds passed; FP32 closure did not fit",
+            reason="both BF16 clean repeats passed; FP32 closure did not fit",
             resource_state={
                 "captured_at": "2026-08-26T13:00:00Z",
                 "pod_count": 0,
@@ -674,6 +821,50 @@ class Plan090TrainingTests(unittest.TestCase):
             fp32_budget_snapshot=low,
         )
         self.assertEqual(terminal["resource_state"]["pod_count"], 0)
+        self.assertTrue(
+            terminal["claims"]["route_o_repeated_on_same_validation_two_clean_runs"]
+        )
+        self.assertFalse(terminal["claims"]["seed_sensitive_stability_tested"])
+
+        unrecovered_second = _completed_result(BF16_SECONDARY_RUN, recovered=False)
+        inconclusive = finalize_terminal(
+            freeze=frozen_contract(),
+            run_results=[passed, unrecovered_second],
+            outcome="INCONCLUSIVE_INFRASTRUCTURE",
+            reason="fresh-process recovery closure unavailable",
+            resource_state=terminal["resource_state"],
+            terminal_budget_snapshot=_budget(projected=0.0),
+        )
+        self.assertTrue(inconclusive["claims"]["positive_bf16_clean_repeats_observed"])
+        self.assertTrue(inconclusive["claims"]["confirmation_closure_incomplete"])
+        self.assertFalse(inconclusive["claims"]["model_question_unanswered"])
+        fp32 = _completed_result(FP32_CONTROL_RUN, recovered=False)
+        fp32_inconclusive = finalize_terminal(
+            freeze=frozen_contract(),
+            run_results=[passed, unrecovered_second, fp32],
+            outcome="INCONCLUSIVE_INFRASTRUCTURE",
+            reason="recovery closure failed after the diagnostic FP32 run",
+            resource_state=terminal["resource_state"],
+            terminal_budget_snapshot=_budget(projected=0.0),
+        )
+        self.assertTrue(fp32_inconclusive["claims"]["confirmation_closure_incomplete"])
+        self.assertTrue(
+            fp32_inconclusive["claims"][
+                "route_o_repeated_on_same_validation_two_clean_runs"
+            ]
+        )
+        with self.assertRaisesRegex(
+            FullModelTrainingError,
+            "plan090_infrastructure_cannot_override_model_result",
+        ):
+            finalize_terminal(
+                freeze=frozen_contract(),
+                run_results=[passed, second],
+                outcome="INCONCLUSIVE_INFRASTRUCTURE",
+                reason="completed confirmation cannot become inconclusive",
+                resource_state=terminal["resource_state"],
+                terminal_budget_snapshot=_budget(projected=0.0),
+            )
         with self.assertRaisesRegex(
             FullModelTrainingError,
             "plan090_infrastructure_cannot_override_model_result",

@@ -86,7 +86,7 @@ class Plan090DeliveryTests(unittest.TestCase):
     def test_optional_receipt_is_written_only_inside_task_root(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory)
-            task = base / "task"
+            task = base / "rondo-plan090-task"
             task.mkdir()
             value = {"schema": "fixture", "status": "verified"}
             with patch.dict(os.environ, {"RONDO_PLAN090_TASK_ROOT": str(task)}):
@@ -150,6 +150,8 @@ class Plan090DeliveryTests(unittest.TestCase):
             task.mkdir()
             sibling = base / "rondo-plan087-history"
             sibling.mkdir()
+            arbitrary = base / "task"
+            arbitrary.mkdir()
             alias = task / "alias"
             alias.symlink_to(sibling, target_is_directory=True)
             with patch.dict(os.environ, {"RONDO_PLAN090_TASK_ROOT": str(task)}):
@@ -161,6 +163,15 @@ class Plan090DeliveryTests(unittest.TestCase):
                 ):
                     with self.assertRaises(FullModelTrainingError):
                         _require_task_owned_paths(forbidden)
+            for invalid_root in (sibling, arbitrary):
+                with patch.dict(
+                    os.environ, {"RONDO_PLAN090_TASK_ROOT": str(invalid_root)}
+                ):
+                    with self.assertRaisesRegex(
+                        FullModelTrainingError,
+                        "plan090_task_root_namespace_invalid",
+                    ):
+                        _require_task_owned_paths(invalid_root / "result.json")
             self.assertEqual(list(sibling.iterdir()), [])
 
     def test_process_receipt_rejects_fake_completion_or_wrong_lineage(self) -> None:

@@ -15,6 +15,7 @@
     "m3_c1_or_m3_c2": false,
     "m3_d_unlocked": false,
     "product_go": false,
+    "seed_sensitive_stability_tested": false,
     "unseen_evidence": false
   },
   "comparison_policy": {
@@ -254,6 +255,20 @@
       "schema": "rondo-publication-critic-plan087-training-recipe-v1",
       "seed": 20260901
     }
+  },
+  "repeat_semantics": {
+    "active_dropout_modules": [],
+    "attention_dropout": 0.0,
+    "bf16_run_kind": "independent_clean_repeat_with_distinct_seed_metadata",
+    "bf16_seed_metadata": [
+      20260901,
+      20260902
+    ],
+    "data_ordering": "sorted_candidates_and_frozen_pair_order",
+    "data_shuffle": false,
+    "interpretation": "two independent clean executions test execution and numerical repeatability; they do not test sensitivity to random seed",
+    "seed_sensitive_consumers": [],
+    "seed_sensitive_stability_tested": false
   },
   "report_threshold": 0.5,
   "resource": {

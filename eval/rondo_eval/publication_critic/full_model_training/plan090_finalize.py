@@ -271,6 +271,7 @@ def finalize_run(
         "claims": {
             "clean_exact_base_training": True,
             "matching_base_assessment": True,
+            "seed_sensitive_stability_tested": False,
             "route_search": False,
             "unseen_evidence": False,
             "product_go": False,
@@ -399,9 +400,18 @@ def finalize_terminal(
         raise FullModelTrainingError("plan090_terminal_run_binding_invalid")
     expected = None
     fp32 = None
+    positive_bf16_repeats = len(rows) >= 2 and all(
+        row["assessment"]["passed"] is True for row in rows[:2]
+    )
+    recovery_closure_incomplete = (
+        len(rows) >= 2
+        and positive_bf16_repeats
+        and all(row["assessment"]["passed"] is True for row in rows)
+        and rows[1]["selected_checkpoint"]["fresh_process_recovery"] is False
+    )
     if outcome == "INCONCLUSIVE_INFRASTRUCTURE":
-        if len(rows) >= 2 or any(
-            row["assessment"]["passed"] is not True for row in rows
+        if any(row["assessment"]["passed"] is not True for row in rows) or (
+            len(rows) >= 2 and not recovery_closure_incomplete
         ):
             raise FullModelTrainingError(
                 "plan090_infrastructure_cannot_override_model_result"
@@ -475,11 +485,18 @@ def finalize_terminal(
         "resource_state": resources,
         "claims": {
             "task_goal_complete": True,
-            "route_o_confirmed_on_same_validation_two_seeds": (
-                outcome == "ROUTE_O_CONFIRMATION_PASS"
+            "route_o_repeated_on_same_validation_two_clean_runs": (
+                positive_bf16_repeats
+            ),
+            "positive_bf16_clean_repeats_observed": positive_bf16_repeats,
+            "seed_sensitive_stability_tested": False,
+            "confirmation_closure_incomplete": (
+                outcome == "INCONCLUSIVE_INFRASTRUCTURE" and recovery_closure_incomplete
             ),
             "route_o_failed": outcome == "ROUTE_O_CONFIRMATION_NO_GO",
-            "model_question_unanswered": outcome == "INCONCLUSIVE_INFRASTRUCTURE",
+            "model_question_unanswered": (
+                outcome == "INCONCLUSIVE_INFRASTRUCTURE" and not positive_bf16_repeats
+            ),
             "independent_cohort_generalization": False,
             "unseen_evidence": False,
             "product_go": False,
@@ -705,6 +722,7 @@ def _validate_run_result(value: Any, *, freeze: Any) -> dict[str, Any]:
         != {
             "clean_exact_base_training": True,
             "matching_base_assessment": True,
+            "seed_sensitive_stability_tested": False,
             "route_search": False,
             "unseen_evidence": False,
             "product_go": False,

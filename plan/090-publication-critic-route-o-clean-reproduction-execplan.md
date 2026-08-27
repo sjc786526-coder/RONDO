@@ -1,4 +1,4 @@
-# Plan 090：Publication Critic Route O 干净复现与稳定性确认 ExecPlan
+# Plan 090：Publication Critic Route O 干净复现与独立重复确认 ExecPlan
 
 > 本计划是 Plan 090 的稳定任务合同。
 > 除“当前状态”和“关键决策记录”外，其他部分在执行期间默认不得修改。
@@ -16,18 +16,22 @@
 exact base 独立干净运行，回答两个问题：
 
 1. Route O 的微弱正向信号能否在原 seed、原 BF16 条件下再次出现；
-2. 若能，同一信号在预先冻结的第二 seed 下是否保持基本一致。
+2. 若能，相同冻结配方在不同 seed 元数据下的第二次独立 clean execution 是否重复该信号。
+
+正式路径没有 shuffle、有效 dropout 或其它已绑定的 seed-sensitive consumer，因此第二次 BF16 只验证执行/数值重复性，不测试随机 seed
+敏感性，也不得宣称排除了 seed 偶然性。保留不同 seed 元数据是为了精确记录两次独立执行，不人为增加随机自由度改变 Route O。
 
 只有两个 BF16 结果均通过预冻结判断时，才允许做一次匹配的真实 FP32 原参数更新对照，以解释更新/计算精度是否压缩或扭曲有效区间。
 本任务不继续搜索 scope、学习率、objective、更新数或其它 Route，也不要求达到独立泛化、unseen 或产品 GO。
 
 唯一正式终态为：
 
-- `ROUTE_O_CONFIRMATION_PASS`：原 seed BF16 得到复现，第二 seed BF16 也保持一致方向；FP32 对照已完成，或按预冻结分支和剩余预算有充分理由不再运行。
-- `ROUTE_O_CONFIRMATION_NO_GO`：原 seed 有效结果未复现、第二 seed 有效结果不稳定，或正式证据表明先前正向信号只是特定数值路径的无效表象。
-- `INCONCLUSIVE_INFRASTRUCTURE`：在授权预算内因持续库存或无法排除的云端基础设施问题，没有形成足以判断的有效训练证据。
+- `ROUTE_O_CONFIRMATION_PASS`：两个 BF16 独立 clean run 均按整体 rubric 重复正向信号；FP32 对照已完成，或按预冻结分支和剩余预算有充分理由不再运行。
+- `ROUTE_O_CONFIRMATION_NO_GO`：任一 BF16 独立 clean run 未通过，或正式证据表明先前正向信号只是特定数值路径的无效表象。
+- `INCONCLUSIVE_INFRASTRUCTURE`：在授权预算内因持续库存或无法排除的云端基础设施问题，没有形成足以判断的有效训练证据，或两个正向 BF16
+  结果已形成但必需的不同进程恢复/闭环无法完成。
 
-三个可信终态都表示 Plan 090 执行目标完成；`NO_GO` 是有效研究结论，`INCONCLUSIVE_INFRASTRUCTURE` 只表示模型问题没有得到回答，
+三个可信终态都表示 Plan 090 执行目标完成；`NO_GO` 是有效研究结论，`INCONCLUSIVE_INFRASTRUCTURE` 表示模型问题未回答或确认闭环未完成，
 不得改写为 Route O 失败。若终态证据本身不成立或资源未按要求收口，才属于验收不通过/任务目标失败。
 
 ### 阶段门
@@ -49,7 +53,8 @@ exact base 独立干净运行，回答两个问题：
 - [ ] exact 模型 revision、snapshot identity、v8 train/validation、input/scalar/pair/objective 语义、Route O 九张量 scope 和 recipe 与
       Plan 087 正式结果精确一致；formal runtime 同时匹配其 container image、Python、Torch、Transformers 和 SDPA/fused AdamW 环境身份；
       unseen 全程物理不可达。
-- [ ] 在任何新训练结果出现前，冻结第二 seed `20260902`、同 seed/第二 seed 判断口径、数值容差、无明显塌缩条件、FP32 触发/解释规则、
+- [ ] 在任何新训练结果出现前，冻结第二次 clean run 的 seed 元数据 `20260902`、两次独立 run 的判断口径、数值容差、无明显塌缩条件、
+      FP32 触发/解释规则、
       独立 namespace 和最小保留集合；阶段 B 不得事后改口径追逐 PASS。
 - [ ] 既有 exact base 与 Plan 087 Route O checkpoint 只做 no-update 统一诊断和历史比较；Plan 090 每条训练均从 exact base 和独立干净空间开始，
       不继承旧候选或前一路线的参数、optimizer、scheduler、RNG 或 cursor。
@@ -60,7 +65,8 @@ exact base 独立干净运行，回答两个问题：
 - [ ] base、Plan 087 Route O 和 Plan 090 各有效结果使用同一评价实现，分别记录 train 与 validation 的 objective/component 变化、raw/projected
       Boundary 与 Within-PASS margin、pair 分布/strict wins、ROC AUC、既有 threshold/operating 指标及必要参数变化摘要，足以判断训练目标、
       validation 传递、pair 抵消和精度影响；不建设统计、审计或可信平台。
-- [ ] 同 seed 与第二 seed 的 PASS 依据预冻结整体口径，而非 bitwise 相同、统一 offset、单一 threshold、单个 ordering 或任一孤立指标；
+- [ ] 两次 BF16 clean run 的 PASS 依据预冻结整体口径，而非 bitwise 相同、统一 offset、单一 threshold、单个 ordering 或任一孤立指标；
+      `seed_sensitive_stability_tested=false` 固定写入 freeze/runtime/result，不把第二次确定性重复表述为随机 seed 稳定性；
       FP32 单条不同结果本身不被夸大为已证明 BF16 偶然，结论边界与实际精度语义一致。
 - [ ] 阶段 B 准入前刷新 live 余额、未结费用、库存/价格、0 Pod、卷状态/实际可用 bytes，并确认 base 诊断、原 seed BF16、可能必需的第二 seed BF16、
       小型回传和止费在安全可用额度内；6 USD 是硬上限而非消费目标。
@@ -145,20 +151,22 @@ linked worktree 不共享主物理根 ignored `eval-data/`。阶段 A 如需只�
    `55/26`；bundle content SHA-256 为 `2247dd09c168900a47d37a50ecd6511d66d62d3f2ec8056ea3bc829c93de8b46`。formal runtime 固定为
    `runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404`、Python `3.12.3`、Torch `2.8.0+cu128`、Transformers `4.52.3`；不可避免的
    runtime 偏离必须在看到新正式结果前经审查者明确冻结，且最终降低结论强度，不得悄然替换。
-3. **配方不搜索。** BF16 路线固定 seed `20260901` 与 `20260902`；一次 full-cohort 更新；九张量、`33,558,784` 原参数；AdamW
+3. **配方不搜索。** 两次 BF16 独立 clean run 分别记录 seed 元数据 `20260901` 与 `20260902`，但正式路径没有 shuffle、有效 dropout 或其它
+   已绑定的 seed-sensitive consumer，故只检验执行/数值重复性并固定 `seed_sensitive_stability_tested=false`；一次 full-cohort 更新；九张量、
+   `33,558,784` 原参数；AdamW
    `5e-6`、betas `0.9/0.999`、epsilon `1e-8`、weight decay `0`、fused；constant scheduler、clip `1.0`、microbatch `1/1`、SDPA、
    activation checkpointing；Binary/Boundary/Within-PASS 权重 `0.05/0.25/0.70`。九张量为 Layer 27 的 Q/K/V projection、Q/K norm、
    MLP gate/up projection、input/post-attention layernorm；实际训练前须按 exact inventory 解析并绑定以下完整参数名：
    `model.layers.27.self_attn.{q_proj,k_proj,v_proj}.weight`、`model.layers.27.self_attn.{q_norm,k_norm}.weight`、
    `model.layers.27.mlp.{gate_proj,up_proj}.weight`、`model.layers.27.{input_layernorm,post_attention_layernorm}.weight`。
 4. **判断口径先于结果。** 阶段 A 依据 Plan 087 完整 signature 与已知 BF16 格点冻结一份小而明确的整体 rubric，至少固定 base-relative 方向、
-   合理容差、pair 分布与关键伴随指标的非塌缩条件。原 seed 和第二 seed 分别对各自 matching base 判断；结果不要求 bitwise 相同，但不能只凭
+   合理容差、pair 分布与关键伴随指标的非塌缩条件。两个独立 clean run 分别对各自 matching base 判断；结果不要求 bitwise 相同，但不能只凭
    统一 offset、threshold 或一个孤立指标。rubric 经阶段 A 审查后不得因结果变化。
-5. **条件分支和 clean base。** 旧 Route O 只用于 no-update 诊断。原 seed BF16 未通过即发布 NO-GO；通过后必须执行第二 seed；第二 seed
+5. **条件分支和 clean base。** 旧 Route O 只用于 no-update 诊断。第一次 BF16 未通过即发布 NO-GO；通过后必须执行第二次独立 clean run；第二次
    未通过即发布 NO-GO；两次均通过才可根据预冻结分支与完整闭环预算运行 FP32。每条正式训练都重新从 exact base、独立空 namespace 开始。
 6. **FP32 是真实训练对照。** FP32 默认匹配 seed `20260901`，除阶段 A 冻结的精度路径外保持 Route O 不变，并使用自身 FP32 base-relative
    delta。允许执行者选择架构契合的 update-only 或整模型 FP32 实现，但必须记录 forward、参数、梯度、optimizer state 和保存精度的实际语义；
-   只做 post-hoc cast 无效。单条 FP32 不一致只支持精度依赖诊断，除非它证明 BF16 证据无效，否则不自动推翻两个 BF16 seed 的复现结论。
+   只做 post-hoc cast 无效。单条 FP32 不一致只支持精度依赖诊断，除非它证明 BF16 证据无效，否则不自动推翻两个 BF16 clean run 的复现结论。
 7. **训练与 validation 分责。** train 才进入梯度；train 与 validation 均以同一 scorer 记录必要 before/after 诊断，但 validation 仅用于预冻结
    判断和停止，unseen 不可达。新增诊断应是现有评价/训练设施上的薄层，不建立第二套 pipeline 或复杂梯度因果平台。
 8. **调试完成后才 formal。** 阶段 A 尽可能打通轻量链；付费真实环境中允许保留已验证进度、从首个未打通处修复。exact 模型载入、no-update
@@ -186,7 +194,7 @@ linked worktree 不共享主物理根 ignored `eval-data/`。阶段 A 如需只�
 14. **终态先止费再收口。** GPU 工作一旦结束，先生成/回传必要小资产，立即 stop/delete 全部任务 Pod并实时确认 0 Pod、compute `$0/h`，再
     完成本地 tracked 结果、WBS、COMPLETED 和日志。最终审查的普通本地问题不得恢复计费；若确需重新用 GPU，必须仍在授权预算与审查批示内。
 15. **提交和结论边界。** 阶段 A 与最终交付均先提交 worktree并停止等待审查；未经用户批准不得合并或推送。PASS 只说明同一 validation 上
-    Route O 在两个预冻结 seed 下具有最低限度复现性，不说明独立 cohort 泛化、unseen、产品 GO 或任何下游解锁。
+    Route O 在两次独立 clean execution 中重复，不测试随机 seed 敏感性，也不说明独立 cohort 泛化、unseen、产品 GO 或任何下游解锁。
 16. **跨会话请示与验收。** 额外授权、计划外变数、不确定事项、阶段 A 申请进入付费阶段和最终任务验收只使用下述 Codex 跨会话队列。
     执行者每条消息必须主动表明“我是 Plan 090 执行者”，发送后停止会话，不等待、不轮询、不重复发送。阶段 A 即使验收通过，审查者也必须
     通过同一队列明确回复“阶段 A 验收通过，批准进入付费阶段”；执行者未收到该明确回复前不得产生费用或外部写状态。
@@ -307,9 +315,9 @@ XXX用以下内容代替：
 | 编号 | 决策 | 原因 | 影响范围 | 状态 |
 |---|---|---|---|---|
 | 001 | 阶段 A 提交并经审查者明确批准后才进入付费阶段 | 尽量在本地关闭可发现问题，同时保留真实环境调试冗余 | 授权与执行顺序 | 已采纳 |
-| 002 | Route O recipe 原样复现，不在 Plan 090 搜索参数 | 本任务只验证复现性与最低 seed 稳定性 | 训练合同 | 已采纳 |
-| 003 | 第二 seed 冻结为 `20260902`，FP32 默认匹配原 seed `20260901` | 防止见结果后选择 seed，并保持精度对照可读 | 正式分支 | 已采纳 |
-| 004 | 两个 BF16 seed 是确认主门；FP32 是条件性精度诊断，不作单结果自动 veto | 单条 FP32 同时可能改变多条数值路径，不足以严格证明 BF16 偶然 | 终态解释 | 已采纳 |
+| 002 | Route O recipe 原样复现，不在 Plan 090 搜索参数 | 本任务只验证同一固定路径的 clean 重复性 | 训练合同 | 已采纳 |
+| 003 | 第二次 clean run 保留 seed 元数据 `20260902`，但 freeze/runtime/result 显式记录没有 seed-sensitive consumer 且 `seed_sensitive_stability_tested=false` | 训练路径确定性强；诚实保留两次独立执行，不人为增加 dropout 或随机数据选择 | 正式分支与结论 | 已采纳 |
+| 004 | 两个 BF16 clean run 是确认主门；FP32 是条件性精度诊断，不作单结果自动 veto | 单条 FP32 同时可能改变多条数值路径，不足以严格证明 BF16 偶然 | 终态解释 | 已采纳 |
 | 005 | 只复用 57GB 现有卷，不授权新建、扩容或删除 | 用户授权只覆盖现有卷，且任务可通过最小保留与清理自有中间资产控容 | 云资源 | 已采纳 |
 | 006 | WBS 在规划分支只窄指向 Plan 090，COMPLETED 待最终验收后更新 | 保持当前规划与历史职责分离 | 文档 | 已采纳 |
 | 007 | 额外授权请示、阶段 A 付费审批和最终验收只使用用户指定的 Codex 跨会话队列 | 保证审查批示进入正确会话且不依赖文件或人工转述 | 协作与审批 | 已采纳 |
@@ -319,3 +327,4 @@ XXX用以下内容代替：
 | 011 | start 在 CLI 边界强制前序结果、完整分支预算、冻结 artifact namespace，并把 Stage B 基线、累计费用和 provider Pod id/name/hostname 带入正式结果 | 防止绕过条件分支、低报费用、混用 namespace 或跨 Pod 拼接；只绑定现有操作事实，不建设云编排/receipt 平台 | 执行与资源边界 | 已采纳 |
 | 012 | 继续复用已审查的小型 handoff envelope、通用抢卡脚本和 Plan 087 terminal helper，不新增 Plan 090 Pod 创建器或创建 receipt | 职责契合且可减少重复设施；实际 Pod 属性仍由执行者创建后独立核验 | 云端接缝 | 已采纳 |
 | 013 | checkpoint 前故障使用新的空 attempt namespace；checkpoint 后只恢复 exact checkpoint，PASS 最终候选要求同 hostname 的不同 OS 新进程恢复 | 同时保持 clean-base 语义、恢复可用性与同一 formal Pod 约束 | 恢复与保留 | 已采纳 |
+| 014 | 两个正向 BF16 结果形成后，若必需恢复/闭环因基础设施失败，允许诚实发布 INCONCLUSIVE；任何有效负面结果仍不得被 infrastructure 覆盖 | 使恢复门与合法终态闭合，同时保护负面研究结果 | 终态状态机 | 已采纳 |

@@ -32,6 +32,8 @@ from .plan081_contract import (
 from .plan081_observation import (
     build_training_observation,
     build_validation_observation,
+    training_identity_sha256,
+    validation_identity_sha256,
 )
 from .plan082_adapter import verify_snapshot
 from .plan082_controller import validate_process_identity
@@ -69,6 +71,7 @@ from .plan090_contract import (
 )
 from .plan090_controller import (
     Plan090ConfirmationController,
+    build_objective_diagnostic,
     validate_runtime_identity,
 )
 from .plan090_finalize import (
@@ -441,23 +444,11 @@ def _diagnose(args: argparse.Namespace) -> dict[str, Any]:
         runtime = validate_runtime_identity(
             adapter.plan090_runtime_identity(), run_spec=spec
         )
-        validation_receipt = adapter.evaluate_validation(datasets.validation)
-        training_receipt = adapter.evaluate_training(datasets.train)
-        validation = build_validation_observation(
-            datasets.validation,
-            validation_receipt["raw_logits"],
-            global_step=0,
+        validation, train = _build_no_update_diagnostics(
+            adapter=adapter,
+            datasets=datasets,
+            spec=spec,
             scope=scope,
-            policy=ComparisonPolicy.from_value(spec["comparison_policy"]),
-            report_threshold=spec["report_threshold"],
-        )
-        train = build_training_observation(
-            datasets.train,
-            training_receipt["raw_logits"],
-            global_step=0,
-            scope=scope,
-            policy=ComparisonPolicy.from_value(spec["comparison_policy"]),
-            report_threshold=spec["report_threshold"],
         )
         core = {
             "schema": DIAGNOSTIC_SCHEMA,
@@ -480,6 +471,67 @@ def _diagnose(args: argparse.Namespace) -> dict[str, Any]:
         return result
     finally:
         adapter.close()
+
+
+def _build_no_update_diagnostics(
+    *, adapter: Any, datasets: Any, spec: Mapping[str, Any], scope: TrainableScope
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    policy = ComparisonPolicy.from_value(spec["comparison_policy"])
+    weights = spec["recipe"]["objective"]["component_weights"]
+    validation_receipt = _validate_no_update_receipt(
+        adapter.evaluate_validation(datasets.validation),
+        identity_field="validation_identity_sha256",
+        expected_identity=validation_identity_sha256(datasets.validation),
+    )
+    training_receipt = _validate_no_update_receipt(
+        adapter.evaluate_training(datasets.train),
+        identity_field="training_identity_sha256",
+        expected_identity=training_identity_sha256(datasets.train),
+    )
+    validation = build_validation_observation(
+        datasets.validation,
+        validation_receipt["raw_logits"],
+        global_step=0,
+        scope=scope,
+        policy=policy,
+        report_threshold=spec["report_threshold"],
+    )
+    train = build_training_observation(
+        datasets.train,
+        training_receipt["raw_logits"],
+        global_step=0,
+        scope=scope,
+        policy=policy,
+        report_threshold=spec["report_threshold"],
+    )
+    validation["objective_diagnostic"] = build_objective_diagnostic(
+        datasets.validation, validation_receipt["raw_logits"], weights
+    )
+    train["objective_diagnostic"] = build_objective_diagnostic(
+        datasets.train, training_receipt["raw_logits"], weights
+    )
+    return validation, train
+
+
+def _validate_no_update_receipt(
+    value: Any, *, identity_field: str, expected_identity: str
+) -> Mapping[str, Any]:
+    if (
+        not isinstance(value, Mapping)
+        or set(value)
+        != {
+            "raw_logits",
+            "gradient_access",
+            "training_state_unchanged",
+            identity_field,
+        }
+        or not isinstance(value.get("raw_logits"), Mapping)
+        or value.get("gradient_access") is not False
+        or value.get("training_state_unchanged") is not True
+        or value.get(identity_field) != expected_identity
+    ):
+        raise FullModelTrainingError("plan090_no_update_diagnostic_receipt_invalid")
+    return value
 
 
 def _run(args: argparse.Namespace, *, recovery: bool) -> dict[str, Any]:
@@ -795,9 +847,7 @@ def _require_task_owned_paths(*paths: Path) -> None:
     raw = os.getenv("RONDO_PLAN090_TASK_ROOT")
     if not raw:
         raise FullModelTrainingError("plan090_task_root_required")
-    task_path = Path(raw)
-    _reject_existing_symlink_chain(task_path)
-    task_root = safe_directory(task_path)
+    task_root = _validated_plan090_task_root(Path(raw))
     for path in paths:
         candidate = path if path.is_absolute() else Path.cwd() / path
         _reject_existing_symlink_chain(candidate)
@@ -810,12 +860,20 @@ def _require_configured_task_root(path: Path) -> Path:
     raw = os.getenv("RONDO_PLAN090_TASK_ROOT")
     if not raw:
         raise FullModelTrainingError("plan090_task_root_required")
-    _reject_existing_symlink_chain(Path(raw))
-    configured = safe_directory(Path(raw))
+    configured = _validated_plan090_task_root(Path(raw))
     _reject_existing_symlink_chain(path)
     if safe_directory(path) != configured:
         raise FullModelTrainingError("plan090_task_root_mismatch")
     return configured
+
+
+def _validated_plan090_task_root(path: Path) -> Path:
+    _reject_existing_symlink_chain(path)
+    root = safe_directory(path)
+    prefix = "rondo-plan090-"
+    if not root.name.startswith(prefix) or len(root.name) == len(prefix):
+        raise FullModelTrainingError("plan090_task_root_namespace_invalid")
+    return root
 
 
 def _reject_existing_symlink_chain(path: Path) -> None:
