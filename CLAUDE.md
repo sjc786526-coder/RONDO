@@ -18,6 +18,8 @@
 - `codex-source-code/` 是 git-ignored 的本地只读上游快照，只用于比较，学习和测试，不在其中开发。
 - `codex-doc/` 保存按日期冻结的 OpenAI Codex 官方在线文档。研究原始Codex 行为时先读对应快照的`manual.md`，专题检索使用 `full.md`；若文档与源码或测试不一致，以源码为准。
 - `.codex/` 存放开发用codex的钩子、创建工作树和本地状态，保持 git-ignored，不作为项目交付物。
+- `training/` 存放轻量、受跟踪的训练合同与符合体积门限的数据集，与两套产品源码隔离且不参与 Rust 构建；
+  模型权重、adapter 和训练输出始终留在仓库外。
 - `README.md` 记录项目背景/目标，`doc/WBS.md` 记录当前阶段，`doc/WBS-COMPLETED.md` 记录已完成工作，`plan/` 存放每次任务具体技术方案，`agent_log/` 存放实际执行的日志与各结论，`doc/WBS/`文件夹存放某一方向/大阶段的规划，`doc/development-environment.md`记录开发环境`doc/eval-data-layout.md`记录数据资产管理规范。
 
 ## 2. 工作流程
