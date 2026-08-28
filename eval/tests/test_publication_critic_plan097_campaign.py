@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+import json
 import os
 from pathlib import Path
 import stat
@@ -138,6 +139,42 @@ class Plan097CampaignTests(unittest.TestCase):
                 },
                 expected_batch_id="plan097-producer-v1",
             )
+
+    def test_current_budget_includes_every_superseded_ledger(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            runtime_root = Path(raw)
+            budget_root = runtime_root / "budget"
+            budget_root.mkdir()
+            for index, (batch_id, filename) in enumerate(
+                campaign._PRIOR_PRODUCER_LEDGERS, start=1
+            ):
+                (budget_root / filename).write_text(
+                    json.dumps(
+                        {
+                            "batch_id": batch_id,
+                            "runs": {
+                                f"plan097-prior-{index}": {
+                                    "spent_usd": f"0.{index}00000",
+                                    "requests": {
+                                        f"request-{request}": {
+                                            "status": "settled",
+                                            "charged_usd": "0.000000",
+                                        }
+                                        for request in range(index)
+                                    },
+                                }
+                            },
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+
+            projection = campaign._prior_producer_budget_projection(
+                mock.Mock(runtime_root=runtime_root)
+            )
+
+        self.assertEqual(projection["spent_usd"], Decimal("0.600000"))
+        self.assertEqual(projection["request_count"], 6)
 
     def test_producer_only_recovery_is_for_commissioning_only(self) -> None:
         campaign._require_backend_mode("commissioning", True)
