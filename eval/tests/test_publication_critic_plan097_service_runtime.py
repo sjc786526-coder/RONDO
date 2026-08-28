@@ -147,6 +147,25 @@ class ServiceRuntimeTests(unittest.TestCase):
                 startup_timeout_ms=1_000,
             )
 
+    def test_descriptor_mismatch_diagnostic_contains_no_values(self) -> None:
+        path = service_runtime._first_mismatch_path(
+            {"identity": {"model": {"revision": "expected-private-value"}}},
+            {"identity": {"model": {"revision": "observed-private-value"}}},
+            "descriptor",
+        )
+        self.assertEqual(path, "descriptor_identity_model_revision")
+        self.assertNotIn("private", path)
+
+    def test_descriptor_json_comparison_tolerates_only_float_rendering(self) -> None:
+        expected = {"scoring": {"threshold": 0.9350569011196121}}
+        rendered = {"scoring": {"threshold": 0.935056901119612}}
+        drifted = {"scoring": {"threshold": 0.9351}}
+        wrong_type = {"scoring": {"threshold": "0.9350569011196121"}}
+
+        self.assertTrue(service_runtime._json_equivalent(expected, rendered))
+        self.assertFalse(service_runtime._json_equivalent(expected, drifted))
+        self.assertFalse(service_runtime._json_equivalent(expected, wrong_type))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -10,6 +10,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import select
@@ -408,8 +409,14 @@ def _start_service(
             raise ServiceRuntimeError("service_announcement_invalid")
         if announcement.get("protocol") != "rondo_publication_critic_v1":
             raise ServiceRuntimeError("service_announcement_protocol_mismatch")
-        if announcement.get("descriptor") != dict(expected_descriptor):
-            raise ServiceRuntimeError("service_announcement_descriptor_mismatch")
+        observed_descriptor = announcement.get("descriptor")
+        if not _json_equivalent(dict(expected_descriptor), observed_descriptor):
+            mismatch = _first_mismatch_path(
+                dict(expected_descriptor), observed_descriptor, "descriptor"
+            )
+            raise ServiceRuntimeError(
+                f"service_announcement_descriptor_mismatch_{mismatch}"
+            )
         endpoint = announcement.get("endpoint")
         if not isinstance(endpoint, str) or not endpoint.startswith("127.0.0.1:"):
             raise ServiceRuntimeError("service_endpoint_invalid")
@@ -445,6 +452,57 @@ def _service_descriptor(value: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(descriptor, dict) or set(descriptor) != {"identity", "limits"}:
         raise ServiceRuntimeError("service_descriptor_invalid")
     return dict(descriptor)
+
+
+def _first_mismatch_path(expected: object, observed: object, prefix: str) -> str:
+    """Return a bounded value-free path for startup identity diagnostics."""
+
+    if isinstance(expected, Mapping) and isinstance(observed, Mapping):
+        keys = sorted(set(expected) | set(observed), key=str)
+        for key in keys:
+            if not isinstance(key, str) or not key.replace("_", "").isalnum():
+                return f"{prefix}_field"
+            if key not in expected or key not in observed:
+                return f"{prefix}_{key}"
+            if not _json_equivalent(expected[key], observed[key]):
+                return _first_mismatch_path(
+                    expected[key], observed[key], f"{prefix}_{key}"
+                )
+        return prefix
+    if isinstance(expected, list) and isinstance(observed, list):
+        for index, (expected_item, observed_item) in enumerate(
+            zip(expected, observed, strict=False)
+        ):
+            if not _json_equivalent(expected_item, observed_item):
+                return _first_mismatch_path(
+                    expected_item, observed_item, f"{prefix}_item_{index}"
+                )
+        return f"{prefix}_length"
+    return prefix
+
+
+def _json_equivalent(expected: object, observed: object) -> bool:
+    if isinstance(expected, Mapping) and isinstance(observed, Mapping):
+        return set(expected) == set(observed) and all(
+            _json_equivalent(expected[key], observed[key]) for key in expected
+        )
+    if isinstance(expected, list) and isinstance(observed, list):
+        return len(expected) == len(observed) and all(
+            _json_equivalent(expected_item, observed_item)
+            for expected_item, observed_item in zip(expected, observed, strict=True)
+        )
+    if (
+        isinstance(expected, (int, float))
+        and not isinstance(expected, bool)
+        and isinstance(observed, (int, float))
+        and not isinstance(observed, bool)
+    ):
+        return (
+            math.isfinite(float(expected))
+            and math.isfinite(float(observed))
+            and abs(float(expected) - float(observed)) <= 1e-12
+        )
+    return type(expected) is type(observed) and expected == observed
 
 
 def _base_environment() -> dict[str, str]:
