@@ -300,6 +300,16 @@ def _fixture(
 
 
 class ProducerCommandTests(unittest.TestCase):
+    def test_member_prompt_forbids_duplicate_or_prewritten_publish_cells(self) -> None:
+        for requirement in (
+            "exactly one fresh code cell for each team_publish attempt",
+            "exactly one awaited team_publish call",
+            "Never prewrite, duplicate, batch, or parallelize publish attempts",
+            "The first team_publish is the only call that may omit review_cycle_id",
+            "never open a second Event",
+        ):
+            self.assertIn(requirement, PRODUCER_MEMBER_PROMPT)
+
     def test_extends_the_shared_strict_multi_command_with_full_critic_config(self) -> None:
         descriptor = {"limits": {"job_timeout_ms": 120_000}, "identity": {"revision": "v1"}}
         command = build_producer_command(

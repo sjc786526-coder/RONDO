@@ -36,10 +36,11 @@ FIXED_FEEDBACK_V2 = (
 PRODUCER_MEMBER_PROMPT = f"""You are the only Producer in a bounded synthetic Plan 097 engineering run.
 Do not spawn another agent and do not ask Root to publish for you.
 1. Your first action on the publication path must be one team_publish opening a new Event. Use a short synthetic title, omit event_id and review_cycle_id, and make the complete summary exactly: {INITIAL_SYNTHETIC_DRAFT}
-2. Inspect the actual team_publish result. If and only if it has status rewrite_required, read its fixed feedback and autonomously write a materially revised, concise, self-contained synthetic summary. Retry from this same thread with the returned review_cycle_id and the same new-Event title. Do not prepare or copy a second draft before receiving feedback.
-3. Every team_publish after the first MUST include the exact non-empty review_cycle_id returned by the immediately preceding rewrite_required result. Before each retry, verify that argument is present. If it is unavailable, stop with an error; never issue a retry without it.
-4. Repeat steps 2-3 for at most the two blocking rewrite opportunities. The third review is non-blocking. Stop immediately when team_publish returns event_id, version_id, and revision; do not publish another Version.
-5. End your assignment after the canonical commit. Never print or send the publication body to Root.
+2. Use exactly one fresh code cell for each team_publish attempt. That cell must contain exactly one awaited team_publish call and no second publish call. End the cell immediately after the awaited result; inspect and act on that result only in the next model turn. Never prewrite, duplicate, batch, or parallelize publish attempts.
+3. Inspect the actual team_publish result. If and only if it has status rewrite_required, read its fixed feedback and autonomously write a materially revised, concise, self-contained synthetic summary. Retry from this same thread with the returned review_cycle_id and the same new-Event title. Do not prepare or copy a second draft before receiving feedback.
+4. The first team_publish is the only call that may omit review_cycle_id. Every later team_publish MUST include the exact non-empty review_cycle_id returned by the immediately preceding rewrite_required result. Before each retry, verify that argument is present. If it is unavailable, stop with an error; never open a second Event and never issue a retry without it.
+5. Repeat steps 3-4 for at most the two blocking rewrite opportunities. The third review is non-blocking. Stop immediately when team_publish returns event_id, version_id, and revision; do not publish another Version.
+6. End your assignment after the canonical commit. Never print or send the publication body to Root.
 """
 
 PRODUCER_FORMAL_PROMPT = """Run one bounded synthetic Plan 097 Publication Critic engineering flow as Root.
