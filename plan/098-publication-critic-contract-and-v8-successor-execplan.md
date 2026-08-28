@@ -146,28 +146,29 @@
 - 工作包一已形成唯一权威 `rondo-publication-critic-task@v2` 与 v2 rubric、v3 input、v4 render、结构化输出/release schema；新增纯函数 gate/loss target/pair/evaluation reference 和物理 split successor consumer，保留产品 typed seam 与冻结历史路径。
 - continuity applicability 已闭合为只依据 model-visible candidate：明确完成才允许 `N/A`，未完成或未明确闭合时适用，冲突时不得用隐藏 completion metadata 绕过 gate。
 - 工作包一定向门禁通过：successor 合同 10/10，旧 contract/training-data/identity 回归 31/31；冻结 v7/v8 tree identity 保持不变。权威合同当前内容 SHA-256 为 `4a0f56a4fc1928a186864a14823eb3e7ead438aad96a746f59f37c9f470e8b0d`。
+- 工作包一首轮独立审查已完成，结论为不通过；模型可见 rubric、continuity `N/A` basis、tie fail-open、Boundary loss projection 和轻量 schema/evaluation parity findings 见 `agent_log/2026-08-28-101607-plan098-work-package-1-review.md`。工作包二继续锁定。
 
 ### 当前工作
 
-- `WORK_PACKAGE_1_IMPLEMENTED_AWAITING_REVIEW / WORK_PACKAGE_2_LOCKED`：工作包一实现、自检与提交交接已闭合，等待审查者阶段验收；未获明确通过前不进入工作包二。
+- `WORK_PACKAGE_1_CHANGES_REQUESTED / WORK_PACKAGE_2_LOCKED`：工作包一首轮验收未通过，等待执行者在本阶段内完成 findings、提交并申请复验；未获明确通过前不进入工作包二。
 
 ### 本任务剩余步骤
 
-1. 审查者检查工作包一正确性、功能性、历史保护和局部回归；finding 通过队列退回，执行者只在工作包一内整改并重新提交。审查者明确验收通过后，工作包二解锁。
+1. 执行者按首轮审查报告只在工作包一范围内整改并重新提交，通过指定队列申请复验。审查者明确验收通过后，工作包二解锁。
 2. 执行者从冻结合同导出数据设计，组织干净上下文模块负责人和一一盲审员，完成调试、正式生成、整合、freeze、consumer 与定向门禁，提交最终汇报并停止会话。
 3. 审查者完成最终验收与 `agent_log` 报告；finding 退回整改，验收通过后 Plan 098 才冻结为完整历史合同。合并和推送继续等待用户另行批准。
 
 ### 阻塞项
 
-- 无启动工作包一的技术阻塞。
+- 工作包一存在首轮审查 findings；均可在既有授权内局部整改，无需用户新增授权。
 - 工作包二唯一正常前置是审查者明确接受工作包一；未收到批准不是普通可绕过问题。
 
 ### 当前验收状态
 
 - 规划：`READY_FOR_EXECUTION`。
-- 工作包一：`IMPLEMENTED_AWAITING_STAGE_REVIEW`。
+- 工作包一：`CHANGES_REQUESTED_STAGE_REVIEW_1`。
 - 工作包二：`LOCKED_BY_WORK_PACKAGE_1_REVIEW`。
-- 完整任务：`NOT_STARTED`。
+- 完整任务：`IN_PROGRESS`。
 
 ### 交接边界
 
@@ -197,6 +198,7 @@
 | 011 | mixed v8 正文不读取；只从物理排除 unseen 的安全投影复用，安全来源不足时允许复用为零 | 当前冻结文件混合 split，不能为复用而突破旧 unseen 封存 | 数据来源、隔离 | 已采纳 |
 | 012 | 工作包一复用严格 `PublicationPacket@v1` 公共字段，不修改 Rust product seam；完成/未完成 applicability 只从 candidate 可见文本判定，隐藏 completion metadata 被 successor schema 拒绝 | 现有公共 packet 已包含作出五项判断所需的 bounded candidate/context；新增产品字段会制造可规避标签的并列事实 | 输入、产品、标签 | 已采纳 |
 | 013 | 新 successor release 采用 train/validation/test 物理 split 文件；训练 consumer 只打开 train bytes，validation 使用独立入口且不提供 test loader | 直接满足 holdout 字节隔离并避免延续旧 mixed-file 后过滤模式 | schema、consumer、隔离 | 已采纳 |
+| 014 | 首轮审查接受“不改 Rust seam、以模型可见 candidate/public packet 操作化 completion”的路线，但要求可见 basis 引用与产品/任务合同明确对齐；schema 设施保持轻量 | 闭合可识别性而不引入隐藏完成事实、NLP 规则或重型可信平台 | 输入、schema、审查 | 已采纳 |
 
 ## 7. 给执行者的启动提示词
 
