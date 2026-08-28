@@ -122,9 +122,9 @@ class Plan097CampaignTests(unittest.TestCase):
             },
         )
 
-        self.assertEqual(projection["cap_rmb"], "11")
+        self.assertEqual(projection["cap_rmb"], "9")
         self.assertEqual(projection["conservative_charged_rmb"], "1.3")
-        self.assertEqual(projection["remaining_rmb"], "9.7")
+        self.assertEqual(projection["remaining_rmb"], "7.7")
         self.assertEqual(projection["attempt_count"], 3)
         self.assertEqual(projection["usage_priced_count"], 2)
         self.assertEqual(projection["unknown_usage_count"], 1)
@@ -163,6 +163,7 @@ class Plan097CampaignTests(unittest.TestCase):
             campaign._PRODUCER_TOTAL_CAP_USD,
             contract.budgets.producer_rmb / contract.budgets.rmb_per_usd,
         )
+        self.assertEqual(campaign._PRODUCER_MAX_CONCURRENT_MAIN, 1)
 
     def test_legacy_zero_cost_attempts_remain_in_total_request_count(self) -> None:
         projection = campaign._producer_ledger_projection(
@@ -232,8 +233,8 @@ class Plan097CampaignTests(unittest.TestCase):
                 mock.Mock(runtime_root=runtime_root)
             )
 
-        self.assertEqual(projection["spent_usd"], Decimal("1.500000"))
-        self.assertEqual(projection["request_count"], 15)
+        self.assertEqual(projection["spent_usd"], Decimal("2.100000"))
+        self.assertEqual(projection["request_count"], 21)
 
     def test_producer_only_recovery_is_for_commissioning_only(self) -> None:
         campaign._require_backend_mode("commissioning", True)

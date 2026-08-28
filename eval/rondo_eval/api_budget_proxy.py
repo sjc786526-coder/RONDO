@@ -210,6 +210,14 @@ class _LogicalRequestLimitExceeded(ApiBudgetProxyError):
     """Raised before reserve/forward when a short diagnostic exceeds its cap."""
 
 
+class _ConcurrentMainQueueTimeout(ApiBudgetProxyError):
+    """Raised when no bounded main request slot becomes available in time."""
+
+
+class _ProxyClosingBeforeReservation(ApiBudgetProxyError):
+    """Raised when shutdown starts while a request is waiting for a slot."""
+
+
 @dataclass(frozen=True)
 class Usage:
     input_tokens: int
@@ -1683,15 +1691,11 @@ class LoopbackResponsesProxy:
                     )
                 except Exception as exc:  # fail closed on any preflight failure
                     raise _SymmetryPreflightRejected(_preflight_reason(exc)) from None
-            with self._lifecycle_lock:
-                if self._closing.is_set():
-                    self._reject(handler, 503, "proxy_closing")
-                    return
-                self._claim_and_reserve_logical_request(
-                    request_metadata["role"],
-                    request_metadata["body_sha256"],
-                    request_id,
-                )
+            self._claim_and_reserve_logical_request(
+                request_metadata["role"],
+                request_metadata["body_sha256"],
+                request_id,
+            )
         except _SymmetryPreflightRejected as exc:
             self._reject(handler, 409, exc.reason)
             return
@@ -1703,6 +1707,12 @@ class LoopbackResponsesProxy:
             return
         except _LogicalRequestLimitExceeded:
             self._reject(handler, 409, "logical_request_limit_exceeded")
+            return
+        except _ConcurrentMainQueueTimeout:
+            self._reject(handler, 503, "concurrent_main_queue_timeout")
+            return
+        except _ProxyClosingBeforeReservation:
+            self._reject(handler, 503, "proxy_closing")
             return
         except BudgetCapacityExhausted:
             self._ledger.stop_run(
@@ -1955,73 +1965,97 @@ class LoopbackResponsesProxy:
     def _claim_and_reserve_logical_request(
         self, role: str, body_sha256: str, request_id: str
     ) -> None:
-        """Persist the reservation before committing in-memory logical claims."""
+        """Wait for a main slot, then atomically persist the reservation."""
 
-        with self._request_policy_lock:
-            run = self._ledger.snapshot()["runs"].get(self._run_id)
-            if not isinstance(run, dict) or not isinstance(run.get("requests"), dict):
-                raise ApiBudgetProxyError("budget run projection is invalid")
-            if role == "main":
-                in_flight = sum(
-                    1
-                    for main_request_id in self._main_request_ids
-                    if isinstance(run["requests"].get(main_request_id), dict)
-                    and run["requests"][main_request_id].get("status") == "reserved"
+        deadline = self._monotonic() + self._timeout
+        while True:
+            with self._lifecycle_lock:
+                if self._closing.is_set():
+                    raise _ProxyClosingBeforeReservation("proxy is closing")
+                with self._request_policy_lock:
+                    run = self._ledger.snapshot()["runs"].get(self._run_id)
+                    if not isinstance(run, dict) or not isinstance(
+                        run.get("requests"), dict
+                    ):
+                        raise ApiBudgetProxyError(
+                            "budget run projection is invalid"
+                        )
+                    in_flight = 0
+                    if role == "main":
+                        in_flight = sum(
+                            1
+                            for main_request_id in self._main_request_ids
+                            if isinstance(
+                                run["requests"].get(main_request_id), dict
+                            )
+                            and run["requests"][main_request_id].get("status")
+                            == "reserved"
+                        )
+                    if role != "main" or in_flight < self._max_concurrent_main:
+                        if (
+                            role == "guardian"
+                            and body_sha256 in self._guardian_body_sha256s
+                        ):
+                            self._ledger.stop_run(
+                                self._run_id,
+                                stop_reason=(
+                                    "guardian_duplicate_logical_request_rejected"
+                                ),
+                            )
+                            raise _GuardianDuplicateLogicalRequest(
+                                "A settled Guardian request body cannot be replayed"
+                            )
+                        if (
+                            self._max_logical_requests is not None
+                            and self._logical_requests >= self._max_logical_requests
+                        ):
+                            self._ledger.stop_run(
+                                self._run_id,
+                                stop_reason="logical_request_limit_exceeded",
+                            )
+                            raise _LogicalRequestLimitExceeded(
+                                "Short-test logical request limit is exhausted"
+                            )
+                        if (
+                            role == "guardian"
+                            and self._max_guardian_logical_requests is not None
+                            and self._guardian_logical_requests
+                            >= self._max_guardian_logical_requests
+                        ):
+                            self._ledger.stop_run(
+                                self._run_id,
+                                stop_reason=(
+                                    "guardian_logical_request_limit_exceeded"
+                                ),
+                            )
+                            raise _GuardianLogicalRequestLimitExceeded(
+                                "Guardian logical request limit is exhausted"
+                            )
+                        self._ledger.reserve(
+                            self._run_id,
+                            request_id,
+                            amount_usd=self._request_reservations[role],
+                            additional_capacity_usd=(
+                                self._request_reservations["guardian"]
+                                if role == "main"
+                                and self._max_guardian_logical_requests != 0
+                                and self._max_logical_requests != 1
+                                else Decimal(0)
+                            ),
+                        )
+                        self._logical_requests += 1
+                        if role == "main":
+                            self._main_request_ids.add(request_id)
+                        else:
+                            self._guardian_logical_requests += 1
+                            self._guardian_body_sha256s.add(body_sha256)
+                        return
+            remaining = deadline - self._monotonic()
+            if remaining <= 0:
+                raise _ConcurrentMainQueueTimeout(
+                    "concurrent main queue wait timed out"
                 )
-                if in_flight >= self._max_concurrent_main:
-                    raise ApiBudgetProxyError(
-                        "concurrent main requests exceed the configured limit"
-                    )
-            if role == "guardian" and body_sha256 in self._guardian_body_sha256s:
-                self._ledger.stop_run(
-                    self._run_id,
-                    stop_reason="guardian_duplicate_logical_request_rejected",
-                )
-                raise _GuardianDuplicateLogicalRequest(
-                    "A settled Guardian request body cannot be replayed"
-                )
-            if (
-                self._max_logical_requests is not None
-                and self._logical_requests >= self._max_logical_requests
-            ):
-                self._ledger.stop_run(
-                    self._run_id,
-                    stop_reason="logical_request_limit_exceeded",
-                )
-                raise _LogicalRequestLimitExceeded(
-                    "Short-test logical request limit is exhausted"
-                )
-            if (
-                role == "guardian"
-                and self._max_guardian_logical_requests is not None
-                and self._guardian_logical_requests
-                >= self._max_guardian_logical_requests
-            ):
-                self._ledger.stop_run(
-                    self._run_id,
-                    stop_reason="guardian_logical_request_limit_exceeded",
-                )
-                raise _GuardianLogicalRequestLimitExceeded(
-                    "Guardian logical request limit is exhausted"
-                )
-            self._ledger.reserve(
-                self._run_id,
-                request_id,
-                amount_usd=self._request_reservations[role],
-                additional_capacity_usd=(
-                    self._request_reservations["guardian"]
-                    if role == "main"
-                    and self._max_guardian_logical_requests != 0
-                    and self._max_logical_requests != 1
-                    else Decimal(0)
-                ),
-            )
-            self._logical_requests += 1
-            if role == "main":
-                self._main_request_ids.add(request_id)
-            else:
-                self._guardian_logical_requests += 1
-                self._guardian_body_sha256s.add(body_sha256)
+            self._sleep(min(0.01, remaining))
 
     def _stop_confirmed_unbilled(
         self,

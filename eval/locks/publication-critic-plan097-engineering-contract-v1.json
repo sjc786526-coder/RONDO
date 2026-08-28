@@ -20,8 +20,8 @@
     }
   },
   "budgets": {
-    "cloud_scorer_rmb": "11",
-    "producer_rmb": "19",
+    "cloud_scorer_rmb": "9",
+    "producer_rmb": "21",
     "rmb_per_usd": "7.5",
     "total_rmb": "30"
   },

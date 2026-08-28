@@ -68,18 +68,20 @@ SUMMARY_SCHEMA = "rondo-publication-critic-plan097-engineering-result-v1"
 _RUN_ID = re.compile(r"plan097-[a-z0-9][a-z0-9-]{0,79}\Z")
 _PHASES = {"commissioning", "formal"}
 _BACKENDS = {"local", "cloud"}
-_PRODUCER_BATCH_ID = "plan097-producer-terra-v6"
-_PRODUCER_LEDGER_NAME = "producer-terra-v6-ledger.json"
+_PRODUCER_BATCH_ID = "plan097-producer-terra-v7"
+_PRODUCER_LEDGER_NAME = "producer-terra-v7-ledger.json"
 _PRIOR_PRODUCER_LEDGERS = (
     ("plan097-producer-v1", "producer-ledger.json"),
     ("plan097-producer-terra-v2", "producer-terra-ledger.json"),
     ("plan097-producer-terra-v3", "producer-terra-v3-ledger.json"),
     ("plan097-producer-terra-v4", "producer-terra-v4-ledger.json"),
     ("plan097-producer-terra-v5", "producer-terra-v5-ledger.json"),
+    ("plan097-producer-terra-v6", "producer-terra-v6-ledger.json"),
 )
 _PRODUCER_MAX_RUNS = 4
 _PRODUCER_RUN_CAP_USD = Decimal("2.4")
-_PRODUCER_TOTAL_CAP_USD = Decimal("19") / Decimal("7.5")
+_PRODUCER_TOTAL_CAP_USD = Decimal("21") / Decimal("7.5")
+_PRODUCER_MAX_CONCURRENT_MAIN = 1
 _CLOUD_LEDGER_NAME = "cloud-scorer-v2-ledger.json"
 _PRIOR_CLOUD_LEDGER_NAME = "cloud-scorer-ledger.json"
 _PRIOR_CLOUD_LEDGER_CAP_RMB = Decimal("12")
@@ -667,7 +669,7 @@ def _run_producer(
             unbilled_retry_statuses=provider.unbilled_retry_statuses,
             request_reservation_usd=reservation,
             run_cap_usd=run_cap,
-            max_concurrent_main=2,
+            max_concurrent_main=_PRODUCER_MAX_CONCURRENT_MAIN,
             usage_envelope=envelope,
             timeout_seconds=180,
         ) as budget_proxy:

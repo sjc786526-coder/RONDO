@@ -507,6 +507,64 @@ class ApiBudgetProxyTests(unittest.TestCase):
         proxy.close()
         ledger.close()
 
+    def test_concurrent_main_waits_for_settlement_before_reserving(self) -> None:
+        ledger = PersistentBudgetLedger(
+            self.root / "serialized-main-budget.json",
+            batch_id="serialized-main",
+            total_cap_usd="10",
+            default_run_cap_usd="10",
+        )
+        proxy = LoopbackResponsesProxy(
+            upstream_base_url="https://provider.example/v1",
+            api_key=self.secret,
+            ledger=ledger,
+            run_id="serialized-main-run",
+            metadata_path=self.root / "serialized-main-metadata.json",
+            **self._profile_kwargs(),
+            request_reservation_usd="1",
+            max_concurrent_main=1,
+            timeout_seconds=2,
+            _transport=_UrllibTransport(endpoint_override=self.upstream.endpoint),
+        )
+        proxy._claim_and_reserve_logical_request("main", "a" * 64, "main-1")
+        ledger.begin_attempt("serialized-main-run", "main-1", max_attempts=1)
+        completed = threading.Event()
+        failure: list[BaseException] = []
+
+        def reserve_second() -> None:
+            try:
+                proxy._claim_and_reserve_logical_request(
+                    "main", "b" * 64, "main-2"
+                )
+            except BaseException as exc:  # pragma: no cover - asserted below
+                failure.append(exc)
+            finally:
+                completed.set()
+
+        second = threading.Thread(target=reserve_second)
+        second.start()
+        self.assertFalse(completed.wait(timeout=0.05))
+        self.assertNotIn(
+            "main-2",
+            ledger.snapshot()["runs"]["serialized-main-run"]["requests"],
+        )
+
+        ledger.settle(
+            "serialized-main-run",
+            "main-1",
+            Usage(1, 0, 0, 1),
+            pricing=MAIN_PRICING,
+        )
+        second.join(timeout=2)
+
+        self.assertFalse(second.is_alive())
+        self.assertEqual(failure, [])
+        requests = ledger.snapshot()["runs"]["serialized-main-run"]["requests"]
+        self.assertEqual(requests["main-1"]["status"], "settled")
+        self.assertEqual(requests["main-2"]["status"], "reserved")
+        proxy.close()
+        ledger.close()
+
     def test_invalid_request_reservations_are_rejected(self) -> None:
         for number, reservation in enumerate(("0", "40.000001", "nan", True)):
             with self.subTest(reservation=reservation), self.assertRaisesRegex(
