@@ -304,14 +304,17 @@ XXX用以下内容代替：
 - 2026-08-27：返修复验提交 `8d1640e` 以 0 High / 0 Medium / 0 Low correctness finding 接受首次独立验收；审查确认 authority
   preflight 时序、95/95 相关 Python 回归、formal/result/price/cost 零漂移与 Plan 097 锁定均成立。按 decision 013 完成
   `doc/WBS-COMPLETED.md`、WBS 最终状态和最终日志收口；未重跑真实 API、Rust 重型门禁或全 workspace。
+- 2026-08-27：最终独立验收提交 `6a6f814` 判定“验收通过 / 任务目标完成”。用户随后授权合并与推送；096 以 merge commit
+  `4c8ccffcb7df78e82648cf10637b72d0eb9b0bf8` 无冲突合入 `main`，相关 Python 95/95 与 Git 门禁通过，主线文档同步为
+  `INTEGRATED / PUSHED`。实现分支仅在本地归档为 `zz-done/worktree-096-validation-cloud-scorer-qualification`，worktree 保留。
 
 ### 当前工作
 
-- `COMPLETED`：实现、正式运行、结果归档、finding 返修、首次独立验收和最终文档收口均已完成；task branch 只待用户决定是否合并、推送或归档。
+- `COMPLETED`：实现、正式运行、结果归档、finding 返修、最终独立验收、主线集成与推送均已完成。
 
 ### 本任务剩余步骤
 
-- 本任务内无剩余实施步骤；提交最终收口并按用户指定模板通过 queue 通知审查者后冻结本计划。后续路线只以 WBS 为准。
+- 本任务内无剩余实施步骤；本计划冻结，后续路线只以 WBS 为准。
 
 ### 阻塞项
 
@@ -319,12 +322,13 @@ XXX用以下内容代替：
 
 ### 当前验收状态
 
-- `COMPLETED / FIRST_INDEPENDENT_REVIEW_ACCEPTED / GOAL_COMPLETED /
-  CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH / NOT_INTEGRATED / NOT_PUSHED`。
+- `COMPLETED / FINAL_REVIEW_ACCEPTED / GOAL_COMPLETED /
+  CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH / INTEGRATED / PUSHED`。
 
 ### 交接边界
 
-- 执行者在既有 096 worktree 内完成实现、验证、真实 API、正式结果、记录和 task branch 提交；本计划制定者作为指定 thread 审查者验收。
+- 执行者在既有 096 worktree 内完成实现、验证、真实 API、正式结果与记录；最终提交经独立验收后已合入并推送 `main`。本地分支已归档到
+  `zz-done/`，worktree 继续保留。
 - 只有 `CLOUD_SCORER_QUALIFIED` 解锁 Plan 097 的另行立项入口；其它终态或 formal incomplete 均不启动 097。Plan 097 的具体范围、授权与
   执行不属于本计划。
 - Plan 096 完成后冻结本计划；未经用户批准不合并、不推送、不归档/重命名分支、不删除 worktree。
@@ -356,3 +360,4 @@ XXX用以下内容代替：
 | 019 | 正式终态冻结为 `CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH`，不解锁 Plan 097；tracked 结果同时保留资格失败与高 headroom 两层事实 | 完整 curve 无 admissible operating point，但两个预冻结 threshold-free 门均通过，不能把校准/error trade-off 问题误写为低任务分辨能力 | 结论、WBS、交接 | 已采纳 |
 | 020 | formal runner 在处理 release、创建 namespace 与调用 evaluator 前，先由 archive 校验根级 authority 未被 claim；末尾 atomic claim 保留为并发兜底 | 已有 authority 时继续评分会重复外发有效 validation 并产生费用；前移现有门禁即可闭合，无需引入通用锁或新状态机 | formal、archive、费用安全 | 已采纳 |
 | 021 | 首次独立验收复验 0/0/0 后，按 decision 013 将任务收口为 `GOAL_COMPLETED`，同时保留 scorer `NOT_QUALIFIED` 与 Plan 097 不解锁 | 研究任务已得到完整、可复算且验收接受的唯一质量终态；任务完成不等于被测 scorer 获得产品或后继资格 | WBS、历史、交付 | 已采纳 |
+| 022 | 用户授权后以非 fast-forward merge 集成并推送 `main`，本地任务分支归档到 `zz-done/` 且保留 worktree | 保留清晰任务边界并遵循仓库单人主线交付流程；任务分支不推送 | Git、交付 | 已采纳 |

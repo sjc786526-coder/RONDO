@@ -2,7 +2,7 @@
 
 最后更新：2026-08-27 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
 状态：**第一期、第二期已完成；Publication Critic 三期 Plan 096 已完成唯一 55 条正式轮与独立复算，当前为
-`COMPLETED / FIRST_INDEPENDENT_REVIEW_ACCEPTED / GOAL_COMPLETED / CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH`。唯一 Medium
+`COMPLETED / FINAL_REVIEW_ACCEPTED / GOAL_COMPLETED / CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH / INTEGRATED / PUSHED`。唯一 Medium
 authority preflight finding 已窄修，首次独立验收复验为 0 High / 0 Medium / 0 Low correctness finding。Plan 094 的
 `ROUTE_O_VALID_NO_MATERIAL_IMPROVEMENT / ZERO_POD / VOLUME_RETAINED / FINAL_REVIEW_ACCEPTED` 和 Plan 095 的
 `COMPLETED / FINAL_REVIEW_ACCEPTED / INTEGRATED / PUSHED` 均保持有效；Plan 096 当前终态不解锁 Plan 097，M3-D 与产品启用仍锁定**
@@ -453,8 +453,8 @@ synthetic/非正式输入上完整打通 provider、typed scalar、usage/cost、
 validation release、质量门与 headroom 规则，从新空 namespace 完成唯一 55 条正式轮。沿用 Plan 073/079 的发布质量门；新 headroom
 规则只看 ROC AUC 与 Boundary strict win 两个既有 threshold-free 门：都过为 HIGH、都不过为 LOW、一过一不过为 INCONCLUSIVE。
 
-**当前状态与依赖**：`COMPLETED / FIRST_INDEPENDENT_REVIEW_ACCEPTED / GOAL_COMPLETED /
-CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH`。在 clean source
+**当前状态与依赖**：`COMPLETED / FINAL_REVIEW_ACCEPTED / GOAL_COMPLETED /
+CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH / INTEGRATED / PUSHED`。在 clean source
 `7bdcad9196d4e7a2de39f6618e0d193476b0d6e6` 与全新空 namespace 上完成 55/55、零最终 typed failure 的唯一正式轮，并由独立入口逐字段
 复算一致。完整 curve 无 admissible operating point；fallback threshold `0.9` 的 False PASS `8/21`、False REWRITE `0/34`、balanced
 accuracy `0.8095`，ROC AUC `0.8403` 与 Boundary strict win `15/19` 均过 threshold-free 门，所以资格不成立但 headroom 为 HIGH。

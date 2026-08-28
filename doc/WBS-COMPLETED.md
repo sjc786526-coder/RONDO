@@ -2499,10 +2499,10 @@ formal retry 整改为 `d29e857`，最终独立验收提交为 `43cf0eeb3e1b4826
 
 ## Publication Critic Validation 云端 Scorer 资格与参考上界测定（Plan 096，2026-08-27）
 
-**状态**：`COMPLETED / FIRST_INDEPENDENT_REVIEW_ACCEPTED / GOAL_COMPLETED /
-CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH / NOT_INTEGRATED / NOT_PUSHED`。实现提交为 `7295156`，8192 output headroom 修复为
-`7bdcad9`，正式结果提交为 `7c4e74c`，authority preflight 返修为 `08a4adb`；首次独立验收复验提交 `8d1640e` 为 0 High / 0 Medium /
-0 Low correctness finding。
+**状态**：`COMPLETED / FINAL_REVIEW_ACCEPTED / GOAL_COMPLETED /
+CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH / INTEGRATED / PUSHED`。实现提交为 `7295156`，8192 output headroom 修复为 `7bdcad9`，正式结果
+提交为 `7c4e74c`，authority preflight 返修为 `08a4adb`；首次独立验收复验提交 `8d1640e` 与最终独立验收提交 `6a6f814` 均为
+0 High / 0 Medium / 0 Low correctness finding，主线 merge commit 为 `4c8ccffcb7df78e82648cf10637b72d0eb9b0bf8`。
 
 - 在 Plan 095 同一 `CloudPublicationScorer` 请求、template/projection、strict parser、retry 与 identity 路径上增加 eval-only
   scalar/usage observation 和 one-shot binary；Python 薄层复用 Plan 073 curve/质量门、canonical validation release 与既有 write-once
@@ -2527,4 +2527,7 @@ CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH / NOT_INTEGRATED / NOT_PUSHED`。实现
   `eval-data/publication-critic/plan096/`。首次审查、返修与复验分别见
   `agent_log/2026-08-27-134602-plan096-first-independent-review.md`、
   `agent_log/2026-08-27-135000-plan096-first-review-remediation.md`、
-  `agent_log/2026-08-27-135349-plan096-first-review-remediation-recheck.md`。未经用户批准不合并、不推送、不归档分支或删除 worktree。
+  `agent_log/2026-08-27-135349-plan096-first-review-remediation-recheck.md`、
+  `agent_log/2026-08-27-135908-plan096-final-independent-review.md`。用户授权后，任务以非 fast-forward merge 合入并推送 `main`；本地任务分支
+  归档为 `zz-done/worktree-096-validation-cloud-scorer-qualification`，worktree 保留，集成记录见
+  `agent_log/2026-08-27-190518-plan096-main-integration.md`。
