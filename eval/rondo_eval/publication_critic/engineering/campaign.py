@@ -66,12 +66,14 @@ SUMMARY_SCHEMA = "rondo-publication-critic-plan097-engineering-result-v1"
 _RUN_ID = re.compile(r"plan097-[a-z0-9][a-z0-9-]{0,79}\Z")
 _PHASES = {"commissioning", "formal"}
 _BACKENDS = {"local", "cloud"}
-_PRODUCER_BATCH_ID = "plan097-producer-terra-v2"
-_PRODUCER_LEDGER_NAME = "producer-terra-ledger.json"
-_LEGACY_PRODUCER_BATCH_ID = "plan097-producer-v1"
-_LEGACY_PRODUCER_LEDGER_NAME = "producer-ledger.json"
+_PRODUCER_BATCH_ID = "plan097-producer-terra-v3"
+_PRODUCER_LEDGER_NAME = "producer-terra-v3-ledger.json"
+_PRIOR_PRODUCER_LEDGERS = (
+    ("plan097-producer-v1", "producer-ledger.json"),
+    ("plan097-producer-terra-v2", "producer-terra-ledger.json"),
+)
 _PRODUCER_MAX_RUNS = 8
-_PRODUCER_RUN_CAP_USD = Decimal("1.2")
+_PRODUCER_RUN_CAP_USD = Decimal("2.4")
 _CONTROLLED_FILTER = "test(process_tests)"
 _OFF_FINDING = "A bounded synthetic migration leaves one report column unresolved."
 _MAX_RECEIPT_BYTES = 1024 * 1024
@@ -597,7 +599,14 @@ def _run_producer(
     envelope.validate()
     reservation = maximum_usage_cost(provider.main_pricing, envelope)
     total_cap = contract.budgets.producer_rmb / contract.budgets.rmb_per_usd
-    if total_cap != Decimal("2.4") or reservation > _PRODUCER_RUN_CAP_USD:
+    prior_budget = _prior_producer_budget_projection(paths)
+    current_cap = total_cap - prior_budget["spent_usd"]
+    run_cap = min(_PRODUCER_RUN_CAP_USD, current_cap)
+    if (
+        total_cap != Decimal("2.4")
+        or current_cap <= 0
+        or reservation > run_cap
+    ):
         raise CampaignError("producer_budget_derivation_invalid")
     ledger_path = paths.runtime_root / f"budget/{_PRODUCER_LEDGER_NAME}"
     ledger_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -605,15 +614,15 @@ def _run_producer(
     with PersistentBudgetLedger(
         ledger_path,
         batch_id=_PRODUCER_BATCH_ID,
-        total_cap_usd=total_cap,
+        total_cap_usd=current_cap,
         max_runs=_PRODUCER_MAX_RUNS,
-        default_run_cap_usd=_PRODUCER_RUN_CAP_USD,
+        default_run_cap_usd=run_cap,
         usage_envelope=envelope,
         unpriced_stop_threshold=1,
         unpriced_fallback_usd=reservation,
         reservation_upstream_attempts=provider.max_attempts,
     ) as ledger:
-        ledger.claim_run(producer_run_id, cap_usd=_PRODUCER_RUN_CAP_USD)
+        ledger.claim_run(producer_run_id, cap_usd=run_cap)
         with LoopbackResponsesProxy(
             upstream_base_url=provider.base_url,
             api_key=upstream_key,
@@ -630,7 +639,7 @@ def _run_producer(
             retry_backoff_seconds=provider.retry_backoff_seconds,
             unbilled_retry_statuses=provider.unbilled_retry_statuses,
             request_reservation_usd=reservation,
-            run_cap_usd=_PRODUCER_RUN_CAP_USD,
+            run_cap_usd=run_cap,
             max_concurrent_main=2,
             usage_envelope=envelope,
             timeout_seconds=180,
@@ -865,14 +874,18 @@ def _producer_budget_snapshot(
         max_output_tokens=contract.producer.max_output_tokens,
     )
     reservation = maximum_usage_cost(provider.main_pricing, envelope)
+    prior = _prior_producer_budget_projection(paths)
+    total_cap = contract.budgets.producer_rmb / contract.budgets.rmb_per_usd
+    current_cap = total_cap - prior["spent_usd"]
+    run_cap = min(_PRODUCER_RUN_CAP_USD, current_cap)
+    if current_cap <= 0 or reservation > run_cap:
+        raise CampaignError("producer_budget_derivation_invalid")
     with PersistentBudgetLedger(
         paths.runtime_root / f"budget/{_PRODUCER_LEDGER_NAME}",
         batch_id=_PRODUCER_BATCH_ID,
-        total_cap_usd=(
-            contract.budgets.producer_rmb / contract.budgets.rmb_per_usd
-        ),
+        total_cap_usd=current_cap,
         max_runs=_PRODUCER_MAX_RUNS,
-        default_run_cap_usd=_PRODUCER_RUN_CAP_USD,
+        default_run_cap_usd=run_cap,
         usage_envelope=envelope,
         unpriced_stop_threshold=1,
         unpriced_fallback_usd=reservation,
@@ -881,17 +894,25 @@ def _producer_budget_snapshot(
         current = _producer_ledger_projection(
             ledger.snapshot(), expected_batch_id=_PRODUCER_BATCH_ID
         )
-    legacy_path = paths.runtime_root / f"budget/{_LEGACY_PRODUCER_LEDGER_NAME}"
-    if legacy_path.exists():
-        legacy = _producer_ledger_projection(
-            _read_json(legacy_path), expected_batch_id=_LEGACY_PRODUCER_BATCH_ID
-        )
-    else:
-        legacy = {"spent_usd": Decimal("0"), "request_count": 0}
     return {
-        "spent_usd": _decimal_text(current["spent_usd"] + legacy["spent_usd"]),
-        "request_count": current["request_count"] + legacy["request_count"],
+        "spent_usd": _decimal_text(current["spent_usd"] + prior["spent_usd"]),
+        "request_count": current["request_count"] + prior["request_count"],
     }
+
+
+def _prior_producer_budget_projection(paths: CampaignPaths) -> dict[str, Any]:
+    spent = Decimal("0")
+    requests = 0
+    for batch_id, filename in _PRIOR_PRODUCER_LEDGERS:
+        path = paths.runtime_root / f"budget/{filename}"
+        if not path.exists():
+            continue
+        projection = _producer_ledger_projection(
+            _read_json(path), expected_batch_id=batch_id
+        )
+        spent += projection["spent_usd"]
+        requests += projection["request_count"]
+    return {"spent_usd": spent, "request_count": requests}
 
 
 def _producer_ledger_projection(
