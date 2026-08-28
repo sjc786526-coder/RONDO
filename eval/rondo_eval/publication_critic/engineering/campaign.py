@@ -68,16 +68,20 @@ SUMMARY_SCHEMA = "rondo-publication-critic-plan097-engineering-result-v1"
 _RUN_ID = re.compile(r"plan097-[a-z0-9][a-z0-9-]{0,79}\Z")
 _PHASES = {"commissioning", "formal"}
 _BACKENDS = {"local", "cloud"}
-_PRODUCER_BATCH_ID = "plan097-producer-terra-v5"
-_PRODUCER_LEDGER_NAME = "producer-terra-v5-ledger.json"
+_PRODUCER_BATCH_ID = "plan097-producer-terra-v6"
+_PRODUCER_LEDGER_NAME = "producer-terra-v6-ledger.json"
 _PRIOR_PRODUCER_LEDGERS = (
     ("plan097-producer-v1", "producer-ledger.json"),
     ("plan097-producer-terra-v2", "producer-terra-ledger.json"),
     ("plan097-producer-terra-v3", "producer-terra-v3-ledger.json"),
     ("plan097-producer-terra-v4", "producer-terra-v4-ledger.json"),
+    ("plan097-producer-terra-v5", "producer-terra-v5-ledger.json"),
 )
-_PRODUCER_MAX_RUNS = 6
+_PRODUCER_MAX_RUNS = 4
 _PRODUCER_RUN_CAP_USD = Decimal("2.4")
+_CLOUD_LEDGER_NAME = "cloud-scorer-v2-ledger.json"
+_PRIOR_CLOUD_LEDGER_NAME = "cloud-scorer-ledger.json"
+_PRIOR_CLOUD_LEDGER_CAP_RMB = Decimal("12")
 _CONTROLLED_FILTER = "test(process_tests)"
 _OFF_FINDING = "A bounded synthetic migration leaves one report column unresolved."
 _MAX_RECEIPT_BYTES = 1024 * 1024
@@ -408,6 +412,7 @@ def run_backend_step(
             producer_run_id=producer_run_id,
             started=started,
             cloud_proxy=None,
+            prior_cloud_budget=None,
             skip_direct_cases=skip_direct_cases,
         )
 
@@ -423,11 +428,18 @@ def run_backend_step(
         raise CampaignError("cloud_provider_configuration_drift")
     secret_name = provider["api_key_env"]
     secret = load_allowlisted_secret_values(paths.repos, (secret_name,))[secret_name]
+    prior_cloud_budget = _prior_cloud_budget_projection(paths)
+    current_cloud_cap = (
+        contract.budgets.cloud_scorer_rmb
+        - prior_cloud_budget["conservative_charged_rmb"]
+    )
+    if current_cloud_cap < Decimal("1"):
+        raise CampaignError("cloud_budget_derivation_invalid")
     cloud_proxy = CloudBudgetProxy(
         upstream_endpoint=provider["base_url"].rstrip("/") + "/chat/completions",
         upstream_api_key=secret,
-        ledger_path=paths.runtime_root / "budget/cloud-scorer-ledger.json",
-        cap_rmb=contract.budgets.cloud_scorer_rmb,
+        ledger_path=paths.runtime_root / f"budget/{_CLOUD_LEDGER_NAME}",
+        cap_rmb=current_cloud_cap,
         timeout_seconds=90,
     )
     runtime_descriptor = run_root / "cloud-runtime-descriptor.json"
@@ -453,6 +465,7 @@ def run_backend_step(
             producer_run_id=producer_run_id,
             started=started,
             cloud_proxy=cloud_proxy,
+            prior_cloud_budget=prior_cloud_budget,
             skip_direct_cases=skip_direct_cases,
         )
 
@@ -470,6 +483,7 @@ def _finish_backend_step(
     producer_run_id: str,
     started: float,
     cloud_proxy: CloudBudgetProxy | None,
+    prior_cloud_budget: Mapping[str, Any] | None,
     skip_direct_cases: bool,
 ) -> Path:
     backend_contract = contract.backends[backend]
@@ -535,7 +549,15 @@ def _finish_backend_step(
             service.close()
     if service.process.poll() is None:
         raise CampaignError("service_process_not_reaped")
-    cloud_budget = cloud_proxy.snapshot() if cloud_proxy is not None else None
+    cloud_budget = (
+        _combined_cloud_budget_projection(
+            contract,
+            prior_cloud_budget,
+            cloud_proxy.snapshot(),
+        )
+        if cloud_proxy is not None
+        else None
+    )
     if cloud_proxy is not None:
         # Linearization barrier: no paid scorer attempt may start after the
         # body-free receipt says this backend step is complete.
@@ -558,7 +580,7 @@ def _finish_backend_step(
         "direct_cases": direct,
         "direct_branch_coverage": [] if skip_direct_cases else ["pass", "rewrite"],
         "producer": producer,
-        "cloud_scorer_budget": _cloud_budget_projection(cloud_budget),
+        "cloud_scorer_budget": cloud_budget,
         "private_packets_and_traces_removed_before_receipt": True,
         "conclusion_boundary": dict(contract.conclusion_boundary),
     }
@@ -1017,6 +1039,88 @@ def _cloud_budget_projection(value: Mapping[str, Any] | None) -> dict[str, Any] 
             row.get("state") == "unknown_usage_charged"
             for row in attempts
             if isinstance(row, dict)
+        ),
+    }
+
+
+def _prior_cloud_budget_projection(paths: CampaignPaths) -> dict[str, Any]:
+    path = paths.runtime_root / f"budget/{_PRIOR_CLOUD_LEDGER_NAME}"
+    if not path.exists():
+        return {
+            "conservative_charged_rmb": Decimal("0"),
+            "attempt_count": 0,
+            "usage_priced_count": 0,
+            "unknown_usage_count": 0,
+        }
+    value = _read_json(path)
+    if (
+        value.get("schema")
+        != "rondo-publication-critic-plan097-cloud-budget-v1"
+        or value.get("cap_rmb")
+        != _decimal_text(_PRIOR_CLOUD_LEDGER_CAP_RMB)
+    ):
+        raise CampaignError("prior_cloud_budget_invalid")
+    attempts = value.get("attempts")
+    if not isinstance(attempts, list):
+        raise CampaignError("prior_cloud_budget_invalid")
+    charged = Decimal("0")
+    usage_priced = 0
+    unknown = 0
+    for expected, row in enumerate(attempts, start=1):
+        if (
+            not isinstance(row, Mapping)
+            or row.get("attempt") != expected
+            or row.get("state")
+            not in {"usage_priced", "unknown_usage_charged"}
+        ):
+            raise CampaignError("prior_cloud_budget_invalid")
+        try:
+            charge = Decimal(str(row.get("conservative_charge_rmb")))
+        except (ArithmeticError, ValueError):
+            raise CampaignError("prior_cloud_budget_invalid") from None
+        if not charge.is_finite() or charge < 0 or charge > Decimal("1"):
+            raise CampaignError("prior_cloud_budget_invalid")
+        charged += charge
+        usage_priced += row.get("state") == "usage_priced"
+        unknown += row.get("state") == "unknown_usage_charged"
+    if charged > _PRIOR_CLOUD_LEDGER_CAP_RMB:
+        raise CampaignError("prior_cloud_budget_invalid")
+    return {
+        "conservative_charged_rmb": charged,
+        "attempt_count": len(attempts),
+        "usage_priced_count": usage_priced,
+        "unknown_usage_count": unknown,
+    }
+
+
+def _combined_cloud_budget_projection(
+    contract: EngineeringContract,
+    prior: Mapping[str, Any] | None,
+    current: Mapping[str, Any],
+) -> dict[str, Any]:
+    if prior is None:
+        raise CampaignError("prior_cloud_budget_missing")
+    projected = _cloud_budget_projection(current)
+    if projected is None:
+        raise CampaignError("cloud_budget_invalid")
+    prior_charged = prior.get("conservative_charged_rmb")
+    if not isinstance(prior_charged, Decimal):
+        raise CampaignError("prior_cloud_budget_invalid")
+    total = prior_charged + Decimal(projected["conservative_charged_rmb"])
+    if total > contract.budgets.cloud_scorer_rmb:
+        raise CampaignError("cloud_budget_invalid")
+    return {
+        "cap_rmb": _decimal_text(contract.budgets.cloud_scorer_rmb),
+        "conservative_charged_rmb": _decimal_text(total),
+        "remaining_rmb": _decimal_text(
+            contract.budgets.cloud_scorer_rmb - total
+        ),
+        "attempt_count": prior["attempt_count"] + projected["attempt_count"],
+        "usage_priced_count": (
+            prior["usage_priced_count"] + projected["usage_priced_count"]
+        ),
+        "unknown_usage_count": (
+            prior["unknown_usage_count"] + projected["unknown_usage_count"]
         ),
     }
 

@@ -20,8 +20,8 @@
     }
   },
   "budgets": {
-    "cloud_scorer_rmb": "12",
-    "producer_rmb": "18",
+    "cloud_scorer_rmb": "11",
+    "producer_rmb": "19",
     "rmb_per_usd": "7.5",
     "total_rmb": "30"
   },
@@ -31,7 +31,7 @@
     "run_timeout_seconds": 600,
     "usage_envelope": {
       "max_input_tokens": 32000,
-      "max_output_tokens": 4000
+      "max_output_tokens": 2000
     }
   },
   "commissioning_cases": [

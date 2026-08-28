@@ -346,8 +346,8 @@ def _validate_budgets(value: Any) -> BudgetContract:
     conversion = _decimal(budgets["rmb_per_usd"], "currency_conversion_invalid")
     total = _decimal(budgets["total_rmb"], "total_budget_invalid")
     if (
-        cloud != Decimal("12")
-        or producer != Decimal("18")
+        cloud != Decimal("11")
+        or producer != Decimal("19")
         or conversion != Decimal("7.5")
         or total != Decimal("30")
         or cloud + producer != total
@@ -381,7 +381,7 @@ def _validate_producer(value: Any) -> ProducerContract:
         or producer["reasoning_effort"] != "low"
         or run_timeout != 600
         or max_input != 32000
-        or max_output != 4000
+        or max_output != 2000
     ):
         raise EngineeringContractError("producer_identity_invalid")
     return ProducerContract("terra", "low", run_timeout, max_input, max_output)

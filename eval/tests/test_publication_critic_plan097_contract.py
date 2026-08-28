@@ -70,13 +70,13 @@ class EngineeringContractTests(unittest.TestCase):
             contract.backends["cloud"].descriptor,
             CLOUD_DESCRIPTOR,
         )
-        self.assertEqual(contract.budgets.cloud_scorer_rmb, Decimal("12"))
-        self.assertEqual(contract.budgets.producer_rmb, Decimal("18"))
+        self.assertEqual(contract.budgets.cloud_scorer_rmb, Decimal("11"))
+        self.assertEqual(contract.budgets.producer_rmb, Decimal("19"))
         self.assertEqual(contract.budgets.total_rmb, Decimal("30"))
         self.assertEqual(contract.producer.model_alias, "terra")
         self.assertEqual(contract.producer.reasoning_effort, "low")
         self.assertEqual(contract.producer.max_input_tokens, 32000)
-        self.assertEqual(contract.producer.max_output_tokens, 4000)
+        self.assertEqual(contract.producer.max_output_tokens, 2000)
         self.assertEqual(len(contract.commissioning_cases), 3)
         self.assertEqual(
             {case.expected_engineering_branch for case in contract.commissioning_cases},
@@ -106,8 +106,8 @@ class EngineeringContractTests(unittest.TestCase):
 
     def test_requires_exact_decimal_budget_partition(self) -> None:
         mutations = (
-            ("cloud_scorer_rmb", "13"),
-            ("producer_rmb", "17"),
+            ("cloud_scorer_rmb", "12"),
+            ("producer_rmb", "18"),
             ("rmb_per_usd", "7.4"),
             ("total_rmb", "31"),
         )
@@ -178,7 +178,7 @@ class EngineeringContractTests(unittest.TestCase):
                 "max_input_tokens", 31000
             ),
             lambda value: value["producer"]["usage_envelope"].__setitem__(
-                "max_output_tokens", 3000
+                "max_output_tokens", 1000
             ),
         )
         for index, change in enumerate(changes):

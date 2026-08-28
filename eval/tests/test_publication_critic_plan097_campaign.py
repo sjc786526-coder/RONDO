@@ -62,7 +62,6 @@ class Plan097CampaignTests(unittest.TestCase):
                 ],
             }
         )
-
         self.assertEqual(
             projection,
             {
@@ -74,6 +73,61 @@ class Plan097CampaignTests(unittest.TestCase):
                 "unknown_usage_count": 1,
             },
         )
+
+    def test_cloud_budget_roll_forward_includes_prior_attempts_and_charges(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            runtime_root = Path(raw)
+            budget_root = runtime_root / "budget"
+            budget_root.mkdir()
+            (budget_root / campaign._PRIOR_CLOUD_LEDGER_NAME).write_text(
+                json.dumps(
+                    {
+                        "schema": "rondo-publication-critic-plan097-cloud-budget-v1",
+                        "cap_rmb": "12",
+                        "attempts": [
+                            {
+                                "attempt": 1,
+                                "state": "usage_priced",
+                                "usage": {},
+                                "actual_charge_rmb": "0.1",
+                                "conservative_charge_rmb": "0.1",
+                            },
+                            {
+                                "attempt": 2,
+                                "state": "unknown_usage_charged",
+                                "usage": None,
+                                "actual_charge_rmb": None,
+                                "conservative_charge_rmb": "1",
+                            },
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            prior = campaign._prior_cloud_budget_projection(
+                mock.Mock(runtime_root=runtime_root)
+            )
+            contract = campaign.load_contract(Path(__file__).resolve().parents[2])
+
+        projection = campaign._combined_cloud_budget_projection(
+            contract,
+            prior,
+            {
+                "cap_rmb": "9.9",
+                "conservative_charged_rmb": "0.2",
+                "remaining_rmb": "9.7",
+                "attempts": [
+                    {"state": "usage_priced"},
+                ],
+            },
+        )
+
+        self.assertEqual(projection["cap_rmb"], "11")
+        self.assertEqual(projection["conservative_charged_rmb"], "1.3")
+        self.assertEqual(projection["remaining_rmb"], "9.7")
+        self.assertEqual(projection["attempt_count"], 3)
+        self.assertEqual(projection["usage_priced_count"], 2)
+        self.assertEqual(projection["unknown_usage_count"], 1)
 
     def test_local_backend_requires_build_watchdog_scope(self) -> None:
         names = (
@@ -173,8 +227,8 @@ class Plan097CampaignTests(unittest.TestCase):
                 mock.Mock(runtime_root=runtime_root)
             )
 
-        self.assertEqual(projection["spent_usd"], Decimal("1.000000"))
-        self.assertEqual(projection["request_count"], 10)
+        self.assertEqual(projection["spent_usd"], Decimal("1.500000"))
+        self.assertEqual(projection["request_count"], 15)
 
     def test_producer_only_recovery_is_for_commissioning_only(self) -> None:
         campaign._require_backend_mode("commissioning", True)
