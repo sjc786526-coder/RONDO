@@ -2,7 +2,7 @@
 
 最后更新：2026-08-28（方向 3 Publication Critic 三期在 Plan 097 双 backend 工程闭环后正式进入质量重构路线；后续固定串行为
 “任务合同重构 → v8 后继数据改造与有限扩充 → 一次主方案训练 → 模型资格验收与横评”。Plan 098 已为前两个工作包建立同一两阶段
-ExecPlan；工作包一已通过并冻结，工作包二已补齐 accepted implementation 的可执行漂移门并等待最终复验，工作包三仍锁定。Plan 097 的 `M3_D_DUAL_BACKEND_ENGINEERING_PASS / FINAL_REVIEW_ACCEPTED / INTEGRATED / NOT_PUSHED`、Plan 096 的
+ExecPlan；工作包一、二均已通过最终验收并冻结，Plan 098 完成；工作包三成为下一工作包但尚未启动。Plan 097 的 `M3_D_DUAL_BACKEND_ENGINEERING_PASS / FINAL_REVIEW_ACCEPTED / INTEGRATED / NOT_PUSHED`、Plan 096 的
 `CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH`、Plan 095 最终验收、Plan 094 有效负向研究终态和 Plan 093 Linux 全 workspace 正确性基线
 均保持有效；新路线不自动解锁产品质量、默认启用或生产）
 
@@ -24,7 +24,7 @@ ExecPlan；工作包一已通过并冻结，工作包二已补齐 accepted imple
 | 0：量化测评基准 | 既有设施与首次 schema v7 正式 canary 已完成，当前无 active campaign | 保留设施；历史结果见 COMPLETED，新 campaign 须重新立项与授权 |
 | 1：Harness 优化 | **正式收口；当前无 active 工作包** | 当前不继续新增观测或内核/热路径优化；既有实现、设施与历史结果保留。未来可由用户另行决定是否重新立项，本次收口不作永久禁止 |
 | 2：本地审批模型 | **已收口，今后不再开启** | 最终结论为“保留为实验”；不改生产默认，不再规划后续工作包 |
-| 3：RONDO Multi | 第一、二期、第四期已完成；三期 Plan 098 工作包二整改完成待最终复验 | 工程链与双 backend 可替换性 GO；工作包三在 Plan 098 最终通过前锁定。新四包串行路线未完成前不读冻结测试、不改产品默认、不授予质量、产品价值或生产资格 |
+| 3：RONDO Multi | 第一、二期、第四期已完成；三期 Plan 098 已完成，工作包三待立项 | 工程链、双 backend 可替换性、v2 任务合同与 v9 数据前置 GO；工作包三须另立 ExecPlan 和授权。新四包串行路线未完成前不读冻结测试、不改产品默认、不授予质量、产品价值或生产资格 |
 
 方向 3 当前 Linux 正确性基线由 Plan 093 建立：default features、standard local Nextest、checksum-verified V8 的完整 workspace
 为 `14660/14660` passed、0 failure/error/timeout，另有 1/1 setup passed；24 个 skip 不计 passed。正式证据和精确边界见
@@ -53,12 +53,13 @@ ExecPlan；工作包一已通过并冻结，工作包二已补齐 accepted imple
 
 - **工作包一 / Plan 098 阶段一已通过并冻结**：`rondo-publication-critic-task@v2` 以 implementation commit `55342bdb11b09c11b589fd398717f7712fca012c`、内容 SHA-256 `3eb0539b16403ebe20e74ce1b1ea5114d2383c6118f61fef56c9c91426e6a560` 通过第二轮独立复验。
   五项 hard requirement 决定资格，soft preference 不再与资格共享可补偿总分；本包不生成大批数据、不运行真实模型或付费服务。
-- **工作包二 / Plan 098 阶段二已实现、最终验收整改完成待复验**：`publication-critic-v9` 已按冻结 v2 合同形成 216 candidates / 96 pairs，物理
+- **工作包二 / Plan 098 阶段二已通过并冻结**：`publication-critic-v9` 已按冻结 v2 合同形成 216 candidates / 96 pairs，物理
   train/validation/test 为 162/27/27 candidates；三个独立负责人模块均经一一对应的干净盲审以 0 finding 接受。正式 manifest、完整五维监督、
   Boundary/invariance、覆盖、重复/捷径门、train-only smoke 与只暴露 train/显式 validation 的 consumer 已闭合；v8 保持不变，安全投影不足以
   无歧义提供五头标签，故正式直接复用为零。finalizer 已在写出前核对 13 个必要语义组件及组合 SHA，并把 accepted implementation
-  绑定进 design、generation config 与 release identity；权威 Markdown 不变而任一其他核心组件漂移的回归已闭合。复验通过前工作包三继续锁定。
-- **工作包三待新数据通过后启动**：只训练一套冻结主方案，不恢复同一旧目标上的多路线搜索。本地非付费阶段先闭合实现、消费、控制、
+  绑定进 design、generation config 与 release identity；权威 Markdown 不变而任一其他核心组件漂移的回归已闭合。最终整改复验接受
+  implementation `7ee479beb1f34677a54b815faf42284c0d8968e4`，Plan 098 完成。
+- **工作包三是下一工作包、尚未启动**：只训练一套冻结主方案，不恢复同一旧目标上的多路线搜索。本地非付费阶段先闭合实现、消费、控制、
   测评、恢复和资源门；云端付费阶段必须由用户另行明确批准模型、资源、时间、预算、允许的技术重试和资产收口范围。
 - **工作包四待候选冻结后启动**：使用未参与训练和方案选择的冻结集合完成资格与横评，给出最终模型、判定配置和 GO/NO-GO；不得用
   测试集返调任务、数据或 threshold，也不因通过而自动默认启用或进入生产。
