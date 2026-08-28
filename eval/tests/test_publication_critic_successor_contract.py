@@ -17,16 +17,19 @@ from rondo_eval.publication_critic.successor_data import (  # noqa: E402
     PAIR_SCHEMA,
     SuccessorDataError,
     SuccessorRelease,
+    SuccessorSplit,
     validate_candidate_row,
     validate_split,
 )
 from rondo_eval.publication_critic.successor_task import (  # noqa: E402
     DIMENSION_CLASSES,
+    FORBIDDEN_MODEL_INPUT_FIELDS,
     HARD_DIMENSIONS,
     STRUCTURED_OUTPUT_SCHEMA,
     SuccessorTaskError,
     decode_structured_output,
     derive_loss_targets,
+    derive_pair_loss_targets,
     derive_quality,
     derive_verdict,
     evaluate_predictions,
@@ -60,18 +63,38 @@ class PublicationCriticSuccessorContractTests(unittest.TestCase):
             REPO_ROOT
             / "eval/templates/publication-critic/successor-output-schema-v1.json"
         )
-        release_schema = self._load_json(
+        release_contract = self._load_json(
             REPO_ROOT
-            / "eval/templates/publication-critic/successor-release-schema-v1.json"
+            / "eval/templates/publication-critic/successor-release-contract-v1.json"
         )
         self.assertEqual(output_schema["$id"], STRUCTURED_OUTPUT_SCHEMA)
         self.assertEqual(
-            release_schema["authority"],
+            output_schema["x-rondo-runtime-validator"],
+            "eval/rondo_eval/publication_critic/successor_task.py"
+            "#validate_structured_output",
+        )
+        self.assertEqual(
+            output_schema["x-rondo-runtime-decoder"],
+            "eval/rondo_eval/publication_critic/successor_task.py"
+            "#decode_structured_output",
+        )
+        self.assertEqual(release_contract["kind"], "rondo-contract-projection")
+        self.assertNotIn("$schema", release_contract)
+        self.assertEqual(
+            release_contract["authority"],
             "rondo-publication-critic-task@v2",
         )
         self.assertEqual(
-            release_schema["manifest"]["consumer_access"]["test"],
+            release_contract["manifest"]["consumer_access"]["test"],
             "no training or selection entrypoint",
+        )
+        self.assertEqual(
+            projection["input"]["forbidden_model_input_fields"],
+            list(FORBIDDEN_MODEL_INPUT_FIELDS),
+        )
+        self.assertEqual(
+            release_contract["candidate"]["forbidden_model_input_fields"],
+            list(FORBIDDEN_MODEL_INPUT_FIELDS),
         )
 
     def test_non_compensating_gate_na_and_scalar_projection(self) -> None:
@@ -123,6 +146,20 @@ class PublicationCriticSuccessorContractTests(unittest.TestCase):
 
         with self.assertRaisesRegex(SuccessorTaskError, "keys differ"):
             validate_structured_output({"logits": [[0.9]]})
+
+        all_tied = self._structured_output()
+        for head in all_tied["heads"].values():
+            head["logits"] = [[0.0] * len(head["classes"])]
+        tied_labels = decode_structured_output(all_tied)[0]
+        self.assertEqual(set(tied_labels.values()), {"FAIL"})
+        self.assertEqual(derive_verdict(tied_labels), "REWRITE")
+
+        local_tie = self._structured_output()
+        local_tie["heads"]["useful_state_transfer"]["logits"] = [[0.5, 0.5]]
+        local_labels = decode_structured_output(local_tie)[0]
+        self.assertEqual(local_labels["useful_state_transfer"], "FAIL")
+        self.assertEqual(local_labels["conditional_continuity"], "N/A")
+        self.assertEqual(derive_verdict(local_labels), "REWRITE")
 
     def test_boundary_and_soft_only_pairs_require_absolute_closure(self) -> None:
         q_plus = self._labels()
@@ -178,6 +215,40 @@ class PublicationCriticSuccessorContractTests(unittest.TestCase):
         self.assertEqual(targets[1]["derived_gate_label"], "REWRITE")
         self.assertNotIn("global_quality_target", targets[1])
 
+        boundary_right = self._labels()
+        boundary_right["honest_uncertainty"] = "FAIL"
+        pair_targets = derive_pair_loss_targets(
+            [
+                {
+                    "pair_id": "boundary-loss-a",
+                    "kind": "boundary",
+                    "left_labels": self._labels(),
+                    "right_labels": boundary_right,
+                    "target_dimension": "honest_uncertainty",
+                }
+            ]
+        )
+        boundary_target = pair_targets[0]
+        self.assertEqual(boundary_target["left_gate_label"], "PASS")
+        self.assertEqual(boundary_target["right_gate_label"], "REWRITE")
+        self.assertEqual(
+            boundary_target["constraints"]["target_head"],
+            {
+                "dimension": "honest_uncertainty",
+                "left_label": "PASS",
+                "right_label": "FAIL",
+                "objective": "finite_margin",
+            },
+        )
+        self.assertNotIn(
+            "honest_uncertainty",
+            boundary_target["constraints"]["prediction_invariance_dimensions"],
+        )
+        self.assertEqual(
+            len(boundary_target["constraints"]["prediction_invariance_dimensions"]),
+            4,
+        )
+
     def test_evaluation_reports_per_head_applicability_and_gate_errors(self) -> None:
         pass_gold = self._labels(continuity="N/A")
         rewrite_gold = self._labels()
@@ -206,12 +277,14 @@ class PublicationCriticSuccessorContractTests(unittest.TestCase):
         pair_summary = evaluate_pair_predictions(
             [
                 {
+                    "pair_id": "boundary-eval-a",
                     "kind": "boundary",
                     "left_labels": boundary_plus,
                     "right_labels": boundary_minus,
                     "target_dimension": "useful_state_transfer",
                 },
                 {
+                    "pair_id": "invariance-eval-a",
                     "kind": "soft_only_invariance",
                     "left_labels": pass_gold,
                     "right_labels": pass_gold,
@@ -219,20 +292,86 @@ class PublicationCriticSuccessorContractTests(unittest.TestCase):
                 },
             ]
         )
-        self.assertEqual(pair_summary["boundary"], {"total": 1, "closed": 1})
         self.assertEqual(
-            pair_summary["soft_only_invariance"],
+            pair_summary["summary"]["boundary"],
             {"total": 1, "closed": 1},
         )
+        self.assertEqual(
+            pair_summary["summary"]["soft_only_invariance"],
+            {"total": 1, "closed": 1},
+        )
+        self.assertEqual(
+            pair_summary["pairs"],
+            [
+                {
+                    "pair_id": "boundary-eval-a",
+                    "kind": "boundary",
+                    "closed": True,
+                    "reason": None,
+                },
+                {
+                    "pair_id": "invariance-eval-a",
+                    "kind": "soft_only_invariance",
+                    "closed": True,
+                    "reason": None,
+                },
+            ],
+        )
+
+        invalid_right = self._labels()
+        invalid_right["useful_state_transfer"] = "FAIL"
+        invalid_right["scope_and_signal"] = "FAIL"
+        failed_report = evaluate_pair_predictions(
+            [
+                {
+                    "pair_id": "boundary-eval-failed",
+                    "kind": "boundary",
+                    "left_labels": self._labels(),
+                    "right_labels": invalid_right,
+                    "target_dimension": "useful_state_transfer",
+                }
+            ]
+        )
+        self.assertFalse(failed_report["pairs"][0]["closed"])
+        self.assertIn("non-target labels", failed_report["pairs"][0]["reason"])
 
     def test_candidate_schema_uses_visible_applicability_and_rejects_hidden_state(self) -> None:
         completed = self._candidate("complete", self._labels(continuity="N/A"))
         validate_candidate_row(completed, repo_root=REPO_ROOT)
 
         broken = copy.deepcopy(completed)
-        broken["continuity_label_basis"] = "model_visible_unfinished_or_not_closed"
-        with self.assertRaisesRegex(SuccessorDataError, "continuity_label_basis"):
+        broken["continuity_label_basis"][
+            "type"
+        ] = "model_visible_unfinished_or_not_closed"
+        with self.assertRaisesRegex(SuccessorDataError, "basis.type"):
             validate_candidate_row(broken, repo_root=REPO_ROOT)
+
+        unfinished = self._candidate(
+            "unfinished",
+            self._labels(),
+            summary="Work is still in progress; the integration check is next.",
+        )
+        validate_candidate_row(unfinished, repo_root=REPO_ROOT)
+
+        conflict_labels = self._labels()
+        conflict_labels["internal_consistency"] = "FAIL"
+        conflicted = self._candidate(
+            "conflicted",
+            conflict_labels,
+            summary="Work is complete, but investigation is still in progress.",
+        )
+        validate_candidate_row(conflicted, repo_root=REPO_ROOT)
+        self.assertEqual(derive_verdict(conflict_labels), "REWRITE")
+
+        absent_quote = copy.deepcopy(completed)
+        absent_quote["continuity_label_basis"]["quote"] = "not in the candidate"
+        with self.assertRaisesRegex(SuccessorDataError, "quote is absent"):
+            validate_candidate_row(absent_quote, repo_root=REPO_ROOT)
+
+        wrong_field = copy.deepcopy(completed)
+        wrong_field["continuity_label_basis"]["field"] = "candidate.handoff"
+        with self.assertRaisesRegex(SuccessorDataError, "quote is absent"):
+            validate_candidate_row(wrong_field, repo_root=REPO_ROOT)
 
         old_style = copy.deepcopy(completed)
         old_style["completion_state"] = "completed"
@@ -243,6 +382,32 @@ class PublicationCriticSuccessorContractTests(unittest.TestCase):
         scalar_packet["packet"]["qualification"]["rubric"]["revision"] = "v1"
         with self.assertRaisesRegex(SuccessorDataError, "rubric.revision"):
             validate_candidate_row(scalar_packet, repo_root=REPO_ROOT)
+
+    def test_rendered_rubric_defines_heads_without_sidecar_values(self) -> None:
+        row = self._candidate(
+            "candidate-id-supervision-marker",
+            self._labels(continuity="N/A"),
+            group_id="group-id-supervision-marker",
+        )
+        rubric = (
+            REPO_ROOT / "eval/templates/publication-critic/qualification-rubric-v2.md"
+        ).read_text(encoding="utf-8")
+        split = SuccessorSplit(name="train", candidates=(row,), pairs=(), rubric=rubric)
+        messages = split.model_inputs()[0]["messages"]
+        rendered = "\n".join(message["content"] for message in messages)
+        for required in (
+            "`useful_state_transfer`: `PASS` when",
+            "`honest_uncertainty`: `PASS` when",
+            "`conditional_continuity`: `N/A` only when",
+            "`scope_and_signal`: `PASS` when",
+            "`internal_consistency`: `PASS` when",
+            "one applicable `FAIL` requires `REWRITE`",
+            "soft quality cannot compensate",
+        ):
+            self.assertIn(required, rendered)
+        self.assertNotIn("candidate-id-supervision-marker", rendered)
+        self.assertNotIn("group-id-supervision-marker", rendered)
+        self.assertNotIn("model_visible_complete_claim", rendered)
 
     def test_train_consumer_never_opens_validation_or_test_bytes(self) -> None:
         accepted_commit = "a" * 40
@@ -336,6 +501,51 @@ class PublicationCriticSuccessorContractTests(unittest.TestCase):
         with self.assertRaisesRegex(SuccessorDataError, "crosses group"):
             validate_split("train", [left, right], [broken], repo_root=REPO_ROOT)
 
+        soft_labels = self._labels(continuity="N/A")
+        soft_left = self._candidate(
+            "soft-left",
+            soft_labels,
+            group_id="group-soft",
+            summary="The focused implementation is complete; targeted checks pass.",
+        )
+        soft_right = self._candidate(
+            "soft-right",
+            copy.deepcopy(soft_labels),
+            group_id="group-soft",
+            summary="The focused implementation is fully complete; targeted checks pass.",
+        )
+        soft_pair = {
+            "schema": PAIR_SCHEMA,
+            "pair_id": "soft-only-a",
+            "group_id": "group-soft",
+            "kind": "soft_only_invariance",
+            "left_candidate_id": "soft-left",
+            "right_candidate_id": "soft-right",
+            "target_dimension": None,
+            "soft_change": "Adds a harmless emphasis word without changing hard meaning.",
+        }
+        self.assertNotEqual(
+            soft_left["packet"]["candidate"],
+            soft_right["packet"]["candidate"],
+        )
+        self.assertEqual(derive_verdict(soft_left["labels"]), "PASS")
+        self.assertEqual(derive_verdict(soft_right["labels"]), "PASS")
+        validate_split(
+            "train",
+            [soft_left, soft_right],
+            [soft_pair],
+            repo_root=REPO_ROOT,
+        )
+        drifted = copy.deepcopy(soft_right)
+        drifted["labels"]["scope_and_signal"] = "FAIL"
+        with self.assertRaisesRegex(SuccessorDataError, "labels must be identical"):
+            validate_split(
+                "train",
+                [soft_left, drifted],
+                [soft_pair],
+                repo_root=REPO_ROOT,
+            )
+
     @staticmethod
     def _labels(*, continuity: str = "PASS") -> dict[str, str]:
         return {
@@ -382,17 +592,22 @@ class PublicationCriticSuccessorContractTests(unittest.TestCase):
         group_id: str = "group-a",
         summary: str | None = None,
     ) -> dict:
+        packet = self._packet(summary=summary)
         return {
             "schema": CANDIDATE_SCHEMA,
             "candidate_id": candidate_id,
             "group_id": group_id,
-            "packet": self._packet(summary=summary),
+            "packet": packet,
             "labels": labels,
-            "continuity_label_basis": (
-                "model_visible_complete_claim"
-                if labels["conditional_continuity"] == "N/A"
-                else "model_visible_unfinished_or_not_closed"
-            ),
+            "continuity_label_basis": {
+                "type": (
+                    "model_visible_complete_claim"
+                    if labels["conditional_continuity"] == "N/A"
+                    else "model_visible_unfinished_or_not_closed"
+                ),
+                "field": "candidate.summary",
+                "quote": packet["candidate"]["summary"],
+            },
         }
 
     @staticmethod

@@ -1,6 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "rondo-publication-critic-structured-output@v1",
+  "x-rondo-runtime-validator": "eval/rondo_eval/publication_critic/successor_task.py#validate_structured_output",
+  "x-rondo-runtime-decoder": "eval/rondo_eval/publication_critic/successor_task.py#decode_structured_output",
+  "x-rondo-runtime-constraints": [
+    "each head logits row count equals batch_size",
+    "all logits are finite",
+    "each head tie decodes fail-closed to FAIL"
+  ],
   "type": "object",
   "additionalProperties": false,
   "required": ["schema", "backbone_forward_count", "batch_size", "heads"],

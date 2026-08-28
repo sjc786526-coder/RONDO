@@ -6,4 +6,6 @@ The successor renderer accepts only a strictly validated `rondo-publication-pack
 
 Continuity applicability is inferred only from model-visible candidate text under the authority contract. The renderer has no argument for labels, completion state, public state, candidate brief, defect, pair, split, source, generator, reviewer, or rationale. Those fields never enter model input.
 
+The data-side continuity basis is not a renderer input. It records a bounded exact quote from `candidate.summary` or `candidate.handoff` so validation and blind review can trace applicability to text the model actually receives; its type and quote are never rendered.
+
 Candidate text is never truncated. Overflow may remove whole oldest public continuity items and must record the render-only omission count. Mandatory-content overflow is a typed input failure.

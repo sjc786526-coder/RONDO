@@ -3,7 +3,7 @@
 最后更新：2026-08-28 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
 状态：**第一期、第二期、第四期已完成；Publication Critic 三期 Plan 097 已完成并闭合双 backend 工程 E2E 与可替换接缝，现正式进入
 质量重构路线。后续严格串行为“任务合同重构 → v8 后继数据改造与有限扩充 → 一次主方案训练 → 模型资格验收与横评”。Plan 098 已把
-前两个工作包规划为严格串行的两个阶段；工作包一首轮审查未通过、当前待整改复验，工作包二由阶段一审查通过硬锁。Plan 097 的
+前两个工作包规划为严格串行的两个阶段；工作包一首轮 findings 已整改、当前待第二轮复验，工作包二由阶段一审查通过硬锁。Plan 097 的
 `M3_D_DUAL_BACKEND_ENGINEERING_PASS / FINAL_REVIEW_ACCEPTED / INTEGRATED / NOT_PUSHED`、Plan 096 的
 `CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH / FINAL_REVIEW_ACCEPTED / INTEGRATED / PUSHED`、Plan 094 的有效负向终态和 Plan 095 的
 最终验收均保持有效；新路线完成资格前，本地/云端质量、产品价值、Publication Critic 默认与生产启用继续锁定**
@@ -134,7 +134,7 @@ M3-B1c 正式分阶段训练与工件回收          │
                        ↓
         Plan 097 M3-D 双 backend 工程前置闭环（已完成并通过最终独立验收）
                        ↓
-        工作包一：任务合同重构（Plan 098 阶段一；当前待整改复验）
+        工作包一：任务合同重构（Plan 098 阶段一；当前待第二轮复验）
                        ↓
         工作包二：v8 后继数据改造与有限扩充（Plan 098 阶段二；锁定）
                        ↓
@@ -155,7 +155,7 @@ Plan 098，但仍是两个严格串行、分别验收的任务阶段；工作包
 
 ### 当前后续路线：三期质量重构
 
-#### 工作包一：任务合同重构（Plan 098 阶段一；当前待整改复验）
+#### 工作包一：任务合同重构（Plan 098 阶段一；当前待第二轮复验）
 
 **目标**：把上文“冻结任务设计方向”完整落实为单一权威训练任务，使模型内部五头判断、同向损失、非补偿聚合、模型可见事实与产品
 `PASS/REWRITE` 语义一致，并为后续数据和训练提供稳定接口；执行者不得把五头 gate 降格为自由单总分或重新引入 hard/soft 混合排序。
@@ -172,9 +172,9 @@ dimension 如何表达和聚合、Binary、Boundary、Within-PASS 各自承担�
 产品启用和生产动作均不包含。
 
 **当前实现**：唯一权威训练语义已落在 `rondo-publication-critic-task@v2`，五头结构化输出、all-hard-pass、派生 min scalar、物理 split
-consumer 与历史隔离主方向已闭合；首轮审查仍发现正式 rubric、continuity applicability basis、logits tie、Boundary loss target 及轻量
-schema/evaluation parity 缺口。执行者须在工作包一内整改并复验；冻结 v8、旧 scalar validator/render 与产品 typed seam 继续保持不变，
-不能据当前提交启动工作包二。
+consumer 与历史隔离主方向已闭合；首轮审查指出的正式 rubric、quoted continuity basis、tie fail-closed、Boundary 完整 target、轻量
+projection parity 和逐 pair evaluation 已整改并通过定向回归，当前待第二轮复验。冻结 v8、旧 scalar validator/render 与产品 typed seam
+继续保持不变；审查接受前不能启动工作包二。
 
 #### 工作包二：v8 后继数据改造与有限扩充（Plan 098 阶段二；锁定）
 

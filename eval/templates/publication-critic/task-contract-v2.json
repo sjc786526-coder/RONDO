@@ -13,14 +13,19 @@
     "render_contract": "eval/templates/publication-critic/render-contract-v4.json",
     "render_implementation": "eval/rondo_eval/publication_critic/render.py",
     "applicability_source": "model_visible_candidate_only",
-    "forbidden_label_sources": [
+    "forbidden_model_input_fields": [
       "completion_state",
       "public_state",
       "candidate_brief",
       "hidden_generation_intent",
       "split",
+      "labels",
       "defects",
-      "reviewer"
+      "source",
+      "generator",
+      "reviewer",
+      "pair_direction",
+      "rationale"
     ]
   },
   "dimensions": {
@@ -44,7 +49,8 @@
     "backbone_forward_count": 1,
     "head_count": 5,
     "global_quality_head": null,
-    "compatibility_scalar_is_derived": true
+    "compatibility_scalar_is_derived": true,
+    "decode_tie_policy": "fail_closed_to_FAIL_per_head"
   },
   "aggregation": {
     "discrete": "all_applicable_heads_pass",
@@ -57,7 +63,7 @@
     "formula": "L_dim + lambda_gate L_gate + lambda_boundary L_boundary + lambda_inv L_invariance",
     "primary": "complete_per_dimension_absolute_classification",
     "gate": "derived_conjunction_only",
-    "boundary": "target_head_finite_margin_with_absolute_pass_rewrite_endpoints_and_non_target_invariance",
+    "boundary": "finite_target_margin_plus_absolute_endpoint_gate_and_non_target_prediction_invariance",
     "invariance": "both_endpoints_pass_with_identical_hard_labels_and_gate",
     "soft_preference_in_qualification": false
   },

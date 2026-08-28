@@ -23,6 +23,20 @@ HARD_DIMENSIONS = (
     "internal_consistency",
 )
 CONDITIONAL_CONTINUITY = "conditional_continuity"
+FORBIDDEN_MODEL_INPUT_FIELDS = (
+    "completion_state",
+    "public_state",
+    "candidate_brief",
+    "hidden_generation_intent",
+    "split",
+    "labels",
+    "defects",
+    "source",
+    "generator",
+    "reviewer",
+    "pair_direction",
+    "rationale",
+)
 DIMENSION_CLASSES = MappingProxyType(
     {
         **{dimension: ("PASS", "FAIL") for dimension in HARD_DIMENSIONS},
@@ -92,7 +106,7 @@ def _validate_task_projection(value: Any) -> None:
             "render_contract",
             "render_implementation",
             "applicability_source",
-            "forbidden_label_sources",
+            "forbidden_model_input_fields",
         },
         "task projection.input",
     )
@@ -131,16 +145,10 @@ def _validate_task_projection(value: Any) -> None:
         "model_visible_candidate_only",
         "task projection.input.applicability_source",
     )
-    if task_input["forbidden_label_sources"] != [
-        "completion_state",
-        "public_state",
-        "candidate_brief",
-        "hidden_generation_intent",
-        "split",
-        "defects",
-        "reviewer",
-    ]:
-        raise SuccessorTaskError("task projection forbidden label sources differ")
+    if task_input["forbidden_model_input_fields"] != list(
+        FORBIDDEN_MODEL_INPUT_FIELDS
+    ):
+        raise SuccessorTaskError("task projection forbidden model input fields differ")
 
     dimensions = _object(obj["dimensions"], "task projection.dimensions")
     _exact_keys(dimensions, {"order", "classes"}, "task projection.dimensions")
@@ -161,6 +169,7 @@ def _validate_task_projection(value: Any) -> None:
             "head_count",
             "global_quality_head",
             "compatibility_scalar_is_derived",
+            "decode_tie_policy",
         },
         "task projection.output",
     )
@@ -176,6 +185,11 @@ def _validate_task_projection(value: Any) -> None:
         output["compatibility_scalar_is_derived"],
         True,
         "task projection.output.compatibility_scalar_is_derived",
+    )
+    _literal(
+        output["decode_tie_policy"],
+        "fail_closed_to_FAIL_per_head",
+        "task projection.output.decode_tie_policy",
     )
 
     aggregation = _object(obj["aggregation"], "task projection.aggregation")
@@ -227,7 +241,7 @@ def _validate_task_projection(value: Any) -> None:
     _literal(loss.get("gate"), "derived_conjunction_only", "task projection.loss.gate")
     _literal(
         loss.get("boundary"),
-        "target_head_finite_margin_with_absolute_pass_rewrite_endpoints_and_non_target_invariance",
+        "finite_target_margin_plus_absolute_endpoint_gate_and_non_target_prediction_invariance",
         "task projection.loss.boundary",
     )
     _literal(
@@ -374,10 +388,84 @@ def decode_structured_output(value: Mapping[str, Any]) -> tuple[dict[str, str], 
         labels: dict[str, str] = {}
         for dimension in HARD_DIMENSIONS:
             logits = value["heads"][dimension]["logits"][index]
-            winner = max(range(len(logits)), key=logits.__getitem__)
-            labels[dimension] = DIMENSION_CLASSES[dimension][winner]
+            maximum = max(logits)
+            winners = [position for position, logit in enumerate(logits) if logit == maximum]
+            labels[dimension] = (
+                DIMENSION_CLASSES[dimension][winners[0]]
+                if len(winners) == 1
+                else "FAIL"
+            )
         decoded.append(labels)
     return tuple(decoded)
+
+
+def derive_pair_loss_targets(
+    rows: Sequence[Mapping[str, Any]],
+) -> tuple[dict[str, Any], ...]:
+    """Build complete auxiliary-loss targets after absolute pair validation."""
+
+    if not rows:
+        raise SuccessorTaskError("pair loss supervision requires at least one pair")
+    targets: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for index, value in enumerate(rows):
+        row = _object(value, f"pair loss[{index}]")
+        _exact_keys(
+            row,
+            {
+                "pair_id",
+                "kind",
+                "left_labels",
+                "right_labels",
+                "target_dimension",
+            },
+            f"pair loss[{index}]",
+        )
+        pair_id = _pair_id(row["pair_id"], f"pair loss[{index}].pair_id")
+        if pair_id in seen:
+            raise SuccessorTaskError(f"duplicate pair loss id: {pair_id}")
+        seen.add(pair_id)
+        left = validate_labels(row["left_labels"])
+        right = validate_labels(row["right_labels"])
+        validate_pair_labels(
+            row["kind"],
+            left,
+            right,
+            target_dimension=row["target_dimension"],
+        )
+        if row["kind"] == "boundary":
+            constraints = {
+                "target_head": {
+                    "dimension": row["target_dimension"],
+                    "left_label": "PASS",
+                    "right_label": "FAIL",
+                    "objective": "finite_margin",
+                },
+                "absolute_gate": {"left": "PASS", "right": "REWRITE"},
+                "prediction_invariance_dimensions": tuple(
+                    dimension
+                    for dimension in HARD_DIMENSIONS
+                    if dimension != row["target_dimension"]
+                ),
+            }
+        else:
+            constraints = {
+                "target_head": None,
+                "absolute_gate": {"left": "PASS", "right": "PASS"},
+                "prediction_invariance_dimensions": HARD_DIMENSIONS,
+            }
+        targets.append(
+            {
+                "pair_id": pair_id,
+                "kind": row["kind"],
+                "left_dimension_labels": left,
+                "right_dimension_labels": right,
+                "left_gate_label": derive_verdict(left),
+                "right_gate_label": derive_verdict(right),
+                "constraints": constraints,
+            }
+        )
+    return tuple(targets)
 
 
 def validate_pair_labels(
@@ -467,17 +555,29 @@ def evaluate_predictions(
 def evaluate_pair_predictions(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     if not rows:
         raise SuccessorTaskError("pair evaluation requires at least one pair")
-    summary = {
+    summary: dict[str, dict[str, int]] = {
         "boundary": {"total": 0, "closed": 0},
         "soft_only_invariance": {"total": 0, "closed": 0},
     }
+    pair_results: list[dict[str, Any]] = []
+    seen: set[str] = set()
     for index, value in enumerate(rows):
         row = _object(value, f"pair evaluation[{index}]")
         _exact_keys(
             row,
-            {"kind", "left_labels", "right_labels", "target_dimension"},
+            {
+                "pair_id",
+                "kind",
+                "left_labels",
+                "right_labels",
+                "target_dimension",
+            },
             f"pair evaluation[{index}]",
         )
+        pair_id = _pair_id(row["pair_id"], f"pair evaluation[{index}].pair_id")
+        if pair_id in seen:
+            raise SuccessorTaskError(f"duplicate pair evaluation id: {pair_id}")
+        seen.add(pair_id)
         kind = row["kind"]
         if kind not in summary:
             raise SuccessorTaskError("pair evaluation kind is invalid")
@@ -489,10 +589,26 @@ def evaluate_pair_predictions(rows: Sequence[Mapping[str, Any]]) -> dict[str, An
                 row["right_labels"],
                 target_dimension=row["target_dimension"],
             )
-        except SuccessorTaskError:
+        except SuccessorTaskError as exc:
+            pair_results.append(
+                {
+                    "pair_id": pair_id,
+                    "kind": kind,
+                    "closed": False,
+                    "reason": str(exc),
+                }
+            )
             continue
         summary[kind]["closed"] += 1
-    return summary
+        pair_results.append(
+            {
+                "pair_id": pair_id,
+                "kind": kind,
+                "closed": True,
+                "reason": None,
+            }
+        )
+    return {"summary": summary, "pairs": pair_results}
 
 
 def _object(value: Any, where: str) -> Mapping[str, Any]:
@@ -509,3 +625,9 @@ def _exact_keys(value: Mapping[str, Any], expected: set[str], where: str) -> Non
 def _literal(value: Any, expected: Any, where: str) -> None:
     if value != expected or isinstance(value, bool) != isinstance(expected, bool):
         raise SuccessorTaskError(f"{where} differs from the contract")
+
+
+def _pair_id(value: Any, where: str) -> str:
+    if not isinstance(value, str) or not value.strip() or len(value) > 128:
+        raise SuccessorTaskError(f"{where} must be a bounded non-empty string")
+    return value

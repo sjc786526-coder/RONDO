@@ -5,7 +5,7 @@
 [`rondo-multi-publication-critic-product-contract.md`](rondo-multi-publication-critic-product-contract.md)
 负责；本文只把该稳定产品边界投影成可训练、可评价的五头 hard-decision 任务。
 
-`eval/templates/publication-critic/` 下的 v2 rubric、v3 input contract、v4 render contract、task/output/release schema
+`eval/templates/publication-critic/` 下的 v2 rubric、v3 input contract、v4 render contract、task/output schema 与 release projection
 以及 `eval/rondo_eval/publication_critic/successor_*.py` 都只是本文的机器投影或实现。发生冲突时以本文为准。
 冻结的 v8、旧 `[B, 1]` scalar objective、历史结果和 cloud/local engineering fixture 不实现本文，也不得冒充
 后继任务。
@@ -20,9 +20,9 @@
 - existing Event 的有界 continuity envelope，或 new Event 的 `not_applicable` continuity；
 - Evidence V1 的 body-free policy、coverage、freshness 与 omission 状态。
 
-输入继续排除 private transcript/reasoning、全 Team State、raw evidence、Fact 正文、密钥以及 split、label、
-pair direction、defect、source、generator、reviewer 等监督或生成元数据。renderer 只接受 packet 与固定 rubric，
-不接受 supervision 参数。
+输入继续排除 private transcript/reasoning、全 Team State、raw evidence、Fact 正文、密钥以及 `completion_state`、
+`public_state`、candidate brief、hidden generation intent、split、labels、defects、source、generator、reviewer、
+pair direction、rationale 等监督或生成元数据。renderer 只接受 packet 与固定 rubric，不接受 supervision 参数。
 
 ### conditional continuity 的适用性
 
@@ -36,6 +36,12 @@ pair direction、defect、source、generator、reviewer 等监督或生成元数
 因此 successor supervision 不接受旧 `completion_state`、scenario `public_state`、candidate brief 或隐藏生成意图
 作为标签事实。`N/A` 的审查依据必须能逐字指回正式 packet。旧 packet 中名为 `continuity` 的字段是 prior
 publication context，不是完成状态标签，也不能自动决定该 head 是否适用。
+
+数据侧的 `continuity_label_basis` 必须记录 `type + candidate.summary/candidate.handoff + bounded exact quote`，
+validator 机械确认引用确实存在于该模型可见字段、且 basis type 与 `N/A`/适用标签一致；quote 本身不进入模型输入。
+引用是否足以表达完成、未完成或未闭合由数据盲审负责，不用关键词 NLP 或隐藏事实替代。若 candidate 的完成声明与同一
+packet 可见内容冲突，continuity 继续适用并至少令 `internal_consistency=FAIL`；若它对可见限制发生确定性越级，还令
+`honest_uncertainty=FAIL`。只有私有/隐藏世界才知道的真假不进入本任务，不能改变 applicability。
 
 ## 2. 五个 hard decision heads
 
@@ -52,6 +58,9 @@ publication context，不是完成状态标签，也不能自动决定该 head �
 四个二分类 heads 永远适用，不能输出 `N/A`、`UNKNOWN` 或 `ABSTAIN`。模型输出合同不得加入自由
 global-quality、第六资格 head 或第二次 backbone forward。结构化 logits 的合法宽度是四个二分类 head 各 2，
 `conditional_continuity` 3；旧 scalar `[B, 1]` 不是合法 successor 输出。
+
+逐 head 解码只接受唯一最大 logit；最大值平局（包括全零）一律把该 head 解码为 `FAIL`。该 fail-closed 规则不创造
+新标签或第六 head，也不限制后续训练期连续近似的具体实现。
 
 ## 3. 确定性 gate 与投影
 
@@ -89,8 +98,9 @@ L = L_dim + lambda_gate L_gate + lambda_boundary L_boundary + lambda_inv L_invar
 - `L_gate` 只监督由五维标签和五头输出派生的合取 gate，不创建第六 head。训练期连续近似可以使用已标注的
   applicability mask，但正式推理必须回到 §3 的离散规则。
 - `L_boundary` 只接收通过严格 pair validator 的 Boundary：`Q+` 的全部适用 heads 为 `PASS`，`Q-` 的
-  target head 为 `FAIL`，非目标 heads（含 continuity `N/A`）完全相同，因而同时满足
-  `Q+ PASS && Q- REWRITE`。它只推动 target head 达到有限 margin；达到后不继续无界扩大。
+  target head 为 `FAIL`，非目标 heads（含 continuity `N/A`）绝对标签完全相同。其辅助约束同时包含 target head
+  的有限 margin、两端 `Q+ PASS && Q- REWRITE` 的绝对 gate 约束，以及全部非目标 head 的预测不变性；达到有限
+  margin 后不继续无界扩大。它不取代两端各自完整的 `L_dim`。
 - `L_invariance` 只接收 soft-only / Within-PASS pair：两端均为 typed `PASS`，五维标签和 applicability
   完全相同；它约束五头与派生 gate 不随 soft 变化漂移，不训练 preferred PASS 取得更高资格分。
 
@@ -99,7 +109,7 @@ preference 完全退出资格 loss、threshold、typed verdict 与 PASS 内资�
 
 ## 5. 数据与 consumer 接口
 
-successor candidate 必须同时携带：严格 `PublicationPacket@v1`、完整五维标签、由模型可见文本支持的
+successor candidate 必须同时携带：严格 `PublicationPacket@v1`、完整五维标签、由模型可见字段和 exact quote 支持的
 continuity label basis，以及关系闭包用 group identity。监督与 packet 物理分离于 renderer API；任何 row 都不得用
 隐藏完成状态、defect 列表或 reviewer rationale 补足模型看不到的判断事实。
 
@@ -107,8 +117,13 @@ Boundary 与 invariance pair 必须满足 §4 的绝对端点条件。candidate/
 各文件的相对路径、SHA-256 与行数。默认 train consumer 只打开 train candidate/pair bytes；validation 只有显式独立
 入口；本任务不提供面向训练或方案选择的 test loader。新 release 必须自包含，不要求调用者跨目录拼 v8 或旧 validation。
 
-后继 release schema、精确 revision、模块、数量、配比和 split 在 Plan 098 工作包二由本合同导出并冻结；本文不预先
+后继 release contract、精确 revision、模块、数量、配比和 split 在 Plan 098 工作包二由本合同导出并冻结；本文不预先
 选择 revision 或生成正式数据。
+
+release JSON 是明确标注的 contract projection，不冒充通用 JSON Schema；`successor_data.py` 是跨字段、文件哈希、
+endpoint 关系和物理读取约束的权威 runtime validator。结构化 output 使用标准 JSON Schema 固定局部 shape；
+`successor_task.py#validate_structured_output` 权威执行 batch-size 相等与 finite logits，随后
+`successor_task.py#decode_structured_output` 执行逐 head tie fail-closed。
 
 ## 6. 评价语义
 

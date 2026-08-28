@@ -113,6 +113,11 @@ Critic 只判断 publication 用词是否诚实保留 `observed/inferred/suspect
 
 这些要求只评价 packet 呈现的内容。Critic 不因无法看到 Producer 私有上下文而猜测“还有遗漏发现”，也不独立调查世界真相。
 
+产品意图中的“工作确实未完成”在 Critic 的受限观察面操作化为 candidate 是否清楚且内部一致地声明完成：清楚完成时
+continuation 不适用；未完成、未明确闭合或可见陈述冲突时仍适用。完成声明若与同一 packet 的可见内容冲突，至少违反
+“packet 内部一致”，对可见限制发生确定性越级时也违反“诚实保留不确定性”。只有私有或隐藏事实才能证明的真假不进入
+Critic packet，也不能通过隐藏 completion label 改变本次判定。
+
 ### 3.2 Soft preferences：只优化 `PASS` 区
 
 当 hard requirements 已全部满足且核心语义等价时，可以偏好更直接、少重复、信息密度更高的表达。这些偏好不改变

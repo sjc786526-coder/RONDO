@@ -179,13 +179,33 @@ def validate_candidate_row(
     except PublicationCriticContractError as exc:
         raise SuccessorDataError(str(exc)) from exc
     labels = validate_labels(_object(candidate["labels"], "candidate row.labels"))
-    basis = candidate["continuity_label_basis"]
-    expected_basis = (
+    basis = _object(candidate["continuity_label_basis"], "candidate row.continuity_label_basis")
+    _exact_keys(
+        basis,
+        {"type", "field", "quote"},
+        "candidate row.continuity_label_basis",
+    )
+    expected_type = (
         "model_visible_complete_claim"
         if labels["conditional_continuity"] == "N/A"
         else "model_visible_unfinished_or_not_closed"
     )
-    _literal(basis, expected_basis, "candidate row.continuity_label_basis")
+    _literal(basis["type"], expected_type, "candidate row.continuity_label_basis.type")
+    field = basis["field"]
+    if field not in {"candidate.summary", "candidate.handoff"}:
+        raise SuccessorDataError("continuity basis field is not model-visible candidate text")
+    candidate_field = field.removeprefix("candidate.")
+    visible_text = packet["candidate"][candidate_field]
+    quote = basis["quote"]
+    if (
+        not isinstance(quote, str)
+        or not quote.strip()
+        or quote != quote.strip()
+        or len(quote) > 240
+    ):
+        raise SuccessorDataError("continuity basis quote must be bounded canonical text")
+    if not isinstance(visible_text, str) or quote not in visible_text:
+        raise SuccessorDataError("continuity basis quote is absent from its model-visible field")
 
 
 def validate_pair_row(row: Mapping[str, Any]) -> None:
