@@ -41,6 +41,25 @@ MODULE_CONTRACT_PATH = TEMPLATE_ROOT / "successor-module-contract-v1.json"
 DATASET_REVISION = "publication-critic-v9"
 ACCEPTED_TASK_SHA256 = "3eb0539b16403ebe20e74ce1b1ea5114d2383c6118f61fef56c9c91426e6a560"
 ACCEPTED_IMPLEMENTATION_COMMIT = "55342bdb11b09c11b589fd398717f7712fca012c"
+ACCEPTED_IMPLEMENTATION_ALGORITHM = "sha256-canonical-component-list-v1"
+ACCEPTED_IMPLEMENTATION_COMPONENT_PATHS = (
+    "doc/rondo-multi-publication-critic-task-contract-v2.md",
+    "doc/rondo-multi-publication-critic-product-contract.md",
+    "eval/rondo_eval/publication_critic/contract.py",
+    "eval/rondo_eval/publication_critic/render.py",
+    "eval/rondo_eval/publication_critic/successor_task.py",
+    "eval/rondo_eval/publication_critic/successor_data.py",
+    "eval/templates/publication-critic/product-packet-limits-v1.json",
+    "eval/templates/publication-critic/task-contract-v2.json",
+    "eval/templates/publication-critic/input-contract-v3.md",
+    "eval/templates/publication-critic/qualification-rubric-v2.md",
+    "eval/templates/publication-critic/render-contract-v4.json",
+    "eval/templates/publication-critic/successor-output-schema-v1.json",
+    "eval/templates/publication-critic/successor-release-contract-v1.json",
+)
+ACCEPTED_IMPLEMENTATION_BUNDLE_SHA256 = (
+    "b0124de561f52fb464c223989d003af1e9f2a8a24eccd9ca349a4d769e3488d5"
+)
 ACCEPTED_TASK = {
     "name": TASK_NAME,
     "version": TASK_VERSION,
@@ -286,6 +305,9 @@ def finalize_successor_release(
             "schema": "rondo-publication-critic-successor-release-identity@v1",
             "dataset_revision": DATASET_REVISION,
             "accepted_task": ACCEPTED_TASK,
+            "accepted_implementation": copy.deepcopy(
+                active.design["accepted_implementation"]
+            ),
             "design_lock_sha256": active.design_sha256,
             "generation_config_sha256": active.config_sha256,
             "manifest_sha256": sha256_file(temporary / "manifest.json"),
@@ -328,6 +350,7 @@ def _validate_design(value: Mapping[str, Any], repo_root: Path) -> None:
             "schema",
             "dataset_revision",
             "accepted_task",
+            "accepted_implementation",
             "source_policy",
             "module_contract",
             "allowed_candidate_tags",
@@ -346,6 +369,7 @@ def _validate_design(value: Mapping[str, Any], repo_root: Path) -> None:
     )
     _literal(value["dataset_revision"], DATASET_REVISION, "successor data revision")
     _validate_accepted_task(value["accepted_task"], repo_root)
+    _validate_accepted_implementation(value["accepted_implementation"], repo_root)
     source_policy = _object(value["source_policy"], "source policy")
     _exact_keys(
         source_policy,
@@ -493,6 +517,7 @@ def _validate_config(
             "schema",
             "dataset_revision",
             "accepted_task",
+            "accepted_implementation",
             "design_lock",
             "module_contract",
             "ignored_namespace",
@@ -510,6 +535,14 @@ def _validate_config(
     )
     _literal(value["dataset_revision"], DATASET_REVISION, "generation revision")
     _literal(value["accepted_task"], ACCEPTED_TASK, "generation accepted task")
+    _literal(
+        value["accepted_implementation"],
+        {
+            "commit": design["accepted_implementation"]["commit"],
+            "bundle_sha256": design["accepted_implementation"]["bundle_sha256"],
+        },
+        "generation accepted implementation",
+    )
     design_binding = _object(value["design_lock"], "generation design binding")
     _exact_keys(design_binding, {"path", "sha256"}, "generation design binding")
     _literal(design_binding["path"], DESIGN_PATH.as_posix(), "generation design path")
@@ -1110,6 +1143,8 @@ def _data_card(coverage: Mapping[str, Any]) -> str:
         "`rondo-publication-critic-task@v2`.",
         "",
         "- Accepted implementation: " f"`{ACCEPTED_IMPLEMENTATION_COMMIT}`",
+        "- Accepted implementation bundle SHA-256: "
+        f"`{ACCEPTED_IMPLEMENTATION_BUNDLE_SHA256}`",
         "- Accepted task SHA-256: " f"`{ACCEPTED_TASK_SHA256}`",
         "- Candidates: " f"{coverage['total_candidates']}",
         "- Pairs: " f"{coverage['total_pairs']}",
@@ -1152,6 +1187,63 @@ def _validate_accepted_task(value: Any, repo_root: Path) -> None:
     _literal(value, ACCEPTED_TASK, "accepted task identity")
     if task_content_sha256(repo_root) != ACCEPTED_TASK_SHA256:
         raise SuccessorBuildError("accepted task authority bytes drifted")
+
+
+def _validate_accepted_implementation(value: Any, repo_root: Path) -> None:
+    identity = _object(value, "accepted implementation identity")
+    _exact_keys(
+        identity,
+        {"commit", "algorithm", "components", "bundle_sha256"},
+        "accepted implementation identity",
+    )
+    _literal(
+        identity["commit"],
+        ACCEPTED_IMPLEMENTATION_COMMIT,
+        "accepted implementation commit",
+    )
+    _literal(
+        identity["algorithm"],
+        ACCEPTED_IMPLEMENTATION_ALGORITHM,
+        "accepted implementation algorithm",
+    )
+    _literal(
+        identity["bundle_sha256"],
+        ACCEPTED_IMPLEMENTATION_BUNDLE_SHA256,
+        "accepted implementation bundle",
+    )
+    components = identity["components"]
+    if not isinstance(components, list):
+        raise SuccessorBuildError("accepted implementation components differ")
+    paths: list[str] = []
+    for value in components:
+        component = _object(value, "accepted implementation component")
+        _exact_keys(
+            component,
+            {"path", "sha256"},
+            "accepted implementation component",
+        )
+        paths.append(component["path"])
+        if not isinstance(component["sha256"], str) or not re.fullmatch(
+            r"[0-9a-f]{64}", component["sha256"]
+        ):
+            raise SuccessorBuildError("accepted implementation component hash differs")
+    _literal(
+        paths,
+        list(ACCEPTED_IMPLEMENTATION_COMPONENT_PATHS),
+        "accepted implementation component paths",
+    )
+    bundle_sha256 = hashlib.sha256(
+        canonical_json_bytes(components)
+    ).hexdigest()
+    if bundle_sha256 != ACCEPTED_IMPLEMENTATION_BUNDLE_SHA256:
+        raise SuccessorBuildError("accepted implementation bundle differs")
+    for component in components:
+        relative = component["path"]
+        path = _safe_repo_component_file(repo_root, relative)
+        if sha256_file(path) != component["sha256"]:
+            raise SuccessorBuildError(
+                f"accepted implementation component drifted: {relative}"
+            )
 
 
 def _minimum(observed: int, required: int, where: str) -> None:
@@ -1220,6 +1312,23 @@ def _safe_workspace_file(root: Path, relative: str) -> Path:
             raise SuccessorBuildError(f"workspace path contains a symlink: {relative}")
     if not current.is_file():
         raise SuccessorBuildError(f"workspace input is missing: {relative}")
+    return current
+
+
+def _safe_repo_component_file(root: Path, relative: str) -> Path:
+    safe = _safe_relative(relative, "accepted implementation component path")
+    resolved_root = root.resolve()
+    current = resolved_root
+    for part in Path(safe).parts:
+        current = current / part
+        if current.is_symlink():
+            raise SuccessorBuildError(
+                f"accepted implementation component is unsafe: {relative}"
+            )
+    if not current.is_file():
+        raise SuccessorBuildError(
+            f"accepted implementation component is missing: {relative}"
+        )
     return current
 
 

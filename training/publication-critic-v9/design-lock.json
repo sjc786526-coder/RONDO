@@ -8,6 +8,65 @@
     "content_sha256": "3eb0539b16403ebe20e74ce1b1ea5114d2383c6118f61fef56c9c91426e6a560",
     "accepted_implementation_commit": "55342bdb11b09c11b589fd398717f7712fca012c"
   },
+  "accepted_implementation": {
+    "commit": "55342bdb11b09c11b589fd398717f7712fca012c",
+    "algorithm": "sha256-canonical-component-list-v1",
+    "components": [
+      {
+        "path": "doc/rondo-multi-publication-critic-task-contract-v2.md",
+        "sha256": "3eb0539b16403ebe20e74ce1b1ea5114d2383c6118f61fef56c9c91426e6a560"
+      },
+      {
+        "path": "doc/rondo-multi-publication-critic-product-contract.md",
+        "sha256": "10d9b6f0efa82c68de2613959af224a59f1eef7d854f85eafc7476ab29d2eec7"
+      },
+      {
+        "path": "eval/rondo_eval/publication_critic/contract.py",
+        "sha256": "4716f77392141e3518d02f10f4eb53cd9ed92c1e5e990de09585c194446cf700"
+      },
+      {
+        "path": "eval/rondo_eval/publication_critic/render.py",
+        "sha256": "3c56bdaecc8633d2486af9733621f7f8a414aae44d8372b0071281470be7df30"
+      },
+      {
+        "path": "eval/rondo_eval/publication_critic/successor_task.py",
+        "sha256": "d138bbe8c44cb9e6fc43b5a27647bbca016d41e8967af7fbb14ba0dfb6de7917"
+      },
+      {
+        "path": "eval/rondo_eval/publication_critic/successor_data.py",
+        "sha256": "9acbca31908cfd42854fbb2c0817e9b8608b48e760355880495086a68b8e00c5"
+      },
+      {
+        "path": "eval/templates/publication-critic/product-packet-limits-v1.json",
+        "sha256": "eb2ec31c1dc4cb271fca8f291b53b75771fd42ede4a49a03fa0628ef147f9397"
+      },
+      {
+        "path": "eval/templates/publication-critic/task-contract-v2.json",
+        "sha256": "6642a743d5d497e9ac6d9bec297fa780cd80b010049f4bda38ce03fcc582f3bd"
+      },
+      {
+        "path": "eval/templates/publication-critic/input-contract-v3.md",
+        "sha256": "9c43c7ca81caa20c337d025375020548bab3b0508f1a4aeff2ca4647c8197f7d"
+      },
+      {
+        "path": "eval/templates/publication-critic/qualification-rubric-v2.md",
+        "sha256": "c26ffffc41aa9adf68cffc38b14eb8e1da34f2e28dcb966fae8fec8055675946"
+      },
+      {
+        "path": "eval/templates/publication-critic/render-contract-v4.json",
+        "sha256": "74f4623fe47188bc947a8a7559f90364fd528a6f9eebdc1b9676cbb2e3d96dde"
+      },
+      {
+        "path": "eval/templates/publication-critic/successor-output-schema-v1.json",
+        "sha256": "bec9c3c3ad66146f4b8b1b6a3b805ae50caa3a29217eef3575897fc952baa2d3"
+      },
+      {
+        "path": "eval/templates/publication-critic/successor-release-contract-v1.json",
+        "sha256": "f77fb0c4174506b8139d86bd1d1404baa3a6cfcb760604b2a1452dd295ac5268"
+      }
+    ],
+    "bundle_sha256": "b0124de561f52fb464c223989d003af1e9f2a8a24eccd9ca349a4d769e3488d5"
+  },
   "source_policy": {
     "mixed_v8_body_access": "forbidden",
     "safe_v8_projection": {

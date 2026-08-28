@@ -8,9 +8,13 @@
     "content_sha256": "3eb0539b16403ebe20e74ce1b1ea5114d2383c6118f61fef56c9c91426e6a560",
     "accepted_implementation_commit": "55342bdb11b09c11b589fd398717f7712fca012c"
   },
+  "accepted_implementation": {
+    "commit": "55342bdb11b09c11b589fd398717f7712fca012c",
+    "bundle_sha256": "b0124de561f52fb464c223989d003af1e9f2a8a24eccd9ca349a4d769e3488d5"
+  },
   "design_lock": {
     "path": "eval/templates/publication-critic/successor-data-design-v1.json",
-    "sha256": "60ebfd8c650b48f60be9e665d12a9f80258d0eb39e6aea60455fc531f8a6eb72"
+    "sha256": "6fa235dce3dc37ce38514f6fbf1aee01194c164f90bc557897a2c9746f77afd7"
   },
   "module_contract": {
     "path": "eval/templates/publication-critic/successor-module-contract-v1.json",

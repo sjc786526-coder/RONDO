@@ -1,6 +1,7 @@
 import copy
 import hashlib
 import json
+import shutil
 import sys
 import tempfile
 import unittest
@@ -13,10 +14,13 @@ sys.path.insert(0, str(EVAL_ROOT))
 
 from rondo_eval.publication_critic.identity import canonical_json_bytes  # noqa: E402
 from rondo_eval.publication_critic.successor_build import (  # noqa: E402
+    ACCEPTED_IMPLEMENTATION_BUNDLE_SHA256,
     ACCEPTED_IMPLEMENTATION_COMMIT,
     ACCEPTED_TASK,
+    ACCEPTED_TASK_SHA256,
     CONFIG_PATH,
     DESIGN_PATH,
+    MODULE_CONTRACT_PATH,
     SuccessorBuildError,
     finalize_successor_release,
     load_build_contracts,
@@ -74,6 +78,21 @@ class PublicationCriticSuccessorReleaseTests(unittest.TestCase):
                 (REPO_ROOT / CONFIG_PATH).read_bytes(),
             )
             identity = self._read_json(output / "release-identity.json")
+            design = self._read_json(output / "design-lock.json")
+            config = self._read_json(output / "generation-config.json")
+            self.assertEqual(
+                identity["accepted_implementation"],
+                design["accepted_implementation"],
+            )
+            self.assertEqual(
+                config["accepted_implementation"],
+                {
+                    "commit": identity["accepted_implementation"]["commit"],
+                    "bundle_sha256": identity["accepted_implementation"][
+                        "bundle_sha256"
+                    ],
+                },
+            )
             self.assertEqual(
                 identity["design_lock_sha256"],
                 hashlib.sha256((output / "design-lock.json").read_bytes()).hexdigest(),
@@ -103,6 +122,8 @@ class PublicationCriticSuccessorReleaseTests(unittest.TestCase):
         coverage = self._read_json(root / "coverage.json")
         identity = self._read_json(root / "release-identity.json")
         manifest = self._read_json(root / "manifest.json")
+        design = self._read_json(root / "design-lock.json")
+        config = self._read_json(root / "generation-config.json")
 
         self.assertEqual(coverage["accepted_task"], ACCEPTED_TASK)
         self.assertEqual(coverage["total_candidates"], 216)
@@ -113,6 +134,21 @@ class PublicationCriticSuccessorReleaseTests(unittest.TestCase):
             0,
         )
         self.assertEqual(identity["accepted_task"], ACCEPTED_TASK)
+        self.assertEqual(
+            identity["accepted_implementation"],
+            design["accepted_implementation"],
+        )
+        self.assertEqual(
+            identity["accepted_implementation"]["bundle_sha256"],
+            ACCEPTED_IMPLEMENTATION_BUNDLE_SHA256,
+        )
+        self.assertEqual(
+            config["accepted_implementation"],
+            {
+                "commit": ACCEPTED_IMPLEMENTATION_COMMIT,
+                "bundle_sha256": ACCEPTED_IMPLEMENTATION_BUNDLE_SHA256,
+            },
+        )
         self.assertEqual(
             identity["manifest_sha256"],
             hashlib.sha256((root / "manifest.json").read_bytes()).hexdigest(),
@@ -225,6 +261,56 @@ class PublicationCriticSuccessorReleaseTests(unittest.TestCase):
                     contracts=contracts,
                     repo_root=REPO_ROOT,
                 )
+
+    def test_core_component_drift_relocks_finalizer_before_output(self) -> None:
+        with tempfile.TemporaryDirectory(dir=COMMISSIONING_ROOT) as directory:
+            root = Path(directory) / "repo"
+            accepted_implementation = self._read_json(
+                REPO_ROOT / DESIGN_PATH
+            )["accepted_implementation"]
+            required = [
+                DESIGN_PATH,
+                CONFIG_PATH,
+                MODULE_CONTRACT_PATH,
+                *(
+                    Path(component["path"])
+                    for component in accepted_implementation["components"]
+                ),
+            ]
+            for relative in required:
+                source = REPO_ROOT / relative
+                destination = root / relative
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(source, destination)
+
+            authority = root / ACCEPTED_TASK["authority_path"]
+            protected = [
+                component
+                for component in accepted_implementation["components"]
+                if component["path"] != ACCEPTED_TASK["authority_path"]
+            ]
+            for component in protected:
+                with self.subTest(component=component["path"]):
+                    path = root / component["path"]
+                    original = path.read_bytes()
+                    path.write_bytes(original + b"\n")
+                    self.assertEqual(
+                        hashlib.sha256(authority.read_bytes()).hexdigest(),
+                        ACCEPTED_TASK_SHA256,
+                    )
+                    output = root / "formal-output"
+                    with self.assertRaisesRegex(
+                        SuccessorBuildError,
+                        "accepted implementation component drifted",
+                    ):
+                        finalize_successor_release(
+                            root / "unused-workspace",
+                            output,
+                            repo_root=root,
+                            enforce_config_paths=False,
+                        )
+                    self.assertFalse(output.exists())
+                    path.write_bytes(original)
 
     def _write_complete_workspace(self, root: Path, design: dict) -> None:
         for module_spec in design["module_contract"]["modules"]:

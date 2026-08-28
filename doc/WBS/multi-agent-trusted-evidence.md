@@ -3,7 +3,7 @@
 最后更新：2026-08-28 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
 状态：**第一期、第二期、第四期已完成；Publication Critic 三期 Plan 097 已完成并闭合双 backend 工程 E2E 与可替换接缝，现正式进入
 质量重构路线。后续严格串行为“任务合同重构 → v8 后继数据改造与有限扩充 → 一次主方案训练 → 模型资格验收与横评”。Plan 098 已把
-前两个工作包规划为严格串行的两个阶段；工作包一已通过并冻结，工作包二最终验收首轮要求补齐 accepted implementation 的可执行漂移门，当前正在整改，工作包三仍锁定。Plan 097 的
+前两个工作包规划为严格串行的两个阶段；工作包一已通过并冻结，工作包二已补齐 accepted implementation 的可执行漂移门并等待最终复验，工作包三仍锁定。Plan 097 的
 `M3_D_DUAL_BACKEND_ENGINEERING_PASS / FINAL_REVIEW_ACCEPTED / INTEGRATED / NOT_PUSHED`、Plan 096 的
 `CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH / FINAL_REVIEW_ACCEPTED / INTEGRATED / PUSHED`、Plan 094 的有效负向终态和 Plan 095 的
 最终验收均保持有效；新路线完成资格前，本地/云端质量、产品价值、Publication Critic 默认与生产启用继续锁定**
@@ -136,7 +136,7 @@ M3-B1c 正式分阶段训练与工件回收          │
                        ↓
         工作包一：任务合同重构（Plan 098 阶段一；已通过并冻结）
                        ↓
-        工作包二：v8 后继数据改造与有限扩充（Plan 098 阶段二；最终验收首轮整改中）
+        工作包二：v8 后继数据改造与有限扩充（Plan 098 阶段二；整改完成待最终复验）
                        ↓
         工作包三：一次主方案训练（本地非付费准备 → 用户授权后的云端付费执行）
                        ↓
@@ -176,7 +176,7 @@ dimension 如何表达和聚合、Binary、Boundary、Within-PASS 各自承担�
 commit 为 `55342bdb11b09c11b589fd398717f7712fca012c`，合同 SHA-256 为
 `3eb0539b16403ebe20e74ce1b1ea5114d2383c6118f61fef56c9c91426e6a560`。冻结 v8、旧 scalar validator/render 与产品 typed seam 保持不变。
 
-#### 工作包二：v8 后继数据改造与有限扩充（Plan 098 阶段二；最终验收首轮整改中）
+#### 工作包二：v8 后继数据改造与有限扩充（Plan 098 阶段二；整改完成待最终复验）
 
 **目标**：保持 `publication-critic-v8` 原样作为历史证据，从其可复用部分和新增高信息样本形成新的后继 revision。合成数据必须服务工作包一
 冻结的新任务合同，而不是机械扩展旧数据；v8 每个旧条目、类别、pair、配比和模板都只有在新合同下仍有信息价值时才能复用。新数据应完整表达
@@ -207,8 +207,9 @@ consumer、统计/重复/捷径检查和轻量 smoke 全部闭合，训练方无
 train/validation/test 为 162/27/27 candidates 与 72/12/12 pairs。`hard-boundaries`、`continuity-context`、`soft-combinations` 三个
 24-group 模块分别由干净负责人生成和整改，并由对应干净盲审员以最终 0 finding 接受。v8 mixed 主体与旧 validation/unseen 均未读取；仅安全
 train projection 被判定无法无歧义提供完整五头监督，故直接复用为零。完整 commissioning 与一次干净正式 finalizer 已闭合 manifest、renderer、
-coverage、exact/cross-group near duplicate、明显捷径、train-only smoke 和无 test 入口的 consumer。首轮最终验收确认这些实际工件闭合，
-但 finalizer 尚未把 accepted implementation 从声明常量闭合为必要语义组件的可执行漂移门；当前只整改该窄门，工作包三未解锁。
+coverage、exact/cross-group near duplicate、明显捷径、train-only smoke 和无 test 入口的 consumer。finalizer 现于写出前核对 13 个
+工作包一必要语义组件及组合 SHA，design、generation config、release identity 已绑定同一 accepted implementation；权威 Markdown
+保持不变而任一其他核心组件漂移时均 fail-closed。当前等待最终复验，工作包三未解锁。
 
 #### 工作包三：一次主方案训练
 
