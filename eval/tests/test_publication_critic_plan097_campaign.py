@@ -158,6 +158,11 @@ class Plan097CampaignTests(unittest.TestCase):
 
     def test_decimal_projection_is_exact(self) -> None:
         self.assertEqual(campaign._decimal_text(Decimal("0.1200")), "0.1200")
+        contract = campaign.load_contract(Path(__file__).resolve().parents[2])
+        self.assertEqual(
+            campaign._PRODUCER_TOTAL_CAP_USD,
+            contract.budgets.producer_rmb / contract.budgets.rmb_per_usd,
+        )
 
     def test_legacy_zero_cost_attempts_remain_in_total_request_count(self) -> None:
         projection = campaign._producer_ledger_projection(

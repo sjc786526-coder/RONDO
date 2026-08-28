@@ -79,6 +79,7 @@ _PRIOR_PRODUCER_LEDGERS = (
 )
 _PRODUCER_MAX_RUNS = 4
 _PRODUCER_RUN_CAP_USD = Decimal("2.4")
+_PRODUCER_TOTAL_CAP_USD = Decimal("19") / Decimal("7.5")
 _CLOUD_LEDGER_NAME = "cloud-scorer-v2-ledger.json"
 _PRIOR_CLOUD_LEDGER_NAME = "cloud-scorer-ledger.json"
 _PRIOR_CLOUD_LEDGER_CAP_RMB = Decimal("12")
@@ -629,7 +630,7 @@ def _run_producer(
     current_cap = total_cap - prior_budget["spent_usd"]
     run_cap = min(_PRODUCER_RUN_CAP_USD, current_cap)
     if (
-        total_cap != Decimal("2.4")
+        total_cap != _PRODUCER_TOTAL_CAP_USD
         or current_cap <= 0
         or reservation > run_cap
     ):
