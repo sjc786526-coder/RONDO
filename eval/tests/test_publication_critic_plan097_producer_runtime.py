@@ -311,6 +311,9 @@ class ProducerCommandTests(unittest.TestCase):
             overrides,
             [
                 "-c",
+                "features.multi_agent_v2.subagent_developer_instructions="
+                + json.dumps(PRODUCER_MEMBER_PROMPT),
+                "-c",
                 'features.multi_agent_v2.publication_critic.endpoint="127.0.0.1:42000"',
                 "-c",
                 "features.multi_agent_v2.publication_critic.expected_descriptor_json="
@@ -325,15 +328,19 @@ class ProducerCommandTests(unittest.TestCase):
 
 
 class ProducerEvidenceTests(unittest.TestCase):
-    def test_rejects_a_paraphrased_producer_spawn_task(self) -> None:
+    def test_accepts_a_paraphrased_spawn_when_member_task_is_runtime_injected(self) -> None:
         jsonl, trace = _fixture()
-        bad_spawn = replace(
+        paraphrased_spawn = replace(
             trace.calls[0],
             arguments={"task_name": "producer", "message": "paraphrased task"},
         )
-        bad_trace = replace(trace, calls=[bad_spawn, *trace.calls[1:]])
-        with self.assertRaisesRegex(ProducerEvidenceError, "producer_spawn_invalid"):
-            evaluate_producer_evidence(jsonl, bad_trace)
+        paraphrased_trace = replace(
+            trace, calls=[paraphrased_spawn, *trace.calls[1:]]
+        )
+
+        result = evaluate_producer_evidence(jsonl, paraphrased_trace)
+
+        self.assertEqual(result["status"], "passed")
 
     def test_failure_projection_retains_control_flow_without_bodies_or_ids(self) -> None:
         jsonl, trace = _fixture()
@@ -382,7 +389,7 @@ class ProducerEvidenceTests(unittest.TestCase):
                 },
             ],
         )
-        self.assertTrue(result["producer_task_exact"])
+        self.assertTrue(result["producer_task_named"])
         encoded = json.dumps(result)
         for private in (
             INITIAL_SYNTHETIC_DRAFT,

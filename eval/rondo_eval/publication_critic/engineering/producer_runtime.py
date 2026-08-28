@@ -40,14 +40,11 @@ Do not spawn another agent and do not ask Root to publish for you.
 5. End your assignment after the canonical commit. Never print or send the publication body to Root.
 """
 
-PRODUCER_FORMAL_PROMPT = f"""Run one bounded synthetic Plan 097 Publication Critic engineering flow as Root.
-1. Spawn exactly one member with task_name producer. Its spawn_agent message MUST equal the complete text between <producer_task> tags below verbatim, without a prefix, suffix, paraphrase, or omission. Do not spawn any other member. Root must never call team_publish.
+PRODUCER_FORMAL_PROMPT = """Run one bounded synthetic Plan 097 Publication Critic engineering flow as Root.
+1. Spawn exactly one member with task_name producer. Tell it to execute its Plan 097 Producer developer instructions. The runtime supplies that member its complete fixed task as developer instructions, so do not restate or paraphrase the task. Do not spawn any other member. Root must never call team_publish.
 2. Immediately call wait_agent once and wait for the Producer's canonical Team State publish to wake Root. A blocked rewrite is not a publish and must not wake Root.
 3. After the wake, call team_inspect exactly once with action dump and limit 50, then exactly once with action log and limit 50. Do not mutate Team State.
 4. Stop after both inspections. Do not quote or summarize the publication body in the final response.
-
-<producer_task>
-{PRODUCER_MEMBER_PROMPT}</producer_task>
 """
 
 _MAX_WIRE_REQUESTS = 128
@@ -112,6 +109,8 @@ def build_producer_command(
     )
     separator = command.index("--")
     critic_overrides = (
+        "features.multi_agent_v2.subagent_developer_instructions="
+        f"{json.dumps(PRODUCER_MEMBER_PROMPT)}",
         f"features.multi_agent_v2.publication_critic.endpoint={json.dumps(endpoint)}",
         "features.multi_agent_v2.publication_critic.expected_descriptor_json="
         f"{json.dumps(descriptor_json)}",
@@ -151,7 +150,6 @@ def evaluate_producer_evidence(jsonl: str, trace: RolloutTrace) -> dict[str, Any
         spawn.thread_id != root_thread_id
         or spawn.status != "completed"
         or spawn_args.get("task_name") != "producer"
-        or spawn_args.get("message") != PRODUCER_MEMBER_PROMPT
     ):
         raise ProducerEvidenceError("producer_spawn_invalid")
 
@@ -314,10 +312,14 @@ def project_producer_attempts(jsonl: str, trace: RolloutTrace) -> dict[str, Any]
         raise ProducerEvidenceError("trace_wire_binding_invalid") from exc
     publishes = sorted(evidence["team_publish_calls"], key=lambda row: row["seq"])
     spawns = _team_calls(trace, "spawn_agent")
-    producer_task_exact = False
+    producer_task_named = False
     if len(spawns) == 1:
         spawn_arguments = _arguments(spawns[0].arguments)
-        producer_task_exact = spawn_arguments.get("message") == PRODUCER_MEMBER_PROMPT
+        producer_task_named = (
+            spawn_arguments.get("task_name") == "producer"
+            and isinstance(spawn_arguments.get("message"), str)
+            and bool(spawn_arguments["message"].strip())
+        )
     attempts = []
     for row in publishes:
         arguments = row.get("arguments")
@@ -357,7 +359,7 @@ def project_producer_attempts(jsonl: str, trace: RolloutTrace) -> dict[str, Any]
         "trace_nested_call_count": evidence["nested_calls"],
         "publish_attempt_count": len(attempts),
         "attempts": attempts,
-        "producer_task_exact": producer_task_exact,
+        "producer_task_named": producer_task_named,
         "wait_call_count": len(evidence["wait_calls"]),
         "inspect_actions": list(evidence["inspect_actions"]),
         "unattributed_count": len(evidence["unattributed"]),
