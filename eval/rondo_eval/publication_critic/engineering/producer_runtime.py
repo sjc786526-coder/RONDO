@@ -7,8 +7,10 @@ tool dispatches bound to the captured Responses wire.
 """
 
 from collections.abc import Mapping
+import hashlib
 import json
 from pathlib import Path
+import re
 from typing import Any
 
 from ...multi_m5.collect import (
@@ -141,18 +143,6 @@ def evaluate_producer_evidence(jsonl: str, trace: RolloutTrace) -> dict[str, Any
         raise ProducerEvidenceError("unattributed_team_evidence")
 
     root_thread_id = trace.root_thread_id
-    spawns = _team_calls(trace, "spawn_agent")
-    if len(spawns) != 1:
-        raise ProducerEvidenceError("spawn_count_invalid")
-    spawn = spawns[0]
-    spawn_args = _arguments(spawn.arguments)
-    if (
-        spawn.thread_id != root_thread_id
-        or spawn.status != "completed"
-        or spawn_args.get("task_name") != "producer"
-    ):
-        raise ProducerEvidenceError("producer_spawn_invalid")
-
     publishes = sorted(evidence["team_publish_calls"], key=lambda row: row["seq"])
     if not 2 <= len(publishes) <= 3:
         raise ProducerEvidenceError("publish_attempt_count_invalid")
@@ -163,95 +153,79 @@ def evaluate_producer_evidence(jsonl: str, trace: RolloutTrace) -> dict[str, Any
     if any(row["status"] != "completed" for row in publishes):
         raise ProducerEvidenceError("publish_attempt_incomplete")
 
-    commit_indexes = [
-        index
-        for index, row in enumerate(publishes)
-        if _is_commit_result(row.get("result"))
-    ]
-    if commit_indexes != [len(publishes) - 1]:
-        raise ProducerEvidenceError("canonical_commit_count_invalid")
+    publish_calls = sorted(_team_calls(trace, "team_publish"), key=lambda call: call.seq)
+    if [call.seq for call in publish_calls] != [row["seq"] for row in publishes]:
+        raise ProducerEvidenceError("publish_trace_projection_mismatch")
+    _validate_publish_turns(trace, publish_calls)
 
-    first_args = publishes[0]["arguments"]
-    title = first_args.get("title")
-    if (
-        first_args.get("summary") != INITIAL_SYNTHETIC_DRAFT
-        or not isinstance(title, str)
-        or not title.strip()
-        or first_args.get("event_id") is not None
-        or first_args.get("review_cycle_id") is not None
-    ):
-        raise ProducerEvidenceError("initial_candidate_invalid")
-
-    expected_cycle: str | None = None
+    expected_cycle_sha1: str | None = None
+    title_sha1: str | None = None
+    previous_summary_sha1: str | None = None
     feedback_versions: list[str] = []
-    for index, row in enumerate(publishes[:-1]):
-        args = row["arguments"]
+    initial_summary_sha1 = _text_sha1(INITIAL_SYNTHETIC_DRAFT)
+    for index, row in enumerate(publishes):
         result = row["result"]
-        if not isinstance(result, Mapping) or result.get("status") != "rewrite_required":
-            raise ProducerEvidenceError("rewrite_result_invalid")
-        expected_feedback = FIXED_FEEDBACK_V1 if index == 0 else FIXED_FEEDBACK_V2
-        expected_version = "v1" if index == 0 else "v2"
-        cycle = result.get("review_cycle_id")
+        if not isinstance(result, Mapping):
+            raise ProducerEvidenceError("publish_result_invalid")
+        observed_title_sha1 = result.get("candidate_title_sha1")
+        observed_summary_sha1 = result.get("candidate_summary_sha1")
         if (
-            result.get("feedback") != expected_feedback
-            or result.get("feedback_version") != expected_version
-            or result.get("review_attempt") != index + 1
-            or result.get("blocking_rewrite_count") != index + 1
-            or not isinstance(cycle, str)
-            or not cycle
-            or cycle == expected_cycle
+            result.get("mode") != "publication_critic"
+            or not _is_sha1(observed_title_sha1)
+            or not _is_sha1(observed_summary_sha1)
+            or result.get("candidate_handoff_sha1") is not None
         ):
-            raise ProducerEvidenceError("rewrite_contract_invalid")
+            raise ProducerEvidenceError("candidate_observation_invalid")
         if index == 0:
-            if args.get("review_cycle_id") is not None:
-                raise ProducerEvidenceError("cycle_chain_invalid")
-        elif args.get("review_cycle_id") != expected_cycle:
-            raise ProducerEvidenceError("cycle_chain_invalid")
-        expected_cycle = cycle
-        feedback_versions.append(expected_version)
-
-    final_args = publishes[-1]["arguments"]
-    if (
-        final_args.get("review_cycle_id") != expected_cycle
-        or final_args.get("event_id") is not None
-        or final_args.get("title") != title
-        or not isinstance(final_args.get("summary"), str)
-        or not final_args["summary"].strip()
-        or final_args["summary"] == INITIAL_SYNTHETIC_DRAFT
-    ):
-        raise ProducerEvidenceError("final_candidate_or_cycle_invalid")
-    for row in publishes[1:-1]:
-        args = row["arguments"]
-        if (
-            args.get("event_id") is not None
-            or args.get("title") != title
-            or not isinstance(args.get("summary"), str)
-            or not args["summary"].strip()
-            or args["summary"] == INITIAL_SYNTHETIC_DRAFT
+            if (
+                observed_summary_sha1 != initial_summary_sha1
+                or result.get("continuation_sha1") is not None
+            ):
+                raise ProducerEvidenceError("initial_candidate_invalid")
+            title_sha1 = observed_title_sha1
+        elif (
+            result.get("continuation_sha1") != expected_cycle_sha1
+            or observed_title_sha1 != title_sha1
+            or observed_summary_sha1 == initial_summary_sha1
+            or observed_summary_sha1 == previous_summary_sha1
         ):
-            raise ProducerEvidenceError("revised_candidate_invalid")
+            raise ProducerEvidenceError("autonomous_rewrite_or_cycle_invalid")
+        previous_summary_sha1 = observed_summary_sha1
+
+        is_final = index == len(publishes) - 1
+        if not is_final:
+            expected_version = "v1" if index == 0 else "v2"
+            next_cycle_sha1 = result.get("next_review_cycle_sha1")
+            if (
+                result.get("status") != "rewrite_required"
+                or result.get("commit_outcome") != "blocked"
+                or result.get("feedback_version") != expected_version
+                or result.get("review_attempt") != index + 1
+                or result.get("blocking_rewrite_count") != index + 1
+                or result.get("failure_kind") is not None
+                or not _is_sha1(next_cycle_sha1)
+                or next_cycle_sha1 == expected_cycle_sha1
+            ):
+                raise ProducerEvidenceError("rewrite_contract_invalid")
+            expected_cycle_sha1 = next_cycle_sha1
+            feedback_versions.append(expected_version)
 
     commit = publishes[-1]["result"]
-    review = commit["publication_review"]
     rewrite_count = len(publishes) - 1
-    final_status = review.get("status")
+    final_status = commit.get("status")
     if (
-        commit.get("revision") != 1
-        or commit.get("deduplicated") is not False
+        commit.get("commit_outcome") != "committed"
         or final_status not in _ALLOWED_FINAL_STATUSES
         or (final_status == "rewrite_exhausted" and rewrite_count != 2)
-        or review.get("review_attempt") != len(publishes)
-        or review.get("blocking_rewrite_count") != rewrite_count
-        or review.get("failure_kind") is not None
+        or commit.get("review_attempt") != len(publishes)
+        or commit.get("blocking_rewrite_count") != rewrite_count
+        or commit.get("failure_kind") is not None
+        or commit.get("next_review_cycle_sha1") is not None
     ):
         raise ProducerEvidenceError("final_commit_invalid")
-    event_id = commit["event_id"]
-    version_id = commit["version_id"]
 
-    _validate_dump(
+    event_id, version_id = _validate_dump(
         evidence["entries"],
-        event_id=event_id,
-        version_id=version_id,
         root_thread_id=root_thread_id,
         producer_thread_id=producer_thread_id,
     )
@@ -263,7 +237,7 @@ def evaluate_producer_evidence(jsonl: str, trace: RolloutTrace) -> dict[str, Any
     )
     wait, inspections = _validate_root_observation(
         trace,
-        spawn=spawn,
+        first_publish_seq=publishes[0]["seq"],
         commit_end_seq=publishes[-1]["end_seq"],
     )
     if not all(
@@ -311,23 +285,12 @@ def project_producer_attempts(jsonl: str, trace: RolloutTrace) -> dict[str, Any]
     except EvidenceError as exc:
         raise ProducerEvidenceError("trace_wire_binding_invalid") from exc
     publishes = sorted(evidence["team_publish_calls"], key=lambda row: row["seq"])
-    spawns = _team_calls(trace, "spawn_agent")
-    producer_task_named = False
-    if len(spawns) == 1:
-        spawn_arguments = _arguments(spawns[0].arguments)
-        producer_task_named = (
-            spawn_arguments.get("task_name") == "producer"
-            and isinstance(spawn_arguments.get("message"), str)
-            and bool(spawn_arguments["message"].strip())
-        )
     attempts = []
+    previous_summary_sha1: object = None
+    previous_cycle_sha1: object = None
     for row in publishes:
-        arguments = row.get("arguments")
         result = row.get("result")
-        arguments = arguments if isinstance(arguments, Mapping) else {}
         result = result if isinstance(result, Mapping) else {}
-        review = result.get("publication_review")
-        review = review if isinstance(review, Mapping) else {}
         if result.get("status") == "rewrite_required":
             result_kind = "rewrite_required"
         elif _is_commit_result(result):
@@ -341,10 +304,22 @@ def project_producer_attempts(jsonl: str, trace: RolloutTrace) -> dict[str, Any]
                 ),
                 "dispatch_status": row.get("status"),
                 "result_kind": result_kind,
-                "review_status": review.get("status"),
-                "review_cycle_present": bool(arguments.get("review_cycle_id")),
-                "result_cycle_present": bool(result.get("review_cycle_id")),
-                "event_id_present": bool(arguments.get("event_id")),
+                "review_status": result.get("status"),
+                "review_attempt": result.get("review_attempt"),
+                "blocking_rewrite_count": result.get("blocking_rewrite_count"),
+                "commit_outcome": result.get("commit_outcome"),
+                "failure_kind": result.get("failure_kind"),
+                "continuation_matches_previous": (
+                    result.get("continuation_sha1") == previous_cycle_sha1
+                    if previous_cycle_sha1 is not None
+                    else result.get("continuation_sha1") is None
+                ),
+                "candidate_changed_from_previous": (
+                    result.get("candidate_summary_sha1")
+                    != previous_summary_sha1
+                    if previous_summary_sha1 is not None
+                    else None
+                ),
                 "result_fields": sorted(
                     key
                     for key in result
@@ -352,6 +327,8 @@ def project_producer_attempts(jsonl: str, trace: RolloutTrace) -> dict[str, Any]
                 ),
             }
         )
+        previous_summary_sha1 = result.get("candidate_summary_sha1")
+        previous_cycle_sha1 = result.get("next_review_cycle_sha1")
     return {
         "schema": "rondo-publication-critic-plan097-producer-failure-v1",
         "wire_request_count": wire_request_count,
@@ -359,7 +336,6 @@ def project_producer_attempts(jsonl: str, trace: RolloutTrace) -> dict[str, Any]
         "trace_nested_call_count": evidence["nested_calls"],
         "publish_attempt_count": len(attempts),
         "attempts": attempts,
-        "producer_task_named": producer_task_named,
         "wait_call_count": len(evidence["wait_calls"]),
         "inspect_actions": list(evidence["inspect_actions"]),
         "unattributed_count": len(evidence["unattributed"]),
@@ -369,11 +345,9 @@ def project_producer_attempts(jsonl: str, trace: RolloutTrace) -> dict[str, Any]
 def _validate_dump(
     entries: object,
     *,
-    event_id: str,
-    version_id: str,
     root_thread_id: str,
     producer_thread_id: str,
-) -> None:
+) -> tuple[str, str]:
     if not isinstance(entries, list):
         raise ProducerEvidenceError("dump_invalid")
     events = [row for row in entries if _entry_kind(row) == "event"]
@@ -386,8 +360,14 @@ def _validate_dump(
         for row in participants
         if isinstance(row, Mapping)
     }
+    event_id = event.get("event_id")
+    version_id = version.get("version_id")
     if (
-        event.get("event_id") != event_id
+        len(participants) != 2
+        or not isinstance(event_id, str)
+        or not event_id
+        or not isinstance(version_id, str)
+        or not version_id
         or event.get("created_by_thread_id") != producer_thread_id
         or event.get("version_count") != 1
         or version.get("version_id") != version_id
@@ -396,6 +376,7 @@ def _validate_dump(
         or roles.get(producer_thread_id) != "member"
     ):
         raise ProducerEvidenceError("canonical_dump_invalid")
+    return event_id, version_id
 
 
 def _validate_log(
@@ -426,7 +407,7 @@ def _validate_log(
 def _validate_root_observation(
     trace: RolloutTrace,
     *,
-    spawn: NestedToolCall,
+    first_publish_seq: int,
     commit_end_seq: int,
 ) -> tuple[NestedToolCall, dict[str, NestedToolCall]]:
     waits = _team_calls(trace, "wait_agent")
@@ -439,7 +420,7 @@ def _validate_root_observation(
         or not isinstance(wait.result, Mapping)
         or wait.result.get("timed_out") is not False
         or wait.result.get("message") != WAIT_TEAM_ACTIVITY_MARK
-        or not spawn.end_seq < wait.seq < commit_end_seq < wait.end_seq
+        or not wait.seq < first_publish_seq < commit_end_seq < wait.end_seq
     ):
         raise ProducerEvidenceError("root_wake_invalid")
 
@@ -464,6 +445,27 @@ def _validate_root_observation(
     if list(actions) != ["dump", "log"]:
         raise ProducerEvidenceError("inspect_order_invalid")
     return wait, actions
+
+
+def _validate_publish_turns(
+    trace: RolloutTrace, publishes: list[NestedToolCall]
+) -> None:
+    previous_end = 0
+    cells: set[tuple[str, str]] = set()
+    for call in publishes:
+        cell_id = call.runtime_cell_id
+        key = (call.thread_id, cell_id or "")
+        cell = trace.cells.get(key)
+        if (
+            call.requester != "code_cell"
+            or not cell_id
+            or cell is None
+            or key in cells
+            or not previous_end < cell.seq < call.seq
+        ):
+            raise ProducerEvidenceError("publish_turn_separation_invalid")
+        cells.add(key)
+        previous_end = call.end_seq
 
 
 def _team_calls(trace: RolloutTrace, name: str) -> list[NestedToolCall]:
@@ -496,12 +498,18 @@ def _entry_kind(value: object) -> object:
 def _is_commit_result(value: object) -> bool:
     return (
         isinstance(value, Mapping)
-        and isinstance(value.get("event_id"), str)
-        and bool(value["event_id"])
-        and isinstance(value.get("version_id"), str)
-        and bool(value["version_id"])
-        and isinstance(value.get("publication_review"), Mapping)
+        and value.get("mode") == "publication_critic"
+        and value.get("commit_outcome") == "committed"
+        and value.get("status") in _ALLOWED_FINAL_STATUSES
     )
+
+
+def _text_sha1(value: str) -> str:
+    return hashlib.sha1(value.encode("utf-8")).hexdigest()
+
+
+def _is_sha1(value: object) -> bool:
+    return isinstance(value, str) and re.fullmatch(r"[0-9a-f]{40}", value) is not None
 
 
 def _strict_wire_request_count(jsonl: str) -> int:

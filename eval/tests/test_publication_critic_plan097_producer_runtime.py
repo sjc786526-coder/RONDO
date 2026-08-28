@@ -1,3 +1,4 @@
+import hashlib
 import json
 from dataclasses import replace
 from pathlib import Path
@@ -20,7 +21,6 @@ from rondo_eval.multi_m5.trace import (  # noqa: E402
     RolloutTrace,
 )
 from rondo_eval.publication_critic.engineering.producer_runtime import (  # noqa: E402
-    FIXED_FEEDBACK_V1,
     INITIAL_SYNTHETIC_DRAFT,
     PRODUCER_FORMAL_PROMPT,
     PRODUCER_MEMBER_PROMPT,
@@ -38,6 +38,10 @@ PRODUCER_SOURCE = "publish initial; consume feedback; publish autonomous revisio
 REVISED_DRAFT = "A bounded migration was attempted and its result was checked."
 EVENT_ID = "evt-1"
 VERSION_ID = "ver-1"
+
+
+def _digest(value: str) -> str:
+    return hashlib.sha1(value.encode("utf-8")).hexdigest()
 
 
 def _call(
@@ -111,12 +115,19 @@ def _fixture(
             source_js=ROOT_SOURCE,
             seq=1,
         ),
-        (PRODUCER, "producer-cell"): CodeCell(
+        (PRODUCER, "producer-cell-1"): CodeCell(
             thread_id=PRODUCER,
-            runtime_cell_id="producer-cell",
-            model_visible_call_id="wire-producer",
+            runtime_cell_id="producer-cell-1",
+            model_visible_call_id="wire-producer-1",
             source_js=PRODUCER_SOURCE,
             seq=5,
+        ),
+        (PRODUCER, "producer-cell-2"): CodeCell(
+            thread_id=PRODUCER,
+            runtime_cell_id="producer-cell-2",
+            model_visible_call_id="wire-producer-2",
+            source_js=PRODUCER_SOURCE,
+            seq=8,
         ),
     }
     if second_thread != PRODUCER:
@@ -147,26 +158,26 @@ def _fixture(
             arguments={"timeout_ms": 30_000},
             result={"message": WAIT_TEAM_ACTIVITY_MARK, "timed_out": False},
             seq=4,
-            end_seq=10,
+            end_seq=12,
         ),
         _call(
             "publish-1",
             name="team_publish",
             thread_id=PRODUCER,
-            cell_id="producer-cell",
-            arguments={"title": "Synthetic migration", "summary": INITIAL_SYNTHETIC_DRAFT},
+            cell_id="producer-cell-1",
+            arguments={"body": "omitted"},
             result={
+                "mode": "publication_critic",
                 "status": "rewrite_required",
                 "feedback_version": "v1",
-                "feedback": FIXED_FEEDBACK_V1,
-                "review_cycle_id": "cycle-1",
                 "review_attempt": 1,
                 "blocking_rewrite_count": 1,
-                "candidate": {
-                    "title": "Synthetic migration",
-                    "summary": INITIAL_SYNTHETIC_DRAFT,
-                    "handoff": None,
-                },
+                "commit_outcome": "blocked",
+                "candidate_title_sha1": _digest("Synthetic migration"),
+                "candidate_summary_sha1": _digest(INITIAL_SYNTHETIC_DRAFT),
+                "candidate_handoff_sha1": None,
+                "continuation_sha1": None,
+                "next_review_cycle_sha1": _digest("cycle-1"),
             },
             seq=6,
             end_seq=7,
@@ -175,29 +186,23 @@ def _fixture(
             "publish-2",
             name="team_publish",
             thread_id=second_thread,
-            cell_id="producer-cell" if second_thread == PRODUCER else "other-cell",
-            arguments={
-                "title": "Synthetic migration",
-                "summary": REVISED_DRAFT,
-                "review_cycle_id": final_cycle,
-            },
+            cell_id="producer-cell-2" if second_thread == PRODUCER else "other-cell",
+            arguments={"body": "omitted"},
             result={
-                "event_id": EVENT_ID,
-                "version_id": VERSION_ID,
-                "revision": 1,
-                "evidence_refs": [],
-                "evidence_refs_omitted": 0,
-                "authored_on_stale_view": False,
-                "deduplicated": False,
-                "publication_review": {
-                    "status": "pass",
-                    "review_attempt": 2,
-                    "blocking_rewrite_count": 1,
-                    "failure_kind": None,
-                },
+                "mode": "publication_critic",
+                "status": "pass",
+                "review_attempt": 2,
+                "blocking_rewrite_count": 1,
+                "failure_kind": None,
+                "commit_outcome": "committed",
+                "candidate_title_sha1": _digest("Synthetic migration"),
+                "candidate_summary_sha1": _digest(REVISED_DRAFT),
+                "candidate_handoff_sha1": None,
+                "continuation_sha1": _digest(final_cycle),
+                "next_review_cycle_sha1": None,
             },
-            seq=8,
-            end_seq=9,
+            seq=9,
+            end_seq=10,
         ),
         _call(
             "inspect-dump",
@@ -213,8 +218,8 @@ def _fixture(
                 "total_entries": len(dump_entries),
                 "next_cursor": None,
             },
-            seq=11,
-            end_seq=12,
+            seq=13,
+            end_seq=14,
         ),
         _call(
             "inspect-log",
@@ -230,8 +235,8 @@ def _fixture(
                 "total_entries": len(log_entries),
                 "next_offset": None,
             },
-            seq=13,
-            end_seq=14,
+            seq=15,
+            end_seq=16,
         ),
     ]
     trace = RolloutTrace(
@@ -259,7 +264,18 @@ def _fixture(
             "input": [
                 {
                     "type": "custom_tool_call",
-                    "call_id": "wire-producer",
+                    "call_id": "wire-producer-1",
+                    "name": "exec",
+                    "input": PRODUCER_SOURCE,
+                }
+            ],
+        },
+        {
+            "model": "luna",
+            "input": [
+                {
+                    "type": "custom_tool_call",
+                    "call_id": "wire-producer-2",
                     "name": "exec",
                     "input": PRODUCER_SOURCE,
                 }
@@ -347,49 +363,17 @@ class ProducerEvidenceTests(unittest.TestCase):
         result = project_producer_attempts(jsonl, trace)
 
         self.assertEqual(result["publish_attempt_count"], 2)
-        self.assertEqual(
-            result["attempts"],
-            [
-                {
-                    "thread_role": "member",
-                    "dispatch_status": "completed",
-                    "result_kind": "rewrite_required",
-                    "review_status": None,
-                    "review_cycle_present": False,
-                    "result_cycle_present": True,
-                    "event_id_present": False,
-                    "result_fields": [
-                        "blocking_rewrite_count",
-                        "candidate",
-                        "feedback",
-                        "feedback_version",
-                        "review_attempt",
-                        "review_cycle_id",
-                        "status",
-                    ],
-                },
-                {
-                    "thread_role": "member",
-                    "dispatch_status": "completed",
-                    "result_kind": "canonical_commit",
-                    "review_status": "pass",
-                    "review_cycle_present": True,
-                    "result_cycle_present": False,
-                    "event_id_present": False,
-                    "result_fields": [
-                        "authored_on_stale_view",
-                        "deduplicated",
-                        "event_id",
-                        "evidence_refs",
-                        "evidence_refs_omitted",
-                        "publication_review",
-                        "revision",
-                        "version_id",
-                    ],
-                },
-            ],
-        )
-        self.assertTrue(result["producer_task_named"])
+        first, second = result["attempts"]
+        self.assertEqual(first["result_kind"], "rewrite_required")
+        self.assertEqual(first["review_attempt"], 1)
+        self.assertEqual(first["commit_outcome"], "blocked")
+        self.assertTrue(first["continuation_matches_previous"])
+        self.assertIsNone(first["candidate_changed_from_previous"])
+        self.assertEqual(second["result_kind"], "canonical_commit")
+        self.assertEqual(second["review_attempt"], 2)
+        self.assertEqual(second["commit_outcome"], "committed")
+        self.assertTrue(second["continuation_matches_previous"])
+        self.assertTrue(second["candidate_changed_from_previous"])
         encoded = json.dumps(result)
         for private in (
             INITIAL_SYNTHETIC_DRAFT,
@@ -410,8 +394,8 @@ class ProducerEvidenceTests(unittest.TestCase):
                 "status": "passed",
                 "root_thread_id": ROOT,
                 "producer_thread_id": PRODUCER,
-                "wire_request_count": 2,
-                "trace_cell_count": 2,
+                "wire_request_count": 3,
+                "trace_cell_count": 3,
                 "trace_nested_call_count": 6,
                 "publish_attempt_count": 2,
                 "rewrite_count": 1,
@@ -442,9 +426,19 @@ class ProducerEvidenceTests(unittest.TestCase):
     def test_rejects_a_broken_cycle_chain(self) -> None:
         jsonl, trace = _fixture(final_cycle="wrong-cycle")
         with self.assertRaisesRegex(
-            ProducerEvidenceError, "final_candidate_or_cycle_invalid"
+            ProducerEvidenceError, "autonomous_rewrite_or_cycle_invalid"
         ):
             evaluate_producer_evidence(jsonl, trace)
+
+    def test_rejects_two_publish_attempts_authored_in_one_model_turn(self) -> None:
+        jsonl, trace = _fixture()
+        second = replace(trace.calls[3], runtime_cell_id="producer-cell-1")
+        bad_trace = replace(trace, calls=[*trace.calls[:3], second, *trace.calls[4:]])
+
+        with self.assertRaisesRegex(
+            ProducerEvidenceError, "publish_turn_separation_invalid"
+        ):
+            evaluate_producer_evidence(jsonl, bad_trace)
 
     def test_rejects_more_than_one_canonical_publish_mutation(self) -> None:
         jsonl, trace = _fixture(duplicate_log=True)

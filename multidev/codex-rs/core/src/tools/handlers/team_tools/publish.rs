@@ -18,6 +18,8 @@ use codex_team_state::TeamRevision;
 use codex_team_state::reported_evidence_refs;
 use codex_tools::ToolSpec;
 use serde_json::json;
+use sha1::Digest;
+use sha1::Sha1;
 
 pub(crate) struct Handler {
     publication_critic: Option<PublicationCriticConfig>,
@@ -115,6 +117,7 @@ async fn handle_reviewed_call(
     } = invocation;
     let arguments = function_arguments(payload)?;
     let args = parse_reviewed_arguments(&arguments)?;
+    let observation = ReviewedAttemptObservation::from_args(&args);
     let access = resolve_access(&session).await?;
     let (submission, request) = reviewed_publish_request(
         args.event_id,
@@ -145,11 +148,13 @@ async fn handle_reviewed_call(
             Ok(boxed_tool_output(ReviewedTeamPublishResult {
                 publish: TeamPublishResult::from(outcome),
                 publication_review: review,
+                observation,
             }))
         }
-        ReviewPublishResult::RewriteRequired(rewrite) => {
-            Ok(boxed_tool_output(RewriteToolOutput { rewrite }))
-        }
+        ReviewPublishResult::RewriteRequired(rewrite) => Ok(boxed_tool_output(RewriteToolOutput {
+            rewrite,
+            observation,
+        })),
     }
 }
 
@@ -271,6 +276,29 @@ struct ReviewedPublishArgs {
     request_id: Option<String>,
 }
 
+#[derive(Debug)]
+struct ReviewedAttemptObservation {
+    title_sha1: Option<String>,
+    summary_sha1: String,
+    handoff_sha1: Option<String>,
+    continuation_sha1: Option<String>,
+}
+
+impl ReviewedAttemptObservation {
+    fn from_args(args: &ReviewedPublishArgs) -> Self {
+        Self {
+            title_sha1: args.title.as_deref().map(body_sha1),
+            summary_sha1: body_sha1(&args.summary),
+            handoff_sha1: args.handoff.as_deref().map(body_sha1),
+            continuation_sha1: args.review_cycle_id.as_deref().map(body_sha1),
+        }
+    }
+}
+
+pub(super) fn body_sha1(value: &str) -> String {
+    format!("{:x}", Sha1::digest(value.as_bytes()))
+}
+
 #[derive(Debug, Serialize)]
 pub(crate) struct TeamPublishResult {
     event_id: String,
@@ -325,6 +353,8 @@ struct ReviewedTeamPublishResult {
     #[serde(flatten)]
     publish: TeamPublishResult,
     publication_review: FinalReviewMetadata,
+    #[serde(skip)]
+    observation: ReviewedAttemptObservation,
 }
 
 impl ToolOutput for ReviewedTeamPublishResult {
@@ -360,7 +390,12 @@ impl ToolOutput for ReviewedTeamPublishResult {
             "review_attempt": self.publication_review.review_attempt,
             "blocking_rewrite_count": self.publication_review.blocking_rewrite_count,
             "failure_kind": self.publication_review.failure_kind,
-            "commit_outcome": "committed"
+            "commit_outcome": "committed",
+            "candidate_title_sha1": self.observation.title_sha1,
+            "candidate_summary_sha1": self.observation.summary_sha1,
+            "candidate_handoff_sha1": self.observation.handoff_sha1,
+            "continuation_sha1": self.observation.continuation_sha1,
+            "next_review_cycle_sha1": JsonValue::Null
         }))
     }
 }
@@ -369,6 +404,8 @@ impl ToolOutput for ReviewedTeamPublishResult {
 struct RewriteToolOutput {
     #[serde(flatten)]
     rewrite: RewriteRequired,
+    #[serde(skip)]
+    observation: ReviewedAttemptObservation,
 }
 
 impl ToolOutput for RewriteToolOutput {
@@ -402,7 +439,13 @@ impl ToolOutput for RewriteToolOutput {
             "status": "rewrite_required",
             "review_attempt": self.rewrite.review_attempt,
             "blocking_rewrite_count": self.rewrite.blocking_rewrite_count,
-            "commit_outcome": "blocked"
+            "commit_outcome": "blocked",
+            "feedback_version": self.rewrite.feedback_version,
+            "candidate_title_sha1": self.observation.title_sha1,
+            "candidate_summary_sha1": self.observation.summary_sha1,
+            "candidate_handoff_sha1": self.observation.handoff_sha1,
+            "continuation_sha1": self.observation.continuation_sha1,
+            "next_review_cycle_sha1": body_sha1(&self.rewrite.review_cycle_id)
         }))
     }
 }
