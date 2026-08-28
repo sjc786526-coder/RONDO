@@ -72,7 +72,7 @@ _LOCAL_IDENTITY = {
             "name": "stable-sigmoid-logits-index-0",
             "revision": "v1",
         },
-        "threshold": 0.9350569011196121,
+        "threshold": 0.935056901119612,
     },
 }
 _CLOUD_IDENTITY = {

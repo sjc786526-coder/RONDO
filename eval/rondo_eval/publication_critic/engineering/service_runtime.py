@@ -254,7 +254,7 @@ class RunningScorerService:
             raise ServiceRuntimeError("probe_timeout") from exc
         if completed.returncode != 0 or len(completed.stdout) > _MAX_JSON_BYTES:
             code = _probe_failure_code(completed.stderr)
-            raise ServiceRuntimeError(f"probe_failed:{code}")
+            raise ServiceRuntimeError(f"probe_{operation}_failed:{code}")
         try:
             value = json.loads(completed.stdout)
         except (UnicodeError, json.JSONDecodeError) as exc:
