@@ -377,14 +377,14 @@ def _validate_producer(value: Any) -> ProducerContract:
         envelope["max_output_tokens"], "producer_max_output_tokens_invalid"
     )
     if (
-        producer["model_alias"] != "luna"
+        producer["model_alias"] != "terra"
         or producer["reasoning_effort"] != "low"
         or run_timeout != 600
         or max_input != 96000
         or max_output != 16000
     ):
         raise EngineeringContractError("producer_identity_invalid")
-    return ProducerContract("luna", "low", run_timeout, max_input, max_output)
+    return ProducerContract("terra", "low", run_timeout, max_input, max_output)
 
 
 def _validate_cases(value: Any) -> tuple[CommissioningCase, ...]:

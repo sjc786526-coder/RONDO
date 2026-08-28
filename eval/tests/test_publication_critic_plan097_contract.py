@@ -73,7 +73,7 @@ class EngineeringContractTests(unittest.TestCase):
         self.assertEqual(contract.budgets.cloud_scorer_rmb, Decimal("12"))
         self.assertEqual(contract.budgets.producer_rmb, Decimal("18"))
         self.assertEqual(contract.budgets.total_rmb, Decimal("30"))
-        self.assertEqual(contract.producer.model_alias, "luna")
+        self.assertEqual(contract.producer.model_alias, "terra")
         self.assertEqual(contract.producer.reasoning_effort, "low")
         self.assertEqual(contract.producer.max_input_tokens, 96000)
         self.assertEqual(contract.producer.max_output_tokens, 16000)
@@ -171,7 +171,7 @@ class EngineeringContractTests(unittest.TestCase):
 
     def test_freezes_producer_model_effort_timeout_and_envelope(self) -> None:
         changes = (
-            lambda value: value["producer"].__setitem__("model_alias", "terra"),
+            lambda value: value["producer"].__setitem__("model_alias", "luna"),
             lambda value: value["producer"].__setitem__("reasoning_effort", "medium"),
             lambda value: value["producer"].__setitem__("run_timeout_seconds", 599),
             lambda value: value["producer"]["usage_envelope"].__setitem__(

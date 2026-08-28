@@ -104,6 +104,41 @@ class Plan097CampaignTests(unittest.TestCase):
     def test_decimal_projection_is_exact(self) -> None:
         self.assertEqual(campaign._decimal_text(Decimal("0.1200")), "0.1200")
 
+    def test_legacy_zero_cost_attempts_remain_in_total_request_count(self) -> None:
+        projection = campaign._producer_ledger_projection(
+            {
+                "batch_id": "plan097-producer-v1",
+                "runs": {
+                    "plan097-old-run": {
+                        "spent_usd": "0.000000",
+                        "requests": {
+                            "request-1": {
+                                "status": "settled",
+                                "charged_usd": "0.000000",
+                            }
+                        },
+                    }
+                },
+            },
+            expected_batch_id="plan097-producer-v1",
+        )
+        self.assertEqual(projection["spent_usd"], Decimal("0.000000"))
+        self.assertEqual(projection["request_count"], 1)
+
+        with self.assertRaisesRegex(campaign.CampaignError, "producer_budget_invalid"):
+            campaign._producer_ledger_projection(
+                {
+                    "batch_id": "plan097-producer-v1",
+                    "runs": {
+                        "plan097-bad-run": {
+                            "spent_usd": "0",
+                            "requests": {"request-1": {"status": "reserved"}},
+                        }
+                    },
+                },
+                expected_batch_id="plan097-producer-v1",
+            )
+
     def test_producer_only_recovery_is_for_commissioning_only(self) -> None:
         campaign._require_backend_mode("commissioning", True)
         campaign._require_backend_mode("formal", False)
