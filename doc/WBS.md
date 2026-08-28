@@ -1,8 +1,8 @@
 # RONDO 长程规划（WBS）
 
 最后更新：2026-08-28（方向 3 Publication Critic 三期在 Plan 097 双 backend 工程闭环后正式进入质量重构路线；后续固定串行为
-“任务合同重构 → v8 后继数据改造与有限扩充 → 一次主方案训练 → 模型资格验收与横评”。当前下一工作包是任务合同重构，尚未建立
-任务级 ExecPlan。Plan 097 的 `M3_D_DUAL_BACKEND_ENGINEERING_PASS / FINAL_REVIEW_ACCEPTED / INTEGRATED / NOT_PUSHED`、Plan 096 的
+“任务合同重构 → v8 后继数据改造与有限扩充 → 一次主方案训练 → 模型资格验收与横评”。Plan 098 已为前两个工作包建立同一两阶段
+ExecPlan；当前待执行工作包一，工作包二由工作包一审查通过硬锁。Plan 097 的 `M3_D_DUAL_BACKEND_ENGINEERING_PASS / FINAL_REVIEW_ACCEPTED / INTEGRATED / NOT_PUSHED`、Plan 096 的
 `CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH`、Plan 095 最终验收、Plan 094 有效负向研究终态和 Plan 093 Linux 全 workspace 正确性基线
 均保持有效；新路线不自动解锁产品质量、默认启用或生产）
 
@@ -24,7 +24,7 @@
 | 0：量化测评基准 | 既有设施与首次 schema v7 正式 canary 已完成，当前无 active campaign | 保留设施；历史结果见 COMPLETED，新 campaign 须重新立项与授权 |
 | 1：Harness 优化 | **正式收口；当前无 active 工作包** | 当前不继续新增观测或内核/热路径优化；既有实现、设施与历史结果保留。未来可由用户另行决定是否重新立项，本次收口不作永久禁止 |
 | 2：本地审批模型 | **已收口，今后不再开启** | 最终结论为“保留为实验”；不改生产默认，不再规划后续工作包 |
-| 3：RONDO Multi | 第一、二期、第四期已完成；三期进入 Publication Critic 质量重构，下一工作包为任务合同重构 | 工程链与双 backend 可替换性 GO；现有 scorer 仍仅为 engineering fixture。新四包串行路线未完成前不读冻结测试、不改产品默认、不授予质量、产品价值或生产资格 |
+| 3：RONDO Multi | 第一、二期、第四期已完成；三期 Plan 098 已规划，当前待执行工作包一，工作包二保持锁定 | 工程链与双 backend 可替换性 GO；现有 scorer 仍仅为 engineering fixture。新四包串行路线未完成前不读冻结测试、不改产品默认、不授予质量、产品价值或生产资格 |
 
 方向 3 当前 Linux 正确性基线由 Plan 093 建立：default features、standard local Nextest、checksum-verified V8 的完整 workspace
 为 `14660/14660` passed、0 failure/error/timeout，另有 1/1 setup passed；24 个 skip 不计 passed。正式证据和精确边界见
@@ -51,9 +51,9 @@
 工作包四：模型资格验收与横评
 ```
 
-- **工作包一当前待启动**：重构 Publication Critic 的模型可见输入、hard qualification、结构化输出、非补偿聚合、训练监督和评价语义。
+- **工作包一 / Plan 098 阶段一当前待执行**：重构 Publication Critic 的模型可见输入、hard qualification、结构化输出、非补偿聚合、训练监督和评价语义。
   五项 hard requirement 决定资格，soft preference 不再与资格共享可补偿总分；本包不生成大批数据、不运行真实模型或付费服务。
-- **工作包二待工作包一冻结后启动**：保留 v8 为不可改写的历史数据资产，复用、重标、重渲染、封存或舍弃其合适部分，形成新的后继
+- **工作包二 / Plan 098 阶段二待工作包一审查通过后解锁**：保留 v8 为不可改写的历史数据资产，复用、重标、重渲染、封存或舍弃其合适部分，形成新的后继
   revision。全部数据工作，包括 schema、生成、复用、标签、pair、配比、审查、split 和指标，只服务工作包一冻结的新任务合同；v8 只是候选
   素材来源，不得机械延续旧类别、pair 结构、配比或模板。按新合同扩充到数百条量级，规模是覆盖目标而非机械成功条件；质量、独立性、
   完整五维监督与冻结 split 优先。
@@ -62,7 +62,9 @@
 - **工作包四待候选冻结后启动**：使用未参与训练和方案选择的冻结集合完成资格与横评，给出最终模型、判定配置和 GO/NO-GO；不得用
   测试集返调任务、数据或 threshold，也不因通过而自动默认启用或进入生产。
 
-各工作包的详细目标、边界、宏观验收与授权门以 `doc/WBS/multi-agent-trusted-evidence.md` 为准；启动时分别建立独立任务级 ExecPlan。
+各工作包的详细目标、边界、宏观验收与授权门以 `doc/WBS/multi-agent-trusted-evidence.md` 为准。按用户本轮明确决定，工作包一与二由
+`plan/098-publication-critic-contract-and-v8-successor-execplan.md` 统一规划为两个严格串行阶段；工作包一验收通过前，阶段二不得启动。
+工作包三、四仍在各自启动时建立独立任务级 ExecPlan。
 
 方向 3 是当前唯一仍在推进的产品线。Plan 081 已取得 `LOCAL_TRAINING_READINESS_PASS`；三期 Plan 082 已获用户付费批准并完成
 真实 commissioning、正式 freeze、干净 formal 和新进程恢复，终态为 `VALID_NO_IMPROVEMENT`。保留 Pod 的 GPU 专项验收已经通过，
