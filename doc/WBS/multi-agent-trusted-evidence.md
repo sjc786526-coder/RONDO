@@ -3,7 +3,7 @@
 最后更新：2026-08-28 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
 状态：**第一期、第二期、第四期已完成；Publication Critic 三期 Plan 097 已完成并闭合双 backend 工程 E2E 与可替换接缝，现正式进入
 质量重构路线。后续严格串行为“任务合同重构 → v8 后继数据改造与有限扩充 → 一次主方案训练 → 模型资格验收与横评”。Plan 098 已把
-前两个工作包规划为严格串行的两个阶段；工作包一首轮 findings 已整改、当前待第二轮复验，工作包二由阶段一审查通过硬锁。Plan 097 的
+前两个工作包规划为严格串行的两个阶段；工作包一第二轮复验已通过并冻结，工作包二现已解锁为当前阶段。Plan 097 的
 `M3_D_DUAL_BACKEND_ENGINEERING_PASS / FINAL_REVIEW_ACCEPTED / INTEGRATED / NOT_PUSHED`、Plan 096 的
 `CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH / FINAL_REVIEW_ACCEPTED / INTEGRATED / PUSHED`、Plan 094 的有效负向终态和 Plan 095 的
 最终验收均保持有效；新路线完成资格前，本地/云端质量、产品价值、Publication Critic 默认与生产启用继续锁定**
@@ -134,9 +134,9 @@ M3-B1c 正式分阶段训练与工件回收          │
                        ↓
         Plan 097 M3-D 双 backend 工程前置闭环（已完成并通过最终独立验收）
                        ↓
-        工作包一：任务合同重构（Plan 098 阶段一；当前待第二轮复验）
+        工作包一：任务合同重构（Plan 098 阶段一；已通过并冻结）
                        ↓
-        工作包二：v8 后继数据改造与有限扩充（Plan 098 阶段二；锁定）
+        工作包二：v8 后继数据改造与有限扩充（Plan 098 阶段二；当前已解锁）
                        ↓
         工作包三：一次主方案训练（本地非付费准备 → 用户授权后的云端付费执行）
                        ↓
@@ -155,7 +155,7 @@ Plan 098，但仍是两个严格串行、分别验收的任务阶段；工作包
 
 ### 当前后续路线：三期质量重构
 
-#### 工作包一：任务合同重构（Plan 098 阶段一；当前待第二轮复验）
+#### 工作包一：任务合同重构（Plan 098 阶段一；已通过并冻结）
 
 **目标**：把上文“冻结任务设计方向”完整落实为单一权威训练任务，使模型内部五头判断、同向损失、非补偿聚合、模型可见事实与产品
 `PASS/REWRITE` 语义一致，并为后续数据和训练提供稳定接口；执行者不得把五头 gate 降格为自由单总分或重新引入 hard/soft 混合排序。
@@ -171,12 +171,12 @@ dimension 如何表达和聚合、Binary、Boundary、Within-PASS 各自承担�
 重跑定向门禁并完成独立审查整改；普通依赖下载和只读源码查询包含在内。真实模型加载/推理、Docker、付费 API、GPU、外部上传、冻结测试读取、
 产品启用和生产动作均不包含。
 
-**当前实现**：唯一权威训练语义已落在 `rondo-publication-critic-task@v2`，五头结构化输出、all-hard-pass、派生 min scalar、物理 split
-consumer 与历史隔离主方向已闭合；首轮审查指出的正式 rubric、quoted continuity basis、tie fail-closed、Boundary 完整 target、轻量
-projection parity 和逐 pair evaluation 已整改并通过定向回归，当前待第二轮复验。冻结 v8、旧 scalar validator/render 与产品 typed seam
-继续保持不变；审查接受前不能启动工作包二。
+**当前实现**：唯一权威训练语义已落在 `rondo-publication-critic-task@v2`；正式 rubric、quoted continuity basis、tie fail-closed、Boundary
+完整 target、轻量 projection parity、逐 pair evaluation、物理 split consumer 与历史隔离已经第二轮复验接受。accepted implementation
+commit 为 `55342bdb11b09c11b589fd398717f7712fca012c`，合同 SHA-256 为
+`3eb0539b16403ebe20e74ce1b1ea5114d2383c6118f61fef56c9c91426e6a560`。冻结 v8、旧 scalar validator/render 与产品 typed seam 保持不变。
 
-#### 工作包二：v8 后继数据改造与有限扩充（Plan 098 阶段二；锁定）
+#### 工作包二：v8 后继数据改造与有限扩充（Plan 098 阶段二；当前已解锁）
 
 **目标**：保持 `publication-critic-v8` 原样作为历史证据，从其可复用部分和新增高信息样本形成新的后继 revision。合成数据必须服务工作包一
 冻结的新任务合同，而不是机械扩展旧数据；v8 每个旧条目、类别、pair、配比和模板都只有在新合同下仍有信息价值时才能复用。新数据应完整表达

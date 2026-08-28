@@ -146,28 +146,26 @@
 - 工作包一已形成唯一权威 `rondo-publication-critic-task@v2` 与 v2 rubric、v3 input、v4 render、结构化输出 schema/release contract projection；新增纯函数 gate/loss target/pair/evaluation reference 和物理 split successor consumer，保留产品 typed seam 与冻结历史路径。
 - continuity applicability 已闭合为只依据 model-visible candidate：明确完成才允许 `N/A`，未完成或未明确闭合时适用，冲突时不得用隐藏 completion metadata 绕过 gate。
 - 工作包一定向门禁通过：successor 合同 11/11，旧 contract/training-data/identity 回归 31/31；冻结 v7/v8 tree identity 保持不变。权威合同当前内容 SHA-256 为 `3eb0539b16403ebe20e74ce1b1ea5114d2383c6118f61fef56c9c91426e6a560`。
-- 工作包一首轮独立审查结论为不通过；报告所列模型可见 rubric、continuity basis、tie fail-open、Boundary loss 与 projection/evaluation findings 已在本阶段完成整改和 42/42 定向回归，等待第二轮复验。工作包二继续锁定。
+- 工作包一首轮独立审查结论为不通过；报告所列 findings 已在本阶段整改。第二轮复验确认 3 High/3 Medium 全部闭合、无新增 finding，并以 implementation commit `55342bdb11b09c11b589fd398717f7712fca012c`、`rondo-publication-critic-task@v2`、SHA-256 `3eb0539b16403ebe20e74ce1b1ea5114d2383c6118f61fef56c9c91426e6a560` 接受工作包一；报告见 `agent_log/2026-08-28-103405-plan098-work-package-1-second-review.md`。
 
 ### 当前工作
 
-- `WORK_PACKAGE_1_REMEDIATED_AWAITING_REVIEW_2 / WORK_PACKAGE_2_LOCKED`：工作包一首轮 findings 已整改并完成自检，等待第二轮复验；未获明确通过前不进入工作包二。
+- `WORK_PACKAGE_1_ACCEPTED / WORK_PACKAGE_2_UNLOCKED_READY`：工作包一已按 accepted identity 冻结；工作包二经审查者明确批准后成为当前执行阶段。
 
 ### 本任务剩余步骤
 
-1. 审查者复验工作包一整改提交；若仍有 finding，执行者只在本阶段内继续整改。审查者明确验收通过后，工作包二解锁。
-2. 执行者从冻结合同导出数据设计，组织干净上下文模块负责人和一一盲审员，完成调试、正式生成、整合、freeze、consumer 与定向门禁，提交最终汇报并停止会话。
-3. 审查者完成最终验收与 `agent_log` 报告；finding 退回整改，验收通过后 Plan 098 才冻结为完整历史合同。合并和推送继续等待用户另行批准。
+1. 执行者从冻结合同导出数据设计，组织干净上下文模块负责人和一一盲审员，完成调试、正式生成、整合、freeze、consumer 与定向门禁，提交最终汇报并停止会话。
+2. 审查者完成最终验收与 `agent_log` 报告；finding 退回整改，验收通过后 Plan 098 才冻结为完整历史合同。合并和推送继续等待用户另行批准。
 
 ### 阻塞项
 
-- 无工作包一整改技术阻塞；当前等待第二轮复验。
-- 工作包二唯一正常前置是审查者明确接受工作包一；未收到批准不是普通可绕过问题。
+- 无启动工作包二的技术阻塞。工作包二必须绑定 accepted identity，核心合同漂移即重新锁定并退回工作包一复验。
 
 ### 当前验收状态
 
 - 规划：`READY_FOR_EXECUTION`。
-- 工作包一：`REMEDIATED_AWAITING_STAGE_REVIEW_2`。
-- 工作包二：`LOCKED_BY_WORK_PACKAGE_1_REVIEW`。
+- 工作包一：`ACCEPTED_AT_55342BDB`。
+- 工作包二：`UNLOCKED_READY`。
 - 完整任务：`IN_PROGRESS`。
 
 ### 交接边界
@@ -200,6 +198,7 @@
 | 013 | 新 successor release 采用 train/validation/test 物理 split 文件；训练 consumer 只打开 train bytes，validation 使用独立入口且不提供 test loader | 直接满足 holdout 字节隔离并避免延续旧 mixed-file 后过滤模式 | schema、consumer、隔离 | 已采纳 |
 | 014 | 首轮审查接受“不改 Rust seam、以模型可见 candidate/public packet 操作化 completion”的路线，但要求可见 basis 引用与产品/任务合同明确对齐；schema 设施保持轻量 | 闭合可识别性而不引入隐藏完成事实、NLP 规则或重型可信平台 | 输入、schema、审查 | 已采纳 |
 | 015 | release JSON 改为明确的 contract projection，跨字段/关系约束由 strict runtime validator 权威执行；output JSON Schema 明示额外 runtime 约束 | 避免非标准描述冒充可执行 schema，同时不建设无现实必要的通用 schema 平台 | schema、runtime、测试 | 已采纳 |
+| 016 | 第二轮复验接受工作包一：implementation commit `55342bdb11b09c11b589fd398717f7712fca012c`，合同 `rondo-publication-critic-task@v2`，SHA-256 `3eb0539b16403ebe20e74ce1b1ea5114d2383c6118f61fef56c9c91426e6a560`；工作包二解锁 | 首轮全部 findings 已闭合，42/42 定向门禁与独立复验无新增 finding | 阶段、合同、数据前置 | 已采纳 |
 
 ## 7. 给执行者的启动提示词
 

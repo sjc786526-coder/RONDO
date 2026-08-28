@@ -2,7 +2,7 @@
 
 最后更新：2026-08-28（方向 3 Publication Critic 三期在 Plan 097 双 backend 工程闭环后正式进入质量重构路线；后续固定串行为
 “任务合同重构 → v8 后继数据改造与有限扩充 → 一次主方案训练 → 模型资格验收与横评”。Plan 098 已为前两个工作包建立同一两阶段
-ExecPlan；工作包一首轮 findings 已整改、当前待第二轮复验，工作包二仍由工作包一审查通过硬锁。Plan 097 的 `M3_D_DUAL_BACKEND_ENGINEERING_PASS / FINAL_REVIEW_ACCEPTED / INTEGRATED / NOT_PUSHED`、Plan 096 的
+ExecPlan；工作包一第二轮复验已通过并冻结，工作包二现已解锁为当前工作包。Plan 097 的 `M3_D_DUAL_BACKEND_ENGINEERING_PASS / FINAL_REVIEW_ACCEPTED / INTEGRATED / NOT_PUSHED`、Plan 096 的
 `CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH`、Plan 095 最终验收、Plan 094 有效负向研究终态和 Plan 093 Linux 全 workspace 正确性基线
 均保持有效；新路线不自动解锁产品质量、默认启用或生产）
 
@@ -24,7 +24,7 @@ ExecPlan；工作包一首轮 findings 已整改、当前待第二轮复验，�
 | 0：量化测评基准 | 既有设施与首次 schema v7 正式 canary 已完成，当前无 active campaign | 保留设施；历史结果见 COMPLETED，新 campaign 须重新立项与授权 |
 | 1：Harness 优化 | **正式收口；当前无 active 工作包** | 当前不继续新增观测或内核/热路径优化；既有实现、设施与历史结果保留。未来可由用户另行决定是否重新立项，本次收口不作永久禁止 |
 | 2：本地审批模型 | **已收口，今后不再开启** | 最终结论为“保留为实验”；不改生产默认，不再规划后续工作包 |
-| 3：RONDO Multi | 第一、二期、第四期已完成；三期 Plan 098 工作包一整改完成待第二轮复验，工作包二保持锁定 | 工程链与双 backend 可替换性 GO；现有 scorer 仍仅为 engineering fixture。新四包串行路线未完成前不读冻结测试、不改产品默认、不授予质量、产品价值或生产资格 |
+| 3：RONDO Multi | 第一、二期、第四期已完成；三期 Plan 098 工作包一已通过，当前执行工作包二 | 工程链与双 backend 可替换性 GO；现有 scorer 仍仅为 engineering fixture。新四包串行路线未完成前不读冻结测试、不改产品默认、不授予质量、产品价值或生产资格 |
 
 方向 3 当前 Linux 正确性基线由 Plan 093 建立：default features、standard local Nextest、checksum-verified V8 的完整 workspace
 为 `14660/14660` passed、0 failure/error/timeout，另有 1/1 setup passed；24 个 skip 不计 passed。正式证据和精确边界见
@@ -51,9 +51,9 @@ ExecPlan；工作包一首轮 findings 已整改、当前待第二轮复验，�
 工作包四：模型资格验收与横评
 ```
 
-- **工作包一 / Plan 098 阶段一当前待第二轮复验**：`rondo-publication-critic-task@v2` 的首轮 rubric、continuity basis、tie 与 loss/projection/evaluation findings 已整改并通过定向回归；审查接受前不视为冻结前置。
+- **工作包一 / Plan 098 阶段一已通过并冻结**：`rondo-publication-critic-task@v2` 以 implementation commit `55342bdb11b09c11b589fd398717f7712fca012c`、内容 SHA-256 `3eb0539b16403ebe20e74ce1b1ea5114d2383c6118f61fef56c9c91426e6a560` 通过第二轮独立复验。
   五项 hard requirement 决定资格，soft preference 不再与资格共享可补偿总分；本包不生成大批数据、不运行真实模型或付费服务。
-- **工作包二 / Plan 098 阶段二待工作包一审查通过后解锁**：保留 v8 为不可改写的历史数据资产，复用、重标、重渲染、封存或舍弃其合适部分，形成新的后继
+- **工作包二 / Plan 098 阶段二当前已解锁**：保留 v8 为不可改写的历史数据资产，复用、重标、重渲染、封存或舍弃其合适部分，形成新的后继
   revision。全部数据工作，包括 schema、生成、复用、标签、pair、配比、审查、split 和指标，只服务工作包一冻结的新任务合同；v8 只是候选
   素材来源，不得机械延续旧类别、pair 结构、配比或模板。按新合同扩充到数百条量级，规模是覆盖目标而非机械成功条件；质量、独立性、
   完整五维监督与冻结 split 优先。
