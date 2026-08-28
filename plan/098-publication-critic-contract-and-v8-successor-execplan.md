@@ -148,25 +148,26 @@
 - 工作包一定向门禁通过：successor 合同 11/11，旧 contract/training-data/identity 回归 31/31；冻结 v7/v8 tree identity 保持不变。权威合同当前内容 SHA-256 为 `3eb0539b16403ebe20e74ce1b1ea5114d2383c6118f61fef56c9c91426e6a560`。
 - 工作包一首轮独立审查结论为不通过；报告所列 findings 已在本阶段整改。第二轮复验确认 3 High/3 Medium 全部闭合、无新增 finding，并以 implementation commit `55342bdb11b09c11b589fd398717f7712fca012c`、`rondo-publication-critic-task@v2`、SHA-256 `3eb0539b16403ebe20e74ce1b1ea5114d2383c6118f61fef56c9c91426e6a560` 接受工作包一；报告见 `agent_log/2026-08-28-103405-plan098-work-package-1-second-review.md`。
 - 工作包二已冻结 `publication-critic-v9`：三个干净上下文负责人分别生成并整改 `hard-boundaries`、`continuity-context`、`soft-combinations`，三个一一对应的干净盲审员最终均以 0 finding 接受绑定的新模块 SHA。正式 release 含 216 candidates、96 pairs，物理 split 为 162/27/27 candidates 与 72/12/12 pairs；完整 commissioning 与正式 finalizer、coverage、重复/捷径、renderer、manifest、train/validation consumer 和 train-only smoke 均通过。
+- 工作包二最终验收首轮确认当前 v9 工件和数据闭合，但发现 finalizer 只写入 accepted implementation commit 常量，没有核验工作包一必要语义组件仍与 accepted commit 相同；报告见 `agent_log/2026-08-28-120115-plan098-work-package-2-final-review.md`。
 
 ### 当前工作
 
-- `WORK_PACKAGE_2_IMPLEMENTED / FINAL_REVIEW_PENDING`：工作包一 accepted identity 保持冻结；工作包二实现、盲审、正式冻结和定向验证已完成，等待最终独立验收。
+- `WORK_PACKAGE_2_FINAL_REVIEW_CHANGES_REQUESTED`：工作包一 accepted identity 保持冻结；工作包二只整改 accepted implementation 的可执行漂移门，工作包三继续锁定。
 
 ### 本任务剩余步骤
 
-1. 审查者完成最终验收与 `agent_log` 报告；finding 退回工作包二范围内整改，验收通过后 Plan 098 才冻结为完整历史合同。
-2. 合并、推送、分支归档和 worktree 清理继续等待用户另行批准；工作包三仍按 WBS 单独立项和授权。
+1. 执行者补齐工作包一必要语义组件的轻量指纹核验与 focused regression，定向复验后提交工作包二整改复审。
+2. 审查者复验整改；通过后 Plan 098 才冻结为完整历史合同。合并、推送、分支归档和 worktree 清理继续等待用户另行批准。
 
 ### 阻塞项
 
-- 无技术阻塞；当前只等待工作包二最终独立验收。核心合同若漂移仍将重新锁定并退回工作包一复验。
+- 一项验收阻塞：finalizer 尚未真正核验 accepted implementation 的必要语义组件；整改只需窄补指纹门，不重开任务定义或数据语义。
 
 ### 当前验收状态
 
 - 规划：`READY_FOR_EXECUTION`。
 - 工作包一：`ACCEPTED_AT_55342BDB`。
-- 工作包二：`IMPLEMENTED_AWAITING_FINAL_REVIEW`。
+- 工作包二：`FINAL_REVIEW_CHANGES_REQUESTED`。
 - 完整任务：`IN_PROGRESS`。
 
 ### 交接边界
@@ -201,6 +202,7 @@
 | 015 | release JSON 改为明确的 contract projection，跨字段/关系约束由 strict runtime validator 权威执行；output JSON Schema 明示额外 runtime 约束 | 避免非标准描述冒充可执行 schema，同时不建设无现实必要的通用 schema 平台 | schema、runtime、测试 | 已采纳 |
 | 016 | 第二轮复验接受工作包一：implementation commit `55342bdb11b09c11b589fd398717f7712fca012c`，合同 `rondo-publication-critic-task@v2`，SHA-256 `3eb0539b16403ebe20e74ce1b1ea5114d2383c6118f61fef56c9c91426e6a560`；工作包二解锁 | 首轮全部 findings 已闭合，42/42 定向门禁与独立复验无新增 finding | 阶段、合同、数据前置 | 已采纳 |
 | 017 | 后继 revision 冻结为 `publication-critic-v9`，由三个 24-group 模块组成；旧 v8 安全投影只用于判断可复用性且直接复用为零 | v1 scalar 监督不足以无歧义投影完整五头标签；新合同原生数据以 216 candidates / 96 pairs 有界覆盖 Boundary、invariance、自然组合与三类 public context | 数据、split、消费 | 已采纳 |
+| 018 | 工作包二首轮最终验收不接受“accepted implementation commit 仅作为常量自洽写入”；要求对工作包一必要语义组件执行轻量字节/组合 SHA 漂移门 | 权威 Markdown 不变时，renderer/schema/loss/consumer 等实现仍可能漂移；必须让阶段一 accepted identity 成为可执行前置，同时避免建设通用审计体系 | finalizer、身份、验收 | 整改中 |
 
 ## 7. 给执行者的启动提示词
 
