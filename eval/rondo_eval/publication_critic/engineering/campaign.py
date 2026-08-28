@@ -17,6 +17,7 @@ import json
 import os
 from pathlib import Path
 import re
+import signal
 import stat
 import subprocess
 import tempfile
@@ -304,7 +305,7 @@ def run_off_step(start: Path, *, phase: str, run_id: str) -> Path:
             )
             if any("publication_critic" in argument for argument in command):
                 raise CampaignError("off_path_contains_critic_configuration")
-            completed = subprocess.run(
+            completed = _run_owned_command(
                 command,
                 cwd=workspace,
                 env=_codex_environment(
@@ -312,11 +313,8 @@ def run_off_step(start: Path, *, phase: str, run_id: str) -> Path:
                     trace_root=trace_root,
                     downstream_key=LOOPBACK_BEARER,
                 ),
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
                 timeout=180,
-                check=False,
+                timeout_code="off_process_timeout",
             )
             wire = capture.jsonl()
         trace = load_rollout_trace(find_trace_bundle(trace_root))
@@ -370,11 +368,13 @@ def run_backend_step(
     run_id: str,
     backend: str,
     producer_run_id: str,
+    skip_direct_cases: bool = False,
 ) -> Path:
     """Run direct branch cases and one normal Producer through a real backend."""
 
     paths = CampaignPaths.discover(start)
     _require_backend(backend)
+    _require_backend_mode(phase, skip_direct_cases)
     frozen = preflight(start, require_clean=phase == "formal")
     contract = load_contract(paths.repos.worktree_root)
     run_root = _existing_run_root(paths, phase, run_id)
@@ -399,6 +399,7 @@ def run_backend_step(
             producer_run_id=producer_run_id,
             started=started,
             cloud_proxy=None,
+            skip_direct_cases=skip_direct_cases,
         )
 
     runtime_config = load_runtime_config(paths.repos)
@@ -443,6 +444,7 @@ def run_backend_step(
             producer_run_id=producer_run_id,
             started=started,
             cloud_proxy=cloud_proxy,
+            skip_direct_cases=skip_direct_cases,
         )
 
 
@@ -459,6 +461,7 @@ def _finish_backend_step(
     producer_run_id: str,
     started: float,
     cloud_proxy: CloudBudgetProxy | None,
+    skip_direct_cases: bool,
 ) -> Path:
     backend_contract = contract.backends[backend]
     direct: list[dict[str, Any]] = []
@@ -475,25 +478,33 @@ def _finish_backend_step(
                 ready = service.ready()
                 if ready.get("result") != "ready":
                     raise CampaignError("backend_not_ready")
-                for index, case in enumerate(contract.commissioning_cases, start=1):
-                    packet = packet_root / f"case-{index}.json"
-                    write_packet(packet, case.packet)
-                    result = service.review(packet)
-                    verdict = result.get("result")
-                    if verdict not in {"pass", "rewrite"}:
-                        raise CampaignError("direct_verdict_invalid")
-                    direct.append(
-                        {
-                            "case_id": case.case_id,
-                            "expected_branch": case.expected_engineering_branch,
-                            "observed_branch": verdict,
-                            "matched": verdict == case.expected_engineering_branch,
-                        }
-                    )
-                if {row["observed_branch"] for row in direct} != {"pass", "rewrite"}:
-                    raise CampaignError("direct_branch_coverage_incomplete")
-                if not all(row["matched"] for row in direct):
-                    raise CampaignError("direct_case_expectation_mismatch")
+                if not skip_direct_cases:
+                    for index, case in enumerate(
+                        contract.commissioning_cases, start=1
+                    ):
+                        packet = packet_root / f"case-{index}.json"
+                        write_packet(packet, case.packet)
+                        result = service.review(packet)
+                        verdict = result.get("result")
+                        if verdict not in {"pass", "rewrite"}:
+                            raise CampaignError("direct_verdict_invalid")
+                        direct.append(
+                            {
+                                "case_id": case.case_id,
+                                "expected_branch": case.expected_engineering_branch,
+                                "observed_branch": verdict,
+                                "matched": (
+                                    verdict == case.expected_engineering_branch
+                                ),
+                            }
+                        )
+                    if {row["observed_branch"] for row in direct} != {
+                        "pass",
+                        "rewrite",
+                    }:
+                        raise CampaignError("direct_branch_coverage_incomplete")
+                    if not all(row["matched"] for row in direct):
+                        raise CampaignError("direct_case_expectation_mismatch")
                 producer = _run_producer(
                     paths=paths,
                     contract=contract,
@@ -522,7 +533,12 @@ def _finish_backend_step(
         cloud_proxy.close()
     receipt = {
         **dict(frozen),
-        "step": f"backend_{backend}",
+        "step": (
+            f"backend_{backend}_producer_only"
+            if skip_direct_cases
+            else f"backend_{backend}"
+        ),
+        "mode": "producer_only" if skip_direct_cases else "full",
         "backend": backend,
         "elapsed_ms": round((time.monotonic() - started) * 1000),
         "service": {
@@ -531,7 +547,7 @@ def _finish_backend_step(
             "diagnostic_codes": list(diagnostics),
         },
         "direct_cases": direct,
-        "direct_branch_coverage": ["pass", "rewrite"],
+        "direct_branch_coverage": [] if skip_direct_cases else ["pass", "rewrite"],
         "producer": producer,
         "cloud_scorer_budget": _cloud_budget_projection(cloud_budget),
         "private_packets_and_traces_removed_before_receipt": True,
@@ -541,7 +557,11 @@ def _finish_backend_step(
         paths,
         phase,
         run_id,
-        f"backend-{backend}.json",
+        (
+            f"backend-{backend}-producer-only.json"
+            if skip_direct_cases
+            else f"backend-{backend}.json"
+        ),
         receipt,
     )
 
@@ -657,7 +677,7 @@ def _run_producer(
                         member_model=provider.main_model,
                         member_effort=provider.main_effort,
                     )
-                    completed = subprocess.run(
+                    completed = _run_owned_command(
                         command,
                         cwd=workspace,
                         env=_codex_environment(
@@ -665,11 +685,8 @@ def _run_producer(
                             trace_root=trace_root,
                             downstream_key=budget_proxy.downstream_api_key,
                         ),
-                        stdin=subprocess.DEVNULL,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE,
                         timeout=contract.producer.run_timeout_seconds,
-                        check=False,
+                        timeout_code="producer_process_timeout",
                     )
                     wire = capture.jsonl()
                 trace = load_rollout_trace(find_trace_bundle(trace_root))
@@ -1048,6 +1065,14 @@ def _require_backend(value: str) -> None:
         raise CampaignError("backend_invalid")
 
 
+def _require_backend_mode(phase: str, skip_direct_cases: bool) -> None:
+    _require_phase(phase)
+    if not isinstance(skip_direct_cases, bool):
+        raise CampaignError("backend_mode_invalid")
+    if skip_direct_cases and phase != "commissioning":
+        raise CampaignError("producer_only_requires_commissioning")
+
+
 def _require_watchdog_scope() -> None:
     required = (
         "RONDO_WATCHDOG_WRAPPER_PID",
@@ -1068,6 +1093,76 @@ def _decimal_text(value: Decimal) -> str:
     return format(value, "f")
 
 
+def _run_owned_command(
+    command: Sequence[str],
+    *,
+    cwd: Path,
+    env: Mapping[str, str],
+    timeout: int,
+    timeout_code: str,
+) -> subprocess.CompletedProcess[bytes]:
+    """Run one task-owned CLI and reap descendants in its private process group."""
+
+    process = subprocess.Popen(
+        list(command),
+        cwd=cwd,
+        env=dict(env),
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        start_new_session=True,
+    )
+    try:
+        stdout, stderr = process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        _signal_process_group(process.pid, signal.SIGTERM)
+        try:
+            process.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            _signal_process_group(process.pid, signal.SIGKILL)
+            process.communicate(timeout=5)
+        raise CampaignError(timeout_code) from None
+    finally:
+        _reap_residual_process_group(process.pid)
+    return subprocess.CompletedProcess(
+        args=list(command),
+        returncode=process.returncode,
+        stdout=stdout,
+        stderr=stderr,
+    )
+
+
+def _reap_residual_process_group(process_group: int) -> None:
+    _signal_process_group(process_group, signal.SIGTERM)
+    deadline = time.monotonic() + 3
+    while _process_group_exists(process_group) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    if _process_group_exists(process_group):
+        _signal_process_group(process_group, signal.SIGKILL)
+        deadline = time.monotonic() + 2
+        while _process_group_exists(process_group) and time.monotonic() < deadline:
+            time.sleep(0.05)
+    if _process_group_exists(process_group):
+        raise CampaignError("owned_process_group_not_reaped")
+
+
+def _signal_process_group(process_group: int, sig: signal.Signals) -> None:
+    try:
+        os.killpg(process_group, sig)
+    except ProcessLookupError:
+        pass
+
+
+def _process_group_exists(process_group: int) -> bool:
+    try:
+        os.killpg(process_group, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Run bounded Plan 097 dual-backend engineering steps"
@@ -1083,6 +1178,11 @@ def build_parser() -> argparse.ArgumentParser:
     backend.add_argument("--run-id", required=True)
     backend.add_argument("--backend", choices=sorted(_BACKENDS), required=True)
     backend.add_argument("--producer-run-id", required=True)
+    backend.add_argument(
+        "--producer-only",
+        action="store_true",
+        help="commissioning recovery after prior valid direct verdicts",
+    )
     return parser
 
 
@@ -1108,6 +1208,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 run_id=args.run_id,
                 backend=args.backend,
                 producer_run_id=args.producer_run_id,
+                skip_direct_cases=args.producer_only,
             )
         else:
             output = finalize_run(

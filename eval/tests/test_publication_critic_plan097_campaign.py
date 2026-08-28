@@ -4,6 +4,7 @@ from decimal import Decimal
 import os
 from pathlib import Path
 import stat
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -102,6 +103,53 @@ class Plan097CampaignTests(unittest.TestCase):
 
     def test_decimal_projection_is_exact(self) -> None:
         self.assertEqual(campaign._decimal_text(Decimal("0.1200")), "0.1200")
+
+    def test_producer_only_recovery_is_for_commissioning_only(self) -> None:
+        campaign._require_backend_mode("commissioning", True)
+        campaign._require_backend_mode("formal", False)
+        with self.assertRaisesRegex(
+            campaign.CampaignError, "producer_only_requires_commissioning"
+        ):
+            campaign._require_backend_mode("formal", True)
+
+        args = campaign.build_parser().parse_args(
+            [
+                "backend",
+                "--phase",
+                "commissioning",
+                "--run-id",
+                "plan097-commission-recovery",
+                "--backend",
+                "local",
+                "--producer-run-id",
+                "plan097-producer-recovery",
+                "--producer-only",
+            ]
+        )
+        self.assertTrue(args.producer_only)
+
+    def test_owned_command_reaps_a_lingering_descendant(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            child_pid_path = root / "child.pid"
+            script = (
+                "import pathlib,subprocess,sys; "
+                "child=subprocess.Popen([sys.executable,'-c',"
+                "'import time; time.sleep(60)'],stdout=subprocess.DEVNULL,"
+                "stderr=subprocess.DEVNULL); "
+                f"pathlib.Path({str(child_pid_path)!r}).write_text(str(child.pid))"
+            )
+            completed = campaign._run_owned_command(
+                [sys.executable, "-c", script],
+                cwd=root,
+                env={"PATH": os.environ.get("PATH", "")},
+                timeout=10,
+                timeout_code="test_timeout",
+            )
+
+            self.assertEqual(completed.returncode, 0)
+            child_pid = int(child_pid_path.read_text(encoding="utf-8"))
+            self.assertFalse(Path(f"/proc/{child_pid}").exists())
 
 
 if __name__ == "__main__":
