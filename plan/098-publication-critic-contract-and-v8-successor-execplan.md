@@ -143,17 +143,19 @@
 - 已创建专用 worktree `/home/sjc/desktop/RONDO/.claude/worktrees/098-publication-critic-contract-data/` 和分支 `worktree-098-publication-critic-contract-data`；本次规划没有创建主物理根 ignored 工件。
 - 已按用户“一个 Plan、两个大阶段”的直接决定窄同步根 WBS 与方向 3 子 WBS：Plan 098 统一承接工作包一、二，工作包二仍由阶段一验收硬锁；工作包三、四继续各自立项。
 - 已完成本计划起草、独立审查、整改与规划提交。
+- 工作包一已形成唯一权威 `rondo-publication-critic-task@v2` 与 v2 rubric、v3 input、v4 render、结构化输出/release schema；新增纯函数 gate/loss target/pair/evaluation reference 和物理 split successor consumer，保留产品 typed seam 与冻结历史路径。
+- continuity applicability 已闭合为只依据 model-visible candidate：明确完成才允许 `N/A`，未完成或未明确闭合时适用，冲突时不得用隐藏 completion metadata 绕过 gate。
+- 工作包一定向门禁通过：successor 合同 10/10，旧 contract/training-data/identity 回归 31/31；冻结 v7/v8 tree identity 保持不变。权威合同当前内容 SHA-256 为 `4a0f56a4fc1928a186864a14823eb3e7ead438aad96a746f59f37c9f470e8b0d`。
 
 ### 当前工作
 
-- `PLAN_READY / WORK_PACKAGE_1_NOT_STARTED / WORK_PACKAGE_2_LOCKED`：等待执行者在 098 worktree 启动工作包一。
+- `WORK_PACKAGE_1_IMPLEMENTED_AWAITING_REVIEW / WORK_PACKAGE_2_LOCKED`：工作包一实现、自检与提交交接已闭合，等待审查者阶段验收；未获明确通过前不进入工作包二。
 
 ### 本任务剩余步骤
 
-1. 执行者完成工作包一实现、自检、日志和提交，通过指定队列申请审查并停止会话。
-2. 审查者检查正确性、功能性、历史保护和局部回归；finding 通过队列退回，执行者整改并重新提交。审查者明确验收通过后，工作包二解锁。
-3. 执行者从冻结合同导出数据设计，组织干净上下文模块负责人和一一盲审员，完成调试、正式生成、整合、freeze、consumer 与定向门禁，提交最终汇报并停止会话。
-4. 审查者完成最终验收与 `agent_log` 报告；finding 退回整改，验收通过后 Plan 098 才冻结为完整历史合同。合并和推送继续等待用户另行批准。
+1. 审查者检查工作包一正确性、功能性、历史保护和局部回归；finding 通过队列退回，执行者只在工作包一内整改并重新提交。审查者明确验收通过后，工作包二解锁。
+2. 执行者从冻结合同导出数据设计，组织干净上下文模块负责人和一一盲审员，完成调试、正式生成、整合、freeze、consumer 与定向门禁，提交最终汇报并停止会话。
+3. 审查者完成最终验收与 `agent_log` 报告；finding 退回整改，验收通过后 Plan 098 才冻结为完整历史合同。合并和推送继续等待用户另行批准。
 
 ### 阻塞项
 
@@ -163,7 +165,7 @@
 ### 当前验收状态
 
 - 规划：`READY_FOR_EXECUTION`。
-- 工作包一：`NOT_STARTED`。
+- 工作包一：`IMPLEMENTED_AWAITING_STAGE_REVIEW`。
 - 工作包二：`LOCKED_BY_WORK_PACKAGE_1_REVIEW`。
 - 完整任务：`NOT_STARTED`。
 
@@ -193,6 +195,8 @@
 | 009 | worktree 创建后，用户 WBS 变动已独立提交为 `main@bf28b50`；经用户明确授权，098 已 fast-forward 到该提交 | 让执行者从同一 worktree 读取最新权威 WBS，避免启动前额外同步请示 | WBS、Git | 已采纳 |
 | 010 | 工作包一接受绑定 exact commit、权威合同版本与内容 SHA-256；工作包二全链 fail-closed 核对，漂移则退回阶段一 | 用轻量身份防止已验收任务语义在数据阶段静默变化 | 阶段、manifest | 已采纳 |
 | 011 | mixed v8 正文不读取；只从物理排除 unseen 的安全投影复用，安全来源不足时允许复用为零 | 当前冻结文件混合 split，不能为复用而突破旧 unseen 封存 | 数据来源、隔离 | 已采纳 |
+| 012 | 工作包一复用严格 `PublicationPacket@v1` 公共字段，不修改 Rust product seam；完成/未完成 applicability 只从 candidate 可见文本判定，隐藏 completion metadata 被 successor schema 拒绝 | 现有公共 packet 已包含作出五项判断所需的 bounded candidate/context；新增产品字段会制造可规避标签的并列事实 | 输入、产品、标签 | 已采纳 |
+| 013 | 新 successor release 采用 train/validation/test 物理 split 文件；训练 consumer 只打开 train bytes，validation 使用独立入口且不提供 test loader | 直接满足 holdout 字节隔离并避免延续旧 mixed-file 后过滤模式 | schema、consumer、隔离 | 已采纳 |
 
 ## 7. 给执行者的启动提示词
 

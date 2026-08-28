@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "name": "rondo-publication-critic-render",
+  "revision": "v4",
+  "authority": "rondo-publication-critic-task@v2",
+  "mechanical_predecessor": "rondo-publication-critic-render@v3",
+  "messages": {
+    "system": "absent",
+    "count": 2,
+    "user_components": ["qualification_rubric", "packet", "continuity", "evidence_v1"],
+    "assistant_components": ["candidate.summary", "candidate.handoff"]
+  },
+  "applicability": {
+    "source": "model_visible_candidate_only",
+    "hidden_completion_metadata": "forbidden"
+  },
+  "dynamic_text_encoding": "json_utf8_less_than_escaped_control_token_safe",
+  "candidate_truncation": "forbidden",
+  "overflow": "drop_whole_oldest_publication_then_rerender_or_typed_failure",
+  "identity_binding": {
+    "algorithm": "sha256_canonical_json",
+    "components": [
+      "doc/rondo-multi-publication-critic-task-contract-v2.md",
+      "eval/templates/publication-critic/input-contract-v3.md",
+      "eval/templates/publication-critic/qualification-rubric-v2.md",
+      "eval/templates/publication-critic/render-contract-v4.json",
+      "eval/rondo_eval/publication_critic/render.py"
+    ]
+  }
+}

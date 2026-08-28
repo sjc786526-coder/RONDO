@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "rondo-publication-critic-successor-release@v1",
+  "authority": "rondo-publication-critic-task@v2",
+  "manifest": {
+    "schema": "rondo-publication-critic-successor-release-manifest@v1",
+    "required_task_binding": ["name", "version", "content_sha256", "accepted_commit"],
+    "physical_splits": ["train", "validation", "test"],
+    "files_per_split": ["candidates", "pairs"],
+    "file_binding": ["path", "sha256", "rows"],
+    "consumer_access": {
+      "train": "opens only train candidates and pairs",
+      "validation": "separate explicit entrypoint",
+      "test": "no training or selection entrypoint"
+    }
+  },
+  "candidate": {
+    "schema": "rondo-publication-critic-successor-candidate@v1",
+    "required": ["schema", "candidate_id", "group_id", "packet", "labels", "continuity_label_basis"],
+    "packet": "rondo-publication-packet@v1 with rondo-publication-qualification@v2",
+    "labels": {
+      "useful_state_transfer": ["PASS", "FAIL"],
+      "honest_uncertainty": ["PASS", "FAIL"],
+      "conditional_continuity": ["PASS", "FAIL", "N/A"],
+      "scope_and_signal": ["PASS", "FAIL"],
+      "internal_consistency": ["PASS", "FAIL"]
+    },
+    "continuity_label_basis": [
+      "model_visible_complete_claim",
+      "model_visible_unfinished_or_not_closed"
+    ],
+    "forbidden_hidden_label_sources": [
+      "completion_state",
+      "public_state",
+      "candidate_brief",
+      "defects",
+      "split",
+      "source",
+      "generator",
+      "reviewer"
+    ]
+  },
+  "pair": {
+    "schema": "rondo-publication-critic-successor-pair@v1",
+    "required": ["schema", "pair_id", "group_id", "kind", "left_candidate_id", "right_candidate_id", "target_dimension", "soft_change"],
+    "kinds": {
+      "boundary": "left is Q+ PASS, right is Q- REWRITE, target changes PASS to FAIL, every non-target label is invariant",
+      "soft_only_invariance": "both endpoints PASS and every hard label including applicability is invariant"
+    },
+    "soft_change": "null for Boundary; a bounded description of the model-visible soft-only counterfactual for invariance"
+  },
+  "authoritative_validation": [
+    "eval/rondo_eval/publication_critic/successor_task.py",
+    "eval/rondo_eval/publication_critic/successor_data.py"
+  ]
+}
