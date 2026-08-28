@@ -1,0 +1,63 @@
+{
+  "deployment_artifact_sha256": "117da8e3a6c3e9c9b9b66e74d69373b8f186e7fe27be2d64e0bb18510c9a07d9",
+  "object_id": "skywork-base-e51ea3e0-plan097",
+  "qualification_freeze_sha256": "02fbb85d9eb3c76a6761fd86b495d46a01720e13ced4fbac0b74e3cd8e831616",
+  "service_descriptor": {
+    "identity": {
+      "implementation": {
+        "name": "rondo-publication-critic-real-service",
+        "revision": "plan097-v1"
+      },
+      "model": {
+        "model": {
+          "name": "skywork-reward-v2-qwen3-1.7b",
+          "revision": "e51ea3e08fb81326-base"
+        },
+        "tokenizer": {
+          "name": "skywork-reward-v2-qwen3-1.7b-tokenizer",
+          "revision": "e51ea3e08fb81326-plan066-export-v1"
+        }
+      },
+      "protocol": "rondo_publication_critic_v1",
+      "qualification": {
+        "packet_schema": {
+          "name": "rondo-publication-packet",
+          "revision": "v1"
+        },
+        "rubric": {
+          "name": "rondo-publication-qualification",
+          "revision": "v1"
+        }
+      },
+      "scoring": {
+        "definition": {
+          "name": "skywork-reward-scalar-higher-better",
+          "revision": "plan068-cuda-bf16-v1"
+        },
+        "domain": {
+          "max": 1.0,
+          "min": 0.0
+        },
+        "input_template": {
+          "name": "rondo-publication-packet-render",
+          "revision": "v3-sha256-dc3209af0d284dfe4be57403873717ba5f2790e2257cd4a39a2376de5696044c"
+        },
+        "pass_rule": "score_greater_than_or_equal_to_threshold",
+        "scalar_projection": {
+          "name": "stable-sigmoid-logits-index-0",
+          "revision": "v1"
+        },
+        "threshold": 0.9350569011196121
+      }
+    },
+    "limits": {
+      "io_timeout_ms": 2000,
+      "job_timeout_ms": 25000,
+      "max_concurrency": 1,
+      "queue_capacity": 8,
+      "request_bytes": 131072,
+      "response_bytes": 16384
+    }
+  },
+  "worker_protocol": "rondo-publication-critic-worker-v1"
+}

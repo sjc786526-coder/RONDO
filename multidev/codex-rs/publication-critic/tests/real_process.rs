@@ -171,7 +171,7 @@ impl Fixture {
         let service_descriptor = test_descriptor();
         let frozen = json!({
             "worker_protocol": "rondo-publication-critic-worker-v1",
-            "object_id": "c1",
+            "object_id": "qualified-plan097",
             "deployment_artifact_sha256": "a".repeat(64),
             "qualification_freeze_sha256": "b".repeat(64),
             "service_descriptor": service_descriptor,
