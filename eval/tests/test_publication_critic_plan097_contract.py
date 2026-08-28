@@ -75,8 +75,8 @@ class EngineeringContractTests(unittest.TestCase):
         self.assertEqual(contract.budgets.total_rmb, Decimal("30"))
         self.assertEqual(contract.producer.model_alias, "terra")
         self.assertEqual(contract.producer.reasoning_effort, "low")
-        self.assertEqual(contract.producer.max_input_tokens, 96000)
-        self.assertEqual(contract.producer.max_output_tokens, 16000)
+        self.assertEqual(contract.producer.max_input_tokens, 32000)
+        self.assertEqual(contract.producer.max_output_tokens, 4000)
         self.assertEqual(len(contract.commissioning_cases), 3)
         self.assertEqual(
             {case.expected_engineering_branch for case in contract.commissioning_cases},
@@ -175,10 +175,10 @@ class EngineeringContractTests(unittest.TestCase):
             lambda value: value["producer"].__setitem__("reasoning_effort", "medium"),
             lambda value: value["producer"].__setitem__("run_timeout_seconds", 599),
             lambda value: value["producer"]["usage_envelope"].__setitem__(
-                "max_input_tokens", 95000
+                "max_input_tokens", 31000
             ),
             lambda value: value["producer"]["usage_envelope"].__setitem__(
-                "max_output_tokens", 15000
+                "max_output_tokens", 3000
             ),
         )
         for index, change in enumerate(changes):

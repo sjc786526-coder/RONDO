@@ -380,8 +380,8 @@ def _validate_producer(value: Any) -> ProducerContract:
         producer["model_alias"] != "terra"
         or producer["reasoning_effort"] != "low"
         or run_timeout != 600
-        or max_input != 96000
-        or max_output != 16000
+        or max_input != 32000
+        or max_output != 4000
     ):
         raise EngineeringContractError("producer_identity_invalid")
     return ProducerContract("terra", "low", run_timeout, max_input, max_output)

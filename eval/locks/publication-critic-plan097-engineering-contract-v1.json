@@ -30,8 +30,8 @@
     "reasoning_effort": "low",
     "run_timeout_seconds": 600,
     "usage_envelope": {
-      "max_input_tokens": 96000,
-      "max_output_tokens": 16000
+      "max_input_tokens": 32000,
+      "max_output_tokens": 4000
     }
   },
   "commissioning_cases": [
