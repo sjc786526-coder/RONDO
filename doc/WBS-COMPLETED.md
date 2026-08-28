@@ -2531,3 +2531,32 @@ CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH / INTEGRATED / PUSHED`。实现提交�
   `agent_log/2026-08-27-135908-plan096-final-independent-review.md`。用户授权后，任务以非 fast-forward merge 合入并推送 `main`；本地任务分支
   归档为 `zz-done/worktree-096-validation-cloud-scorer-qualification`，worktree 保留，集成记录见
   `agent_log/2026-08-27-190518-plan096-main-integration.md`。
+
+## Publication Critic M3-D 双 Backend 工程闭环（Plan 097，2026-08-28）
+
+**状态**：`COMPLETED / M3_D_DUAL_BACKEND_ENGINEERING_PASS / FINAL_REVIEW_ACCEPTED / GOAL_COMPLETED /
+NOT_INTEGRATED / NOT_PUSHED`。clean formal source 为 `0ae9623`，执行者交付提交为 `32553d8`，初审报告提交为 `8dc768e`，窄修提交为
+`161be6d`。
+
+- 在 Plan 057 既有 `team_publish` publication cycle 与 canonical Team State mutation 上，以同一
+  `PublicationScorer → service → typed client` 接缝分别接入 local exact Skywork 1.7B base 与 cloud DeepSeek V4 Flash；backend 差异只在
+  工件、启动/配置和 identity，没有复制 Producer、Root、Team State 或第二套发布状态机。OFF 保持真正旁路。
+- clean `plan097-formal-5` 的 local/cloud 各 3/3 engineering fixture 覆盖 `PASS + REWRITE`；两条正常 Terra Producer 路径均为 3 次 publish、
+  2 次固定反馈重写/同 cycle 回环与唯一 canonical commit。前两稿不创建 Event/Version 或推进公共 revision/wake；最终各只有 1 Event、1 Version、
+  revision 1 和一次 Root wake。受控 failure fallback 为一次 commit，cancel 为零 commit。
+- 正式费用总账为 `21.4197186 RMB / 30 RMB`：Producer 172 请求、`2.846074 USD = 21.3455550 RMB`；cloud scorer 24 个
+  usage-priced attempts、`0.0741636 RMB`，无 unknown-usage charge。未读取 validation/unseen，未训练、微调、量化、下载/上传模型，也未使用
+  Docker 或 RunPod。
+- 首次独立验收发现 4 Medium / 1 Low：cloud 单文件 ledger 缺少跨进程互斥、finalizer 未冻结两 backend Producer runtime identity、shutdown
+  异常可被误记成功、三处 task-owned 私有临时残留，以及 local threshold 低 1 ULP。窄修加入 per-operation 文件锁/fresh reload、Producer
+  identity 等值和当前配置校验、accepted/graceful/zero-exit lifecycle 收口，恢复权威 threshold，并精确清除残留。
+- 按审查裁定保留 formal-5 的真实模型/API/Producer 证据和费用总账，不伪造历史 identity，也不为离线设施窄修追加付费/模型运行；归档明确记录旧
+  formal threshold 低 1 ULP、旧 service receipt 只证明 process reaped。最终复验独立运行 Plan 097 Python `51/51`，并以 16 个独立 ledger
+  并发实例确认 16 个唯一 reservation 和完整保守额度，未发现新的 High / Medium / Low correctness/functionality finding。
+- 正式摘要见 `eval/results/publication-critic/m3-d-dual-backend-engineering-v1.{json,md}`；初审、返修与最终验收分别见
+  `agent_log/2026-08-28-001531-plan097-independent-review.md`、
+  `agent_log/2026-08-28-003120-plan097-review-remediation.md` 与
+  `agent_log/2026-08-28-004428-plan097-final-independent-review.md`。Plan 097 一次性外部动作授权已经关闭，余额不转移；分支尚未合并或推送，
+  worktree 保留等待用户批准。
+- 本任务只完成工程链与双 backend 可替换性 GO。本地模型质量仍为 `NO-GO / 待替换`，云端 scorer 仍为 `NOT QUALIFIED`，M3-D 产品价值仍未验收，
+  Publication Critic 默认 `OFF`，生产启用 `NO`。

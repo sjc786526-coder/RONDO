@@ -1,8 +1,8 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
 最后更新：2026-08-28 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
-状态：**第一期、第二期、第四期已完成；Publication Critic 三期 Plan 097 已完成实现与 clean formal，初审 finding 已窄修，执行者终态为
-`M3_D_DUAL_BACKEND_ENGINEERING_PASS / RE_REVIEW_PENDING`。local exact 1.7B base 与 cloud DeepSeek V4 Flash 两个未获产品质量资格的
+状态：**第一期、第二期、第四期已完成；Publication Critic 三期 Plan 097 已完成实现、clean formal、初审窄修与最终独立验收，终态为
+`M3_D_DUAL_BACKEND_ENGINEERING_PASS / FINAL_REVIEW_ACCEPTED`。local exact 1.7B base 与 cloud DeepSeek V4 Flash 两个未获产品质量资格的
 真实 fixture 已闭合双 backend 工程 E2E 与可替换接缝。Plan 096 的
 `CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH / FINAL_REVIEW_ACCEPTED / INTEGRATED / PUSHED`、Plan 094 的有效负向终态和 Plan 095 的
 最终验收均保持有效；本地/云端质量、产品价值、Publication Critic 默认与生产启用继续锁定**
@@ -105,7 +105,7 @@ M3-B1c 正式分阶段训练与工件回收          │
                        ↓
         Plan 094 Route O 连续训练与实质增益候选形成（有效负向终态；zero-Pod 收口及最终验收完成）
                        ↓
-        Plan 097 M3-D 双 backend 工程前置闭环（实现与 clean formal 完成；初审窄修完成、复验待办）
+        Plan 097 M3-D 双 backend 工程前置闭环（已完成并通过最终独立验收）
 
 并列 reference 支线：M3-B2a 已有可替换 service → Plan 095 云端参考 scorer backend（已完成）
                                               ↓
@@ -474,7 +474,7 @@ rubric/quality floor，不读取 unseen，不训练/微调/量化，不使用 Do
 
 ### D 阶段：端到端收口
 
-#### M3-D：双 backend 工程前置闭环（Plan 097 初审窄修完成、待复验）
+#### M3-D：双 backend 工程前置闭环（Plan 097 已完成）
 
 **当前目标**：在少量合成或代表性的 RONDO Multi publication 流程中，让 local exact 1.7B base 与 cloud DeepSeek V4 Flash 分别通过同一
 `PublicationScorer → service → typed client → team_publish` 边界，验证 OFF/local/cloud、Producer 固定反馈重写、canonical commit、
@@ -491,16 +491,17 @@ failure fallback、取消、Root/Team State 不变量和有界资源回收。bac
 - 前两次拒稿不创建 Event/Version 或推进 revision/wake/Root attention/evidence cursor，Root 不感知 backend；
 - 代表 typed failure fallback、commit 前取消、deadline/shutdown 与 task-owned model/worker/service/socket/request 回收成立；
 - commissioning 全链打通后冻结 clean 条件并从干净状态完整运行一轮，相关正确性测试进入既有体系，结果诚实区分真实/受控/未运行；
-- 首次独立验收接受后把完成证据归档到 `doc/WBS-COMPLETED.md`，本页只保留最终工程事实和仍有效边界。
+- 完成证据归档到 `doc/WBS-COMPLETED.md`，本页只保留最终工程事实和仍有效边界。
 
 **当前状态**：clean `plan097-formal-5` 在 `0ae9623` 上形成 `M3_D_DUAL_BACKEND_ENGINEERING_PASS`。OFF 旁路、
 local/cloud 各 3/3 fixture 的 `PASS + REWRITE`、正常 Producer 两次重写/回环与唯一提交、controlled fallback/cancel 和资源回收均闭合；
 累计保守费用 `21.4197186 RMB / 30 RMB`。首次独立验收未接受原实现；费用账本跨进程互斥、双 backend Producer runtime identity
 相等收口、service shutdown 异常传播、三处 task-owned 残留和 local reference threshold 一 ULP 偏差均已窄修。按审查决定保留原 formal
-证据且不重跑付费 API/真实模型，当前为 `REMEDIATION_COMPLETE / RE_REVIEW_PENDING`。正式摘要见
-[`M3-D 双 backend 工程结果`](../../eval/results/publication-critic/m3-d-dual-backend-engineering-v1.md)，合同与待审状态见
+证据且不重跑付费 API/真实模型；最终独立复验以 0 High / 0 Medium / 0 Low 接受。工程链与双 backend 可替换性均为 GO；本地模型质量、
+云端 scorer 资格、产品价值、默认启用与生产锁保持不变。正式摘要见
+[`M3-D 双 backend 工程结果`](../../eval/results/publication-critic/m3-d-dual-backend-engineering-v1.md)，合同与最终状态见
 [`Plan 097 ExecPlan`](../../plan/097-m3-d-dual-backend-engineering-execplan.md)。Plan 096 的 scorer 资格失败不是本任务工程失败，也没有被推翻；
-首次独立验收接受前不写入 `doc/WBS-COMPLETED.md`。
+完成历史见 `doc/WBS-COMPLETED.md`。
 
 ## 串并行与资源关系
 
@@ -626,8 +627,7 @@ local/cloud 各 3/3 fixture 的 `PASS + REWRITE`、正常 Producer 两次重写/
   合计 `2.1391799 RMB`，剩余授权 `27.8608201 RMB` 不作为后续预算。授权仅覆盖的 bounded validation packet cloud projection 已完成；未使用
   Docker、GPU、RunPod、unseen、训练、产品启用、远端发布或数据/权重上传。正式终态不是 `CLOUD_SCORER_QUALIFIED`，因此不授予任何质量或产品资格。
 - Plan 068、Plan 071 与 Plan 073 的一次性授权已随本地交接、真实推理、资格/联合横评、独立验收和 exact winner 卷删除全部完成，
-  不向后续任务延伸。Plan 097 已另行取得一次性授权：原位使用现有 exact base/8GB GPU、DeepSeek scorer 与正常 Producer 的少量 bounded
-  真实调用、必要定向门禁及项目内实现/记录，真实 API 总硬上限 `30 RMB`。不允许 Docker、RunPod、训练/微调/量化、模型下载/上传、
-  validation/unseen、全 workspace、默认启用或生产；完成只提交本地 097 分支，合并/推送/归档/worktree 删除等待用户批准。
+  不向后续任务延伸。Plan 097 的 exact base/8GB GPU、DeepSeek scorer、正常 Producer 与 30 RMB 真实 API 授权也已随最终验收关闭，余额不转移；
+  当前只保留本地 097 分支和既有证据，合并/推送/归档/worktree 删除等待用户批准。后续真实模型/API、validation/unseen、产品价值或生产动作须重新授权。
 - 训练数据、权重、逐样本输出与私有运行材料留在 `eval-data/` 或仓库外；`training/` 只保存体积合规的轻量合同与数据。
 - 正确性测试随产品能力建设；测评只保留能指导模型选择和产品验收的轻量指标，不建设数据资产审计或可信证明平台。

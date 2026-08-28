@@ -271,15 +271,17 @@ XXX用以下内容代替：
 - 2026-08-28：完成窄修与 39/39 受影响 Python 回归：ledger 每次操作在跨进程文件锁内 fresh reload，finalizer 强制相等并投影 Producer identity，
   backend receipt 只接受 shutdown probe accepted + graceful zero exit，threshold 恢复权威值并新增防漂移断言，三处点名残留已精确删除。按审查决定
   保留 `formal-5`、真实模型/API/Producer 证据和 `21.4197186 RMB` 总账，不重跑付费 API 或真实本地模型。
+- 2026-08-28：最终独立复验逐项接受 4 Medium / 1 Low 窄修，独立重跑 Plan 097 Python `51/51`，并以 16 个独立 ledger 并发实例确认
+  attempt 唯一及保守额度完整；未发现新的 High / Medium / Low correctness 或 functionality finding。任务终态正式接受为
+  `M3_D_DUAL_BACKEND_ENGINEERING_PASS / FINAL_REVIEW_ACCEPTED`。
 
 ### 当前工作
 
-- `REMEDIATION_COMPLETE / FORMAL_EVIDENCE_RETAINED / RE_REVIEW_PENDING`：初审 finding 已收敛，等待独立复验。
+- `COMPLETED / M3_D_DUAL_BACKEND_ENGINEERING_PASS / FINAL_REVIEW_ACCEPTED / NOT_INTEGRATED / NOT_PUSHED`。
 
 ### 本任务剩余步骤
 
-1. 提交本轮窄修并按用户给定最终消息模板通过 queue 交审查者复验后停止。
-2. 若复验接受，由审查者完成审查报告和任务终态文档收口；若仍有 finding，按既有边界继续窄修。
+- 本任务内无剩余实施步骤；当前状态与任何未来工作包只由 WBS 承接。
 
 ### 阻塞项
 
@@ -288,7 +290,8 @@ XXX用以下内容代替：
 
 ### 当前验收状态
 
-- 执行者正式轮终态为 `M3_D_DUAL_BACKEND_ENGINEERING_PASS`；首次独立验收不通过，全部已知 finding 已窄修，正确性/功能性复验尚未完成。
+- **验收通过 / 任务目标完成**。正式终态为 `M3_D_DUAL_BACKEND_ENGINEERING_PASS / FINAL_REVIEW_ACCEPTED`；这只完成 M3-D 工程前置，
+  不授予模型质量、产品价值、默认启用或生产资格。
 
 ### 交接边界
 

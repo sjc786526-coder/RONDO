@@ -6,9 +6,10 @@ Plan 097 completed one clean formal run from source
 `M3_D_DUAL_BACKEND_ENGINEERING_PASS`
 
 The initial independent review did not accept the implementation. Its four medium findings and
-one low finding have since been remediated, and the branch is pending re-review. By reviewer
-decision, `formal-5`, its real-model/API/Producer evidence, and its cumulative cost remain the
-historical formal evidence; remediation did not rerun paid API calls or the real local model.
+one low finding were remediated; final independent re-review accepted the task with zero remaining
+High, Medium, or Low correctness/functionality findings. By reviewer decision, `formal-5`, its
+real-model/API/Producer evidence, and its cumulative cost remain the historical formal evidence;
+remediation did not rerun paid API calls or the real local model.
 
 The result establishes the engineering chain and backend replacement seam only. The exact
 Skywork 1.7B base remains `NO-GO / pending replacement`, DeepSeek V4 Flash remains
@@ -49,7 +50,9 @@ shutdown probe, graceful completion, and zero exit before a backend receipt can 
 Remediation additionally gives the cloud ledger a cross-process file lock with a fresh reload for
 every reserve, settle, and snapshot, and removed the three exact task-owned temporary remnants
 identified by review. The affected Python regression set passes 39/39; the full lightweight
-Plan 097 Python unit set passes 51/51.
+Plan 097 Python unit set passes 51/51, independently repeated during final review. Final review
+also exercised 16 concurrent independent ledger instances and observed 16 unique reservations
+with the full conservative cap retained.
 
 The cumulative Plan 097 conservative total is `21.4197186 RMB` of the `30 RMB` hard cap. This
 includes all commissioning and unsuccessful technical attempts: Producer is `21.3455550 RMB`
@@ -60,3 +63,5 @@ The complete body-free formal receipts remain in the task-owned ignored namespac
 `eval-data/publication-critic/plan097/formal/plan097-formal-5/`.
 The initial review report is
 [`agent_log/2026-08-28-001531-plan097-independent-review.md`](../../../agent_log/2026-08-28-001531-plan097-independent-review.md).
+The accepted final re-review is
+[`agent_log/2026-08-28-004428-plan097-final-independent-review.md`](../../../agent_log/2026-08-28-004428-plan097-final-independent-review.md).
