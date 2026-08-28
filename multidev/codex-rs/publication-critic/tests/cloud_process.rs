@@ -42,6 +42,7 @@ use std::sync::atomic::Ordering;
 use std::time::Duration;
 use tokio::io::AsyncBufReadExt;
 use tokio::io::AsyncReadExt;
+use tokio::io::AsyncWriteExt;
 use tokio::io::BufReader;
 use tokio::process::Child;
 use tokio::process::ChildStderr;
@@ -59,6 +60,7 @@ use wiremock::matchers::path;
 const API_KEY_ENV: &str = "RONDO_PLAN095_TEST_CLOUD_API_KEY";
 const API_KEY: &str = "sk-plan095-loopback-only-not-a-real-credential";
 const BODY_SENTINEL: &str = "PLAN095_SYNTHETIC_CANDIDATE_BODY";
+const REASONING_SENTINEL: &str = "PLAN096_PRIVATE_REASONING_MUST_NOT_LEAK";
 const PROVIDER_MODEL: &str = "rondo-plan095-fake-model";
 const PROVIDER_PATH: &str = "/v1/chat/completions";
 const PROCESS_TIMEOUT: Duration = Duration::from_secs(10);
@@ -231,6 +233,34 @@ fn completion(model: &str, content: &str) -> Value {
             "finish_reason": "stop",
         }],
         "usage": {"prompt_tokens": 512, "completion_tokens": 8, "total_tokens": 520},
+    })
+}
+
+fn detailed_completion(model: &str, content: Option<&str>, finish_reason: Option<&str>) -> Value {
+    let mut choice = json!({
+        "index": 0,
+        "message": {
+            "role": "assistant",
+            "content": content,
+            "reasoning_content": REASONING_SENTINEL,
+        },
+    });
+    if let Some(finish_reason) = finish_reason {
+        choice["finish_reason"] = json!(finish_reason);
+    }
+    json!({
+        "id": "chatcmpl-plan096",
+        "object": "chat.completion",
+        "created": 1_700_000_000,
+        "model": model,
+        "choices": [choice],
+        "usage": {
+            "prompt_tokens": 512,
+            "completion_tokens": 8,
+            "total_tokens": 520,
+            "prompt_cache_hit_tokens": 128,
+            "prompt_cache_miss_tokens": 384,
+        },
     })
 }
 
@@ -421,6 +451,31 @@ fn path_text(path: &Path) -> TestResult<&str> {
     path.to_str().ok_or_else(|| "test path is not UTF-8".into())
 }
 
+async fn run_cloud_eval(fixture: &Fixture, input: &[u8]) -> TestResult<CapturedProbe> {
+    let mut command = Command::new(cargo_bin("codex-publication-critic-cloud-eval")?);
+    command
+        .arg("--descriptor")
+        .arg(&fixture.descriptor_path)
+        .env(API_KEY_ENV, API_KEY)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    let mut child = command.spawn()?;
+    let mut stdin = child.stdin.take().ok_or("cloud eval stdin was not piped")?;
+    stdin.write_all(input).await?;
+    stdin.shutdown().await?;
+    drop(stdin);
+    let output = timeout(PROCESS_TIMEOUT, child.wait_with_output())
+        .await
+        .map_err(|_| "cloud eval process timed out")??;
+    Ok(CapturedProbe {
+        status: output.status,
+        stdout: String::from_utf8(output.stdout)?,
+        stderr: String::from_utf8(output.stderr)?,
+    })
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn cloud_backend_reaches_ready_and_produces_both_verdicts() -> TestResult {
     let provider = FakeProvider::start().await;
@@ -461,8 +516,12 @@ async fn cloud_backend_reaches_ready_and_produces_both_verdicts() -> TestResult 
     );
     let body: Value = serde_json::from_slice(&requests[0].body)?;
     assert_eq!(body["model"], json!(PROVIDER_MODEL));
+    assert_eq!(body["temperature"], json!(0.0));
+    assert_eq!(body["max_tokens"], json!(64));
     assert_eq!(body["stream"], json!(false));
     assert_eq!(body["response_format"]["type"], json!("json_object"));
+    assert!(body.get("thinking").is_none());
+    assert!(body.get("reasoning_effort").is_none());
     let user = body["messages"][1]["content"]
         .as_str()
         .ok_or("user message must be a string")?;
@@ -489,6 +548,219 @@ async fn cloud_backend_reaches_ready_and_produces_both_verdicts() -> TestResult 
     assert!(stderr.contains("publication_critic_cloud_service_listening"));
     assert!(stderr.contains("publication_critic_cloud_service_stopped"));
     assert!(stderr.contains("publication_critic_cloud_call attempts=1"));
+    Ok(())
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn eval_entry_point_preserves_scalar_model_and_cache_usage_without_reasoning() -> TestResult {
+    let provider = FakeProvider::start().await;
+    provider
+        .mount(
+            ResponseTemplate::new(200).set_body_json(detailed_completion(
+                PROVIDER_MODEL,
+                Some(r#"{"quality":0.83}"#),
+                Some("stop"),
+            )),
+        )
+        .await;
+    let fixture = Fixture::new(&provider.base_url(), DescriptorOptions::default())?;
+    let input = std::fs::read(&fixture.packet_path)?;
+    let output = run_cloud_eval(&fixture, &input).await?;
+    assert!(
+        output.status.success(),
+        "cloud eval failed: {}",
+        output.stderr
+    );
+    assert_body_free(&output.stdout, &output.stderr);
+    assert!(!output.stdout.contains(REASONING_SENTINEL));
+    assert!(!output.stderr.contains(REASONING_SENTINEL));
+    assert_eq!(
+        output
+            .stderr
+            .matches("publication_critic_cloud_attempt attempt=1")
+            .count(),
+        1
+    );
+
+    let mut observation: Value = serde_json::from_str(output.stdout.trim())?;
+    assert!(observation["elapsed_ms"].as_u64().is_some());
+    observation["elapsed_ms"] = json!(0);
+    assert_eq!(
+        observation,
+        json!({
+            "requested_model": PROVIDER_MODEL,
+            "served_model": PROVIDER_MODEL,
+            "score": 0.83,
+            "attempts": 1,
+            "elapsed_ms": 0,
+            "usage": {
+                "prompt_tokens": 512,
+                "completion_tokens": 8,
+                "total_tokens": 520,
+                "prompt_cache_hit_tokens": 128,
+                "prompt_cache_miss_tokens": 384,
+            },
+            "outcome": {"type": "success"},
+        })
+    );
+    Ok(())
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn eval_malformed_finish_retains_usage_and_never_exposes_reasoning() -> TestResult {
+    for finish_reason in [Some("length"), None] {
+        let provider = FakeProvider::start().await;
+        provider
+            .mount(
+                ResponseTemplate::new(200).set_body_json(detailed_completion(
+                    PROVIDER_MODEL,
+                    None,
+                    finish_reason,
+                )),
+            )
+            .await;
+        let fixture = Fixture::new(&provider.base_url(), DescriptorOptions::default())?;
+        let input = std::fs::read(&fixture.packet_path)?;
+        let output = run_cloud_eval(&fixture, &input).await?;
+        assert!(
+            output.status.success(),
+            "cloud eval failed: {}",
+            output.stderr
+        );
+        assert_body_free(&output.stdout, &output.stderr);
+        assert!(!output.stdout.contains(REASONING_SENTINEL));
+        assert!(!output.stderr.contains(REASONING_SENTINEL));
+
+        let observation: Value = serde_json::from_str(output.stdout.trim())?;
+        assert_eq!(observation["attempts"], json!(1));
+        assert_eq!(observation["score"], Value::Null);
+        assert_eq!(observation["usage"]["prompt_tokens"], json!(512));
+        assert_eq!(observation["usage"]["completion_tokens"], json!(8));
+        assert_eq!(
+            observation["outcome"],
+            json!({
+                "type": "failure",
+                "kind": "provider_malformed_response",
+                "http_status": null,
+            })
+        );
+        assert_eq!(provider.requests().await.len(), 1);
+    }
+    Ok(())
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn eval_model_drift_and_out_of_domain_scores_are_typed_observations() -> TestResult {
+    for (model, quality, expected_kind) in [
+        (
+            "rondo-plan096-substituted-model",
+            0.83,
+            "model_identity_mismatch",
+        ),
+        (PROVIDER_MODEL, 1.7, "score_out_of_domain"),
+    ] {
+        let provider = FakeProvider::start().await;
+        provider
+            .mount(
+                ResponseTemplate::new(200).set_body_json(detailed_completion(
+                    model,
+                    Some(&format!(r#"{{"quality":{quality}}}"#)),
+                    Some("stop"),
+                )),
+            )
+            .await;
+        let fixture = Fixture::new(&provider.base_url(), DescriptorOptions::default())?;
+        let input = std::fs::read(&fixture.packet_path)?;
+        let output = run_cloud_eval(&fixture, &input).await?;
+        assert!(
+            output.status.success(),
+            "cloud eval failed: {}",
+            output.stderr
+        );
+        assert_body_free(&output.stdout, &output.stderr);
+        let observation: Value = serde_json::from_str(output.stdout.trim())?;
+        assert_eq!(observation["served_model"], json!(model));
+        assert_eq!(observation["score"], json!(quality));
+        assert_eq!(observation["usage"]["total_tokens"], json!(520));
+        assert_eq!(observation["outcome"]["type"], json!("failure"));
+        assert_eq!(observation["outcome"]["kind"], json!(expected_kind));
+        assert_eq!(observation["outcome"]["http_status"], Value::Null);
+    }
+    Ok(())
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn eval_retry_and_terminal_status_keep_attempts_and_body_free_failure() -> TestResult {
+    let throttled = FakeProvider::start().await;
+    throttled
+        .mount_sequence(
+            ResponseTemplate::new(429).set_body_string("rate limited"),
+            ResponseTemplate::new(200)
+                .set_body_json(completion(PROVIDER_MODEL, r#"{"quality":0.83}"#)),
+        )
+        .await;
+    let fixture = Fixture::new(&throttled.base_url(), DescriptorOptions::default())?;
+    let input = std::fs::read(&fixture.packet_path)?;
+    let output = run_cloud_eval(&fixture, &input).await?;
+    assert!(
+        output.status.success(),
+        "cloud eval failed: {}",
+        output.stderr
+    );
+    let observation: Value = serde_json::from_str(output.stdout.trim())?;
+    assert_eq!(observation["attempts"], json!(2));
+    assert_eq!(observation["outcome"], json!({"type": "success"}));
+    assert_eq!(throttled.requests().await.len(), 2);
+    assert_eq!(
+        output
+            .stderr
+            .matches("publication_critic_cloud_attempt attempt=")
+            .count(),
+        2
+    );
+
+    let unauthorized = FakeProvider::start().await;
+    unauthorized
+        .mount(ResponseTemplate::new(401).set_body_string(REASONING_SENTINEL))
+        .await;
+    let fixture = Fixture::new(&unauthorized.base_url(), DescriptorOptions::default())?;
+    let input = std::fs::read(&fixture.packet_path)?;
+    let output = run_cloud_eval(&fixture, &input).await?;
+    assert!(
+        output.status.success(),
+        "cloud eval failed: {}",
+        output.stderr
+    );
+    assert_body_free(&output.stdout, &output.stderr);
+    assert!(!output.stdout.contains(REASONING_SENTINEL));
+    assert!(!output.stderr.contains(REASONING_SENTINEL));
+    let observation: Value = serde_json::from_str(output.stdout.trim())?;
+    assert_eq!(observation["attempts"], json!(1));
+    assert_eq!(observation["score"], Value::Null);
+    assert_eq!(observation["usage"], Value::Null);
+    assert_eq!(
+        observation["outcome"],
+        json!({
+            "type": "failure",
+            "kind": "provider_http_status",
+            "http_status": 401,
+        })
+    );
+    assert_eq!(unauthorized.requests().await.len(), 1);
+    Ok(())
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn eval_invalid_local_input_exits_before_credential_or_provider_use() -> TestResult {
+    let provider = FakeProvider::start().await;
+    provider.mount_quality(/*quality*/ 0.83).await;
+    let fixture = Fixture::new(&provider.base_url(), DescriptorOptions::default())?;
+    let output = run_cloud_eval(&fixture, b"{}").await?;
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    assert!(output.stderr.contains("code=invalid_packet"));
+    assert!(!output.stderr.contains("publication_critic_cloud_attempt"));
+    assert!(provider.requests().await.is_empty());
     Ok(())
 }
 

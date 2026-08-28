@@ -1,0 +1,73 @@
+{
+  "backend_protocol": "rondo-publication-critic-cloud-v1",
+  "provider": {
+    "api": "chat_completions",
+    "base_url": "https://api.deepseek.com",
+    "api_key_env": "DEEPSEEK_API_KEY",
+    "model": "deepseek-v4-flash",
+    "served_model": "echoed",
+    "response_format": "json_object",
+    "max_output_tokens": 8192,
+    "temperature": 0.0,
+    "request_timeout_ms": 60000,
+    "max_attempts": 2,
+    "retry_backoff_ms": 1000
+  },
+  "service_descriptor": {
+    "identity": {
+      "protocol": "rondo_publication_critic_v1",
+      "implementation": {
+        "name": "rondo-publication-critic-cloud-service",
+        "revision": "v1"
+      },
+      "qualification": {
+        "packet_schema": {
+          "name": "rondo-publication-packet",
+          "revision": "v1"
+        },
+        "rubric": {
+          "name": "rondo-publication-qualification",
+          "revision": "v1"
+        }
+      },
+      "model": {
+        "model": {
+          "name": "deepseek-v4-flash",
+          "revision": "serving-revision-unverifiable"
+        },
+        "tokenizer": {
+          "name": "provider-managed-tokenizer",
+          "revision": "unverifiable"
+        }
+      },
+      "scoring": {
+        "definition": {
+          "name": "rondo-cloud-reference-deepseek-v4-flash",
+          "revision": "v1"
+        },
+        "input_template": {
+          "name": "rondo-publication-cloud-template",
+          "revision": "v1"
+        },
+        "scalar_projection": {
+          "name": "rondo-cloud-json-quality-scalar",
+          "revision": "v1"
+        },
+        "domain": {
+          "min": 0.0,
+          "max": 1.0
+        },
+        "threshold": 0.5,
+        "pass_rule": "score_greater_than_or_equal_to_threshold"
+      }
+    },
+    "limits": {
+      "request_bytes": 131072,
+      "response_bytes": 16384,
+      "max_concurrency": 1,
+      "queue_capacity": 4,
+      "job_timeout_ms": 130000,
+      "io_timeout_ms": 2000
+    }
+  }
+}

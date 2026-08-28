@@ -1,9 +1,8 @@
 # RONDO 长程规划（WBS）
 
-最后更新：2026-08-27（方向 3 Publication Critic 三期 Plan 095 已通过 Sol 最终复验并按用户授权合入本地 `main`：云端 reference scorer
-backend 与既有 service/default-off 边界正确，定向门禁为 `57/57` 与 core `17/17`，最终状态为
-`COMPLETED / FINAL_REVIEW_ACCEPTED / GOAL_COMPLETED / INTEGRATED / PUSHED`。用户本人创建的远端 backup ref 已按其明确授权删除；
-本地 `main` 与 `origin/main` 已同步。Plan 094 有效负向研究终态与 Plan 093 Linux 全 workspace 正确性基线保持有效，Plan 095 不延续训练路线或解锁 M3-D）
+最后更新：2026-08-27（方向 3 Publication Critic 三期 Plan 096 已完成并通过首次独立验收，0 High / 0 Medium / 0 Low correctness
+finding；研究终态为 `CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH`。任务目标完成，但云端 scorer 未取得资格，因此 Plan 097 不解锁，
+当前没有新的三期工作包。Plan 095 最终验收、主线集成与推送，Plan 094 有效负向研究终态及 Plan 093 Linux 全 workspace 正确性基线均保持有效）
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段指针、跨方向关系、
 稳定工程边界和授权门；已完成成果与验收见 `doc/WBS-COMPLETED.md`，单次任务合同见 `plan/`，执行细节见
@@ -23,7 +22,7 @@ backend 与既有 service/default-off 边界正确，定向门禁为 `57/57` 与
 | 0：量化测评基准 | 既有设施与首次 schema v7 正式 canary 已完成，当前无 active campaign | 保留设施；历史结果见 COMPLETED，新 campaign 须重新立项与授权 |
 | 1：Harness 优化 | **正式收口；当前无 active 工作包** | 当前不继续新增观测或内核/热路径优化；既有实现、设施与历史结果保留。未来可由用户另行决定是否重新立项，本次收口不作永久禁止 |
 | 2：本地审批模型 | **已收口，今后不再开启** | 最终结论为“保留为实验”；不改生产默认，不再规划后续工作包 |
-| 3：RONDO Multi | 第一、二期、三期 Plan 095 与第四期均已完成；Plan 095 已合入并推送主线 | 云端 reference scorer 保持 eval/reference-only、default-off；不扩大到 threshold/批量测评/v8/unseen，不解锁 M3-D。完成历史统一见 COMPLETED |
+| 3：RONDO Multi | 第一、二期、第四期已完成；三期 Plan 096 为 `COMPLETED / FIRST_INDEPENDENT_REVIEW_ACCEPTED / GOAL_COMPLETED` | `CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH` 不解锁 Plan 097；当前不另行立项、不读 unseen、不改产品默认 |
 
 方向 3 当前 Linux 正确性基线由 Plan 093 建立：default features、standard local Nextest、checksum-verified V8 的完整 workspace
 为 `14660/14660` passed、0 failure/error/timeout，另有 1/1 setup passed；24 个 skip 不计 passed。正式证据和精确边界见
@@ -56,10 +55,12 @@ Plan 090 guarded import 因历史 cursor 不兼容按合同拒绝，正式轮使
 material/strict/operating event，step 4 按预冻结平台规则形成 `ROUTE_O_VALID_NO_MATERIAL_IMPROVEMENT`；step 2/3 均由新进程恢复并继续。
 三份保留 checkpoint 已在挂载卷上深读资格化，小型证据已回传，大型权重保留在 70GB 既有卷。预释放审查通过后，唯一 Pod 已精确 stop/delete；
 账户 0 Pod、compute `$0/h` 与本地 finalizer 均完成，账户只剩卷费 `$0.007/h`。该任务仍只使用开发 validation，不回答独立 cohort 或产品资格，M3-D 继续锁定。
-Plan 095 作为与上述训练路线正交的后端接入任务已经提交实现：复用 Plan 055/057/068 已有服务、typed verdict 与发布接缝，只增加显式
-选择的云端 reference scorer backend，并已用合成 packet 完成真实 API commissioning 与 clean smoke。首次验收发现 provider 请求 model
-可与声明 identity 错绑、retry 预算少算、cloud-specific 在途取消/关闭证据及 Bazel lock 未闭合，现返回同一 worktree 窄修；它仍不消费
-冻结 v8/unseen，不冻结最终 threshold，不改变本地 worker 或产品默认，不上传项目数据，也不继承或修改 Plan 094 的云资源。
+Plan 095 已完成并进入主线：复用 Plan 055/057/068 服务、typed verdict 与发布接缝，增加显式选择、default-off 的云端 reference scorer，
+合成 packet 的真实 API commissioning/clean smoke、全部窄修与最终验收均通过。Plan 096 已在保持产品默认、local worker、Team State 与
+发布行为不变的前提下，对冻结 validation 55 条完成 DeepSeek V4 Flash 正式 curve 与独立复算。正式 55/55、零最终 typed failure；
+ROC AUC `0.8403` 与 Boundary strict win `15/19` 均过线，但 fallback threshold `0.9` 的 False PASS `8/21` 超过 `5/21` 上限，故终态为
+`CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH`。唯一 authority preflight finding 已离线窄修，首次独立验收复验以 0 High / 0 Medium /
+0 Low 接受；Plan 097 不解锁。不读取 unseen，不延续训练或继承 Plan 094 云资源。
 方向 1 已正式收口，不作为方向 3 的前置或旁支。
 
 ### 方向 3：Publication Critic 三期
@@ -128,14 +129,22 @@ Plan 095 作为与上述训练路线正交的后端接入任务已经提交实�
   扩到 70GB 的既有卷，小型结果已回传。预释放审查通过后，唯一 Pod 已删除并独立复核账户 0 Pod / compute `$0/h`；本地 finalizer
   保持同一有效负向终态，并已通过整体最终验收。不读取 unseen、不授予产品资格或 M3-D 解锁。任务合同见
   `plan/094-publication-critic-route-o-continuous-training-execplan.md`。
-- Plan 095 已提交实现：在不改变 `PublicationScorer`/service/packet/render/`team_publish`/本地 worker 语义的前提下，新增
+- Plan 095 已完成并进入主线：在不改变 `PublicationScorer`/service/packet/render/`team_publish`/本地 worker 语义的前提下，新增
   default-off 的云端参考 scorer backend `codex-publication-critic-cloud-service` 与显式选择路径。离线以 loopback provider 覆盖
   ready/PASS/REWRITE、malformed/out-of-domain、model drift、有界 retry、慢 provider 与取消、并发/队列与 fail-closed 启动；随后以合成
   packet 完成真实 API commissioning 与 clean smoke，两个正反 packet 得到 `PASS` 与 `REWRITE`，并由 400 负向对照证明请求确实到达选定
   provider。云端 identity 对 provider 无法验证的 tokenizer/serving 分量显式标为 `provider-managed-tokenizer@unverifiable`，scoring
-  definition 强制带 `rondo-cloud-reference-` 前缀，threshold 为显式非最终参考值。首次独立验收未通过，窄修范围与决策见
-  `agent_log/2026-08-27-071711-plan095-review.md`；任务不做批量测评、最终 threshold、v8/unseen、GPU、真实本地模型或项目数据上传，
-  合同见 `plan/095-publication-critic-cloud-reference-scorer-backend-execplan.md`。
+  definition 强制带 `rondo-cloud-reference-` 前缀，threshold 为显式非最终参考值。首次 finding 已全部窄修并通过 Sol 最终复验，任务不做
+  批量测评、最终 threshold、v8/unseen、GPU、真实本地模型或项目数据上传；合同见
+  `plan/095-publication-critic-cloud-reference-scorer-backend-execplan.md`。
+- Plan 096 已完成实现、真实 synthetic commissioning、clean freeze、空 namespace 正式 55 条与独立复算，并通过首次独立验收。唯一
+  authority preflight finding 已窄修，复验为 0 High / 0 Medium / 0 Low correctness finding。正式模型
+  `deepseek-v4-flash` 的结果为 `CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH`：False PASS `8/21`、False REWRITE `0/34`、balanced
+  accuracy `0.8095`、ROC AUC `0.8403`、Boundary strict win `15/19`，完整 curve 无 admissible operating point。正式轮 55/55、零最终
+  typed failure、56 attempts，其中一次冻结 policy 允许的 transient retry；正式费用 `1.3855704 RMB`，含两轮 commissioning 的任务总费用
+  `2.1391799 RMB`。该终态不解锁 Plan 097。任务未修改标签/pair/rubric/quality floor，未读取 unseen，未训练或使用 GPU/RunPod/Docker，
+  也未改变 Publication Critic 默认和产品发布语义；合同与待审状态见
+  `plan/096-validation-cloud-scorer-qualification-and-headroom-execplan.md`。
 
 如果未来重新启动方向 1，它仍与方向 3 保持产品源码和任务合同独立；本地重型 Cargo、Docker、真实本地模型
 加载/推理继续全局串行，并由实际进入实施的工作包协调共享资源。

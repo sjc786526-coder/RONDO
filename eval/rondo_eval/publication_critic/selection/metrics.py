@@ -36,7 +36,7 @@ _FACETS = (
 class LabeledRow:
     candidate_id: str
     score: float
-    raw_logit: float
+    raw_logit: float | None
     label: str
     slices: tuple[str, ...]
     facets: Mapping[str, str]
@@ -48,6 +48,26 @@ def build_labeled_rows(
 ) -> tuple[LabeledRow, ...]:
     """Join a released split with one candidate's projected scores."""
 
+    return _build_labeled_rows(release, scores, require_raw_logit=True)
+
+
+def build_score_only_labeled_rows(
+    release: Mapping[str, Any],
+    scores: Mapping[str, Mapping[str, float]],
+) -> tuple[LabeledRow, ...]:
+    """Join scalar-only observations without inventing a local raw logit."""
+
+    return _build_labeled_rows(release, scores, require_raw_logit=False)
+
+
+def _build_labeled_rows(
+    release: Mapping[str, Any],
+    scores: Mapping[str, Mapping[str, float]],
+    *,
+    require_raw_logit: bool,
+) -> tuple[LabeledRow, ...]:
+    """Shared release join for local raw-logit and cloud score-only rows."""
+
     supervision = {str(row["candidate_id"]): row for row in release["supervision"]}
     if set(scores) != set(supervision):
         raise SelectionError("Plan 073 score cohort does not match the release")
@@ -57,9 +77,13 @@ def build_labeled_rows(
         score = float(scores[candidate_id]["score"])
         if not math.isfinite(score) or not 0.0 <= score <= 1.0:
             raise SelectionError("Plan 073 projected score is outside its domain")
-        raw_logit = float(scores[candidate_id]["raw_logit"])
-        if not math.isfinite(raw_logit):
-            raise SelectionError("Plan 073 raw logit is not finite")
+        raw_logit: float | None = None
+        if require_raw_logit:
+            raw_logit = float(scores[candidate_id]["raw_logit"])
+            if not math.isfinite(raw_logit):
+                raise SelectionError("Plan 073 raw logit is not finite")
+        elif "raw_logit" in scores[candidate_id]:
+            raise SelectionError("score-only rows must not carry a raw logit")
         rows.append(
             LabeledRow(
                 candidate_id=candidate_id,
@@ -207,12 +231,15 @@ def threshold_free_metrics(
 ) -> dict[str, Any]:
     """Everything that does not depend on where the threshold lands."""
 
+    raw_logits = [row.raw_logit for row in rows if row.raw_logit is not None]
+    if raw_logits and len(raw_logits) != len(rows):
+        raise SelectionError("raw logit availability is inconsistent across rows")
     return {
         "roc_auc": roc_auc(rows),
         "boundary_pairs": _pair_outcomes(release, rows, "boundary"),
         "within_pass_pairs": _pair_outcomes(release, rows, "within_pass"),
         "score_distribution": _distribution([row.score for row in rows]),
-        "raw_logit_distribution": _distribution([row.raw_logit for row in rows]),
+        "raw_logit_distribution": _distribution(raw_logits) if raw_logits else None,
     }
 
 
@@ -330,7 +357,11 @@ def candidate_metrics(
                 "candidate_id": row.candidate_id,
                 "label": row.label,
                 "score": row.score,
-                "raw_logit": row.raw_logit,
+                **(
+                    {"raw_logit": row.raw_logit}
+                    if row.raw_logit is not None
+                    else {}
+                ),
                 "predicted": PASS if row.score >= threshold else REWRITE,
                 "margin_to_threshold": row.score - threshold,
             }
