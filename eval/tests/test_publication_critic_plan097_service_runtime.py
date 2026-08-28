@@ -166,6 +166,20 @@ class ServiceRuntimeTests(unittest.TestCase):
         self.assertFalse(service_runtime._json_equivalent(expected, drifted))
         self.assertFalse(service_runtime._json_equivalent(expected, wrong_type))
 
+    def test_probe_failure_diagnostic_accepts_only_typed_code_line(self) -> None:
+        self.assertEqual(
+            service_runtime._probe_failure_code(
+                b"publication_critic_probe_failed code=backend\n"
+            ),
+            "backend",
+        )
+        self.assertEqual(
+            service_runtime._probe_failure_code(
+                b"publication_critic_probe_failed code=backend secret=value\n"
+            ),
+            "unknown",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

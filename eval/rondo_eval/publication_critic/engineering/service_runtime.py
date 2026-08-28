@@ -13,6 +13,7 @@ import json
 import math
 import os
 from pathlib import Path
+import re
 import select
 import signal
 import subprocess
@@ -252,7 +253,8 @@ class RunningScorerService:
         except subprocess.TimeoutExpired as exc:
             raise ServiceRuntimeError("probe_timeout") from exc
         if completed.returncode != 0 or len(completed.stdout) > _MAX_JSON_BYTES:
-            raise ServiceRuntimeError("probe_failed")
+            code = _probe_failure_code(completed.stderr)
+            raise ServiceRuntimeError(f"probe_failed:{code}")
         try:
             value = json.loads(completed.stdout)
         except (UnicodeError, json.JSONDecodeError) as exc:
@@ -503,6 +505,13 @@ def _json_equivalent(expected: object, observed: object) -> bool:
             and abs(float(expected) - float(observed)) <= 1e-12
         )
     return type(expected) is type(observed) and expected == observed
+
+
+def _probe_failure_code(stderr: bytes) -> str:
+    match = re.fullmatch(
+        rb"publication_critic_probe_failed code=([a-z0-9_]{1,80})\s*", stderr
+    )
+    return match.group(1).decode("ascii") if match is not None else "unknown"
 
 
 def _base_environment() -> dict[str, str]:
