@@ -1,11 +1,12 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
 最后更新：2026-08-28 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
-状态：**第一期、第二期、第四期已完成；Publication Critic 三期 Plan 097 已完成实现、clean formal、初审窄修与最终独立验收，终态为
-`M3_D_DUAL_BACKEND_ENGINEERING_PASS / FINAL_REVIEW_ACCEPTED / INTEGRATED / NOT_PUSHED`。local exact 1.7B base 与 cloud DeepSeek V4 Flash 两个未获产品质量资格的
-真实 fixture 已闭合双 backend 工程 E2E 与可替换接缝。Plan 096 的
+状态：**第一期、第二期、第四期已完成；Publication Critic 三期 Plan 097 已完成并闭合双 backend 工程 E2E 与可替换接缝，现正式进入
+质量重构路线。后续严格串行为“任务合同重构 → v8 后继数据改造与有限扩充 → 一次主方案训练 → 模型资格验收与横评”，当前下一工作包为
+任务合同重构，尚未建立任务级 ExecPlan。Plan 097 的
+`M3_D_DUAL_BACKEND_ENGINEERING_PASS / FINAL_REVIEW_ACCEPTED / INTEGRATED / NOT_PUSHED`、Plan 096 的
 `CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH / FINAL_REVIEW_ACCEPTED / INTEGRATED / PUSHED`、Plan 094 的有效负向终态和 Plan 095 的
-最终验收均保持有效；本地/云端质量、产品价值、Publication Critic 默认与生产启用继续锁定**
+最终验收均保持有效；新路线完成资格前，本地/云端质量、产品价值、Publication Critic 默认与生产启用继续锁定**
 
 ## 当前定位
 
@@ -25,6 +26,7 @@ Producer、Critic、Harness、Root 的职责及现行 Team State 不变量以该
 Plan 095 已在同一服务边界增加 eval/reference-only 的云端 scorer backend，不改变上述本地产品目标或默认关闭姿态。Plan 096 只为该
 backend 增加 validation 质量测量与 scalar/curve 接缝，不把 reference score 扩成产品 API。Plan 097 不再以合格 scorer 为前置，
 只把 local/cloud 都当作 engineering fixture，验证同一产品链在两个真实 backend 下的组合正确性；它不改写上述质量结论。
+Plan 097 完成后，三期不再继续沿用旧的单标量混合目标搜索，而是先重构任务合同，再依次重建数据、形成一个主训练候选并独立验收。
 
 四期 Durable Team Runtime 已正式收口，终态为 `M4_W1_PASS / PHASE_4_COMPLETE`，没有后续必需工作包；完整历史见
 `doc/WBS-COMPLETED.md`，简要归档入口见 [`doc/WBS/durable-team-runtime.md`](durable-team-runtime.md)，本页只继续维护三期路线。
@@ -52,24 +54,49 @@ High/Medium/Low correctness finding 为 0。
 
 ### 模型与训练边界
 
-- 学生模型冻结为 `Skywork/Skywork-Reward-V2-Qwen3-1.7B`，目标是形成一个可在本地运行的专用发布质量模型。
-- Plan 079 已以 exact `Skywork/Skywork-Reward-V2-Qwen3-4B@fd958fef475f323f4e6b195930e3dd918485c668`
-  原始 BF16 base 独立验证更大同家族基座的云端质量，终态为 `4B_BASE_QUALITY_NO_GO`；它没有改写 1.7B 训练历史，也没有训练、
-  量化或授予本地产品资格。
-- Plan 060/066 已历史性证明单张 RunPod H100 PCIe 80GB 上的 BF16 全参数 FlashAdamW 训练、checkpoint 与恢复技术可行；
-  该固定 recipe 后续出现模型质量与排序退化，因此不再作为当前冻结路线，也不改写其当时的技术/执行成功事实。
-- Plan 087 已在 exact BF16 1.7B、既有 pair/input 与冻结 v8、非 PEFT/非量化边界内完成 15 条自适应路线。Plan 090 随后冻结 Route O
-  的九张量、`33,558,784` 原参数配方并从 exact base 完成两次 clean BF16 execution；两次均重复同一小幅 validation 正向 signature，
-  第二候选经不同进程恢复，结论为 `ROUTE_O_CONFIRMATION_PASS`。正式路径没有 seed-sensitive consumer，因此不宣称随机 seed 稳定；
-  条件性 FP32 对照的 raw/projected 分歧只作为精度路径诊断。
-- Plan 094 保持 exact 1.7B、冻结数据/pair/input/objective 家族、unseen 隔离和 Route O 九张量唯一更新范围，通过连续训练、完整 checkpoint
-  后测评、fresh-process 恢复和同轮 exact base 比较，判断上述微弱信号能否形成有意义的 ranking、strict 或 operating 改善。训练强度、
-  checkpoint 密度和调度由执行者依据实测决定；material/停止/保留规则须在正式结果前冻结。
-- 训练控制须支持多个连续更新/观测点、同口径 validation 质量趋势、模型评价快照与完整恢复 checkpoint 分层，以及
-  base/best/latest/少量关键转折点保留。base 继续作为研究 incumbent，只有同口径优于 base 的训练结果才成为目标候选；
-  未优于 base 时诚实记录 no-improvement。当前研究不要求候选直接达到产品 GO，开发期 validation 不冒充 M3-C2 或 unseen 证据。
-- 数据以少量真实协作样本为锚点、教师合成为主体，保留必要的独立复核和冻结测试集；异构模型只承担最终辅助横评，
-  不建立教师委员会、人工标注平台或严格盲测体系。
+- 最终目标仍是形成一个可在本地运行的专用 Publication Critic；具体学生基座、训练参数和模块布局不由本 WBS 预先冻结，工作包三只允许
+  在其 ExecPlan 中选择并冻结一套主方案，不恢复多路线云端搜索。
+- Plan 060/066 已证明真实训练、checkpoint 与恢复技术可行，但旧固定 recipe 发生质量与排序退化；Plan 079、082、087、090、094 和 096
+  共同表明继续扩大同家族 base、相邻 scope/LR/权重搜索或只调 threshold 的优先级很低。历史结果保持冻结证据，不作为新合同的数据或质量 GO。
+- 新训练仍须支持开发期趋势、checkpoint、fresh-process 恢复和 base/best/latest 的有界保留；开发 validation 只用于形成候选，不冒充
+  独立资格或冻结测试证据。模型、数据和付费条件一经正式冻结，只执行一次主方案；技术故障可在授权总额内自主修复、恢复或重跑，
+  语义失败不得通过临时改目标、改标签或反复搜索掩盖。
+- 数据继续允许教师合成为主体，但合成数据的唯一上游是新任务合同，不是旧 v8 的类别、pair、配比或模板；v8 只提供待重新判定的候选素材，
+  不得机械扩展。新 revision 还须保留少量真实或真实形态锚点、独立 split 与模块化盲审；不建设人工标注平台、教师委员会或重型数据可信系统。
+
+### 冻结任务设计方向
+
+以下是工作包一必须落地、后续工作包不得自行改写的核心设计；实现者只对具体模型基座、head 代码形态、连续近似、loss 数值权重、margin、
+batch、优化器和训练资源作任务内技术选择。若要改变这里的任务结构，必须先更新本 WBS，而不能由单次 ExecPlan 或训练现场临时决定。
+
+1. **单 backbone、五个 hard decision heads**：一次模型 forward 产生五项结构化 hard 判断，不建立五个独立模型，也不以五次条件化推理代替
+   当前主方向。五项分别为 `useful_state_transfer`、`honest_uncertainty`、`conditional_continuity`、`scope_and_signal`、
+   `internal_consistency`；continuity 必须表达 `PASS / FAIL / N/A`，其余维度至少表达 `PASS / FAIL`。
+2. **确定性非补偿 gate**：最终 `PASS` 当且仅当全部适用 hard heads 都通过，任一 head 失败即 `REWRITE`。内部可使用 violation probability
+   或 satisfaction probability，但不得平均或学习一组可相互补偿的总质量权重。若现有 scorer 接缝需要 scalar，只允许把结构化判断投影为
+   `quality = min(applicable satisfaction)`，等价于 `1 - max(applicable violation)`；该 scalar 是 gate 投影，不是独立学习的整体质量语义。
+3. **不设置决定资格的自由 global-quality head**：Binary `PASS/REWRITE` 监督作用于五个 heads 派生出的 gate；可以为训练可微性使用
+   `max/min` 的平滑近似，但正式 verdict 必须回到确定性 all-hard-pass。诊断性输出不得覆盖任一 hard failure。
+4. **五维绝对监督是主体**：每个 candidate 都应提供完整的五维 `PASS/FAIL/N/A` 标签矩阵，逐维分类损失是主损失。`defects`、
+   `hard_focus` 或“本样本主要注入的缺陷”不能替代完整标签，未列出的维度不得自动推定为 PASS。
+5. **总体 Binary 只监督派生 gate**：总体标签用于约束五个 heads 的合取结果，不再训练另一个可以用风格、语法或其他优点补偿 hard failure 的
+   单标量。训练目标可以保留派生 gate loss，但其梯度来源和推理语义必须可追溯到五项 hard 判断。
+6. **Boundary 是定向 hard 监督**：Boundary pair 的主要差异只落到声明的 target hard head，并要求两端各自达到绝对资格结论；非目标 heads
+   应保持一致。Pair loss 使用达到即停止继续扩张的有限 margin，不得以“总分 Q+ > Q-”替代 `Q+ PASS && Q- REWRITE`。
+7. **Within-PASS 是资格不变性监督**：两端都必须是五项 hard 全部通过；其 soft-only 差异用于约束各 hard heads 和派生 gate 保持一致，
+   不再要求 preferred PASS 的资格分更高。当前产品没有 PASS 内排序 consumer，因此 soft preference 完全退出资格损失、threshold 和
+   verdict；未来若确需偏好排序，另立独立 head/模型和产品消费者，不反向并回 gate。
+8. **损失结构保持同向**：工作包一应围绕 `L_dim + λ_gate L_gate + λ_boundary L_boundary + λ_inv L_invariance` 建立训练合同；
+   `L_dim` 是主体，其余只提供与 hard gate 同向的合取、定向边界和不变性辅助。精确权重与连续实现由执行者冻结，但不得重新加入
+   Within-PASS ranking 或任何可补偿 overall-quality 目标。
+9. **输入必须使标签可识别**：工作包一同时冻结模型完成五项判断必须看到的 bounded、permission-scoped 公共任务事实，尤其不能让数据负责人
+   依据 scorer 不可见的 `public_state`、candidate brief 或隐藏生成意图决定 useful-state/continuity 标签。若某项无法由正式输入判定，必须
+   修改输入合同、标签或适用性，而不能期待模型通过规模或训练猜出隐藏事实。
+10. **外部产品合同保持轻量**：多维判断和失败维度可以留在 scorer 内部与 eval 证据中；现有产品仍只消费 typed `PASS/REWRITE`，本轮任务
+    不因内部结构化而扩张 wire、引入自动改写、复杂解释协议或新的在线决策系统。
+11. **全部数据活动从属于任务合同**：data schema、字段、样本类型、生成分块、数量与配比、标签、pair、renderer、盲审标准、split、统计门和
+    验收指标都必须能追溯到任务合同中的明确需要；不能说明服务哪项输入可识别性、hard 判断、非补偿 gate、Boundary 或 invariance 目标的内容，
+    不进入新 revision。不得把旧数据复用率、旧分布延续、历史投资保留或凑足规模当成独立目标。
 
 ## 三期工作包与顺序
 
@@ -106,6 +133,14 @@ M3-B1c 正式分阶段训练与工件回收          │
         Plan 094 Route O 连续训练与实质增益候选形成（有效负向终态；zero-Pod 收口及最终验收完成）
                        ↓
         Plan 097 M3-D 双 backend 工程前置闭环（已完成并通过最终独立验收）
+                       ↓
+        工作包一：任务合同重构（当前下一工作包）
+                       ↓
+        工作包二：v8 后继数据改造与有限扩充
+                       ↓
+        工作包三：一次主方案训练（本地非付费准备 → 用户授权后的云端付费执行）
+                       ↓
+        工作包四：模型资格验收与横评
 
 并列 reference 支线：M3-B2a 已有可替换 service → Plan 095 云端参考 scorer backend（已完成）
                                               ↓
@@ -114,8 +149,80 @@ M3-B1c 正式分阶段训练与工件回收          │
                          作为 Plan 097 cloud engineering fixture 接入同一产品链
 ```
 
-四阶段叙事保持不变：A 阶段收口产品合同并建立轻量基准；B 阶段让模型链与产品链接力并行；C 阶段串行完成本地资格和
-最终选择；D 阶段做端到端收口。阶段本身不是 ExecPlan 单位，以下每个工作包各对应一个独立 plan。
+历史 A/B/C/D 阶段及 Plan 097 的工程结果保持冻结。当前权威后续路线是上述四个质量重构工作包；它们各自对应一个独立任务级
+ExecPlan，不由本 WBS 冻结具体模块、训练超参数、云资源或实现步骤。
+
+### 当前后续路线：三期质量重构
+
+#### 工作包一：任务合同重构（当前下一工作包）
+
+**目标**：把上文“冻结任务设计方向”完整落实为单一权威训练任务，使模型内部五头判断、同向损失、非补偿聚合、模型可见事实与产品
+`PASS/REWRITE` 语义一致，并为后续数据和训练提供稳定接口；执行者不得把五头 gate 降格为自由单总分或重新引入 hard/soft 混合排序。
+
+**边界**：本包可以修改任务/产品合同、输入与标签 schema、训练目标、评价语义及其必要的轻量实现和测试；不批量生成正式数据，
+不选择最终训练超参数，不运行真实本地模型、GPU、云训练或付费 API，不读取冻结测试集，也不默认启用 Publication Critic。
+
+**宏观验收**：形成一个无待定核心语义的权威合同与必要轻量实现，逐项闭合上文全部冻结设计，明确模型为判断任务必须看到什么、五项 hard
+dimension 如何表达和聚合、Binary、Boundary、Within-PASS 各自承担什么监督，以及后续数据 schema、训练 consumer 和资格指标的版本边界；
+相称的轻量测试能够证明 hard failure 不可补偿、soft-only 差异不改变 gate、Boundary 两端绝对资格成立，工作包二无需重新决定任务语义即可开始。
+
+**授权范围**：启动 ExecPlan 时应一次授权项目内合同、源码、模板、测试、文档和必要重构，允许执行者在范围内自主修复、重生成受影响工件、
+重跑定向门禁并完成独立审查整改；普通依赖下载和只读源码查询包含在内。真实模型加载/推理、Docker、付费 API、GPU、外部上传、冻结测试读取、
+产品启用和生产动作均不包含。
+
+#### 工作包二：v8 后继数据改造与有限扩充
+
+**目标**：保持 `publication-critic-v8` 原样作为历史证据，从其可复用部分和新增高信息样本形成新的后继 revision。合成数据必须服务工作包一
+冻结的新任务合同，而不是机械扩展旧数据；v8 每个旧条目、类别、pair、配比和模板都只有在新合同下仍有信息价值时才能复用。新数据应完整表达
+模型可见输入、五维 hard 标签、适用性、Boundary 目标维度、soft-only invariance 与自然多缺陷组合，整体达到数百条量级并形成独立
+train/validation/test。
+
+**组织约束**：所有模块、字段、数量、配比和审查清单先从任务合同导出，再按 hard dimension、组合缺陷和 invariance 等有界模块拆分；不得先按
+旧 v8 结构生成，再事后寻找任务理由。执行者只负责合同、分块、机械整合和终态门禁；必须调用多个
+完全干净上下文的子智能体分别担任各模块“负责人”，每个负责人只生成和整改自己的小块；另为每块配置完全干净上下文、未接触生成过程的
+“盲审员”，与负责人按块一一对应。不得由一两个子智能体包办大部分数据。盲审不通过时只退回该块负责人整改或重做并重新盲审；通过后立即
+冻结该块，除任务合同变化或集成发现可证明的机械冲突外，不再跨块反复重审或改写语义。最终整合只检查 schema、覆盖、split、重复/捷径和消费闭合，
+不重新扮演全量语义审查者。
+
+**边界**：允许复用、重标、重渲染、封存或舍弃 v8 条目，但不得原地改写 v8，也不得以保留旧数据利用率为目标；凡与新任务合同不一致、
+模型不可识别、监督语义不完整或仅重复旧模板的条目应封存或舍弃。旧 validation 已是开发数据，不得冒充新测试集，旧 unseen 继续封存。
+数量以数百条量级和各关键切片具备有效覆盖为目标，不以机械凑数替代质量；不建立人工标注平台、无限审查循环或重型可信系统，不在本包训练
+真实模型或按结果返调任务合同。
+
+**宏观验收**：每个数据模块和关键字段都能追溯到任务合同中的明确用途；各模块均有负责人交付、对应盲审通过和冻结记录；最终 revision 的
+完整五维标签、可见输入、单/多缺陷、hard/soft 四象限、反事实不变性、分组 split 和独立冻结测试覆盖达到合同要求；manifest、renderer、
+consumer、统计/重复/捷径检查和轻量 smoke 全部闭合，训练方无需补标签、猜语义或读取测试集即可开始工作包三。
+
+**授权范围**：启动 ExecPlan 时应一次授权项目内数据、schema、模板、生成/审查编排、轻量代码、测试、文档、干净上下文子智能体和必要的本地
+暂存/归档，允许模块负责人在各自范围内多轮整改至一次盲审通过并由执行者修复机械集成问题。普通只读网络和依赖下载可包含；真实付费 API、
+真实本地模型、GPU/RunPod、Docker、数据外发、旧 unseen 读取和产品动作均不包含，若确需其中任一项须另行批准。
+
+#### 工作包三：一次主方案训练
+
+**目标**：在工作包一、二冻结后形成一个可进入资格验收的本地候选模型。任务分为同一 ExecPlan 内的两个串行阶段：先完成不产生云训练费用的
+本地准备与审查，再在用户明确批准付费条件后执行一次冻结主方案训练；不以本包为新的多路线搜索平台。
+
+**阶段 A——本地非付费准备**：冻结学生基座、数据 revision、输入/输出/损失合同、主 recipe、开发指标、停止与候选保留规则；闭合 consumer、
+模型无关 objective 测试、训练控制、checkpoint/recovery、费用/资源门、归档和 dry-run/fake 流程。阶段 A 须经独立审查接受，并形成清晰的
+付费执行申请；未获用户批准时在此安全停止，不创建计费资源或上传资产。
+
+**阶段 B——云端付费执行**：用户须另行明确批准 provider、区域/硬件、最长时限、总预算、允许上传/下载的精确资产、可创建的 Pod/卷、
+技术重试与恢复范围及最终停止/删除/保留策略。授权后，执行者可在这些总边界内自主处理库存、环境、依赖、传输、训练中断、checkpoint 恢复、
+代码或配置的普通正确性问题并重跑必要步骤，不因一个可自行修复的窄故障反复停下请示；超预算、换模型/任务/数据、扩大资源、读取测试集、
+新增付费分支或改变外部状态范围仍须重新授权。
+
+**宏观验收**：阶段 A 的正式条件可复现且没有未决合同问题；阶段 B 从冻结起点完成一条有效主训练轨迹、关键 checkpoint 与 fresh-process 恢复，
+形成一个无明显塌缩、在预冻结开发口径上达到进入资格验收最低条件的候选，并完成工件校验、回传、费用和计算资源收口。若主方案语义有效但未形成
+候选，应诚实终止为 no-go 并回交 WBS，不在同一授权内开启多路线搜索；产品资格、冻结测试结论、默认启用和生产仍留给工作包四及其后续决定。
+
+#### 工作包四：模型资格验收与横评
+
+**目标**：冻结候选与判定配置后，使用未参与训练和方案选择的集合完成本地资格、相对 base/历史候选及必要异构 reference 的同口径横评，
+给出最终模型和 GO/NO-GO。
+
+**边界与宏观验收**：测试集只允许一次正式释放，不得用于返调任务、数据、模型或 threshold；资格以 false PASS、各 hard dimension 的失败召回、
+两端 Boundary 闭合、总体 operating point、稳定性和有界运行资源为主，Within-PASS 只作 invariance/独立报告。任何真实本地模型、付费 API、
+冻结测试释放和外部资源均在该任务开始前单独授权。通过只解锁后续产品价值/启用决策，不自动改变 default-off 或生产状态。
 
 ### A 阶段：共同前置与轻量基准
 
@@ -505,6 +612,10 @@ local/cloud 各 3/3 fixture 的 `PASS + REWRITE`、正常 Producer 两次重写/
 
 ## 串并行与资源关系
 
+- 当前唯一主路线为工作包一 → 二 → 三 → 四严格串行。工作包一冻结任务语义后工作包二才能生成正式后继数据；工作包二冻结完整 revision 后
+  工作包三才能准备并训练；工作包三冻结候选和配置后工作包四才能释放独立测试并验收。四包不得并行改写同一任务合同、数据标签或候选身份。
+- 工作包二内部允许且要求按独立数据模块并行：多个负责人和对应盲审员仅处理自己的块，冻结块之间互不返工；执行者最终只做机械整合与全局覆盖门。
+  工作包三内部的本地准备与云端付费执行严格串行，付费阶段在阶段 A 审查通过和用户明确批准前保持锁定。
 - M3-A1、M3-A2 与 M3-B1a 已完成共同前置。Plan 060 / M3-B1b 与已完成的 Plan 064 构成 M3-B1c 的并列资格门；产品链的
   M3-B2a、M3-B2b 均已完成，两链在 M3-C1 前汇合。
 - M3-B1b 是独立付费资格门；Plan 060 `TECHNICAL_GO`、Plan 064 `DATA_GO` 与正式训练授权均已成立，Plan 066 已据此完成训练执行、
@@ -525,8 +636,8 @@ local/cloud 各 3/3 fixture 的 `PASS + REWRITE`、正常 Producer 两次重写/
   Cargo 继续绝对复用物理根唯一 `.codex/cargo-target/rondo-multi`，模型/env/credential/raw 只在物理根 ignored 路径原位使用。
 - 三期与已经正式收口的方向 1 没有产品依赖。如果未来重新启动方向 1，普通工作仍可并行安排，但共享 API 预算、
   本地 GPU、Docker、构建锁和磁盘时必须显式错峰。
-- M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、M3-C2、M3-D 各自对应一个任务级 plan；
-  阶段叙事不单独创建总 plan，长程 WBS 也不替执行者冻结模块布局、API schema、训练超参数或部署技术路线。
+- 历史 M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、M3-C2、M3-D 与当前四个工作包均各自对应
+  独立任务级 plan；阶段叙事不单独创建总 plan，长程 WBS 也不替执行者冻结模块布局、训练超参数、云资源或部署技术路线。
 
 ## 现行产品语义合同
 
@@ -630,5 +741,10 @@ local/cloud 各 3/3 fixture 的 `PASS + REWRITE`、正常 Producer 两次重写/
   不向后续任务延伸。Plan 097 的 exact base/8GB GPU、DeepSeek scorer、正常 Producer 与 30 RMB 真实 API 授权也已随最终验收关闭，余额不转移；
   用户已批准并完成本地 main 合并；当前保留 097 分支、worktree 与既有证据，推送/归档/worktree 删除等待用户批准。后续真实模型/API、
   validation/unseen、产品价值或生产动作须重新授权。
+- 当前工作包一、二可以在各自任务启动时一次授权范围内自主完成项目内编辑、必要重构、生成工件、定向测试、独立审查与整改重跑；工作包二的
+  干净上下文负责人/盲审员及其块内返修包含在该包正常执行范围。两包默认均不取得真实模型、Docker、GPU、付费 API、外部上传或冻结测试权限。
+- 工作包三的本地准备授权不得被解释为云端付费授权。阶段 A 通过后，执行者必须向用户一次说明主方案、资源、最长时间、总预算、允许的技术
+  重试/恢复、资产传输和收口动作并取得明确批准；批准后，范围内普通故障修复与必要重跑可自主完成，只有超出这些总边界时才再次停下确认。
+- 工作包四必须单独取得真实模型推理、冻结测试释放及任何付费异构横评的任务授权；历史 Plan 096/097 余额、provider 请求和数据权限均不转移。
 - 训练数据、权重、逐样本输出与私有运行材料留在 `eval-data/` 或仓库外；`training/` 只保存体积合规的轻量合同与数据。
 - 正确性测试随产品能力建设；测评只保留能指导模型选择和产品验收的轻量指标，不建设数据资产审计或可信证明平台。
