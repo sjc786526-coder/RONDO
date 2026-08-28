@@ -384,6 +384,20 @@ class ProducerEvidenceTests(unittest.TestCase):
         self.assertEqual(second["commit_outcome"], "committed")
         self.assertTrue(second["continuation_matches_previous"])
         self.assertTrue(second["candidate_changed_from_previous"])
+        self.assertEqual(
+            result["waits"],
+            [
+                {
+                    "thread_role": "root",
+                    "dispatch_status": "completed",
+                    "timed_out": False,
+                    "wake_message_matches": True,
+                    "started_before_first_publish": True,
+                    "started_before_commit": True,
+                    "ended_after_commit": True,
+                }
+            ],
+        )
         encoded = json.dumps(result)
         for private in (
             INITIAL_SYNTHETIC_DRAFT,
@@ -427,6 +441,17 @@ class ProducerEvidenceTests(unittest.TestCase):
         self.assertNotIn(INITIAL_SYNTHETIC_DRAFT, encoded)
         self.assertNotIn(REVISED_DRAFT, encoded)
         self.assertNotIn("cycle-1", encoded)
+
+    def test_accepts_wait_started_after_a_blocked_review_but_before_commit(self) -> None:
+        jsonl, trace = _fixture()
+        late_wait = replace(trace.calls[1], seq=8)
+        late_trace = replace(
+            trace, calls=[trace.calls[0], late_wait, *trace.calls[2:]]
+        )
+
+        result = evaluate_producer_evidence(jsonl, late_trace)
+
+        self.assertTrue(result["root_wake"])
 
     def test_rejects_a_rewrite_from_another_thread(self) -> None:
         jsonl, trace = _fixture(second_thread="thread-other")

@@ -238,7 +238,6 @@ def evaluate_producer_evidence(jsonl: str, trace: RolloutTrace) -> dict[str, Any
     )
     wait, inspections = _validate_root_observation(
         trace,
-        first_publish_seq=publishes[0]["seq"],
         commit_end_seq=publishes[-1]["end_seq"],
     )
     if not all(
@@ -330,6 +329,39 @@ def project_producer_attempts(jsonl: str, trace: RolloutTrace) -> dict[str, Any]
         )
         previous_summary_sha1 = result.get("candidate_summary_sha1")
         previous_cycle_sha1 = result.get("next_review_cycle_sha1")
+    waits = _team_calls(trace, "wait_agent")
+    first_publish_seq = publishes[0]["seq"] if publishes else None
+    commit_end_seq = publishes[-1]["end_seq"] if publishes else None
+    wait_projection = []
+    for wait in waits:
+        result = wait.result if isinstance(wait.result, Mapping) else {}
+        wait_projection.append(
+            {
+                "thread_role": (
+                    "root" if wait.thread_id == trace.root_thread_id else "member"
+                ),
+                "dispatch_status": wait.status,
+                "timed_out": result.get("timed_out"),
+                "wake_message_matches": (
+                    result.get("message") == WAIT_TEAM_ACTIVITY_MARK
+                ),
+                "started_before_first_publish": (
+                    wait.seq < first_publish_seq
+                    if isinstance(first_publish_seq, int)
+                    else None
+                ),
+                "started_before_commit": (
+                    wait.seq < commit_end_seq
+                    if isinstance(commit_end_seq, int)
+                    else None
+                ),
+                "ended_after_commit": (
+                    commit_end_seq < wait.end_seq
+                    if isinstance(commit_end_seq, int)
+                    else None
+                ),
+            }
+        )
     return {
         "schema": "rondo-publication-critic-plan097-producer-failure-v1",
         "wire_request_count": wire_request_count,
@@ -338,6 +370,7 @@ def project_producer_attempts(jsonl: str, trace: RolloutTrace) -> dict[str, Any]
         "publish_attempt_count": len(attempts),
         "attempts": attempts,
         "wait_call_count": len(evidence["wait_calls"]),
+        "waits": wait_projection,
         "inspect_actions": list(evidence["inspect_actions"]),
         "unattributed_count": len(evidence["unattributed"]),
     }
@@ -408,7 +441,6 @@ def _validate_log(
 def _validate_root_observation(
     trace: RolloutTrace,
     *,
-    first_publish_seq: int,
     commit_end_seq: int,
 ) -> tuple[NestedToolCall, dict[str, NestedToolCall]]:
     waits = _team_calls(trace, "wait_agent")
@@ -421,7 +453,7 @@ def _validate_root_observation(
         or not isinstance(wait.result, Mapping)
         or wait.result.get("timed_out") is not False
         or wait.result.get("message") != WAIT_TEAM_ACTIVITY_MARK
-        or not wait.seq < first_publish_seq < commit_end_seq < wait.end_seq
+        or not wait.seq < commit_end_seq < wait.end_seq
     ):
         raise ProducerEvidenceError("root_wake_invalid")
 
