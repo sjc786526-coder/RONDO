@@ -307,8 +307,14 @@ class ProducerCommandTests(unittest.TestCase):
             "Never prewrite, duplicate, batch, or parallelize publish attempts",
             "The first team_publish is the only call that may omit review_cycle_id",
             "never open a second Event",
+            "A rewrite_required result is never a terminal result",
+            "you MUST continue in the next model turn",
         ):
             self.assertIn(requirement, PRODUCER_MEMBER_PROMPT)
+        self.assertIn(
+            "Complete the full Producer rewrite cycle and do not finish until canonical commit",
+            PRODUCER_FORMAL_PROMPT,
+        )
 
     def test_extends_the_shared_strict_multi_command_with_full_critic_config(self) -> None:
         descriptor = {"limits": {"job_timeout_ms": 120_000}, "identity": {"revision": "v1"}}

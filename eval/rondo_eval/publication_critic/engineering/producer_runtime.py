@@ -35,8 +35,9 @@ FIXED_FEEDBACK_V2 = (
 
 PRODUCER_MEMBER_PROMPT = f"""You are the only Producer in a bounded synthetic Plan 097 engineering run.
 Do not spawn another agent and do not ask Root to publish for you.
+Your assignment is complete only after team_publish returns the canonical event_id, version_id, and revision. A rewrite_required result is never a terminal result: do not send a final response or end your assignment after one.
 1. Your first action on the publication path must be one team_publish opening a new Event. Use a short synthetic title, omit event_id and review_cycle_id, and make the complete summary exactly: {INITIAL_SYNTHETIC_DRAFT}
-2. Use exactly one fresh code cell for each team_publish attempt. That cell must contain exactly one awaited team_publish call and no second publish call. End the cell immediately after the awaited result; inspect and act on that result only in the next model turn. Never prewrite, duplicate, batch, or parallelize publish attempts.
+2. Use exactly one fresh code cell for each team_publish attempt. That cell must contain exactly one awaited team_publish call and no second publish call. End the cell immediately after the awaited result; when it is rewrite_required, you MUST continue in the next model turn and make the required revised attempt. Never prewrite, duplicate, batch, or parallelize publish attempts.
 3. Inspect the actual team_publish result. If and only if it has status rewrite_required, read its fixed feedback and autonomously write a materially revised, concise, self-contained synthetic summary. Retry from this same thread with the returned review_cycle_id and the same new-Event title. Do not prepare or copy a second draft before receiving feedback.
 4. The first team_publish is the only call that may omit review_cycle_id. Every later team_publish MUST include the exact non-empty review_cycle_id returned by the immediately preceding rewrite_required result. Before each retry, verify that argument is present. If it is unavailable, stop with an error; never open a second Event and never issue a retry without it.
 5. Repeat steps 3-4 for at most the two blocking rewrite opportunities. The third review is non-blocking. Stop immediately when team_publish returns event_id, version_id, and revision; do not publish another Version.
@@ -44,7 +45,7 @@ Do not spawn another agent and do not ask Root to publish for you.
 """
 
 PRODUCER_FORMAL_PROMPT = """Run one bounded synthetic Plan 097 Publication Critic engineering flow as Root.
-1. Spawn exactly one member with task_name producer. Tell it to execute its Plan 097 Producer developer instructions. The runtime supplies that member its complete fixed task as developer instructions, so do not restate or paraphrase the task. Do not spawn any other member. Root must never call team_publish.
+1. Spawn exactly one member with task_name producer and the exact user task: Complete the full Producer rewrite cycle and do not finish until canonical commit. The runtime supplies that member its complete detailed task as developer instructions, so add no other task detail. Do not spawn any other member. Root must never call team_publish.
 2. Immediately call wait_agent once and wait for the Producer's canonical Team State publish to wake Root. A blocked rewrite is not a publish and must not wake Root.
 3. After the wake, call team_inspect exactly once with action dump and limit 50, then exactly once with action log and limit 50. Do not mutate Team State.
 4. Stop after both inspections. Do not quote or summarize the publication body in the final response.
