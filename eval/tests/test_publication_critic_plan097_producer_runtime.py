@@ -25,6 +25,7 @@ from rondo_eval.publication_critic.engineering.producer_runtime import (  # noqa
     ProducerEvidenceError,
     build_producer_command,
     evaluate_producer_evidence,
+    project_producer_attempts,
 )
 
 
@@ -322,6 +323,42 @@ class ProducerCommandTests(unittest.TestCase):
 
 
 class ProducerEvidenceTests(unittest.TestCase):
+    def test_failure_projection_retains_control_flow_without_bodies_or_ids(self) -> None:
+        jsonl, trace = _fixture()
+        result = project_producer_attempts(jsonl, trace)
+
+        self.assertEqual(result["publish_attempt_count"], 2)
+        self.assertEqual(
+            result["attempts"],
+            [
+                {
+                    "thread_role": "member",
+                    "dispatch_status": "completed",
+                    "result_kind": "rewrite_required",
+                    "review_status": None,
+                    "review_cycle_present": False,
+                    "event_id_present": False,
+                },
+                {
+                    "thread_role": "member",
+                    "dispatch_status": "completed",
+                    "result_kind": "canonical_commit",
+                    "review_status": "pass",
+                    "review_cycle_present": True,
+                    "event_id_present": False,
+                },
+            ],
+        )
+        encoded = json.dumps(result)
+        for private in (
+            INITIAL_SYNTHETIC_DRAFT,
+            REVISED_DRAFT,
+            "cycle-1",
+            EVENT_ID,
+            VERSION_ID,
+        ):
+            self.assertNotIn(private, encoded)
+
     def test_projects_one_rewrite_and_one_canonical_publish_without_bodies(self) -> None:
         jsonl, trace = _fixture()
         result = evaluate_producer_evidence(jsonl, trace)

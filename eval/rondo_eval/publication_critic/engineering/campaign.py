@@ -48,8 +48,10 @@ from .cloud_budget_proxy import CloudBudgetProxy
 from .contract import EngineeringContract, load_contract
 from .producer_runtime import (
     INITIAL_SYNTHETIC_DRAFT,
+    ProducerEvidenceError,
     build_producer_command,
     evaluate_producer_evidence,
+    project_producer_attempts,
 )
 from .service_runtime import (
     LocalRuntime,
@@ -704,7 +706,29 @@ def _run_producer(
                 trace = load_rollout_trace(find_trace_bundle(trace_root))
                 if completed.returncode != 0:
                     raise CampaignError("producer_process_failed")
-                evidence = evaluate_producer_evidence(wire, trace)
+                try:
+                    evidence = evaluate_producer_evidence(wire, trace)
+                except ProducerEvidenceError as exc:
+                    error_code = str(exc)
+                    if not re.fullmatch(r"[a-z0-9_]{1,120}", error_code):
+                        error_code = "producer_evidence_invalid"
+                    try:
+                        diagnostic = project_producer_attempts(wire, trace)
+                    except ProducerEvidenceError:
+                        diagnostic = {
+                            "schema": (
+                                "rondo-publication-critic-plan097-"
+                                "producer-failure-v1"
+                            ),
+                            "projection_status": "unavailable",
+                        }
+                    _write_private_diagnostic(
+                        metadata_path.with_name(
+                            f"{metadata_path.stem}-evidence-failure.json"
+                        ),
+                        {**diagnostic, "error_code": error_code},
+                    )
+                    raise
         snapshot = ledger.snapshot()
     _assert_body_free_file(
         metadata_path,
@@ -1105,6 +1129,35 @@ def _assert_body_free_file(path: Path, *, forbidden: Sequence[str]) -> None:
     for value in forbidden:
         if value and value.encode("utf-8") in raw:
             raise CampaignError("body_free_metadata_leak")
+
+
+def _write_private_diagnostic(path: Path, value: Mapping[str, Any]) -> None:
+    try:
+        body = (
+            json.dumps(
+                dict(value),
+                ensure_ascii=True,
+                allow_nan=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+            + b"\n"
+        )
+    except (TypeError, ValueError) as exc:
+        raise CampaignError("private_diagnostic_invalid") from exc
+    if not body or len(body) > _MAX_RECEIPT_BYTES:
+        raise CampaignError("private_diagnostic_invalid")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        descriptor = os.open(path, flags, 0o600)
+    except OSError as exc:
+        raise CampaignError("private_diagnostic_output_exists") from exc
+    with os.fdopen(descriptor, "wb") as handle:
+        handle.write(body)
+        handle.flush()
+        os.fsync(handle.fileno())
 
 
 def _require_phase(value: str) -> None:

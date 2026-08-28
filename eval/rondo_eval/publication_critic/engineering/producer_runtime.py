@@ -304,6 +304,54 @@ def evaluate_producer_evidence(jsonl: str, trace: RolloutTrace) -> dict[str, Any
     }
 
 
+def project_producer_attempts(jsonl: str, trace: RolloutTrace) -> dict[str, Any]:
+    """Project body-free publish control flow for a failed commissioning run."""
+
+    wire_request_count = _strict_wire_request_count(jsonl)
+    try:
+        evidence = collect_gate1_evidence(jsonl, trace)
+    except EvidenceError as exc:
+        raise ProducerEvidenceError("trace_wire_binding_invalid") from exc
+    publishes = sorted(evidence["team_publish_calls"], key=lambda row: row["seq"])
+    attempts = []
+    for row in publishes:
+        arguments = row.get("arguments")
+        result = row.get("result")
+        arguments = arguments if isinstance(arguments, Mapping) else {}
+        result = result if isinstance(result, Mapping) else {}
+        review = result.get("publication_review")
+        review = review if isinstance(review, Mapping) else {}
+        if result.get("status") == "rewrite_required":
+            result_kind = "rewrite_required"
+        elif _is_commit_result(result):
+            result_kind = "canonical_commit"
+        else:
+            result_kind = "other"
+        attempts.append(
+            {
+                "thread_role": (
+                    "root" if row.get("thread_id") == trace.root_thread_id else "member"
+                ),
+                "dispatch_status": row.get("status"),
+                "result_kind": result_kind,
+                "review_status": review.get("status"),
+                "review_cycle_present": bool(arguments.get("review_cycle_id")),
+                "event_id_present": bool(arguments.get("event_id")),
+            }
+        )
+    return {
+        "schema": "rondo-publication-critic-plan097-producer-failure-v1",
+        "wire_request_count": wire_request_count,
+        "trace_cell_count": evidence["cells"],
+        "trace_nested_call_count": evidence["nested_calls"],
+        "publish_attempt_count": len(attempts),
+        "attempts": attempts,
+        "wait_call_count": len(evidence["wait_calls"]),
+        "inspect_actions": list(evidence["inspect_actions"]),
+        "unattributed_count": len(evidence["unattributed"]),
+    }
+
+
 def _validate_dump(
     entries: object,
     *,
@@ -494,4 +542,5 @@ __all__ = [
     "ProducerEvidenceError",
     "build_producer_command",
     "evaluate_producer_evidence",
+    "project_producer_attempts",
 ]
