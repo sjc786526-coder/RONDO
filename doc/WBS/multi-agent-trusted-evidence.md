@@ -1,9 +1,9 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
-最后更新：2026-08-27 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
-状态：**第一期、第二期、第四期已完成；Publication Critic 三期 Plan 097 已由用户另行立项并完成规划，当前为
-`PLANNED / AUTHORIZED / IMPLEMENTATION_NOT_STARTED`。其目标是以 local exact 1.7B base 与 cloud DeepSeek V4 Flash 两个未获产品质量资格的
-真实 fixture，完成双 backend 工程 E2E 与可替换接缝验证。Plan 096 的
+最后更新：2026-08-28 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
+状态：**第一期、第二期、第四期已完成；Publication Critic 三期 Plan 097 已完成实现与 clean formal，执行者终态为
+`M3_D_DUAL_BACKEND_ENGINEERING_PASS / REVIEW_PENDING`。local exact 1.7B base 与 cloud DeepSeek V4 Flash 两个未获产品质量资格的
+真实 fixture 已闭合双 backend 工程 E2E 与可替换接缝。Plan 096 的
 `CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH / FINAL_REVIEW_ACCEPTED / INTEGRATED / PUSHED`、Plan 094 的有效负向终态和 Plan 095 的
 最终验收均保持有效；本地/云端质量、产品价值、Publication Critic 默认与生产启用继续锁定**
 
@@ -105,7 +105,7 @@ M3-B1c 正式分阶段训练与工件回收          │
                        ↓
         Plan 094 Route O 连续训练与实质增益候选形成（有效负向终态；zero-Pod 收口及最终验收完成）
                        ↓
-        Plan 097 M3-D 双 backend 工程前置闭环（已规划、已授权、待实施）
+        Plan 097 M3-D 双 backend 工程前置闭环（实现与 clean formal 完成；首次独立验收待办）
 
 并列 reference 支线：M3-B2a 已有可替换 service → Plan 095 云端参考 scorer backend（已完成）
                                               ↓
@@ -474,7 +474,7 @@ rubric/quality floor，不读取 unseen，不训练/微调/量化，不使用 Do
 
 ### D 阶段：端到端收口
 
-#### M3-D：双 backend 工程前置闭环（Plan 097 已规划并授权）
+#### M3-D：双 backend 工程前置闭环（Plan 097 实施完成、待首次独立验收）
 
 **当前目标**：在少量合成或代表性的 RONDO Multi publication 流程中，让 local exact 1.7B base 与 cloud DeepSeek V4 Flash 分别通过同一
 `PublicationScorer → service → typed client → team_publish` 边界，验证 OFF/local/cloud、Producer 固定反馈重写、canonical commit、
@@ -493,8 +493,12 @@ failure fallback、取消、Root/Team State 不变量和有界资源回收。bac
 - commissioning 全链打通后冻结 clean 条件并从干净状态完整运行一轮，相关正确性测试进入既有体系，结果诚实区分真实/受控/未运行；
 - 首次独立验收接受后把完成证据归档到 `doc/WBS-COMPLETED.md`，本页只保留最终工程事实和仍有效边界。
 
-**当前状态**：`PLANNED / AUTHORIZED / IMPLEMENTATION_NOT_STARTED`。合同见
-[`Plan 097 ExecPlan`](../../plan/097-m3-d-dual-backend-engineering-execplan.md)。Plan 096 的 scorer 资格失败不是本任务工程失败，也没有被推翻。
+**当前状态**：clean `plan097-formal-5` 在 `0ae9623` 上形成 `M3_D_DUAL_BACKEND_ENGINEERING_PASS / REVIEW_PENDING`。OFF 旁路、
+local/cloud 各 3/3 fixture 的 `PASS + REWRITE`、正常 Producer 两次重写/回环与唯一提交、controlled fallback/cancel 和资源回收均闭合；
+累计保守费用 `21.4197186 RMB / 30 RMB`。正式摘要见
+[`M3-D 双 backend 工程结果`](../../eval/results/publication-critic/m3-d-dual-backend-engineering-v1.md)，合同与待审状态见
+[`Plan 097 ExecPlan`](../../plan/097-m3-d-dual-backend-engineering-execplan.md)。Plan 096 的 scorer 资格失败不是本任务工程失败，也没有被推翻；
+首次独立验收接受前不写入 `doc/WBS-COMPLETED.md`。
 
 ## 串并行与资源关系
 

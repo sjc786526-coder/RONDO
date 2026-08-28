@@ -1,0 +1,110 @@
+{
+  "schema": "rondo-publication-critic-plan097-engineering-archive-v1",
+  "terminal": "M3_D_DUAL_BACKEND_ENGINEERING_PASS",
+  "formal_run_id": "plan097-formal-5",
+  "source": {
+    "commit": "0ae9623f3d0c2ce764f4b7c6e13994759b47746f",
+    "dirty": false
+  },
+  "contract_sha256": "7abdd900c4b2cc27fe4400edf534ac4ef8d175331b933d55e2c089149879cf87",
+  "receipts": {
+    "root": "eval-data/publication-critic/plan097/formal/plan097-formal-5",
+    "result_sha256": "91a191f07c35575242eeaf478422e2efceac48f683cd91c61491e93b913f9b57",
+    "local_sha256": "50106108e59109c3681e97601dbb1390dde8a92301f2cfea6684375c4b2efd52",
+    "cloud_sha256": "6e418b6003b7924490c8a0925addcd0f3f8314529c3ef36f20d733b9b7ea9ec5",
+    "preflight_sha256": "a248ac096888775edfc7f6dcbb3ca2e3bc2d8b5ea1d6f08a52f163e6afb9b430",
+    "off_sha256": "d39c7a3163cb95a91887a024e85c6531fe3b2c6dcf1f4917f5d1faf6b53cb856",
+    "controlled_gates_sha256": "ef4298f64bacf0258a97942d732d705a9aa7e00c5ba2853b47e49c3f84a445f7"
+  },
+  "off": {
+    "bypass": true,
+    "scorer_process_started": false,
+    "scorer_secret_loaded": false,
+    "review_cycle_created": false,
+    "canonical_flow_passed": true
+  },
+  "controlled_paths": {
+    "test_filter": "test(process_tests)",
+    "tests": 13,
+    "failures": 0,
+    "failure_fallback": "one_canonical_commit",
+    "cancellation": "zero_commit"
+  },
+  "backends": {
+    "local": {
+      "descriptor_sha256": "93e0ea030cde562fc68d3b9797f085bfdf0d2ced12c4453da0d7cb7836b9fcfa",
+      "direct_cases_matched": 3,
+      "direct_branch_coverage": [
+        "pass",
+        "rewrite"
+      ],
+      "ready_elapsed_ms": 5301,
+      "producer": {
+        "status": "passed",
+        "publish_attempt_count": 3,
+        "rewrite_count": 2,
+        "cycle_hop_count": 2,
+        "final_review_status": "rewrite_exhausted",
+        "canonical_commit_count": 1,
+        "event_count": 1,
+        "version_count": 1,
+        "publish_mutation_count": 1,
+        "revision": 1,
+        "root_wake": true,
+        "request_count": 12,
+        "spent_usd": "0.121840"
+      }
+    },
+    "cloud": {
+      "descriptor_sha256": "e10fb4463b4c3fa40265e07d234d3127f4a82908eca31cdcc0186e8963125401",
+      "direct_cases_matched": 3,
+      "direct_branch_coverage": [
+        "pass",
+        "rewrite"
+      ],
+      "ready_elapsed_ms": 6,
+      "producer": {
+        "status": "passed",
+        "publish_attempt_count": 3,
+        "rewrite_count": 2,
+        "cycle_hop_count": 2,
+        "final_review_status": "rewrite_exhausted",
+        "canonical_commit_count": 1,
+        "event_count": 1,
+        "version_count": 1,
+        "publish_mutation_count": 1,
+        "revision": 1,
+        "root_wake": true,
+        "request_count": 11,
+        "spent_usd": "0.179534"
+      }
+    }
+  },
+  "budget": {
+    "currency": "CNY",
+    "total_cap_rmb": "30",
+    "total_conservative_rmb": "21.4197186",
+    "producer_cap_rmb": "24",
+    "producer_spent_usd": "2.846074",
+    "producer_spent_rmb": "21.3455550",
+    "producer_request_count": 172,
+    "cloud_cap_rmb": "6",
+    "cloud_conservative_charged_rmb": "0.0741636",
+    "cloud_attempt_count": 24,
+    "unknown_usage_count": 0
+  },
+  "resource_terminal": {
+    "local_worker_reaped": true,
+    "local_service_reaped": true,
+    "cloud_service_reaped": true,
+    "paid_proxies_closed_before_summary": true,
+    "private_packets_wire_and_trace_removed": true
+  },
+  "conclusion_boundary": {
+    "local_quality": "no_go_pending_replacement",
+    "cloud_quality": "not_qualified",
+    "product_value": "not_evaluated",
+    "product_default": "off",
+    "production": "disabled"
+  }
+}

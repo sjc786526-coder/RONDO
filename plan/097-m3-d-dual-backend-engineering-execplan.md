@@ -261,18 +261,20 @@ XXX用以下内容代替：
   ignored 运行 namespace。
 - 2026-08-27：独立只读规划复核确认模板、queue 原文、Plan 096 结论边界、WBS 一致性、实现自主度、ignored 资产和唯一 Cargo target 均无
   High / Medium / Low correctness finding；复核未修改文件。
+- 2026-08-27：完成 body-free `team_publish` trace 证明、双 backend service/runtime 编排、正常 Terra Producer 重写回环、持久费用代理与
+  Plan 097 专用正式 campaign；相关 Python 回归、格式/diff 门禁及受共享锁保护的 Rust process tests 均通过。
+- 2026-08-27：commissioning 打通后在 clean `0ae9623` 上完成 `plan097-formal-5`。OFF 真实旁路；local/cloud 各 3/3 fixture 命中
+  `PASS + REWRITE`，正常 Producer 各完成 3 次发布、2 次重写/回环与唯一 canonical commit；fallback 为一次提交、cancel 为零提交，全部
+  task-owned 资源回收。正式终态 `M3_D_DUAL_BACKEND_ENGINEERING_PASS`，累计保守费用 `21.4197186 RMB / 30 RMB`。
 
 ### 当前工作
 
-- `PLANNED / AUTHORIZED / IMPLEMENTATION_NOT_STARTED / REVIEW_PENDING`：等待执行者按本计划实施。
+- `IMPLEMENTATION_COMPLETE / FORMAL_PASS / REVIEW_PENDING`：实现与正式结果已提交前自检，等待首次独立验收。
 
 ### 本任务剩余步骤
 
-1. 复核 live gap，完成必要实现与定向离线门禁。
-2. 完成 OFF、local exact、cloud DeepSeek 与代表 failure/cancel commissioning。
-3. 冻结 clean 条件并执行一轮完整正式工程 E2E。
-4. 自检、完成待审记录、提交 097 分支，并按用户给定最终消息模板通过 queue 交审查者首次独立验收后停止。
-5. 若收到 finding 则修复、提交并发送新的完成汇报；若验收接受，由审查者完成审查报告和任务终态文档收口。
+1. 提交待审记录并按用户给定最终消息模板通过 queue 交审查者首次独立验收后停止。
+2. 若收到 finding 则修复、提交并发送新的完成汇报；若验收接受，由审查者完成审查报告和任务终态文档收口。
 
 ### 阻塞项
 
@@ -281,7 +283,7 @@ XXX用以下内容代替：
 
 ### 当前验收状态
 
-- 尚无工程终态；Plan 097 只完成规划和一次性授权冻结，未产生实现或运行证据。
+- 执行者正式轮终态为 `M3_D_DUAL_BACKEND_ENGINEERING_PASS`；正确性/功能性独立验收尚未完成。
 
 ### 交接边界
 
@@ -304,3 +306,6 @@ XXX用以下内容代替：
 | 007 | tracked 工作只在 097 worktree；模型/env/secret/config/shared target/raw 只在主物理根原位使用 | linked worktree 不共享 ignored 资产，且唯一 target/权重不能复制 | Git、宿主资源 | 已采纳 |
 | 008 | 额外请示、计划外不确定性与验收只走指定 queue，执行者主动表明身份，发送后停止且不重复 | 遵循用户指定的跨会话审查机制 | 协调、交付 | 已采纳 |
 | 009 | 完成后只提交 097 本地分支；合并、推送、归档和删除 worktree 等待用户批准 | 用户明确本任务 Git 停止点 | Git | 已采纳 |
+| 010 | normal Producer 使用专用 runtime-injected member 指令与现有 collaboration/Team State 接缝；不复制第二套发布状态机 | 既有 Multi 驱动不提供固定 publication task，但产品状态机已完整 | Producer、E2E | 已采纳 |
+| 011 | Plan 097 明确声明零 Guardian、串行排队 main 请求，并以持久 roll-forward ledger 计入全部旧轮次 | 正常 Producer 流程没有 Guardian；并发额度预留会造成假性 capacity failure | 费用、代理、运行 | 已采纳 |
+| 012 | 30 RMB 总上限最终分账为 cloud scorer 6 RMB / Producer 24 RMB；正式结论按合并保守总账判断 | commissioning 显示主要费用来自正常 Producer，而 scorer 实耗很低 | 费用、正式轮 | 已采纳 |
