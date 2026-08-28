@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 from pathlib import Path
 import sys
 import unittest
@@ -22,6 +23,7 @@ from rondo_eval.publication_critic.engineering.producer_runtime import (  # noqa
     FIXED_FEEDBACK_V1,
     INITIAL_SYNTHETIC_DRAFT,
     PRODUCER_FORMAL_PROMPT,
+    PRODUCER_MEMBER_PROMPT,
     ProducerEvidenceError,
     build_producer_command,
     evaluate_producer_evidence,
@@ -132,7 +134,7 @@ def _fixture(
             name="spawn_agent",
             thread_id=ROOT,
             cell_id="root-cell",
-            arguments={"task_name": "producer", "message": "bounded Producer task"},
+            arguments={"task_name": "producer", "message": PRODUCER_MEMBER_PROMPT},
             result={"agent_id": PRODUCER},
             seq=2,
             end_seq=3,
@@ -323,6 +325,16 @@ class ProducerCommandTests(unittest.TestCase):
 
 
 class ProducerEvidenceTests(unittest.TestCase):
+    def test_rejects_a_paraphrased_producer_spawn_task(self) -> None:
+        jsonl, trace = _fixture()
+        bad_spawn = replace(
+            trace.calls[0],
+            arguments={"task_name": "producer", "message": "paraphrased task"},
+        )
+        bad_trace = replace(trace, calls=[bad_spawn, *trace.calls[1:]])
+        with self.assertRaisesRegex(ProducerEvidenceError, "producer_spawn_invalid"):
+            evaluate_producer_evidence(jsonl, bad_trace)
+
     def test_failure_projection_retains_control_flow_without_bodies_or_ids(self) -> None:
         jsonl, trace = _fixture()
         result = project_producer_attempts(jsonl, trace)
@@ -337,7 +349,17 @@ class ProducerEvidenceTests(unittest.TestCase):
                     "result_kind": "rewrite_required",
                     "review_status": None,
                     "review_cycle_present": False,
+                    "result_cycle_present": True,
                     "event_id_present": False,
+                    "result_fields": [
+                        "blocking_rewrite_count",
+                        "candidate",
+                        "feedback",
+                        "feedback_version",
+                        "review_attempt",
+                        "review_cycle_id",
+                        "status",
+                    ],
                 },
                 {
                     "thread_role": "member",
@@ -345,10 +367,22 @@ class ProducerEvidenceTests(unittest.TestCase):
                     "result_kind": "canonical_commit",
                     "review_status": "pass",
                     "review_cycle_present": True,
+                    "result_cycle_present": False,
                     "event_id_present": False,
+                    "result_fields": [
+                        "authored_on_stale_view",
+                        "deduplicated",
+                        "event_id",
+                        "evidence_refs",
+                        "evidence_refs_omitted",
+                        "publication_review",
+                        "revision",
+                        "version_id",
+                    ],
                 },
             ],
         )
+        self.assertTrue(result["producer_task_exact"])
         encoded = json.dumps(result)
         for private in (
             INITIAL_SYNTHETIC_DRAFT,

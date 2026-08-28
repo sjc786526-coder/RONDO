@@ -35,12 +35,13 @@ PRODUCER_MEMBER_PROMPT = f"""You are the only Producer in a bounded synthetic Pl
 Do not spawn another agent and do not ask Root to publish for you.
 1. Your first action on the publication path must be one team_publish opening a new Event. Use a short synthetic title, omit event_id and review_cycle_id, and make the complete summary exactly: {INITIAL_SYNTHETIC_DRAFT}
 2. Inspect the actual team_publish result. If and only if it has status rewrite_required, read its fixed feedback and autonomously write a materially revised, concise, self-contained synthetic summary. Retry from this same thread with the returned review_cycle_id and the same new-Event title. Do not prepare or copy a second draft before receiving feedback.
-3. Repeat step 2 for at most the two blocking rewrite opportunities. The third review is non-blocking. Stop immediately when team_publish returns event_id, version_id, and revision; do not publish another Version.
-4. End your assignment after the canonical commit. Never print or send the publication body to Root.
+3. Every team_publish after the first MUST include the exact non-empty review_cycle_id returned by the immediately preceding rewrite_required result. Before each retry, verify that argument is present. If it is unavailable, stop with an error; never issue a retry without it.
+4. Repeat steps 2-3 for at most the two blocking rewrite opportunities. The third review is non-blocking. Stop immediately when team_publish returns event_id, version_id, and revision; do not publish another Version.
+5. End your assignment after the canonical commit. Never print or send the publication body to Root.
 """
 
 PRODUCER_FORMAL_PROMPT = f"""Run one bounded synthetic Plan 097 Publication Critic engineering flow as Root.
-1. Spawn exactly one member with task_name producer and give it the Producer task between <producer_task> tags below. Do not spawn any other member. Root must never call team_publish.
+1. Spawn exactly one member with task_name producer. Its spawn_agent message MUST equal the complete text between <producer_task> tags below verbatim, without a prefix, suffix, paraphrase, or omission. Do not spawn any other member. Root must never call team_publish.
 2. Immediately call wait_agent once and wait for the Producer's canonical Team State publish to wake Root. A blocked rewrite is not a publish and must not wake Root.
 3. After the wake, call team_inspect exactly once with action dump and limit 50, then exactly once with action log and limit 50. Do not mutate Team State.
 4. Stop after both inspections. Do not quote or summarize the publication body in the final response.
@@ -150,8 +151,7 @@ def evaluate_producer_evidence(jsonl: str, trace: RolloutTrace) -> dict[str, Any
         spawn.thread_id != root_thread_id
         or spawn.status != "completed"
         or spawn_args.get("task_name") != "producer"
-        or not isinstance(spawn_args.get("message"), str)
-        or not spawn_args["message"].strip()
+        or spawn_args.get("message") != PRODUCER_MEMBER_PROMPT
     ):
         raise ProducerEvidenceError("producer_spawn_invalid")
 
@@ -313,6 +313,11 @@ def project_producer_attempts(jsonl: str, trace: RolloutTrace) -> dict[str, Any]
     except EvidenceError as exc:
         raise ProducerEvidenceError("trace_wire_binding_invalid") from exc
     publishes = sorted(evidence["team_publish_calls"], key=lambda row: row["seq"])
+    spawns = _team_calls(trace, "spawn_agent")
+    producer_task_exact = False
+    if len(spawns) == 1:
+        spawn_arguments = _arguments(spawns[0].arguments)
+        producer_task_exact = spawn_arguments.get("message") == PRODUCER_MEMBER_PROMPT
     attempts = []
     for row in publishes:
         arguments = row.get("arguments")
@@ -336,7 +341,13 @@ def project_producer_attempts(jsonl: str, trace: RolloutTrace) -> dict[str, Any]
                 "result_kind": result_kind,
                 "review_status": review.get("status"),
                 "review_cycle_present": bool(arguments.get("review_cycle_id")),
+                "result_cycle_present": bool(result.get("review_cycle_id")),
                 "event_id_present": bool(arguments.get("event_id")),
+                "result_fields": sorted(
+                    key
+                    for key in result
+                    if isinstance(key, str) and key.replace("_", "").isalnum()
+                ),
             }
         )
     return {
@@ -346,6 +357,7 @@ def project_producer_attempts(jsonl: str, trace: RolloutTrace) -> dict[str, Any]
         "trace_nested_call_count": evidence["nested_calls"],
         "publish_attempt_count": len(attempts),
         "attempts": attempts,
+        "producer_task_exact": producer_task_exact,
         "wait_call_count": len(evidence["wait_calls"]),
         "inspect_actions": list(evidence["inspect_actions"]),
         "unattributed_count": len(evidence["unattributed"]),
