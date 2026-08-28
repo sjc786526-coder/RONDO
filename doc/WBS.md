@@ -1,7 +1,7 @@
 # RONDO 长程规划（WBS）
 
 最后更新：2026-08-28（方向 3 Publication Critic 三期 Plan 097 已完成实现、clean formal、初审窄修与最终独立验收，终态为
-`M3_D_DUAL_BACKEND_ENGINEERING_PASS / FINAL_REVIEW_ACCEPTED`。
+`M3_D_DUAL_BACKEND_ENGINEERING_PASS / FINAL_REVIEW_ACCEPTED / INTEGRATED / NOT_PUSHED`。
 Plan 096 的 `CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH`、Plan 095 最终验收、Plan 094 有效负向研究终态和 Plan 093 Linux 全 workspace
 正确性基线均保持有效；Plan 097 不解锁产品质量、默认启用或生产）
 
@@ -249,8 +249,8 @@ RONDO/
 普通依赖下载、源码查询和只读网络访问可随已授权任务执行。具体资源阈值、密钥边界和操作纪律以根
 `AGENTS.md` 为准。
 
-Plan 097 的一次性本地模型、DeepSeek scorer、正常 Producer 与 30 RMB 真实 API 授权已随最终验收关闭，余额不转移。任务分支仍未合并或
-推送；合并、推送、分支归档或 worktree 删除继续等待用户批准。任何后续真实模型/API、质量测量、产品价值验证或生产动作都须另立任务授权。
+Plan 097 的一次性本地模型、DeepSeek scorer、正常 Producer 与 30 RMB 真实 API 授权已随最终验收关闭，余额不转移。用户已批准并完成本地
+main 合并，尚未推送；推送、分支归档或 worktree 删除继续等待用户批准。任何后续真实模型/API、质量测量、产品价值验证或生产动作都须另立任务授权。
 
 ## 7. 子 WBS 索引
 

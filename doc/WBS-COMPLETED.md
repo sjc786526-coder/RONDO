@@ -2535,7 +2535,7 @@ CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH / INTEGRATED / PUSHED`。实现提交�
 ## Publication Critic M3-D 双 Backend 工程闭环（Plan 097，2026-08-28）
 
 **状态**：`COMPLETED / M3_D_DUAL_BACKEND_ENGINEERING_PASS / FINAL_REVIEW_ACCEPTED / GOAL_COMPLETED /
-NOT_INTEGRATED / NOT_PUSHED`。clean formal source 为 `0ae9623`，执行者交付提交为 `32553d8`，初审报告提交为 `8dc768e`，窄修提交为
+INTEGRATED / NOT_PUSHED`。clean formal source 为 `0ae9623`，执行者交付提交为 `32553d8`，初审报告提交为 `8dc768e`，窄修提交为
 `161be6d`。
 
 - 在 Plan 057 既有 `team_publish` publication cycle 与 canonical Team State mutation 上，以同一
@@ -2556,7 +2556,8 @@ NOT_INTEGRATED / NOT_PUSHED`。clean formal source 为 `0ae9623`，执行者交�
 - 正式摘要见 `eval/results/publication-critic/m3-d-dual-backend-engineering-v1.{json,md}`；初审、返修与最终验收分别见
   `agent_log/2026-08-28-001531-plan097-independent-review.md`、
   `agent_log/2026-08-28-003120-plan097-review-remediation.md` 与
-  `agent_log/2026-08-28-004428-plan097-final-independent-review.md`。Plan 097 一次性外部动作授权已经关闭，余额不转移；分支尚未合并或推送，
-  worktree 保留等待用户批准。
+  `agent_log/2026-08-28-004428-plan097-final-independent-review.md`。Plan 097 一次性外部动作授权已经关闭，余额不转移；用户批准后以 merge commit
+  `b7a83fcd54999fbd0c03bb057366748c2464e579` 合入本地 main，主线轻量回归 `51/51` 通过。尚未推送，分支与 worktree 保留等待用户批准；集成记录见
+  `agent_log/2026-08-28-004839-plan097-main-integration.md`。
 - 本任务只完成工程链与双 backend 可替换性 GO。本地模型质量仍为 `NO-GO / 待替换`，云端 scorer 仍为 `NOT QUALIFIED`，M3-D 产品价值仍未验收，
   Publication Critic 默认 `OFF`，生产启用 `NO`。

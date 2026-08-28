@@ -2,7 +2,7 @@
 
 最后更新：2026-08-28 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
 状态：**第一期、第二期、第四期已完成；Publication Critic 三期 Plan 097 已完成实现、clean formal、初审窄修与最终独立验收，终态为
-`M3_D_DUAL_BACKEND_ENGINEERING_PASS / FINAL_REVIEW_ACCEPTED`。local exact 1.7B base 与 cloud DeepSeek V4 Flash 两个未获产品质量资格的
+`M3_D_DUAL_BACKEND_ENGINEERING_PASS / FINAL_REVIEW_ACCEPTED / INTEGRATED / NOT_PUSHED`。local exact 1.7B base 与 cloud DeepSeek V4 Flash 两个未获产品质量资格的
 真实 fixture 已闭合双 backend 工程 E2E 与可替换接缝。Plan 096 的
 `CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH / FINAL_REVIEW_ACCEPTED / INTEGRATED / PUSHED`、Plan 094 的有效负向终态和 Plan 095 的
 最终验收均保持有效；本地/云端质量、产品价值、Publication Critic 默认与生产启用继续锁定**
@@ -628,6 +628,7 @@ local/cloud 各 3/3 fixture 的 `PASS + REWRITE`、正常 Producer 两次重写/
   Docker、GPU、RunPod、unseen、训练、产品启用、远端发布或数据/权重上传。正式终态不是 `CLOUD_SCORER_QUALIFIED`，因此不授予任何质量或产品资格。
 - Plan 068、Plan 071 与 Plan 073 的一次性授权已随本地交接、真实推理、资格/联合横评、独立验收和 exact winner 卷删除全部完成，
   不向后续任务延伸。Plan 097 的 exact base/8GB GPU、DeepSeek scorer、正常 Producer 与 30 RMB 真实 API 授权也已随最终验收关闭，余额不转移；
-  当前只保留本地 097 分支和既有证据，合并/推送/归档/worktree 删除等待用户批准。后续真实模型/API、validation/unseen、产品价值或生产动作须重新授权。
+  用户已批准并完成本地 main 合并；当前保留 097 分支、worktree 与既有证据，推送/归档/worktree 删除等待用户批准。后续真实模型/API、
+  validation/unseen、产品价值或生产动作须重新授权。
 - 训练数据、权重、逐样本输出与私有运行材料留在 `eval-data/` 或仓库外；`training/` 只保存体积合规的轻量合同与数据。
 - 正确性测试随产品能力建设；测评只保留能指导模型选择和产品验收的轻量指标，不建设数据资产审计或可信证明平台。

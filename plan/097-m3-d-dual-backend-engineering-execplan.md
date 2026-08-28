@@ -274,10 +274,12 @@ XXX用以下内容代替：
 - 2026-08-28：最终独立复验逐项接受 4 Medium / 1 Low 窄修，独立重跑 Plan 097 Python `51/51`，并以 16 个独立 ledger 并发实例确认
   attempt 唯一及保守额度完整；未发现新的 High / Medium / Low correctness 或 functionality finding。任务终态正式接受为
   `M3_D_DUAL_BACKEND_ENGINEERING_PASS / FINAL_REVIEW_ACCEPTED`。
+- 2026-08-28：用户批准合并主工作区；097 分支以非 fast-forward merge commit `b7a83fc` 合入本地 main，合并后 Plan 097 Python `51/51`
+  通过。同步更新 WBS、完成历史与集成日志；未推送、未归档分支、未删除 worktree。
 
 ### 当前工作
 
-- `COMPLETED / M3_D_DUAL_BACKEND_ENGINEERING_PASS / FINAL_REVIEW_ACCEPTED / NOT_INTEGRATED / NOT_PUSHED`。
+- `COMPLETED / M3_D_DUAL_BACKEND_ENGINEERING_PASS / FINAL_REVIEW_ACCEPTED / INTEGRATED / NOT_PUSHED`。
 
 ### 本任务剩余步骤
 
@@ -318,3 +320,4 @@ XXX用以下内容代替：
 | 011 | Plan 097 明确声明零 Guardian、串行排队 main 请求，并以持久 roll-forward ledger 计入全部旧轮次 | 正常 Producer 流程没有 Guardian；并发额度预留会造成假性 capacity failure | 费用、代理、运行 | 已采纳 |
 | 012 | 30 RMB 总上限最终分账为 cloud scorer 6 RMB / Producer 24 RMB；正式结论按合并保守总账判断 | commissioning 显示主要费用来自正常 Producer，而 scorer 实耗很低 | 费用、正式轮 | 已采纳 |
 | 013 | 初审窄修保留 `formal-5` 原始真实证据与总账，不重跑付费 API/真实模型；历史 threshold 与 shutdown receipt 局限在 tracked 归档中诚实标注 | 审查者代用户决定，问题均可离线修复且重跑不会增加修复正确性 | 复验、证据、费用 | 已采纳 |
+| 014 | 用户批准把已验收 097 分支合入本地 main；本批次不推送、不归档或删除 worktree | 遵循用户本轮明确的集成范围 | Git、交付 | 已采纳 |
