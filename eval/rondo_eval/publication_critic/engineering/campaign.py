@@ -68,12 +68,13 @@ SUMMARY_SCHEMA = "rondo-publication-critic-plan097-engineering-result-v1"
 _RUN_ID = re.compile(r"plan097-[a-z0-9][a-z0-9-]{0,79}\Z")
 _PHASES = {"commissioning", "formal"}
 _BACKENDS = {"local", "cloud"}
-_PRODUCER_BATCH_ID = "plan097-producer-terra-v4"
-_PRODUCER_LEDGER_NAME = "producer-terra-v4-ledger.json"
+_PRODUCER_BATCH_ID = "plan097-producer-terra-v5"
+_PRODUCER_LEDGER_NAME = "producer-terra-v5-ledger.json"
 _PRIOR_PRODUCER_LEDGERS = (
     ("plan097-producer-v1", "producer-ledger.json"),
     ("plan097-producer-terra-v2", "producer-terra-ledger.json"),
     ("plan097-producer-terra-v3", "producer-terra-v3-ledger.json"),
+    ("plan097-producer-terra-v4", "producer-terra-v4-ledger.json"),
 )
 _PRODUCER_MAX_RUNS = 6
 _PRODUCER_RUN_CAP_USD = Decimal("2.4")

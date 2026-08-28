@@ -173,8 +173,8 @@ class Plan097CampaignTests(unittest.TestCase):
                 mock.Mock(runtime_root=runtime_root)
             )
 
-        self.assertEqual(projection["spent_usd"], Decimal("0.600000"))
-        self.assertEqual(projection["request_count"], 6)
+        self.assertEqual(projection["spent_usd"], Decimal("1.000000"))
+        self.assertEqual(projection["request_count"], 10)
 
     def test_producer_only_recovery_is_for_commissioning_only(self) -> None:
         campaign._require_backend_mode("commissioning", True)
