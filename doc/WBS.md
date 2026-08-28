@@ -1,7 +1,7 @@
 # RONDO 长程规划（WBS）
 
-最后更新：2026-08-28（方向 3 Publication Critic 三期 Plan 097 已完成实现与 clean formal，执行者终态为
-`M3_D_DUAL_BACKEND_ENGINEERING_PASS`，当前等待首次独立验收。
+最后更新：2026-08-28（方向 3 Publication Critic 三期 Plan 097 已完成实现与 clean formal；首次独立验收提出的窄修已完成，执行者终态仍为
+`M3_D_DUAL_BACKEND_ENGINEERING_PASS`，当前等待复验。
 Plan 096 的 `CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH`、Plan 095 最终验收、Plan 094 有效负向研究终态和 Plan 093 Linux 全 workspace
 正确性基线均保持有效；Plan 097 不解锁产品质量、默认启用或生产）
 
@@ -23,7 +23,7 @@ Plan 096 的 `CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH`、Plan 095 最终验收�
 | 0：量化测评基准 | 既有设施与首次 schema v7 正式 canary 已完成，当前无 active campaign | 保留设施；历史结果见 COMPLETED，新 campaign 须重新立项与授权 |
 | 1：Harness 优化 | **正式收口；当前无 active 工作包** | 当前不继续新增观测或内核/热路径优化；既有实现、设施与历史结果保留。未来可由用户另行决定是否重新立项，本次收口不作永久禁止 |
 | 2：本地审批模型 | **已收口，今后不再开启** | 最终结论为“保留为实验”；不改生产默认，不再规划后续工作包 |
-| 3：RONDO Multi | 第一、二期、第四期已完成；三期 Plan 097 实现与正式轮完成、首次独立验收待办 | 执行者终态为双 backend 工程 PASS；两个 scorer 仍仅为 engineering fixture，不读 unseen、不改产品默认、不授予产品价值或生产资格 |
+| 3：RONDO Multi | 第一、二期、第四期已完成；三期 Plan 097 实现与正式轮完成、初审 finding 已窄修、复验待办 | 执行者终态为双 backend 工程 PASS；两个 scorer 仍仅为 engineering fixture，不读 unseen、不改产品默认、不授予产品价值或生产资格 |
 
 方向 3 当前 Linux 正确性基线由 Plan 093 建立：default features、standard local Nextest、checksum-verified V8 的完整 workspace
 为 `14660/14660` passed、0 failure/error/timeout，另有 1/1 setup passed；24 个 skip 不计 passed。正式证据和精确边界见
@@ -69,7 +69,9 @@ ROC AUC `0.8403` 与 Boundary strict win `15/19` 均过线，但 fallback thresh
 failure/cancel、Root/Team State 不变量及 backend 可替换性。任务通过只表示工程链与替换接缝 GO；本地模型质量、云端 scorer 资格、产品价值、
 Publication Critic 默认与生产启用继续锁定。实现与 clean `plan097-formal-5` 已形成
 `M3_D_DUAL_BACKEND_ENGINEERING_PASS`：local/cloud 均 3/3 fixture 覆盖 `PASS + REWRITE`，正常 Producer 均完成两次重写与唯一提交，
-OFF/fallback/cancel 和资源终态闭合；累计保守费用 `21.4197186 RMB / 30 RMB`。当前等待首次独立验收，合同与待审状态见
+OFF/fallback/cancel 和资源终态闭合；累计保守费用 `21.4197186 RMB / 30 RMB`。首次独立验收指出费用账本跨进程互斥、Producer identity
+收口、service shutdown 失败传播、临时残留和 reference threshold 精度问题；执行者已按保留 `formal-5` 且不重跑付费 API/真实模型的决定完成窄修，
+当前等待复验。合同与待审状态见
 `plan/097-m3-d-dual-backend-engineering-execplan.md`，正式摘要见
 `eval/results/publication-critic/m3-d-dual-backend-engineering-v1.md`。
 方向 1 已正式收口，不作为方向 3 的前置或旁支。

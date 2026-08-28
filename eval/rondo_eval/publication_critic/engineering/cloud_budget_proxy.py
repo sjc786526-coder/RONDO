@@ -1,6 +1,7 @@
 """Plan 097 loopback chat-completions proxy with a persistent RMB cap."""
 
 import copy
+from contextlib import contextmanager
 import hmac
 import json
 import math
@@ -67,11 +68,14 @@ class _PersistentLedger:
         self.path = path
         self.cap_rmb = cap_rmb
         self._lock = threading.Lock()
-        self._document = self._load_or_create()
+        self._lock_path = path.with_name(f".{path.name}.lock")
+        self._prepare_parent()
+        with self._locked_document():
+            pass
 
     def reserve(self) -> int:
-        with self._lock:
-            attempts = self._document["attempts"]
+        with self._locked_document() as document:
+            attempts = document["attempts"]
             if _charged(attempts) + ATTEMPT_RESERVATION_RMB > self.cap_rmb:
                 raise BudgetCapExceeded("budget_cap_exceeded")
             row = {
@@ -81,9 +85,8 @@ class _PersistentLedger:
                 "actual_charge_rmb": None,
                 "conservative_charge_rmb": "1",
             }
-            updated = {**self._document, "attempts": [*attempts, row]}
+            updated = {**document, "attempts": [*attempts, row]}
             self._persist(updated)
-            self._document = updated
             return row["attempt"]
 
     def settle(self, attempt: int, usage: dict[str, int] | None) -> None:
@@ -95,8 +98,8 @@ class _PersistentLedger:
         if actual is not None and actual > ATTEMPT_RESERVATION_RMB:
             usage = None
             actual = None
-        with self._lock:
-            attempts = copy.deepcopy(self._document["attempts"])
+        with self._locked_document() as document:
+            attempts = copy.deepcopy(document["attempts"])
             if not 1 <= attempt <= len(attempts):
                 raise CloudBudgetProxyError("ledger_attempt_missing")
             row = attempts[attempt - 1]
@@ -117,13 +120,12 @@ class _PersistentLedger:
                     actual_charge_rmb=charge,
                     conservative_charge_rmb=charge,
                 )
-            updated = {**self._document, "attempts": attempts}
+            updated = {**document, "attempts": attempts}
             self._persist(updated)
-            self._document = updated
 
     def snapshot(self) -> dict[str, Any]:
-        with self._lock:
-            attempts = copy.deepcopy(self._document["attempts"])
+        with self._locked_document() as document:
+            attempts = copy.deepcopy(document["attempts"])
             charged = _charged(attempts)
         return {
             "schema": _SCHEMA,
@@ -132,6 +134,37 @@ class _PersistentLedger:
             "remaining_rmb": _decimal_text(self.cap_rmb - charged),
             "attempts": attempts,
         }
+
+    def _prepare_parent(self) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        if self.path.parent.is_symlink() or not self.path.parent.is_dir():
+            raise CloudBudgetProxyError("ledger_parent_unsafe")
+
+    @contextmanager
+    def _locked_document(self):
+        with self._lock:
+            flags = os.O_CREAT | os.O_RDWR | os.O_CLOEXEC | os.O_NOFOLLOW
+            try:
+                descriptor = os.open(self._lock_path, flags, 0o600)
+            except OSError as exc:
+                raise CloudBudgetProxyError("ledger_lock_unsafe") from exc
+            try:
+                metadata = os.fstat(descriptor)
+                if not stat.S_ISREG(metadata.st_mode):
+                    raise CloudBudgetProxyError("ledger_lock_unsafe")
+                os.fchmod(descriptor, 0o600)
+                try:
+                    import fcntl
+
+                    fcntl.flock(descriptor, fcntl.LOCK_EX)
+                except (ImportError, OSError) as exc:
+                    raise CloudBudgetProxyError("ledger_lock_failed") from exc
+                try:
+                    yield self._load_or_create()
+                finally:
+                    fcntl.flock(descriptor, fcntl.LOCK_UN)
+            finally:
+                os.close(descriptor)
 
     def _load_or_create(self) -> dict[str, Any]:
         if self.path.exists() or self.path.is_symlink():
@@ -149,9 +182,6 @@ class _PersistentLedger:
                 raise CloudBudgetProxyError("ledger_file_invalid") from exc
             _validate_document(document, self.cap_rmb)
             return document
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        if self.path.parent.is_symlink() or not self.path.parent.is_dir():
-            raise CloudBudgetProxyError("ledger_parent_unsafe")
         document = {
             "schema": _SCHEMA,
             "cap_rmb": _decimal_text(self.cap_rmb),

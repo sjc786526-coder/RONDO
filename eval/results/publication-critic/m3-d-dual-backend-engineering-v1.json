@@ -1,12 +1,18 @@
 {
   "schema": "rondo-publication-critic-plan097-engineering-archive-v1",
   "terminal": "M3_D_DUAL_BACKEND_ENGINEERING_PASS",
+  "review_status": "INITIAL_REVIEW_FINDINGS_REMEDIATED_RE_REVIEW_PENDING",
   "formal_run_id": "plan097-formal-5",
   "source": {
     "commit": "0ae9623f3d0c2ce764f4b7c6e13994759b47746f",
     "dirty": false
   },
   "contract_sha256": "7abdd900c4b2cc27fe4400edf534ac4ef8d175331b933d55e2c089149879cf87",
+  "producer_runtime_identity": {
+    "provider_profile_sha256": "29e0cded5a50f3f4666a6b915ac883f825c479ccadcd8a50bfcd25f9ffc8df98",
+    "model": "gpt-5.6-terra",
+    "effort": "low"
+  },
   "receipts": {
     "root": "eval-data/publication-critic/plan097/formal/plan097-formal-5",
     "result_sha256": "91a191f07c35575242eeaf478422e2efceac48f683cd91c61491e93b913f9b57",
@@ -99,6 +105,17 @@
     "cloud_service_reaped": true,
     "paid_proxies_closed_before_summary": true,
     "private_packets_wire_and_trace_removed": true
+  },
+  "review_remediation": {
+    "review_report": "agent_log/2026-08-28-001531-plan097-independent-review.md",
+    "formal_run_retained_without_paid_or_local_model_rerun": true,
+    "historical_formal_local_threshold": 0.935056901119612,
+    "current_authoritative_local_threshold": 0.9350569011196121,
+    "historical_threshold_delta": "one_ulp_below_authority",
+    "current_local_descriptor_sha256": "78aa4d94ca98b3ae71b833d27626b6bc86d1c39255ebbb0cf3dfa595ff4f8c90",
+    "historical_service_receipt_scope": "process_reaped_only",
+    "current_service_receipt_requirement": "accepted_graceful_shutdown_and_zero_exit",
+    "current_cloud_budget_ledger": "cross_process_locked_reload_per_operation"
   },
   "conclusion_boundary": {
     "local_quality": "no_go_pending_replacement",

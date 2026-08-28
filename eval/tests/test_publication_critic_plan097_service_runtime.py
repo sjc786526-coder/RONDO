@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import io
 import json
 import os
 from pathlib import Path
+import signal
 import sys
 import tempfile
 import unittest
@@ -17,13 +19,112 @@ if str(EVAL_ROOT) not in sys.path:
 from rondo_eval.publication_critic.engineering import service_runtime  # noqa: E402
 from rondo_eval.publication_critic.engineering.service_runtime import (  # noqa: E402
     LocalRuntime,
+    RunningScorerService,
     RuntimeBinaries,
     ServiceRuntimeError,
     start_cloud_service,
 )
 
 
+class _FakeProcess:
+    pid = 12345
+
+    def __init__(
+        self,
+        *,
+        returncode: int | None = None,
+        waits: list[int | BaseException] | None = None,
+    ) -> None:
+        self.returncode = returncode
+        self.stderr = io.BytesIO()
+        self._waits = list(waits or [])
+
+    def poll(self) -> int | None:
+        return self.returncode
+
+    def wait(self, timeout: float) -> int:
+        del timeout
+        if self._waits:
+            outcome = self._waits.pop(0)
+            if isinstance(outcome, BaseException):
+                raise outcome
+            self.returncode = outcome
+        elif self.returncode is None:
+            self.returncode = 0
+        assert self.returncode is not None
+        return self.returncode
+
+
 class ServiceRuntimeTests(unittest.TestCase):
+    def _service(self, process: _FakeProcess) -> RunningScorerService:
+        return RunningScorerService(
+            backend="cloud",
+            process=process,  # type: ignore[arg-type]
+            probe=Path(sys.executable),
+            expected_argument="--expected-cloud-descriptor",
+            expected_descriptor_path=Path("descriptor.json"),
+            endpoint="http://127.0.0.1:1",
+            descriptor_sha256="a" * 64,
+            startup_elapsed_ms=1,
+            call_timeout_ms=1_000,
+            startup_timeout_ms=1_000,
+            environment={"PATH": os.environ.get("PATH", "")},
+        )
+
+    def test_close_records_only_confirmed_graceful_shutdown(self) -> None:
+        service = self._service(_FakeProcess())
+        with patch.object(
+            service,
+            "_probe",
+            return_value={"operation": "shutdown", "result": "accepted"},
+        ):
+            service.close()
+
+        self.assertEqual(service.shutdown_outcome, "graceful")
+
+    def test_close_rejects_a_shutdown_probe_failure_after_reaping(self) -> None:
+        process = _FakeProcess()
+        service = self._service(process)
+        with patch.object(
+            service,
+            "_probe",
+            side_effect=ServiceRuntimeError("probe_shutdown_failed:backend"),
+        ), self.assertRaisesRegex(
+            ServiceRuntimeError, "probe_shutdown_failed:backend"
+        ):
+            service.close()
+
+        self.assertEqual(process.returncode, 0)
+
+    def test_close_rejects_a_service_that_exited_before_shutdown(self) -> None:
+        service = self._service(_FakeProcess(returncode=7))
+        with self.assertRaisesRegex(
+            ServiceRuntimeError, "service_exited_before_shutdown"
+        ):
+            service.close()
+
+    def test_close_rejects_forced_reaping_as_a_successful_shutdown(self) -> None:
+        timeout = service_runtime.subprocess.TimeoutExpired
+        process = _FakeProcess(
+            waits=[timeout("service", 15), timeout("service", 5), -9]
+        )
+        service = self._service(process)
+        with patch.object(
+            service,
+            "_probe",
+            return_value={"operation": "shutdown", "result": "accepted"},
+        ), patch.object(
+            service_runtime, "_terminate_process_group"
+        ) as terminate, self.assertRaisesRegex(
+            ServiceRuntimeError, "service_graceful_shutdown_timeout"
+        ):
+            service.close()
+
+        self.assertEqual(
+            [call.args[1] for call in terminate.call_args_list],
+            [signal.SIGTERM, signal.SIGKILL],
+        )
+
     def test_local_runtime_accepts_the_bounded_venv_python_symlink(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

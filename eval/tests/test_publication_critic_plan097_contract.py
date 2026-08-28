@@ -23,6 +23,9 @@ from rondo_eval.publication_critic.engineering.contract import (  # noqa: E402
     EngineeringContractError,
     load_contract,
 )
+from rondo_eval.publication_critic.local_deployment.comparability import (  # noqa: E402
+    FORMAL_THRESHOLD,
+)
 
 
 def _json(relative: str | Path) -> dict[str, Any]:
@@ -78,6 +81,12 @@ class EngineeringContractTests(unittest.TestCase):
         self.assertEqual(contract.producer.max_input_tokens, 32000)
         self.assertEqual(contract.producer.max_output_tokens, 2000)
         self.assertEqual(len(contract.commissioning_cases), 3)
+        self.assertEqual(
+            contract.backends["local"].service_descriptor["identity"]["scoring"][
+                "threshold"
+            ],
+            FORMAL_THRESHOLD,
+        )
         self.assertEqual(
             {case.expected_engineering_branch for case in contract.commissioning_cases},
             {"pass", "rewrite"},

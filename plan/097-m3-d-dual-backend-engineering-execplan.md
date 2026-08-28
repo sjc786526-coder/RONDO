@@ -266,15 +266,20 @@ XXX用以下内容代替：
 - 2026-08-27：commissioning 打通后在 clean `0ae9623` 上完成 `plan097-formal-5`。OFF 真实旁路；local/cloud 各 3/3 fixture 命中
   `PASS + REWRITE`，正常 Producer 各完成 3 次发布、2 次重写/回环与唯一 canonical commit；fallback 为一次提交、cancel 为零提交，全部
   task-owned 资源回收。正式终态 `M3_D_DUAL_BACKEND_ENGINEERING_PASS`，累计保守费用 `21.4197186 RMB / 30 RMB`。
+- 2026-08-28：首次独立验收未接受原实现，报告 4 Medium / 1 Low：cloud ledger 无跨进程互斥、finalizer 未收口两 backend Producer
+  runtime identity、service shutdown 异常可被吞掉、三处 task-owned 临时残留，以及 local reference threshold 比权威值低一 ULP。
+- 2026-08-28：完成窄修与 39/39 受影响 Python 回归：ledger 每次操作在跨进程文件锁内 fresh reload，finalizer 强制相等并投影 Producer identity，
+  backend receipt 只接受 shutdown probe accepted + graceful zero exit，threshold 恢复权威值并新增防漂移断言，三处点名残留已精确删除。按审查决定
+  保留 `formal-5`、真实模型/API/Producer 证据和 `21.4197186 RMB` 总账，不重跑付费 API 或真实本地模型。
 
 ### 当前工作
 
-- `IMPLEMENTATION_COMPLETE / FORMAL_PASS / REVIEW_PENDING`：实现与正式结果已提交前自检，等待首次独立验收。
+- `REMEDIATION_COMPLETE / FORMAL_EVIDENCE_RETAINED / RE_REVIEW_PENDING`：初审 finding 已收敛，等待独立复验。
 
 ### 本任务剩余步骤
 
-1. 提交待审记录并按用户给定最终消息模板通过 queue 交审查者首次独立验收后停止。
-2. 若收到 finding 则修复、提交并发送新的完成汇报；若验收接受，由审查者完成审查报告和任务终态文档收口。
+1. 提交本轮窄修并按用户给定最终消息模板通过 queue 交审查者复验后停止。
+2. 若复验接受，由审查者完成审查报告和任务终态文档收口；若仍有 finding，按既有边界继续窄修。
 
 ### 阻塞项
 
@@ -283,7 +288,7 @@ XXX用以下内容代替：
 
 ### 当前验收状态
 
-- 执行者正式轮终态为 `M3_D_DUAL_BACKEND_ENGINEERING_PASS`；正确性/功能性独立验收尚未完成。
+- 执行者正式轮终态为 `M3_D_DUAL_BACKEND_ENGINEERING_PASS`；首次独立验收不通过，全部已知 finding 已窄修，正确性/功能性复验尚未完成。
 
 ### 交接边界
 
@@ -309,3 +314,4 @@ XXX用以下内容代替：
 | 010 | normal Producer 使用专用 runtime-injected member 指令与现有 collaboration/Team State 接缝；不复制第二套发布状态机 | 既有 Multi 驱动不提供固定 publication task，但产品状态机已完整 | Producer、E2E | 已采纳 |
 | 011 | Plan 097 明确声明零 Guardian、串行排队 main 请求，并以持久 roll-forward ledger 计入全部旧轮次 | 正常 Producer 流程没有 Guardian；并发额度预留会造成假性 capacity failure | 费用、代理、运行 | 已采纳 |
 | 012 | 30 RMB 总上限最终分账为 cloud scorer 6 RMB / Producer 24 RMB；正式结论按合并保守总账判断 | commissioning 显示主要费用来自正常 Producer，而 scorer 实耗很低 | 费用、正式轮 | 已采纳 |
+| 013 | 初审窄修保留 `formal-5` 原始真实证据与总账，不重跑付费 API/真实模型；历史 threshold 与 shutdown receipt 局限在 tracked 归档中诚实标注 | 审查者代用户决定，问题均可离线修复且重跑不会增加修复正确性 | 复验、证据、费用 | 已采纳 |

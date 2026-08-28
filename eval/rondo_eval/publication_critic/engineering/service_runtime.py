@@ -148,6 +148,7 @@ class RunningScorerService:
         )
         self._stderr_thread.start()
         self._closed = False
+        self._shutdown_outcome: str | None = None
 
     def __enter__(self) -> "RunningScorerService":
         return self
@@ -175,6 +176,12 @@ class RunningScorerService:
             if line.startswith("publication_critic_") and len(line) <= 256:
                 allowed.append(line)
         return tuple(allowed[-64:])
+
+    @property
+    def shutdown_outcome(self) -> str:
+        if not self._closed or self._shutdown_outcome is None:
+            raise ServiceRuntimeError("service_shutdown_not_confirmed")
+        return self._shutdown_outcome
 
     def ready(self) -> dict[str, Any]:
         started = time.monotonic()
@@ -208,23 +215,40 @@ class RunningScorerService:
         if self._closed:
             return
         self._closed = True
-        if self.process.poll() is None:
+        failure: ServiceRuntimeError | None = None
+        if self.process.poll() is not None:
+            failure = ServiceRuntimeError("service_exited_before_shutdown")
+        else:
             try:
-                self._probe("shutdown", timeout_ms=15_000)
-            except ServiceRuntimeError:
-                pass
+                shutdown = self._probe("shutdown", timeout_ms=15_000)
+                if shutdown.get("result") != "accepted":
+                    failure = ServiceRuntimeError("service_shutdown_not_accepted")
+            except ServiceRuntimeError as exc:
+                failure = exc
         try:
             self.process.wait(timeout=15)
         except subprocess.TimeoutExpired:
+            if failure is None:
+                failure = ServiceRuntimeError("service_graceful_shutdown_timeout")
             _terminate_process_group(self.process, signal.SIGTERM)
             try:
                 self.process.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 _terminate_process_group(self.process, signal.SIGKILL)
-                self.process.wait(timeout=5)
+                try:
+                    self.process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    failure = ServiceRuntimeError("service_process_not_reaped")
+        if self.process.poll() is None:
+            failure = ServiceRuntimeError("service_process_not_reaped")
+        elif self.process.returncode != 0 and failure is None:
+            failure = ServiceRuntimeError("service_exit_nonzero")
         self._stderr_thread.join(timeout=2)
         if self._stderr_thread.is_alive():
-            raise ServiceRuntimeError("service_stderr_reader_stuck")
+            failure = ServiceRuntimeError("service_stderr_reader_stuck")
+        if failure is not None:
+            raise failure
+        self._shutdown_outcome = "graceful"
 
     def _probe(self, operation: str, *arguments: str, timeout_ms: int) -> dict[str, Any]:
         command = [

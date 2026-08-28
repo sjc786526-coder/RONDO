@@ -36,6 +36,7 @@ from ...config import (
     load_provider_secret,
     load_runtime_config,
 )
+from ...contracts import ProviderProjection
 from ...multi_m5.capture import CaptureProxy
 from ...multi_m5.command import build_multi_exec_command
 from ...multi_m5.loopback import LOOPBACK_BEARER, LOOPBACK_MODEL
@@ -553,6 +554,7 @@ def _finish_backend_step(
             service.close()
     if service.process.poll() is None:
         raise CampaignError("service_process_not_reaped")
+    shutdown_outcome = service.shutdown_outcome
     cloud_budget = (
         _combined_cloud_budget_projection(
             contract,
@@ -579,6 +581,7 @@ def _finish_backend_step(
         "service": {
             **observation,
             "process_reaped": True,
+            "shutdown_outcome": shutdown_outcome,
             "diagnostic_codes": list(diagnostics),
         },
         "direct_cases": direct,
@@ -834,11 +837,29 @@ def finalize_run(start: Path, *, phase: str, run_id: str) -> Path:
         or cloud.get("direct_branch_coverage") != ["pass", "rewrite"]
         or local.get("service", {}).get("process_reaped") is not True
         or cloud.get("service", {}).get("process_reaped") is not True
+        or local.get("service", {}).get("shutdown_outcome") != "graceful"
+        or cloud.get("service", {}).get("shutdown_outcome") != "graceful"
         or local.get("producer", {}).get("status") != "passed"
         or cloud.get("producer", {}).get("status") != "passed"
     ):
         raise CampaignError("step_receipt_incomplete")
-    producer_budget = _producer_budget_snapshot(paths, contract)
+    producer_provider = _producer_provider(paths, contract)
+    configured_producer_identity = {
+        "provider_profile_sha256": producer_provider.profile_sha256,
+        "model": producer_provider.main_model,
+        "effort": producer_provider.main_effort,
+    }
+    producer_runtime_identity = _matching_producer_runtime_identity(
+        local,
+        cloud,
+        contract,
+        configured_producer_identity,
+    )
+    producer_budget = _producer_budget_snapshot(
+        paths,
+        contract,
+        producer_provider,
+    )
     cloud_budget = cloud.get("cloud_scorer_budget")
     if not isinstance(cloud_budget, dict):
         raise CampaignError("cloud_budget_receipt_missing")
@@ -865,6 +886,7 @@ def finalize_run(start: Path, *, phase: str, run_id: str) -> Path:
         "source": preflight_receipt["source"],
         "contract_sha256": contract.contract_sha256,
         "runtime_identity": preflight_receipt["runtime_identity"],
+        "producer_runtime_identity": producer_runtime_identity,
         "backend_descriptor_sha256": preflight_receipt[
             "backend_descriptor_sha256"
         ],
@@ -899,8 +921,10 @@ def finalize_run(start: Path, *, phase: str, run_id: str) -> Path:
         },
         "resource_terminal": {
             "local_service_reaped": True,
+            "local_service_shutdown_outcome": "graceful",
             "local_worker_reaped": True,
             "cloud_service_reaped": True,
+            "cloud_service_shutdown_outcome": "graceful",
             "paid_proxies_closed_before_summary": True,
             "private_packets_wire_and_trace_removed": True,
         },
@@ -910,18 +934,10 @@ def finalize_run(start: Path, *, phase: str, run_id: str) -> Path:
 
 
 def _producer_budget_snapshot(
-    paths: CampaignPaths, contract: EngineeringContract
+    paths: CampaignPaths,
+    contract: EngineeringContract,
+    provider: ProviderProjection,
 ) -> dict[str, Any]:
-    runtime_config = load_runtime_config(paths.repos)
-    model = runtime_config.paid_model(contract.producer.model_alias)
-    model_id = model.get("model_id")
-    if not isinstance(model_id, str) or not model_id:
-        raise CampaignError("producer_model_invalid")
-    provider = runtime_config.paid_provider_projection(
-        model_id=model_id,
-        main_effort=contract.producer.reasoning_effort,
-        guardian_effort=contract.producer.reasoning_effort,
-    )
     envelope = UsageEnvelope(
         max_input_tokens=contract.producer.max_input_tokens,
         max_output_tokens=contract.producer.max_output_tokens,
@@ -951,6 +967,22 @@ def _producer_budget_snapshot(
         "spent_usd": _decimal_text(current["spent_usd"] + prior["spent_usd"]),
         "request_count": current["request_count"] + prior["request_count"],
     }
+
+
+def _producer_provider(
+    paths: CampaignPaths,
+    contract: EngineeringContract,
+) -> ProviderProjection:
+    runtime_config = load_runtime_config(paths.repos)
+    model = runtime_config.paid_model(contract.producer.model_alias)
+    model_id = model.get("model_id")
+    if not isinstance(model_id, str) or not model_id:
+        raise CampaignError("producer_model_invalid")
+    return runtime_config.paid_provider_projection(
+        model_id=model_id,
+        main_effort=contract.producer.reasoning_effort,
+        guardian_effort=contract.producer.reasoning_effort,
+    )
 
 
 def _prior_producer_budget_projection(paths: CampaignPaths) -> dict[str, Any]:
@@ -1021,7 +1053,42 @@ def _backend_projection(receipt: Mapping[str, Any]) -> dict[str, Any]:
             "spent_usd": producer["spent_usd"],
         },
         "service_process_reaped": True,
+        "service_shutdown_outcome": receipt["service"]["shutdown_outcome"],
     }
+
+
+def _matching_producer_runtime_identity(
+    local: Mapping[str, Any],
+    cloud: Mapping[str, Any],
+    contract: EngineeringContract,
+    configured: Mapping[str, str],
+) -> dict[str, str]:
+    identities: list[dict[str, str]] = []
+    for receipt in (local, cloud):
+        producer = receipt.get("producer")
+        if not isinstance(producer, Mapping):
+            raise CampaignError("producer_runtime_identity_invalid")
+        profile_sha256 = producer.get("provider_profile_sha256")
+        model = producer.get("model")
+        effort = producer.get("effort")
+        if (
+            not isinstance(profile_sha256, str)
+            or re.fullmatch(r"[0-9a-f]{64}", profile_sha256) is None
+            or not isinstance(model, str)
+            or not 0 < len(model) <= 128
+            or effort != contract.producer.reasoning_effort
+        ):
+            raise CampaignError("producer_runtime_identity_invalid")
+        identities.append(
+            {
+                "provider_profile_sha256": profile_sha256,
+                "model": model,
+                "effort": effort,
+            }
+        )
+    if identities[0] != identities[1] or identities[0] != dict(configured):
+        raise CampaignError("producer_runtime_identity_mismatch")
+    return identities[0]
 
 
 def _cloud_budget_projection(value: Mapping[str, Any] | None) -> dict[str, Any] | None:

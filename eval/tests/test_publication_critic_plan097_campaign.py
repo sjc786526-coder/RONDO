@@ -14,6 +14,47 @@ from rondo_eval.publication_critic.engineering import campaign
 
 
 class Plan097CampaignTests(unittest.TestCase):
+    def test_finalizer_requires_matching_producer_runtime_identity(self) -> None:
+        contract = campaign.load_contract(Path(__file__).resolve().parents[2])
+        identity = {
+            "provider_profile_sha256": "a" * 64,
+            "model": "gpt-5.6-terra",
+            "effort": contract.producer.reasoning_effort,
+        }
+        local = {"producer": dict(identity)}
+        cloud = {"producer": dict(identity)}
+
+        self.assertEqual(
+            campaign._matching_producer_runtime_identity(
+                local, cloud, contract, identity
+            ),
+            identity,
+        )
+        cloud["producer"]["provider_profile_sha256"] = "b" * 64
+        with self.assertRaisesRegex(
+            campaign.CampaignError, "producer_runtime_identity_mismatch"
+        ):
+            campaign._matching_producer_runtime_identity(
+                local, cloud, contract, identity
+            )
+
+        cloud["producer"] = {**identity, "effort": "medium"}
+        with self.assertRaisesRegex(
+            campaign.CampaignError, "producer_runtime_identity_invalid"
+        ):
+            campaign._matching_producer_runtime_identity(
+                local, cloud, contract, identity
+            )
+
+        cloud["producer"] = dict(identity)
+        configured = {**identity, "model": "gpt-5.6-luna"}
+        with self.assertRaisesRegex(
+            campaign.CampaignError, "producer_runtime_identity_mismatch"
+        ):
+            campaign._matching_producer_runtime_identity(
+                local, cloud, contract, configured
+            )
+
     def test_codex_environment_uses_private_runtime_tmp(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)

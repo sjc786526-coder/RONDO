@@ -7,6 +7,7 @@ import tempfile
 import threading
 import time
 import unittest
+from decimal import Decimal
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -19,9 +20,11 @@ if str(EVAL_ROOT) not in sys.path:
 from rondo_eval.publication_critic.engineering.cloud_budget_proxy import (  # noqa: E402
     MAX_REQUEST_BYTES,
     MAX_RESPONSE_BYTES,
+    BudgetCapExceeded,
     CloudBudgetProxy,
     CloudBudgetProxyError,
     _NoRedirect,
+    _PersistentLedger,
 )
 
 
@@ -112,6 +115,39 @@ def _success_body(*, content: str = "provider-response-marker") -> bytes:
 
 
 class CloudBudgetProxyTest(unittest.TestCase):
+    def test_independent_ledgers_serialize_reserve_settle_and_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "ledger.json"
+            first = _PersistentLedger(path, Decimal("2"))
+            second = _PersistentLedger(path, Decimal("2"))
+
+            first_attempt = first.reserve()
+            second_attempt = second.reserve()
+            first.settle(
+                first_attempt,
+                {
+                    "prompt_tokens": 100,
+                    "completion_tokens": 10,
+                    "cache_hit_tokens": 40,
+                    "cache_miss_tokens": 60,
+                },
+            )
+            second.settle(second_attempt, None)
+
+            expected = first.snapshot()
+            self.assertEqual(second.snapshot(), expected)
+            self.assertEqual(
+                [row["attempt"] for row in expected["attempts"]],
+                [1, 2],
+            )
+            self.assertEqual(
+                [row["state"] for row in expected["attempts"]],
+                ["usage_priced", "unknown_usage_charged"],
+            )
+            self.assertEqual(expected["conservative_charged_rmb"], "1.000137")
+            with self.assertRaisesRegex(BudgetCapExceeded, "budget_cap_exceeded"):
+                first.reserve()
+
     def test_forwards_with_ephemeral_key_and_persists_only_body_free_cost(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             ledger_path = Path(directory) / "ledger.json"
