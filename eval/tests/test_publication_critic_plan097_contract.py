@@ -70,8 +70,8 @@ class EngineeringContractTests(unittest.TestCase):
             contract.backends["cloud"].descriptor,
             CLOUD_DESCRIPTOR,
         )
-        self.assertEqual(contract.budgets.cloud_scorer_rmb, Decimal("9"))
-        self.assertEqual(contract.budgets.producer_rmb, Decimal("21"))
+        self.assertEqual(contract.budgets.cloud_scorer_rmb, Decimal("6"))
+        self.assertEqual(contract.budgets.producer_rmb, Decimal("24"))
         self.assertEqual(contract.budgets.total_rmb, Decimal("30"))
         self.assertEqual(contract.producer.model_alias, "terra")
         self.assertEqual(contract.producer.reasoning_effort, "low")
@@ -106,8 +106,8 @@ class EngineeringContractTests(unittest.TestCase):
 
     def test_requires_exact_decimal_budget_partition(self) -> None:
         mutations = (
-            ("cloud_scorer_rmb", "10"),
-            ("producer_rmb", "20"),
+            ("cloud_scorer_rmb", "7"),
+            ("producer_rmb", "23"),
             ("rmb_per_usd", "7.4"),
             ("total_rmb", "31"),
         )

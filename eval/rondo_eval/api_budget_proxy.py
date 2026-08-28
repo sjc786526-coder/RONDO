@@ -1416,10 +1416,10 @@ class LoopbackResponsesProxy:
         if max_guardian_logical_requests is not None and (
             isinstance(max_guardian_logical_requests, bool)
             or not isinstance(max_guardian_logical_requests, int)
-            or not 1 <= max_guardian_logical_requests <= 3
+            or not 0 <= max_guardian_logical_requests <= 3
         ):
             raise ApiBudgetProxyError(
-                "proxy Guardian logical request limit must be between one and three"
+                "proxy Guardian logical request limit must be between zero and three"
             )
         if max_logical_requests is not None and (
             isinstance(max_logical_requests, bool)

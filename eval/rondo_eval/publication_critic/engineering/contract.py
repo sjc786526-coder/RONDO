@@ -346,8 +346,8 @@ def _validate_budgets(value: Any) -> BudgetContract:
     conversion = _decimal(budgets["rmb_per_usd"], "currency_conversion_invalid")
     total = _decimal(budgets["total_rmb"], "total_budget_invalid")
     if (
-        cloud != Decimal("9")
-        or producer != Decimal("21")
+        cloud != Decimal("6")
+        or producer != Decimal("24")
         or conversion != Decimal("7.5")
         or total != Decimal("30")
         or cloud + producer != total

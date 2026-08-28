@@ -113,18 +113,18 @@ class Plan097CampaignTests(unittest.TestCase):
             contract,
             prior,
             {
-                "cap_rmb": "9.9",
+                "cap_rmb": "6.9",
                 "conservative_charged_rmb": "0.2",
-                "remaining_rmb": "9.7",
+                "remaining_rmb": "6.7",
                 "attempts": [
                     {"state": "usage_priced"},
                 ],
             },
         )
 
-        self.assertEqual(projection["cap_rmb"], "9")
+        self.assertEqual(projection["cap_rmb"], "6")
         self.assertEqual(projection["conservative_charged_rmb"], "1.3")
-        self.assertEqual(projection["remaining_rmb"], "7.7")
+        self.assertEqual(projection["remaining_rmb"], "4.7")
         self.assertEqual(projection["attempt_count"], 3)
         self.assertEqual(projection["usage_priced_count"], 2)
         self.assertEqual(projection["unknown_usage_count"], 1)
@@ -233,8 +233,8 @@ class Plan097CampaignTests(unittest.TestCase):
                 mock.Mock(runtime_root=runtime_root)
             )
 
-        self.assertEqual(projection["spent_usd"], Decimal("2.100000"))
-        self.assertEqual(projection["request_count"], 21)
+        self.assertEqual(projection["spent_usd"], Decimal("2.800000"))
+        self.assertEqual(projection["request_count"], 28)
 
     def test_producer_only_recovery_is_for_commissioning_only(self) -> None:
         campaign._require_backend_mode("commissioning", True)

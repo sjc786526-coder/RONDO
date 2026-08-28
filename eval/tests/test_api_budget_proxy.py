@@ -614,9 +614,9 @@ class ApiBudgetProxyTests(unittest.TestCase):
         ledger.close()
 
     def test_guardian_logical_request_limit_is_bounded(self) -> None:
-        for number, limit in enumerate((True, False, 0, 4, -1)):
+        for number, limit in enumerate((True, False, 4, -1)):
             with self.subTest(limit=limit), self.assertRaisesRegex(
-                ApiBudgetProxyError, "between one and three"
+                ApiBudgetProxyError, "between zero and three"
             ):
                 LoopbackResponsesProxy(
                     upstream_base_url="https://provider.example/v1",
@@ -628,6 +628,34 @@ class ApiBudgetProxyTests(unittest.TestCase):
                     max_guardian_logical_requests=limit,
                     _transport=_UrllibTransport(endpoint_override=self.upstream.endpoint),
                 )
+
+    def test_zero_guardian_limit_rejects_guardian_without_reserving(self) -> None:
+        self.proxy.close()
+        self.proxy = LoopbackResponsesProxy(
+            upstream_base_url="https://provider.example/v1",
+            api_key=self.secret,
+            ledger=self.ledger,
+            run_id="no-guardian-run",
+            metadata_path=self.root / "no-guardian-metadata.json",
+            **self._profile_kwargs(),
+            max_guardian_logical_requests=0,
+            _transport=_UrllibTransport(endpoint_override=self.upstream.endpoint),
+        ).start()
+
+        status, body, _headers = self._post(
+            self._body(effort="low", guardian=True),
+            role="guardian",
+            request_id="guardian-forbidden",
+        )
+
+        self.assertEqual(status, 409)
+        self.assertEqual(
+            json.loads(body)["error"]["code"],
+            "guardian_logical_request_limit_exceeded",
+        )
+        self.assertEqual(len(self.upstream.requests), 0)
+        run = self.ledger.snapshot()["runs"]["no-guardian-run"]
+        self.assertEqual(run["requests"], {})
 
     def test_invalid_compatible_base_urls_are_rejected_before_registration(self) -> None:
         for number, base_url in enumerate(
