@@ -404,12 +404,12 @@ def _start_service(
         if not line or len(line) > _MAX_JSON_BYTES:
             raise ServiceRuntimeError("service_announcement_invalid")
         announcement = json.loads(line)
-        if (
-            not isinstance(announcement, dict)
-            or announcement.get("protocol") != "rondo_publication_critic_v1"
-            or announcement.get("descriptor") != dict(expected_descriptor)
-        ):
-            raise ServiceRuntimeError("service_announcement_mismatch")
+        if not isinstance(announcement, dict):
+            raise ServiceRuntimeError("service_announcement_invalid")
+        if announcement.get("protocol") != "rondo_publication_critic_v1":
+            raise ServiceRuntimeError("service_announcement_protocol_mismatch")
+        if announcement.get("descriptor") != dict(expected_descriptor):
+            raise ServiceRuntimeError("service_announcement_descriptor_mismatch")
         endpoint = announcement.get("endpoint")
         if not isinstance(endpoint, str) or not endpoint.startswith("127.0.0.1:"):
             raise ServiceRuntimeError("service_endpoint_invalid")

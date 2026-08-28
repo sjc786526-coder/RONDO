@@ -133,7 +133,7 @@ class ServiceRuntimeTests(unittest.TestCase):
                 "time.sleep(60)"
             ),
         ]
-        with self.assertRaisesRegex(ServiceRuntimeError, "announcement_mismatch"):
+        with self.assertRaisesRegex(ServiceRuntimeError, "protocol_mismatch"):
             service_runtime._start_service(
                 backend="cloud",
                 command=command,
