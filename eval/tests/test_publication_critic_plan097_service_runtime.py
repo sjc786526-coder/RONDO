@@ -1,0 +1,286 @@
+from __future__ import annotations
+
+import io
+import json
+import os
+from pathlib import Path
+import signal
+import sys
+import tempfile
+import unittest
+from unittest.mock import patch
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+EVAL_ROOT = REPO_ROOT / "eval"
+if str(EVAL_ROOT) not in sys.path:
+    sys.path.insert(0, str(EVAL_ROOT))
+
+from rondo_eval.publication_critic.engineering import service_runtime  # noqa: E402
+from rondo_eval.publication_critic.engineering.service_runtime import (  # noqa: E402
+    LocalRuntime,
+    RunningScorerService,
+    RuntimeBinaries,
+    ServiceRuntimeError,
+    start_cloud_service,
+)
+
+
+class _FakeProcess:
+    pid = 12345
+
+    def __init__(
+        self,
+        *,
+        returncode: int | None = None,
+        waits: list[int | BaseException] | None = None,
+    ) -> None:
+        self.returncode = returncode
+        self.stderr = io.BytesIO()
+        self._waits = list(waits or [])
+
+    def poll(self) -> int | None:
+        return self.returncode
+
+    def wait(self, timeout: float) -> int:
+        del timeout
+        if self._waits:
+            outcome = self._waits.pop(0)
+            if isinstance(outcome, BaseException):
+                raise outcome
+            self.returncode = outcome
+        elif self.returncode is None:
+            self.returncode = 0
+        assert self.returncode is not None
+        return self.returncode
+
+
+class ServiceRuntimeTests(unittest.TestCase):
+    def _service(self, process: _FakeProcess) -> RunningScorerService:
+        return RunningScorerService(
+            backend="cloud",
+            process=process,  # type: ignore[arg-type]
+            probe=Path(sys.executable),
+            expected_argument="--expected-cloud-descriptor",
+            expected_descriptor_path=Path("descriptor.json"),
+            endpoint="http://127.0.0.1:1",
+            descriptor_sha256="a" * 64,
+            startup_elapsed_ms=1,
+            call_timeout_ms=1_000,
+            startup_timeout_ms=1_000,
+            environment={"PATH": os.environ.get("PATH", "")},
+        )
+
+    def test_close_records_only_confirmed_graceful_shutdown(self) -> None:
+        service = self._service(_FakeProcess())
+        with patch.object(
+            service,
+            "_probe",
+            return_value={"operation": "shutdown", "result": "accepted"},
+        ):
+            service.close()
+
+        self.assertEqual(service.shutdown_outcome, "graceful")
+
+    def test_close_rejects_a_shutdown_probe_failure_after_reaping(self) -> None:
+        process = _FakeProcess()
+        service = self._service(process)
+        with patch.object(
+            service,
+            "_probe",
+            side_effect=ServiceRuntimeError("probe_shutdown_failed:backend"),
+        ), self.assertRaisesRegex(
+            ServiceRuntimeError, "probe_shutdown_failed:backend"
+        ):
+            service.close()
+
+        self.assertEqual(process.returncode, 0)
+
+    def test_close_rejects_a_service_that_exited_before_shutdown(self) -> None:
+        service = self._service(_FakeProcess(returncode=7))
+        with self.assertRaisesRegex(
+            ServiceRuntimeError, "service_exited_before_shutdown"
+        ):
+            service.close()
+
+    def test_close_rejects_forced_reaping_as_a_successful_shutdown(self) -> None:
+        timeout = service_runtime.subprocess.TimeoutExpired
+        process = _FakeProcess(
+            waits=[timeout("service", 15), timeout("service", 5), -9]
+        )
+        service = self._service(process)
+        with patch.object(
+            service,
+            "_probe",
+            return_value={"operation": "shutdown", "result": "accepted"},
+        ), patch.object(
+            service_runtime, "_terminate_process_group"
+        ) as terminate, self.assertRaisesRegex(
+            ServiceRuntimeError, "service_graceful_shutdown_timeout"
+        ):
+            service.close()
+
+        self.assertEqual(
+            [call.args[1] for call in terminate.call_args_list],
+            [signal.SIGTERM, signal.SIGKILL],
+        )
+
+    def test_local_runtime_accepts_the_bounded_venv_python_symlink(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            python = root / "python"
+            python.symlink_to(Path(sys.executable).resolve())
+            snapshot = root / "snapshot"
+            repo = root / "repo"
+            snapshot.mkdir()
+            repo.mkdir()
+            descriptor = root / "descriptor.json"
+            descriptor.write_text("{}\n", encoding="utf-8")
+
+            LocalRuntime(
+                python=python,
+                snapshot=snapshot,
+                repo_root=repo,
+                descriptor=descriptor,
+            ).validate()
+
+    def test_cloud_runtime_descriptor_changes_only_private_transport(self) -> None:
+        tracked = (
+            REPO_ROOT
+            / "eval/locks/publication-critic-plan096-cloud-descriptor-v1.json"
+        )
+        expected = json.loads(tracked.read_text(encoding="utf-8"))
+        executable = Path(sys.executable).resolve()
+        binaries = RuntimeBinaries(
+            codex=executable,
+            real_service=executable,
+            cloud_service=executable,
+            probe=executable,
+        )
+        secret = "temporary-downstream-secret"
+        with tempfile.TemporaryDirectory() as temporary:
+            runtime = Path(temporary) / "runtime-descriptor.json"
+            sentinel = object()
+            with patch.object(
+                service_runtime,
+                "_start_service",
+                return_value=sentinel,
+            ) as start:
+                actual = start_cloud_service(
+                    binaries=binaries,
+                    tracked_descriptor=tracked,
+                    runtime_descriptor=runtime,
+                    proxy_base_url="http://127.0.0.1:43210/v1",
+                    downstream_api_key=secret,
+                    call_timeout_ms=150_000,
+                    startup_timeout_ms=30_000,
+                )
+
+            self.assertIs(actual, sentinel)
+            projected = json.loads(runtime.read_text(encoding="utf-8"))
+            self.assertEqual(
+                projected["provider"]["base_url"],
+                "http://127.0.0.1:43210/v1",
+            )
+            self.assertEqual(
+                projected["provider"]["api_key_env"],
+                "RONDO_PLAN097_DEEPSEEK_PROXY_KEY",
+            )
+            projected["provider"] = expected["provider"]
+            self.assertEqual(projected, expected)
+            self.assertNotIn(secret, runtime.read_text(encoding="utf-8"))
+            arguments = start.call_args.kwargs
+            self.assertEqual(
+                arguments["expected_descriptor"], expected["service_descriptor"]
+            )
+            self.assertEqual(
+                arguments["environment"]["RONDO_PLAN097_DEEPSEEK_PROXY_KEY"],
+                secret,
+            )
+
+    def test_cloud_runtime_descriptor_is_write_once(self) -> None:
+        tracked = (
+            REPO_ROOT
+            / "eval/locks/publication-critic-plan096-cloud-descriptor-v1.json"
+        )
+        executable = Path(sys.executable).resolve()
+        binaries = RuntimeBinaries(
+            codex=executable,
+            real_service=executable,
+            cloud_service=executable,
+            probe=executable,
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            runtime = Path(temporary) / "runtime-descriptor.json"
+            runtime.write_text("{}\n", encoding="utf-8")
+            with self.assertRaisesRegex(ServiceRuntimeError, "runtime_output_exists"):
+                start_cloud_service(
+                    binaries=binaries,
+                    tracked_descriptor=tracked,
+                    runtime_descriptor=runtime,
+                    proxy_base_url="http://127.0.0.1:43210/v1",
+                    downstream_api_key="temporary",
+                    call_timeout_ms=150_000,
+                    startup_timeout_ms=30_000,
+                )
+
+    def test_bad_announcement_terminates_the_task_owned_process_group(self) -> None:
+        command = [
+            sys.executable,
+            "-c",
+            (
+                "import json,time; "
+                "print(json.dumps({'protocol':'wrong'}), flush=True); "
+                "time.sleep(60)"
+            ),
+        ]
+        with self.assertRaisesRegex(ServiceRuntimeError, "protocol_mismatch"):
+            service_runtime._start_service(
+                backend="cloud",
+                command=command,
+                environment={"PATH": os.environ.get("PATH", "")},
+                probe=Path(sys.executable),
+                expected_argument="--expected-cloud-descriptor",
+                expected_descriptor_path=Path("unused.json"),
+                expected_descriptor={"identity": {}, "limits": {}},
+                descriptor_sha256="a" * 64,
+                call_timeout_ms=1_000,
+                startup_timeout_ms=1_000,
+            )
+
+    def test_descriptor_mismatch_diagnostic_contains_no_values(self) -> None:
+        path = service_runtime._first_mismatch_path(
+            {"identity": {"model": {"revision": "expected-private-value"}}},
+            {"identity": {"model": {"revision": "observed-private-value"}}},
+            "descriptor",
+        )
+        self.assertEqual(path, "descriptor_identity_model_revision")
+        self.assertNotIn("private", path)
+
+    def test_descriptor_json_comparison_tolerates_only_float_rendering(self) -> None:
+        expected = {"scoring": {"threshold": 0.9350569011196121}}
+        rendered = {"scoring": {"threshold": 0.935056901119612}}
+        drifted = {"scoring": {"threshold": 0.9351}}
+        wrong_type = {"scoring": {"threshold": "0.9350569011196121"}}
+
+        self.assertTrue(service_runtime._json_equivalent(expected, rendered))
+        self.assertFalse(service_runtime._json_equivalent(expected, drifted))
+        self.assertFalse(service_runtime._json_equivalent(expected, wrong_type))
+
+    def test_probe_failure_diagnostic_accepts_only_typed_code_line(self) -> None:
+        self.assertEqual(
+            service_runtime._probe_failure_code(
+                b"publication_critic_probe_failed code=backend\n"
+            ),
+            "backend",
+        )
+        self.assertEqual(
+            service_runtime._probe_failure_code(
+                b"publication_critic_probe_failed code=backend secret=value\n"
+            ),
+            "unknown",
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()

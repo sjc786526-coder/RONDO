@@ -1,0 +1,135 @@
+{
+  "schema": "rondo-publication-critic-plan097-engineering-contract-v1",
+  "conclusion_boundary": {
+    "cloud_quality": "not_qualified",
+    "local_quality": "no_go_pending_replacement",
+    "product_default": "off",
+    "product_value": "not_evaluated",
+    "production": "disabled"
+  },
+  "backends": {
+    "local": {
+      "descriptor": "eval/locks/publication-critic-plan097-local-descriptor-v1.json",
+      "client_call_timeout_ms": 60000,
+      "client_startup_timeout_ms": 120000
+    },
+    "cloud": {
+      "descriptor": "eval/locks/publication-critic-plan096-cloud-descriptor-v1.json",
+      "client_call_timeout_ms": 150000,
+      "client_startup_timeout_ms": 30000
+    }
+  },
+  "budgets": {
+    "cloud_scorer_rmb": "6",
+    "producer_rmb": "24",
+    "rmb_per_usd": "7.5",
+    "total_rmb": "30"
+  },
+  "producer": {
+    "model_alias": "terra",
+    "reasoning_effort": "low",
+    "run_timeout_seconds": 600,
+    "usage_envelope": {
+      "max_input_tokens": 32000,
+      "max_output_tokens": 2000
+    }
+  },
+  "commissioning_cases": [
+    {
+      "case_id": "synthetic-obviously-incomplete-v1",
+      "expected_engineering_branch": "rewrite",
+      "packet": {
+        "qualification": {
+          "packet_schema": {
+            "name": "rondo-publication-packet",
+            "revision": "v1"
+          },
+          "rubric": {
+            "name": "rondo-publication-qualification",
+            "revision": "v1"
+          }
+        },
+        "actor_role": "member",
+        "target_kind": "new_event",
+        "local_scope": {
+          "title": "Bound synthetic shutdown result"
+        },
+        "candidate": {
+          "summary": "Work was attempted.",
+          "handoff": null
+        },
+        "continuity": {
+          "state": "not_applicable"
+        },
+        "evidence_v1": {
+          "semantic_entailment": "not_evaluated",
+          "candidate_window": "not_frozen_before_commit"
+        }
+      }
+    },
+    {
+      "case_id": "synthetic-complete-bounded-v1",
+      "expected_engineering_branch": "pass",
+      "packet": {
+        "qualification": {
+          "packet_schema": {
+            "name": "rondo-publication-packet",
+            "revision": "v1"
+          },
+          "rubric": {
+            "name": "rondo-publication-qualification",
+            "revision": "v1"
+          }
+        },
+        "actor_role": "member",
+        "target_kind": "new_event",
+        "local_scope": {
+          "title": "Bound synthetic shutdown result"
+        },
+        "candidate": {
+          "summary": "Completed the bounded synthetic shutdown change: new work is rejected after shutdown begins, the in-flight worker drains, and the focused cancellation and no-leak checks pass.",
+          "handoff": null
+        },
+        "continuity": {
+          "state": "not_applicable"
+        },
+        "evidence_v1": {
+          "semantic_entailment": "not_evaluated",
+          "candidate_window": "not_frozen_before_commit"
+        }
+      }
+    },
+    {
+      "case_id": "synthetic-complete-bounded-v2",
+      "expected_engineering_branch": "pass",
+      "packet": {
+        "qualification": {
+          "packet_schema": {
+            "name": "rondo-publication-packet",
+            "revision": "v1"
+          },
+          "rubric": {
+            "name": "rondo-publication-qualification",
+            "revision": "v1"
+          }
+        },
+        "actor_role": "member",
+        "target_kind": "new_event",
+        "local_scope": {
+          "title": "Bound synthetic shutdown result"
+        },
+        "candidate": {
+          "summary": "The bounded synthetic shutdown path is complete. It rejects late work, drains the active worker, and passes focused checks for cancellation, final wakeup, and task-owned process cleanup.",
+          "handoff": null
+        },
+        "continuity": {
+          "state": "not_applicable"
+        },
+        "evidence_v1": {
+          "semantic_entailment": "not_evaluated",
+          "candidate_window": "not_frozen_before_commit"
+        }
+      }
+    }
+  ]
+}

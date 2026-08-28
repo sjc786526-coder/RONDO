@@ -20,6 +20,7 @@ from .inference import InferenceError, PublicationCriticInference
 WORKER_PROTOCOL = "rondo-publication-critic-worker-v1"
 DEFAULT_MAX_FRAME_BYTES = 1024 * 1024
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
+_ARTIFACT_OBJECT_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
 
 
 class WorkerError(RuntimeError):
@@ -172,7 +173,8 @@ def _load_descriptor(path: Path) -> dict[str, Any]:
         raise WorkerError("worker descriptor identity is invalid")
     if (
         value["worker_protocol"] != WORKER_PROTOCOL
-        or value["object_id"] not in {"base", "c1", "c2", "c3"}
+        or not isinstance(value["object_id"], str)
+        or _ARTIFACT_OBJECT_ID.fullmatch(value["object_id"]) is None
         or not isinstance(value["deployment_artifact_sha256"], str)
         or _SHA256.fullmatch(value["deployment_artifact_sha256"]) is None
         or not isinstance(value["qualification_freeze_sha256"], str)

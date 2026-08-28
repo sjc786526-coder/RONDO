@@ -103,7 +103,7 @@ fn output_json(output: &dyn ToolOutput) -> Value {
     serde_json::from_str(&text).expect("team_publish output is JSON")
 }
 
-fn assert_body_free_observation(output: &dyn ToolOutput) {
+fn assert_body_free_observation(output: &dyn ToolOutput) -> Value {
     assert!(!output.log_preview().contains(CANDIDATE_SENTINEL));
     let response = output
         .post_tool_use_response(
@@ -114,6 +114,7 @@ fn assert_body_free_observation(output: &dyn ToolOutput) {
         )
         .expect("reviewed output has an explicit body-free hook response");
     assert!(!response.to_string().contains(CANDIDATE_SENTINEL));
+    response
 }
 
 struct TeamHarness {
@@ -538,7 +539,17 @@ async fn full_rewrite_cycle_replays_exact_attempt_and_commits_third_candidate() 
     let first = harness
         .publish("rewrite-call-1", first_args.clone())
         .await?;
-    assert_body_free_observation(first.as_ref());
+    let first_observation = assert_body_free_observation(first.as_ref());
+    assert_eq!(first_observation["feedback_version"], "v1");
+    assert_eq!(first_observation["continuation_sha1"], Value::Null);
+    assert_eq!(
+        first_observation["candidate_summary_sha1"],
+        crate::tools::handlers::team_tools::publish::body_sha1(CANDIDATE_SENTINEL)
+    );
+    let first_cycle_sha1 = first_observation["next_review_cycle_sha1"]
+        .as_str()
+        .unwrap()
+        .to_string();
     let first = output_json(first.as_ref());
     assert_eq!(first["status"], "rewrite_required");
     assert_eq!(first["feedback_version"], "v1");
@@ -575,6 +586,17 @@ async fn full_rewrite_cycle_replays_exact_attempt_and_commits_third_candidate() 
             }),
         )
         .await?;
+    let second_observation = assert_body_free_observation(second.as_ref());
+    assert_eq!(second_observation["continuation_sha1"], first_cycle_sha1);
+    assert_ne!(
+        second_observation["candidate_summary_sha1"],
+        first_observation["candidate_summary_sha1"]
+    );
+    let second_cycle_sha1 = second_observation["next_review_cycle_sha1"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_ne!(second_cycle_sha1, first_cycle_sha1);
     let second = output_json(second.as_ref());
     assert_eq!(second["feedback_version"], "v2");
     assert_eq!(second["blocking_rewrite_count"], 2);
@@ -592,6 +614,13 @@ async fn full_rewrite_cycle_replays_exact_attempt_and_commits_third_candidate() 
             }),
         )
         .await?;
+    let third_observation = assert_body_free_observation(third.as_ref());
+    assert_eq!(third_observation["continuation_sha1"], second_cycle_sha1);
+    assert_ne!(
+        third_observation["candidate_summary_sha1"],
+        second_observation["candidate_summary_sha1"]
+    );
+    assert_eq!(third_observation["next_review_cycle_sha1"], Value::Null);
     let third = output_json(third.as_ref());
     assert_eq!(third["publication_review"]["status"], "rewrite_exhausted");
     assert_eq!(third["publication_review"]["review_attempt"], 3);

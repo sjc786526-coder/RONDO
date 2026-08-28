@@ -36,6 +36,7 @@ const MAX_WORKER_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 const ADOPTED_CONTEXT_WINDOW: u32 = 16_384;
 const MAX_OMITTED_PUBLICATIONS: u32 = 4;
 const PROJECTION_TOLERANCE: f64 = 1e-12;
+const MAX_OBJECT_ID_BYTES: usize = 128;
 
 /// Frozen worker identity shared by the launcher, scorer, and Python worker.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -51,7 +52,7 @@ pub struct RealScorerDescriptor {
 impl RealScorerDescriptor {
     pub fn validate(&self) -> Result<(), RealScorerConfigError> {
         if self.worker_protocol != WORKER_PROTOCOL
-            || !matches!(self.object_id.as_str(), "base" | "c1" | "c2" | "c3")
+            || !is_artifact_object_id(&self.object_id)
             || !is_sha256(&self.deployment_artifact_sha256)
             || !is_sha256(&self.qualification_freeze_sha256)
             || self.service_descriptor.validate().is_err()
@@ -64,6 +65,16 @@ impl RealScorerDescriptor {
     pub fn service_descriptor(&self) -> &ServiceDescriptor {
         &self.service_descriptor
     }
+}
+
+fn is_artifact_object_id(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    !bytes.is_empty()
+        && bytes.len() <= MAX_OBJECT_ID_BYTES
+        && bytes[0].is_ascii_alphanumeric()
+        && bytes
+            .iter()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
 }
 
 fn is_sha256(value: &str) -> bool {
@@ -714,3 +725,7 @@ struct WorkerFailureBody {
     failure_kind: String,
     message: String,
 }
+
+#[cfg(test)]
+#[path = "real_scorer_tests.rs"]
+mod tests;
