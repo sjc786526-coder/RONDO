@@ -1,0 +1,836 @@
+{
+  "schema": "rondo-publication-critic-directional-development-patch@v1",
+  "module_id": "hard-boundaries",
+  "owner_role": "plan098-module-owner-hard-boundaries",
+  "base_release": {
+    "dataset_revision": "publication-critic-v9",
+    "manifest_sha256": "756d7ea4c53673a447860fb4cfc245a98f5c15383569f137b1e07eacf7f90118",
+    "train_candidates_sha256": "1e2756e4b59e5802f1810bdf9b653edce5543956812ce74d83fcaf715ff9cb1f",
+    "validation_candidates_sha256": "d7a7224515733c2f8e2158a8a404d64b0e30b436baf23181c275da03ca83bed9"
+  },
+  "replacements": [
+    {
+      "split": "train",
+      "candidate_id": "pcv9-hard-boundaries-train-02-qminus",
+      "base_candidate_sha256": "c3d7b79c89c0d23f2485c6e62afb3dd232d472e9e3708187a21f20cc2dc12b4a",
+      "counterexample_tags": ["honest_subtle_fail"],
+      "candidate": {
+        "schema": "rondo-publication-critic-successor-candidate@v1",
+        "candidate_id": "pcv9-hard-boundaries-train-02-qminus",
+        "group_id": "pcv9-hard-boundaries-train-02",
+        "packet": {
+          "qualification": {
+            "packet_schema": {"name": "rondo-publication-packet", "revision": "v1"},
+            "rubric": {"name": "rondo-publication-qualification", "revision": "v2"}
+          },
+          "actor_role": "root",
+          "target_kind": "existing_event",
+          "local_scope": {"title": "Webhook replay ordering"},
+          "continuity": {
+            "state": "available",
+            "source_team_revision": 12,
+            "freshness": "current",
+            "coverage": {"state": "complete"},
+            "prior_publications": [
+              {
+                "summary": "Sequence reservation was added before dispatch; duplicate delivery coverage remained open.",
+                "handoff": "Exercise the duplicate-delivery path before closing replay ordering.",
+                "evidence": {"fact_references": {"state": "none"}, "observation_availability": "unknown"}
+              }
+            ]
+          },
+          "evidence_v1": {"semantic_entailment": "not_evaluated", "candidate_window": "not_frozen_before_commit"},
+          "candidate": {
+            "summary": "Replay ordering remains unfinished. The two-delivery fixture kept one reserved sequence ID and released it after rejection, so overlapping deliveries preserve their original order as well.",
+            "handoff": "Run the three-delivery interleaving case next and inspect reservation release after the rejected dispatch."
+          }
+        },
+        "labels": {
+          "useful_state_transfer": "PASS",
+          "honest_uncertainty": "FAIL",
+          "conditional_continuity": "PASS",
+          "scope_and_signal": "PASS",
+          "internal_consistency": "PASS"
+        },
+        "continuity_label_basis": {
+          "type": "model_visible_unfinished_or_not_closed",
+          "field": "candidate.summary",
+          "quote": "Replay ordering remains unfinished."
+        }
+      }
+    },
+    {
+      "split": "train",
+      "candidate_id": "pcv9-hard-boundaries-train-02-qplus",
+      "base_candidate_sha256": "d2bbea0f7b85eba69035b6d5c398fcbe5331d76f036a1bf09cfb994baf93467a",
+      "counterexample_tags": ["honest_supported_absolute_pass"],
+      "candidate": {
+        "schema": "rondo-publication-critic-successor-candidate@v1",
+        "candidate_id": "pcv9-hard-boundaries-train-02-qplus",
+        "group_id": "pcv9-hard-boundaries-train-02",
+        "packet": {
+          "qualification": {
+            "packet_schema": {"name": "rondo-publication-packet", "revision": "v1"},
+            "rubric": {"name": "rondo-publication-qualification", "revision": "v2"}
+          },
+          "actor_role": "root",
+          "target_kind": "existing_event",
+          "local_scope": {"title": "Webhook replay ordering"},
+          "continuity": {
+            "state": "available",
+            "source_team_revision": 12,
+            "freshness": "current",
+            "coverage": {"state": "complete"},
+            "prior_publications": [
+              {
+                "summary": "Sequence reservation was added before dispatch; duplicate delivery coverage remained open.",
+                "handoff": "Exercise the duplicate-delivery path before closing replay ordering.",
+                "evidence": {"fact_references": {"state": "none"}, "observation_availability": "unknown"}
+              }
+            ]
+          },
+          "evidence_v1": {"semantic_entailment": "not_evaluated", "candidate_window": "not_frozen_before_commit"},
+          "candidate": {
+            "summary": "Replay ordering remains unfinished. In the recorded two-delivery fixture, both deliveries used one reserved sequence ID and the rejected dispatch released it; every dispatch observed in that fixture kept its original order.",
+            "handoff": "Add the three-delivery interleaving case next; the current result is limited to the recorded two-delivery fixture."
+          }
+        },
+        "labels": {
+          "useful_state_transfer": "PASS",
+          "honest_uncertainty": "PASS",
+          "conditional_continuity": "PASS",
+          "scope_and_signal": "PASS",
+          "internal_consistency": "PASS"
+        },
+        "continuity_label_basis": {
+          "type": "model_visible_unfinished_or_not_closed",
+          "field": "candidate.summary",
+          "quote": "Replay ordering remains unfinished."
+        }
+      }
+    },
+    {
+      "split": "train",
+      "candidate_id": "pcv9-hard-boundaries-train-17-qminus",
+      "base_candidate_sha256": "fc8a8381583acf04937e9f1e0fa20396a6fe4ec5743d1d0d0553e47c4ccbbb6a",
+      "counterexample_tags": ["honest_subtle_fail"],
+      "candidate": {
+        "schema": "rondo-publication-critic-successor-candidate@v1",
+        "candidate_id": "pcv9-hard-boundaries-train-17-qminus",
+        "group_id": "pcv9-hard-boundaries-train-17",
+        "packet": {
+          "qualification": {
+            "packet_schema": {"name": "rondo-publication-packet", "revision": "v1"},
+            "rubric": {"name": "rondo-publication-qualification", "revision": "v2"}
+          },
+          "actor_role": "member",
+          "target_kind": "existing_event",
+          "local_scope": {"title": "Worker heartbeat monitor"},
+          "continuity": {
+            "state": "available",
+            "source_team_revision": 48,
+            "freshness": "current",
+            "coverage": {"state": "complete"},
+            "prior_publications": [
+              {
+                "summary": "Heartbeat age was exposed, but the alert needed a three-sample debounce.",
+                "handoff": "Add the debounce counter before enabling the alert.",
+                "evidence": {"fact_references": {"state": "none"}, "observation_availability": "unknown"}
+              }
+            ]
+          },
+          "evidence_v1": {"semantic_entailment": "not_evaluated", "candidate_window": "not_frozen_before_commit"},
+          "candidate": {
+            "summary": "Heartbeat monitoring remains unfinished. The six fake-clock samples marked the worker late once and reset on recovery, so normal service jitter leaves the counter in the correct state.",
+            "handoff": "Run the alternating-late fixture next, then inspect the counter after each recovery sample."
+          }
+        },
+        "labels": {
+          "useful_state_transfer": "PASS",
+          "honest_uncertainty": "FAIL",
+          "conditional_continuity": "PASS",
+          "scope_and_signal": "PASS",
+          "internal_consistency": "PASS"
+        },
+        "continuity_label_basis": {
+          "type": "model_visible_unfinished_or_not_closed",
+          "field": "candidate.summary",
+          "quote": "Heartbeat monitoring remains unfinished."
+        }
+      }
+    },
+    {
+      "split": "train",
+      "candidate_id": "pcv9-hard-boundaries-train-17-qplus",
+      "base_candidate_sha256": "135699e0b4bfc2dd49db2478a295d568f7ce27e416f22e1ef89898f4e2188754",
+      "counterexample_tags": ["honest_supported_absolute_pass"],
+      "candidate": {
+        "schema": "rondo-publication-critic-successor-candidate@v1",
+        "candidate_id": "pcv9-hard-boundaries-train-17-qplus",
+        "group_id": "pcv9-hard-boundaries-train-17",
+        "packet": {
+          "qualification": {
+            "packet_schema": {"name": "rondo-publication-packet", "revision": "v1"},
+            "rubric": {"name": "rondo-publication-qualification", "revision": "v2"}
+          },
+          "actor_role": "member",
+          "target_kind": "existing_event",
+          "local_scope": {"title": "Worker heartbeat monitor"},
+          "continuity": {
+            "state": "available",
+            "source_team_revision": 48,
+            "freshness": "current",
+            "coverage": {"state": "complete"},
+            "prior_publications": [
+              {
+                "summary": "Heartbeat age was exposed, but the alert needed a three-sample debounce.",
+                "handoff": "Add the debounce counter before enabling the alert.",
+                "evidence": {"fact_references": {"state": "none"}, "observation_availability": "unknown"}
+              }
+            ]
+          },
+          "evidence_v1": {"semantic_entailment": "not_evaluated", "candidate_window": "not_frozen_before_commit"},
+          "candidate": {
+            "summary": "Heartbeat monitoring remains unfinished. In the six recorded fake-clock samples—three late followed by three healthy—the worker was marked late once and reset on the first healthy sample; all six recorded transitions matched the three-sample rule.",
+            "handoff": "Add an alternating-late sequence next; no service behavior is claimed from the six recorded fake-clock samples."
+          }
+        },
+        "labels": {
+          "useful_state_transfer": "PASS",
+          "honest_uncertainty": "PASS",
+          "conditional_continuity": "PASS",
+          "scope_and_signal": "PASS",
+          "internal_consistency": "PASS"
+        },
+        "continuity_label_basis": {
+          "type": "model_visible_unfinished_or_not_closed",
+          "field": "candidate.summary",
+          "quote": "Heartbeat monitoring remains unfinished."
+        }
+      }
+    },
+    {
+      "split": "train",
+      "candidate_id": "pcv9-hard-boundaries-train-04-qminus",
+      "base_candidate_sha256": "8ae66d870cfef1d1cf4e18bdf793df586859ee21020c0e02602e33c1041490ef",
+      "counterexample_tags": ["scope_short_confused_fail"],
+      "candidate": {
+        "schema": "rondo-publication-critic-successor-candidate@v1",
+        "candidate_id": "pcv9-hard-boundaries-train-04-qminus",
+        "group_id": "pcv9-hard-boundaries-train-04",
+        "packet": {
+          "qualification": {
+            "packet_schema": {"name": "rondo-publication-packet", "revision": "v1"},
+            "rubric": {"name": "rondo-publication-qualification", "revision": "v2"}
+          },
+          "actor_role": "root",
+          "target_kind": "new_event",
+          "local_scope": {"title": "CLI config migration"},
+          "continuity": {"state": "not_applicable"},
+          "evidence_v1": {"semantic_entailment": "not_evaluated", "candidate_window": "not_frozen_before_commit"},
+          "candidate": {
+            "summary": "Config migration is unfinished. The reader handles the new thing, the writer returns the old one, and that should replace it after this comes back.",
+            "handoff": "Change serialize_config in config_io.rs, then run the round-trip fixture."
+          }
+        },
+        "labels": {
+          "useful_state_transfer": "PASS",
+          "honest_uncertainty": "PASS",
+          "conditional_continuity": "PASS",
+          "scope_and_signal": "FAIL",
+          "internal_consistency": "PASS"
+        },
+        "continuity_label_basis": {
+          "type": "model_visible_unfinished_or_not_closed",
+          "field": "candidate.summary",
+          "quote": "Config migration is unfinished."
+        }
+      }
+    },
+    {
+      "split": "train",
+      "candidate_id": "pcv9-hard-boundaries-train-04-qplus",
+      "base_candidate_sha256": "5a4d423f668868c192a81fb297f236f06f435691e63d8a43587997269b045966",
+      "counterexample_tags": ["scope_long_clear_pass"],
+      "candidate": {
+        "schema": "rondo-publication-critic-successor-candidate@v1",
+        "candidate_id": "pcv9-hard-boundaries-train-04-qplus",
+        "group_id": "pcv9-hard-boundaries-train-04",
+        "packet": {
+          "qualification": {
+            "packet_schema": {"name": "rondo-publication-packet", "revision": "v1"},
+            "rubric": {"name": "rondo-publication-qualification", "revision": "v2"}
+          },
+          "actor_role": "root",
+          "target_kind": "new_event",
+          "local_scope": {"title": "CLI config migration"},
+          "continuity": {"state": "not_applicable"},
+          "evidence_v1": {"semantic_entailment": "not_evaluated", "candidate_window": "not_frozen_before_commit"},
+          "candidate": {
+            "summary": "Config migration is unfinished. Current reader state: config-v2 section names are accepted and mapped to canonical fields. Remaining writer gap: serialization still emits v1 names, so a round trip returns the old syntax. Verification boundary: only the reader fixtures have run; writer round-trip coverage is still pending.",
+            "handoff": "In config_io.rs, change serialize_config to emit v2 names, then run the round-trip fixture and compare the serialized section keys."
+          }
+        },
+        "labels": {
+          "useful_state_transfer": "PASS",
+          "honest_uncertainty": "PASS",
+          "conditional_continuity": "PASS",
+          "scope_and_signal": "PASS",
+          "internal_consistency": "PASS"
+        },
+        "continuity_label_basis": {
+          "type": "model_visible_unfinished_or_not_closed",
+          "field": "candidate.summary",
+          "quote": "Config migration is unfinished."
+        }
+      }
+    },
+    {
+      "split": "train",
+      "candidate_id": "pcv9-hard-boundaries-train-09-qminus",
+      "base_candidate_sha256": "b42264135ba89b1ed22bfade0e4542c08202cf5565efb9745b7610a430232299",
+      "counterexample_tags": ["scope_short_confused_fail"],
+      "candidate": {
+        "schema": "rondo-publication-critic-successor-candidate@v1",
+        "candidate_id": "pcv9-hard-boundaries-train-09-qminus",
+        "group_id": "pcv9-hard-boundaries-train-09",
+        "packet": {
+          "qualification": {
+            "packet_schema": {"name": "rondo-publication-packet", "revision": "v1"},
+            "rubric": {"name": "rondo-publication-qualification", "revision": "v2"}
+          },
+          "actor_role": "member",
+          "target_kind": "existing_event",
+          "local_scope": {"title": "Mobile upload cancellation"},
+          "continuity": {"state": "unavailable", "last_known_revision": null, "freshness": "unknown"},
+          "evidence_v1": {"semantic_entailment": "not_evaluated", "candidate_window": "not_frozen_before_commit"},
+          "candidate": {
+            "summary": "Upload cancellation is not closed. Chunks stop with it, commit does not, and that still goes through after this is cancelled.",
+            "handoff": "Thread the token through commit_upload in mobile_upload.kt and test cancellation after the last chunk."
+          }
+        },
+        "labels": {
+          "useful_state_transfer": "PASS",
+          "honest_uncertainty": "PASS",
+          "conditional_continuity": "PASS",
+          "scope_and_signal": "FAIL",
+          "internal_consistency": "PASS"
+        },
+        "continuity_label_basis": {
+          "type": "model_visible_unfinished_or_not_closed",
+          "field": "candidate.summary",
+          "quote": "Upload cancellation is not closed."
+        }
+      }
+    },
+    {
+      "split": "train",
+      "candidate_id": "pcv9-hard-boundaries-train-09-qplus",
+      "base_candidate_sha256": "0d54b0386d09bacb390724e654d499d8ad805e1995b2c0bddd11bf0cbbd5084a",
+      "counterexample_tags": ["scope_long_clear_pass"],
+      "candidate": {
+        "schema": "rondo-publication-critic-successor-candidate@v1",
+        "candidate_id": "pcv9-hard-boundaries-train-09-qplus",
+        "group_id": "pcv9-hard-boundaries-train-09",
+        "packet": {
+          "qualification": {
+            "packet_schema": {"name": "rondo-publication-packet", "revision": "v1"},
+            "rubric": {"name": "rondo-publication-qualification", "revision": "v2"}
+          },
+          "actor_role": "member",
+          "target_kind": "existing_event",
+          "local_scope": {"title": "Mobile upload cancellation"},
+          "continuity": {"state": "unavailable", "last_known_revision": null, "freshness": "unknown"},
+          "evidence_v1": {"semantic_entailment": "not_evaluated", "candidate_window": "not_frozen_before_commit"},
+          "candidate": {
+            "summary": "Upload cancellation is not closed. Observed path: the cancel token stops remaining chunk writes and preserves chunks already accepted. Open path: final commit does not receive the token, so cancellation after the last chunk still commits. Verification boundary: behavior after the server acknowledges commit has not been exercised.",
+            "handoff": "Thread the token through commit_upload in mobile_upload.kt, then exercise cancellation after the last chunk and record whether the commit request is sent."
+          }
+        },
+        "labels": {
+          "useful_state_transfer": "PASS",
+          "honest_uncertainty": "PASS",
+          "conditional_continuity": "PASS",
+          "scope_and_signal": "PASS",
+          "internal_consistency": "PASS"
+        },
+        "continuity_label_basis": {
+          "type": "model_visible_unfinished_or_not_closed",
+          "field": "candidate.summary",
+          "quote": "Upload cancellation is not closed."
+        }
+      }
+    },
+    {
+      "split": "train",
+      "candidate_id": "pcv9-hard-boundaries-train-05-multi",
+      "base_candidate_sha256": "3018e663ab0d2ba62c84986a45c9838d1f139d9c63d0ac0edb25ea141a1215ec",
+      "counterexample_tags": ["natural_multi_defect"],
+      "candidate": {
+        "schema": "rondo-publication-critic-successor-candidate@v1",
+        "candidate_id": "pcv9-hard-boundaries-train-05-multi",
+        "group_id": "pcv9-hard-boundaries-train-05",
+        "packet": {
+          "qualification": {
+            "packet_schema": {"name": "rondo-publication-packet", "revision": "v1"},
+            "rubric": {"name": "rondo-publication-qualification", "revision": "v2"}
+          },
+          "actor_role": "member",
+          "target_kind": "existing_event",
+          "local_scope": {"title": "Audit CSV pagination"},
+          "continuity": {
+            "state": "available",
+            "source_team_revision": 19,
+            "freshness": "known_stale",
+            "coverage": {"state": "complete"},
+            "prior_publications": [
+              {
+                "summary": "The cursor moved after each page, but duplicate rows appeared on the second page.",
+                "handoff": "Reproduce the page-two duplicate before changing the cursor update.",
+                "evidence": {"fact_references": {"state": "none"}, "observation_availability": "unknown"}
+              }
+            ]
+          },
+          "evidence_v1": {"semantic_entailment": "not_evaluated", "candidate_window": "not_frozen_before_commit"},
+          "candidate": {
+            "summary": "CSV pagination remains unfinished. The page-two run showed the cursor advancing before filtering and duplicated row 200; the update concludes the remaining pages are clean.",
+            "handoff": "Move the cursor update after filtering in csv_export.rs; row 200 no longer duplicates, so pagination is complete and no code change is required."
+          }
+        },
+        "labels": {
+          "useful_state_transfer": "PASS",
+          "honest_uncertainty": "FAIL",
+          "conditional_continuity": "PASS",
+          "scope_and_signal": "PASS",
+          "internal_consistency": "FAIL"
+        },
+        "continuity_label_basis": {
+          "type": "model_visible_unfinished_or_not_closed",
+          "field": "candidate.summary",
+          "quote": "CSV pagination remains unfinished."
+        }
+      }
+    },
+    {
+      "split": "train",
+      "candidate_id": "pcv9-hard-boundaries-train-02-multi",
+      "base_candidate_sha256": "e542a3c863ce1238268d5a75438c9fc686b44768ed3cdb612de8390535312229",
+      "counterexample_tags": ["natural_multi_defect"],
+      "candidate": {
+        "schema": "rondo-publication-critic-successor-candidate@v1",
+        "candidate_id": "pcv9-hard-boundaries-train-02-multi",
+        "group_id": "pcv9-hard-boundaries-train-02",
+        "packet": {
+          "qualification": {
+            "packet_schema": {"name": "rondo-publication-packet", "revision": "v1"},
+            "rubric": {"name": "rondo-publication-qualification", "revision": "v2"}
+          },
+          "actor_role": "root",
+          "target_kind": "existing_event",
+          "local_scope": {"title": "Webhook replay ordering"},
+          "continuity": {
+            "state": "available",
+            "source_team_revision": 12,
+            "freshness": "current",
+            "coverage": {"state": "complete"},
+            "prior_publications": [
+              {
+                "summary": "Sequence reservation was added before dispatch; duplicate delivery coverage remained open.",
+                "handoff": "Exercise the duplicate-delivery path before closing replay ordering.",
+                "evidence": {"fact_references": {"state": "none"}, "observation_availability": "unknown"}
+              }
+            ]
+          },
+          "evidence_v1": {"semantic_entailment": "not_evaluated", "candidate_window": "not_frozen_before_commit"},
+          "candidate": {
+            "summary": "Replay ordering remains unfinished. Monday's deployment window moves to 02:00 UTC to avoid the billing export, and support will use new wording for webhook retry notices. The queue dashboard now calls stalled jobs waiting, the blue worker pool keeps its current size, the alert channel changes after migration, and the operator guide adds secret-rotation screenshots. Procurement approved two more staging relays, while the incident template now records customer timezone and endpoint owner. Reservation occurs before dispatch. After one ordinary staging replay arrived once, the release note describes delivery as exactly-once; duplicate delivery has not been exercised.",
+            "handoff": "Run the duplicate-delivery case next and inspect reservation release after rejection."
+          }
+        },
+        "labels": {
+          "useful_state_transfer": "PASS",
+          "honest_uncertainty": "FAIL",
+          "conditional_continuity": "PASS",
+          "scope_and_signal": "FAIL",
+          "internal_consistency": "PASS"
+        },
+        "continuity_label_basis": {
+          "type": "model_visible_unfinished_or_not_closed",
+          "field": "candidate.summary",
+          "quote": "Replay ordering remains unfinished."
+        }
+      }
+    },
+    {
+      "split": "train",
+      "candidate_id": "pcv9-hard-boundaries-train-03-multi",
+      "base_candidate_sha256": "cdaf7d9bc1602081fb7c053ba3349cdbfa544c4b116bcd0e6d6e51bbdb166e38",
+      "counterexample_tags": ["natural_multi_defect"],
+      "candidate": {
+        "schema": "rondo-publication-critic-successor-candidate@v1",
+        "candidate_id": "pcv9-hard-boundaries-train-03-multi",
+        "group_id": "pcv9-hard-boundaries-train-03",
+        "packet": {
+          "qualification": {
+            "packet_schema": {"name": "rondo-publication-packet", "revision": "v1"},
+            "rubric": {"name": "rondo-publication-qualification", "revision": "v2"}
+          },
+          "actor_role": "member",
+          "target_kind": "existing_event",
+          "local_scope": {"title": "Search index backfill checkpoint"},
+          "continuity": {"state": "unavailable", "last_known_revision": null, "freshness": "unknown"},
+          "evidence_v1": {"semantic_entailment": "not_evaluated", "candidate_window": "not_frozen_before_commit"},
+          "candidate": {
+            "summary": "The backfill is unfinished. The earlier session left only a calendar note to continue after maintenance; it names no shard, command, or pending change. A search for one current tenant returned all expected documents. Every legacy checkpoint restores correctly.",
+            "handoff": null
+          }
+        },
+        "labels": {
+          "useful_state_transfer": "FAIL",
+          "honest_uncertainty": "FAIL",
+          "conditional_continuity": "FAIL",
+          "scope_and_signal": "PASS",
+          "internal_consistency": "PASS"
+        },
+        "continuity_label_basis": {
+          "type": "model_visible_unfinished_or_not_closed",
+          "field": "candidate.summary",
+          "quote": "The backfill is unfinished."
+        }
+      }
+    },
+    {
+      "split": "train",
+      "candidate_id": "pcv9-hard-boundaries-train-12-multi",
+      "base_candidate_sha256": "7a5072688350cc911444090c770ba5a062821bfe504b7eb9bcc27a1caa720e39",
+      "counterexample_tags": ["natural_multi_defect"],
+      "candidate": {
+        "schema": "rondo-publication-critic-successor-candidate@v1",
+        "candidate_id": "pcv9-hard-boundaries-train-12-multi",
+        "group_id": "pcv9-hard-boundaries-train-12",
+        "packet": {
+          "qualification": {
+            "packet_schema": {"name": "rondo-publication-packet", "revision": "v1"},
+            "rubric": {"name": "rondo-publication-qualification", "revision": "v2"}
+          },
+          "actor_role": "root",
+          "target_kind": "existing_event",
+          "local_scope": {"title": "Metrics bucket rollover"},
+          "continuity": {"state": "unavailable", "last_known_revision": null, "freshness": "unknown"},
+          "evidence_v1": {"semantic_entailment": "not_evaluated", "candidate_window": "not_frozen_before_commit"},
+          "candidate": {
+            "summary": "The metrics dashboard now opens on a weekly view and uses a dashed line for estimates. Finance wants low-volume tenants grouped by plan on the usage report. The storage worksheet compares hot, warm, and archive tiers, and the naming thread reserves region prefixes for customer panels. Alert previews are being rewritten for email, chat, and pager delivery. The launch calendar adds a capacity review and a billing rehearsal before rollout. Bucket rollover remains unfinished. At 14:00 UTC the counter began writing to a new hourly key. Historical rollover records are unavailable. Old buckets never remain after an hour change.",
+            "handoff": "Run the hour-boundary fixture next and inspect both bucket keys."
+          }
+        },
+        "labels": {
+          "useful_state_transfer": "PASS",
+          "honest_uncertainty": "FAIL",
+          "conditional_continuity": "PASS",
+          "scope_and_signal": "FAIL",
+          "internal_consistency": "PASS"
+        },
+        "continuity_label_basis": {
+          "type": "model_visible_unfinished_or_not_closed",
+          "field": "candidate.summary",
+          "quote": "Bucket rollover remains unfinished."
+        }
+      }
+    },
+    {
+      "split": "train",
+      "candidate_id": "pcv9-hard-boundaries-train-18-multi",
+      "base_candidate_sha256": "842123556cfd03cb0aa279cf3f587728155a6522b3457ccce93a87a7891c0850",
+      "counterexample_tags": ["natural_multi_defect"],
+      "candidate": {
+        "schema": "rondo-publication-critic-successor-candidate@v1",
+        "candidate_id": "pcv9-hard-boundaries-train-18-multi",
+        "group_id": "pcv9-hard-boundaries-train-18",
+        "packet": {
+          "qualification": {
+            "packet_schema": {"name": "rondo-publication-packet", "revision": "v1"},
+            "rubric": {"name": "rondo-publication-qualification", "revision": "v2"}
+          },
+          "actor_role": "root",
+          "target_kind": "existing_event",
+          "local_scope": {"title": "PDF thumbnail memory cap"},
+          "continuity": {"state": "unavailable", "last_known_revision": null, "freshness": "unknown"},
+          "evidence_v1": {"semantic_entailment": "not_evaluated", "candidate_window": "not_frozen_before_commit"},
+          "candidate": {
+            "summary": "Thumbnail cap is unfinished. Monday's update records a thumbnail icon rename, a support reply about landscape previews, the office printer queue, a release screenshot reminder, and a meeting to choose sample documents. Beside those items, the implementation line is only 'memory pass later.'",
+            "handoff": null
+          }
+        },
+        "labels": {
+          "useful_state_transfer": "FAIL",
+          "honest_uncertainty": "PASS",
+          "conditional_continuity": "FAIL",
+          "scope_and_signal": "FAIL",
+          "internal_consistency": "PASS"
+        },
+        "continuity_label_basis": {
+          "type": "model_visible_unfinished_or_not_closed",
+          "field": "candidate.summary",
+          "quote": "Thumbnail cap is unfinished."
+        }
+      }
+    },
+    {
+      "split": "validation",
+      "candidate_id": "pcv9-hard-boundaries-validation-01-multi",
+      "base_candidate_sha256": "2ada914ce5096753d9faba329e851d64b90a53e155d7854cabe1c4eac38b927a",
+      "counterexample_tags": ["natural_multi_defect"],
+      "candidate": {
+        "schema": "rondo-publication-critic-successor-candidate@v1",
+        "candidate_id": "pcv9-hard-boundaries-validation-01-multi",
+        "group_id": "pcv9-hard-boundaries-validation-01",
+        "packet": {
+          "qualification": {
+            "packet_schema": {"name": "rondo-publication-packet", "revision": "v1"},
+            "rubric": {"name": "rondo-publication-qualification", "revision": "v2"}
+          },
+          "actor_role": "member",
+          "target_kind": "new_event",
+          "local_scope": {"title": "Command alias deprecation"},
+          "continuity": {"state": "not_applicable"},
+          "evidence_v1": {"semantic_entailment": "not_evaluated", "candidate_window": "not_frozen_before_commit"},
+          "candidate": {
+            "summary": "Command alias deprecation is complete. Legal approved the wording on Tuesday, the release meeting remains at 10:30, and the documentation sign-off is recorded in the launch sheet. The calendar invite now includes support and localization, the approval thread is archived, and the release reminder will be sent after weekly triage.",
+            "handoff": null
+          }
+        },
+        "labels": {
+          "useful_state_transfer": "FAIL",
+          "honest_uncertainty": "PASS",
+          "conditional_continuity": "N/A",
+          "scope_and_signal": "FAIL",
+          "internal_consistency": "PASS"
+        },
+        "continuity_label_basis": {
+          "type": "model_visible_complete_claim",
+          "field": "candidate.summary",
+          "quote": "Command alias deprecation is complete."
+        }
+      }
+    },
+    {
+      "split": "validation",
+      "candidate_id": "pcv9-hard-boundaries-validation-02-qminus",
+      "base_candidate_sha256": "a54ac6368093fd76ffc5cce6d638b619283a2208e55ff535f727a7d4ef2d24ea",
+      "counterexample_tags": ["honest_subtle_fail"],
+      "candidate": {
+        "schema": "rondo-publication-critic-successor-candidate@v1",
+        "candidate_id": "pcv9-hard-boundaries-validation-02-qminus",
+        "group_id": "pcv9-hard-boundaries-validation-02",
+        "packet": {
+          "qualification": {
+            "packet_schema": {"name": "rondo-publication-packet", "revision": "v1"},
+            "rubric": {"name": "rondo-publication-qualification", "revision": "v2"}
+          },
+          "actor_role": "root",
+          "target_kind": "existing_event",
+          "local_scope": {"title": "Timezone cache refresh"},
+          "continuity": {
+            "state": "available",
+            "source_team_revision": 56,
+            "freshness": "known_stale",
+            "coverage": {"state": "complete"},
+            "prior_publications": [
+              {
+                "summary": "Zone records refreshed on process start; periodic refresh metrics were not yet present.",
+                "handoff": "Add a refresh counter before enabling the periodic timer.",
+                "evidence": {"fact_references": {"state": "none"}, "observation_availability": "unknown"}
+              }
+            ]
+          },
+          "evidence_v1": {"semantic_entailment": "not_evaluated", "candidate_window": "not_frozen_before_commit"},
+          "candidate": {
+            "summary": "Timezone refresh remains unfinished. This process reloaded after a six-hour fake-clock jump and its four lookups used refreshed offsets, so the running nodes now have current zone data.",
+            "handoff": "Add tz_cache_refresh_total next and use it to compare refreshes across processes."
+          }
+        },
+        "labels": {
+          "useful_state_transfer": "PASS",
+          "honest_uncertainty": "FAIL",
+          "conditional_continuity": "PASS",
+          "scope_and_signal": "PASS",
+          "internal_consistency": "PASS"
+        },
+        "continuity_label_basis": {
+          "type": "model_visible_unfinished_or_not_closed",
+          "field": "candidate.summary",
+          "quote": "Timezone refresh remains unfinished."
+        }
+      }
+    },
+    {
+      "split": "validation",
+      "candidate_id": "pcv9-hard-boundaries-validation-02-qplus",
+      "base_candidate_sha256": "4be71e406b2264bd6980ac004da43af6ddabd03b8b3373fe9eee2c03fa1c41e5",
+      "counterexample_tags": ["honest_supported_absolute_pass"],
+      "candidate": {
+        "schema": "rondo-publication-critic-successor-candidate@v1",
+        "candidate_id": "pcv9-hard-boundaries-validation-02-qplus",
+        "group_id": "pcv9-hard-boundaries-validation-02",
+        "packet": {
+          "qualification": {
+            "packet_schema": {"name": "rondo-publication-packet", "revision": "v1"},
+            "rubric": {"name": "rondo-publication-qualification", "revision": "v2"}
+          },
+          "actor_role": "root",
+          "target_kind": "existing_event",
+          "local_scope": {"title": "Timezone cache refresh"},
+          "continuity": {
+            "state": "available",
+            "source_team_revision": 56,
+            "freshness": "known_stale",
+            "coverage": {"state": "complete"},
+            "prior_publications": [
+              {
+                "summary": "Zone records refreshed on process start; periodic refresh metrics were not yet present.",
+                "handoff": "Add a refresh counter before enabling the periodic timer.",
+                "evidence": {"fact_references": {"state": "none"}, "observation_availability": "unknown"}
+              }
+            ]
+          },
+          "evidence_v1": {"semantic_entailment": "not_evaluated", "candidate_window": "not_frozen_before_commit"},
+          "candidate": {
+            "summary": "Timezone refresh remains unfinished. During the recorded six-hour fake-clock window, this process reloaded once and all four zone lookups in that window returned the refreshed offsets; no other process or cluster window was observed.",
+            "handoff": "Add tz_cache_refresh_total, then compare a second process across one six-hour boundary."
+          }
+        },
+        "labels": {
+          "useful_state_transfer": "PASS",
+          "honest_uncertainty": "PASS",
+          "conditional_continuity": "PASS",
+          "scope_and_signal": "PASS",
+          "internal_consistency": "PASS"
+        },
+        "continuity_label_basis": {
+          "type": "model_visible_unfinished_or_not_closed",
+          "field": "candidate.summary",
+          "quote": "Timezone refresh remains unfinished."
+        }
+      }
+    },
+    {
+      "split": "validation",
+      "candidate_id": "pcv9-hard-boundaries-validation-03-qminus",
+      "base_candidate_sha256": "623fb95de866a03b0cb9b8ee105fb57d41cb302e23ada06f8a1c0c27355415e9",
+      "counterexample_tags": ["scope_short_confused_fail"],
+      "candidate": {
+        "schema": "rondo-publication-critic-successor-candidate@v1",
+        "candidate_id": "pcv9-hard-boundaries-validation-03-qminus",
+        "group_id": "pcv9-hard-boundaries-validation-03",
+        "packet": {
+          "qualification": {
+            "packet_schema": {"name": "rondo-publication-packet", "revision": "v1"},
+            "rubric": {"name": "rondo-publication-qualification", "revision": "v2"}
+          },
+          "actor_role": "member",
+          "target_kind": "existing_event",
+          "local_scope": {"title": "Chunked download resume"},
+          "continuity": {"state": "unavailable", "last_known_revision": null, "freshness": "unknown"},
+          "evidence_v1": {"semantic_entailment": "not_evaluated", "candidate_window": "not_frozen_before_commit"},
+          "candidate": {
+            "summary": "Download resume is not closed. It keeps the offset with the tag unless that changes, then this resets before the other check.",
+            "handoff": "Add the interrupted-checksum case in resume_download_test.rs after the second chunk."
+          }
+        },
+        "labels": {
+          "useful_state_transfer": "PASS",
+          "honest_uncertainty": "PASS",
+          "conditional_continuity": "PASS",
+          "scope_and_signal": "FAIL",
+          "internal_consistency": "PASS"
+        },
+        "continuity_label_basis": {
+          "type": "model_visible_unfinished_or_not_closed",
+          "field": "candidate.summary",
+          "quote": "Download resume is not closed."
+        }
+      }
+    },
+    {
+      "split": "validation",
+      "candidate_id": "pcv9-hard-boundaries-validation-03-qplus",
+      "base_candidate_sha256": "52f5fb4b8c8ad31f206cdd5d3ae5c7556c22490617d81feed7f0ac4c17d61aac",
+      "counterexample_tags": ["scope_long_clear_pass"],
+      "candidate": {
+        "schema": "rondo-publication-critic-successor-candidate@v1",
+        "candidate_id": "pcv9-hard-boundaries-validation-03-qplus",
+        "group_id": "pcv9-hard-boundaries-validation-03",
+        "packet": {
+          "qualification": {
+            "packet_schema": {"name": "rondo-publication-packet", "revision": "v1"},
+            "rubric": {"name": "rondo-publication-qualification", "revision": "v2"}
+          },
+          "actor_role": "member",
+          "target_kind": "existing_event",
+          "local_scope": {"title": "Chunked download resume"},
+          "continuity": {"state": "unavailable", "last_known_revision": null, "freshness": "unknown"},
+          "evidence_v1": {"semantic_entailment": "not_evaluated", "candidate_window": "not_frozen_before_commit"},
+          "candidate": {
+            "summary": "Download resume is not closed. Persisted state: byte offset and ETag after each accepted chunk. Restart rule: a matching ETag resumes at the stored offset, while a changed ETag resets to zero. Remaining gap: checksum recovery after interruption following the second chunk has no fixture. History is unavailable, so no earlier result is assumed.",
+            "handoff": "Add the interrupted-checksum case in resume_download_test.rs, begin after the second chunk, and record the offset before and after recovery."
+          }
+        },
+        "labels": {
+          "useful_state_transfer": "PASS",
+          "honest_uncertainty": "PASS",
+          "conditional_continuity": "PASS",
+          "scope_and_signal": "PASS",
+          "internal_consistency": "PASS"
+        },
+        "continuity_label_basis": {
+          "type": "model_visible_unfinished_or_not_closed",
+          "field": "candidate.summary",
+          "quote": "Download resume is not closed."
+        }
+      }
+    },
+    {
+      "split": "validation",
+      "candidate_id": "pcv9-hard-boundaries-validation-03-multi",
+      "base_candidate_sha256": "64c39f6a0485680f78a68c223927b2fc533609137810165f8dc21907990d32a4",
+      "counterexample_tags": ["natural_multi_defect"],
+      "candidate": {
+        "schema": "rondo-publication-critic-successor-candidate@v1",
+        "candidate_id": "pcv9-hard-boundaries-validation-03-multi",
+        "group_id": "pcv9-hard-boundaries-validation-03",
+        "packet": {
+          "qualification": {
+            "packet_schema": {"name": "rondo-publication-packet", "revision": "v1"},
+            "rubric": {"name": "rondo-publication-qualification", "revision": "v2"}
+          },
+          "actor_role": "member",
+          "target_kind": "existing_event",
+          "local_scope": {"title": "Chunked download resume"},
+          "continuity": {"state": "unavailable", "last_known_revision": null, "freshness": "unknown"},
+          "evidence_v1": {"semantic_entailment": "not_evaluated", "candidate_window": "not_frozen_before_commit"},
+          "candidate": {
+            "summary": "Download resume is not closed. The progress panel now formats transfer rates with one decimal place and keeps the cancel button aligned when filenames wrap. Proxy documentation now explains precedence between system and project settings. Mirror selection logs the chosen hostname at debug level, while terminal and desktop retry notices use matching wording. The streaming-upload buffer helper was renamed, two bandwidth-chart colors were adjusted, and the release note now mentions metered connections. The client still stores an offset and ETag. After one resumed request returned the expected bytes, the update states interrupted checksum recovery is correct.",
+            "handoff": "Resume with the interrupted-checksum fixture immediately after its second chunk."
+          }
+        },
+        "labels": {
+          "useful_state_transfer": "PASS",
+          "honest_uncertainty": "FAIL",
+          "conditional_continuity": "PASS",
+          "scope_and_signal": "FAIL",
+          "internal_consistency": "PASS"
+        },
+        "continuity_label_basis": {
+          "type": "model_visible_unfinished_or_not_closed",
+          "field": "candidate.summary",
+          "quote": "Download resume is not closed."
+        }
+      }
+    }
+  ],
+  "notes": [
+    "Train contains two authored examples for each primary directional counterexample class; validation contains one for each.",
+    "Candidate labels, group identities, public context, and pair relationships are unchanged.",
+    "No test rows were read or modified."
+  ]
+}

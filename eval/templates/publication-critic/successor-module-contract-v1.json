@@ -1,0 +1,29 @@
+{
+  "kind": "rondo-contract-projection",
+  "name": "rondo-publication-critic-successor-module",
+  "version": "v1",
+  "runtime_validator": "eval/rondo_eval/publication_critic/successor_build.py",
+  "module_source": {
+    "schema": "rondo-publication-critic-successor-module-source@v1",
+    "required": ["schema", "module_id", "owner_role", "accepted_task", "groups"],
+    "group_required": ["group_id", "split", "source", "context", "candidates", "pairs"],
+    "context_required": ["actor_role", "target_kind", "local_scope", "continuity", "evidence_v1"],
+    "candidate_required": ["key", "summary", "handoff", "labels", "continuity_basis", "tags"],
+    "continuity_basis_required": ["field", "quote"],
+    "pair_required": ["key", "kind", "left_key", "right_key", "target_dimension", "soft_change"]
+  },
+  "blind_review": {
+    "schema": "rondo-publication-critic-successor-module-review@v1",
+    "required": ["schema", "module_id", "reviewer_role", "accepted_task", "module_sha256", "verdict", "findings", "checklist"],
+    "checklist": [
+      "contract_alignment",
+      "complete_absolute_labels",
+      "visible_basis_sufficient",
+      "boundary_closure",
+      "soft_only_invariance",
+      "split_grouping",
+      "language_quality",
+      "no_hidden_metadata"
+    ]
+  }
+}

@@ -1,0 +1,233 @@
+{
+  "schema": "rondo-publication-critic-successor-data-design@v1",
+  "dataset_revision": "publication-critic-v9",
+  "accepted_task": {
+    "name": "rondo-publication-critic-task",
+    "version": "v2",
+    "authority_path": "doc/rondo-multi-publication-critic-task-contract-v2.md",
+    "content_sha256": "3eb0539b16403ebe20e74ce1b1ea5114d2383c6118f61fef56c9c91426e6a560",
+    "accepted_implementation_commit": "55342bdb11b09c11b589fd398717f7712fca012c"
+  },
+  "accepted_implementation": {
+    "commit": "55342bdb11b09c11b589fd398717f7712fca012c",
+    "algorithm": "sha256-canonical-component-list-v1",
+    "components": [
+      {
+        "path": "doc/rondo-multi-publication-critic-task-contract-v2.md",
+        "sha256": "3eb0539b16403ebe20e74ce1b1ea5114d2383c6118f61fef56c9c91426e6a560"
+      },
+      {
+        "path": "doc/rondo-multi-publication-critic-product-contract.md",
+        "sha256": "10d9b6f0efa82c68de2613959af224a59f1eef7d854f85eafc7476ab29d2eec7"
+      },
+      {
+        "path": "eval/rondo_eval/publication_critic/contract.py",
+        "sha256": "4716f77392141e3518d02f10f4eb53cd9ed92c1e5e990de09585c194446cf700"
+      },
+      {
+        "path": "eval/rondo_eval/publication_critic/render.py",
+        "sha256": "3c56bdaecc8633d2486af9733621f7f8a414aae44d8372b0071281470be7df30"
+      },
+      {
+        "path": "eval/rondo_eval/publication_critic/successor_task.py",
+        "sha256": "d138bbe8c44cb9e6fc43b5a27647bbca016d41e8967af7fbb14ba0dfb6de7917"
+      },
+      {
+        "path": "eval/rondo_eval/publication_critic/successor_data.py",
+        "sha256": "9acbca31908cfd42854fbb2c0817e9b8608b48e760355880495086a68b8e00c5"
+      },
+      {
+        "path": "eval/templates/publication-critic/product-packet-limits-v1.json",
+        "sha256": "eb2ec31c1dc4cb271fca8f291b53b75771fd42ede4a49a03fa0628ef147f9397"
+      },
+      {
+        "path": "eval/templates/publication-critic/task-contract-v2.json",
+        "sha256": "6642a743d5d497e9ac6d9bec297fa780cd80b010049f4bda38ce03fcc582f3bd"
+      },
+      {
+        "path": "eval/templates/publication-critic/input-contract-v3.md",
+        "sha256": "9c43c7ca81caa20c337d025375020548bab3b0508f1a4aeff2ca4647c8197f7d"
+      },
+      {
+        "path": "eval/templates/publication-critic/qualification-rubric-v2.md",
+        "sha256": "c26ffffc41aa9adf68cffc38b14eb8e1da34f2e28dcb966fae8fec8055675946"
+      },
+      {
+        "path": "eval/templates/publication-critic/render-contract-v4.json",
+        "sha256": "74f4623fe47188bc947a8a7559f90364fd528a6f9eebdc1b9676cbb2e3d96dde"
+      },
+      {
+        "path": "eval/templates/publication-critic/successor-output-schema-v1.json",
+        "sha256": "bec9c3c3ad66146f4b8b1b6a3b805ae50caa3a29217eef3575897fc952baa2d3"
+      },
+      {
+        "path": "eval/templates/publication-critic/successor-release-contract-v1.json",
+        "sha256": "f77fb0c4174506b8139d86bd1d1404baa3a6cfcb760604b2a1452dd295ac5268"
+      }
+    ],
+    "bundle_sha256": "b0124de561f52fb464c223989d003af1e9f2a8a24eccd9ca349a4d769e3488d5"
+  },
+  "source_policy": {
+    "mixed_v8_body_access": "forbidden",
+    "safe_v8_projection": {
+      "path": "training/publication-critic-v8/train-only-smoke-bundle.json",
+      "sha256": "0e1e690016fd3f10a47fb4e714dfd00923a9ffcf9e1c022cc1c02177af6a983b",
+      "candidate_count": 6,
+      "direct_reuse_count": 0,
+      "decision": "old v1 scalar supervision and pairs do not supply unambiguous complete five-head successor labels"
+    },
+    "formal_source_kinds": ["new_synthetic"],
+    "real_shaped_anchors": "new contract-native public packets that resemble practical development handoffs"
+  },
+  "module_contract": {
+    "schema": "rondo-publication-critic-successor-module-source@v1",
+    "candidate_count_per_group": 3,
+    "groups_per_module": 24,
+    "group_splits_per_module": {"train": 18, "validation": 3, "test": 3},
+    "modules": [
+      {
+        "module_id": "hard-boundaries",
+        "owner_role": "plan098-module-owner-hard-boundaries",
+        "reviewer_role": "plan098-blind-reviewer-hard-boundaries",
+        "pairs_per_group": {"boundary": 1, "soft_only_invariance": 0},
+        "boundary_targets_by_split": {
+          "train": [
+            "useful_state_transfer", "honest_uncertainty", "conditional_continuity",
+            "scope_and_signal", "internal_consistency", "useful_state_transfer",
+            "honest_uncertainty", "conditional_continuity", "scope_and_signal",
+            "internal_consistency", "useful_state_transfer", "honest_uncertainty",
+            "conditional_continuity", "scope_and_signal", "internal_consistency",
+            "useful_state_transfer", "honest_uncertainty", "scope_and_signal"
+          ],
+          "validation": ["useful_state_transfer", "honest_uncertainty", "scope_and_signal"],
+          "test": ["conditional_continuity", "internal_consistency", "useful_state_transfer"]
+        },
+        "brief": "single-head boundaries plus natural multi-defect candidates across all five hard dimensions"
+      },
+      {
+        "module_id": "continuity-context",
+        "owner_role": "plan098-module-owner-continuity-context",
+        "reviewer_role": "plan098-blind-reviewer-continuity-context",
+        "pairs_per_group": {"boundary": 1, "soft_only_invariance": 0},
+        "boundary_targets_by_split": {
+          "train": [
+            "conditional_continuity", "internal_consistency", "honest_uncertainty",
+            "useful_state_transfer", "scope_and_signal", "conditional_continuity",
+            "internal_consistency", "honest_uncertainty", "useful_state_transfer",
+            "scope_and_signal", "conditional_continuity", "internal_consistency",
+            "honest_uncertainty", "useful_state_transfer", "scope_and_signal",
+            "conditional_continuity", "internal_consistency", "honest_uncertainty"
+          ],
+          "validation": ["conditional_continuity", "internal_consistency", "useful_state_transfer"],
+          "test": ["honest_uncertainty", "scope_and_signal", "conditional_continuity"]
+        },
+        "brief": "completion applicability, visible conflicts, stale or missing continuity, and Evidence V1 uncertainty"
+      },
+      {
+        "module_id": "soft-combinations",
+        "owner_role": "plan098-module-owner-soft-combinations",
+        "reviewer_role": "plan098-blind-reviewer-soft-combinations",
+        "pairs_per_group": {"boundary": 1, "soft_only_invariance": 1},
+        "boundary_targets_by_split": {
+          "train": [
+            "useful_state_transfer", "honest_uncertainty", "conditional_continuity",
+            "scope_and_signal", "internal_consistency", "useful_state_transfer",
+            "honest_uncertainty", "conditional_continuity", "scope_and_signal",
+            "internal_consistency", "useful_state_transfer", "honest_uncertainty",
+            "conditional_continuity", "scope_and_signal", "internal_consistency",
+            "useful_state_transfer", "scope_and_signal", "internal_consistency"
+          ],
+          "validation": ["honest_uncertainty", "scope_and_signal", "internal_consistency"],
+          "test": ["useful_state_transfer", "conditional_continuity", "internal_consistency"]
+        },
+        "brief": "soft-only invariance and hard-fail soft-good or soft-bad cross-combinations"
+      }
+    ]
+  },
+  "allowed_candidate_tags": [
+    "hard_pass_soft_good",
+    "hard_pass_soft_bad",
+    "hard_fail_soft_good",
+    "hard_fail_soft_bad",
+    "single_hard_failure",
+    "multi_hard_failure",
+    "real_shaped_anchor",
+    "visible_conflict"
+  ],
+  "split_contract": {
+    "names": ["train", "validation", "test"],
+    "candidate_counts": {"train": 162, "validation": 27, "test": 27},
+    "group_relation_closure": true,
+    "test_training_entrypoint": "forbidden"
+  },
+  "coverage_minimums": {
+    "total_candidates": 216,
+    "total_pairs": 96,
+    "verdicts": {"PASS": 90, "REWRITE": 110},
+    "split_verdicts": {
+      "train": {"PASS": 60, "REWRITE": 75},
+      "validation": {"PASS": 10, "REWRITE": 10},
+      "test": {"PASS": 10, "REWRITE": 10}
+    },
+    "dimension_fail": {
+      "useful_state_transfer": 12,
+      "honest_uncertainty": 12,
+      "conditional_continuity": 12,
+      "scope_and_signal": 12,
+      "internal_consistency": 12
+    },
+    "continuity_labels": {"PASS": 90, "FAIL": 12, "N/A": 45},
+    "boundary_pairs_per_dimension": {
+      "useful_state_transfer": 8,
+      "honest_uncertainty": 8,
+      "conditional_continuity": 8,
+      "scope_and_signal": 8,
+      "internal_consistency": 8
+    },
+    "boundary_pairs_per_dimension_per_split": 1,
+    "invariance_pairs_per_split": {"train": 18, "validation": 3, "test": 3},
+    "context_candidates": {
+      "new_event": 45,
+      "existing_event_available": 45,
+      "existing_event_unavailable": 45
+    },
+    "candidate_tags": {
+      "hard_pass_soft_good": 24,
+      "hard_pass_soft_bad": 24,
+      "hard_fail_soft_good": 24,
+      "hard_fail_soft_bad": 24,
+      "single_hard_failure": 60,
+      "multi_hard_failure": 36,
+      "real_shaped_anchor": 18,
+      "visible_conflict": 12
+    }
+  },
+  "quality_checks": {
+    "exact_duplicate_packets": "reject",
+    "cross_group_near_duplicate_threshold": 0.94,
+    "model_visible_metadata_tokens": "reject",
+    "verdict_length_ranges_per_split": "must_overlap",
+    "module_blind_review": "one accepted review per module"
+  },
+  "stop_conditions": [
+    "accepted task identity matches current authority bytes",
+    "all three exact module quotas and split schedules validate",
+    "all three independent blind reviews accept their bound module hashes",
+    "coverage, duplicate, shortcut, renderer, manifest, and train-only consumer checks pass"
+  ],
+  "formal_freeze": {
+    "output": "training/publication-critic-v9",
+    "run_mode": "one transactional clean finalization after commissioning passes",
+    "tracked_files": [
+      "DATA_CARD.md",
+      "design-lock.json",
+      "generation-config.json",
+      "coverage.json",
+      "release-identity.json",
+      "manifest.json",
+      "train-only-smoke-bundle.json",
+      "modules/*.json",
+      "splits/{train,validation,test}/{candidates,pairs}.jsonl"
+    ]
+  }
+}

@@ -2,8 +2,10 @@
 
 最后更新：2026-08-28 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
 状态：**第一期、第二期、第四期已完成；Publication Critic 三期 Plan 097 已完成并闭合双 backend 工程 E2E 与可替换接缝，现正式进入
-质量重构路线。后续严格串行为“任务合同重构 → v8 后继数据改造与有限扩充 → 一次主方案训练 → 模型资格验收与横评”，当前下一工作包为
-任务合同重构，尚未建立任务级 ExecPlan。Plan 097 的
+质量重构路线。后续严格串行为“任务合同重构 → v8 后继数据改造与有限扩充 → 一次主方案训练 → 模型资格验收与横评”。Plan 098 已把
+前两个工作包规划为严格串行的两个阶段；Plan 098 的 v2/v9/v10/qualification 主体与此前方向性整改保留，formal
+decoder 唯一入口、pair-aware margin selection 和 frozen decision direct-dependency identity 均已通过最终复验，Plan 098 完成并冻结。
+下一工作包为工作包三，但仍须单独 ExecPlan 与授权。Plan 097 的
 `M3_D_DUAL_BACKEND_ENGINEERING_PASS / FINAL_REVIEW_ACCEPTED / INTEGRATED / NOT_PUSHED`、Plan 096 的
 `CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH / FINAL_REVIEW_ACCEPTED / INTEGRATED / PUSHED`、Plan 094 的有效负向终态和 Plan 095 的
 最终验收均保持有效；新路线完成资格前，本地/云端质量、产品价值、Publication Critic 默认与生产启用继续锁定**
@@ -134,9 +136,9 @@ M3-B1c 正式分阶段训练与工件回收          │
                        ↓
         Plan 097 M3-D 双 backend 工程前置闭环（已完成并通过最终独立验收）
                        ↓
-        工作包一：任务合同重构（当前下一工作包）
+        工作包一：任务合同重构（Plan 098 阶段一；主体保留，判定入口待窄修）
                        ↓
-        工作包二：v8 后继数据改造与有限扩充
+        工作包二：v8 后继数据改造与有限扩充（Plan 098 阶段二；主体保留，pair selector 待窄修）
                        ↓
         工作包三：一次主方案训练（本地非付费准备 → 用户授权后的云端付费执行）
                        ↓
@@ -149,12 +151,13 @@ M3-B1c 正式分阶段训练与工件回收          │
                          作为 Plan 097 cloud engineering fixture 接入同一产品链
 ```
 
-历史 A/B/C/D 阶段及 Plan 097 的工程结果保持冻结。当前权威后续路线是上述四个质量重构工作包；它们各自对应一个独立任务级
-ExecPlan，不由本 WBS 冻结具体模块、训练超参数、云资源或实现步骤。
+历史 A/B/C/D 阶段及 Plan 097 的工程结果保持冻结。当前权威后续路线是上述四个质量重构工作包。按用户本轮明确决定，工作包一和二共享
+Plan 098，但仍是两个严格串行、分别验收的任务阶段；工作包一接受前工作包二不得启动。工作包三、四仍各自建立独立任务级 ExecPlan。
+本 WBS 不冻结具体模块、训练超参数、云资源或实现步骤。
 
 ### 当前后续路线：三期质量重构
 
-#### 工作包一：任务合同重构（当前下一工作包）
+#### 工作包一：任务合同重构（Plan 098 阶段一；主体保留，判定 identity 已窄修待复验）
 
 **目标**：把上文“冻结任务设计方向”完整落实为单一权威训练任务，使模型内部五头判断、同向损失、非补偿聚合、模型可见事实与产品
 `PASS/REWRITE` 语义一致，并为后续数据和训练提供稳定接口；执行者不得把五头 gate 降格为自由单总分或重新引入 hard/soft 混合排序。
@@ -170,7 +173,19 @@ dimension 如何表达和聚合、Binary、Boundary、Within-PASS 各自承担�
 重跑定向门禁并完成独立审查整改；普通依赖下载和只读源码查询包含在内。真实模型加载/推理、Docker、付费 API、GPU、外部上传、冻结测试读取、
 产品启用和生产动作均不包含。
 
-#### 工作包二：v8 后继数据改造与有限扩充
+**当前实现**：唯一权威训练语义已落在 `rondo-publication-critic-task@v2`；正式 rubric、quoted continuity basis、tie fail-closed、Boundary
+完整 target、轻量 projection parity、逐 pair evaluation、物理 split consumer 与历史隔离已经第二轮复验接受。accepted implementation
+commit 为 `55342bdb11b09c11b589fd398717f7712fca012c`，合同 SHA-256 为
+`3eb0539b16403ebe20e74ce1b1ea5114d2383c6118f61fef56c9c91426e6a560`。冻结 v8、旧 scalar validator/render 与产品 typed seam 保持不变。
+验收后方向性整改保持上述 v2 identity 不变，并在下游 `rondo-publication-critic-decision@v1` 显式冻结逐头 margin、保守 continuity N/A、
+validation-only decision config 和固定逐维 confusion/failure recall；decision config 同时绑定 decoder/metrics implementation bundle。五头和
+non-compensating gate 不重开。continuity 弱 N/A 最高和 margin 边界现 fail-closed；标准 selector 只通过已验证的 `DevelopmentRelease`
+机械派生 v10 manifest/candidate/labels identity 并核对行序。directional design 另绑定 implementation commit 与 bundle。版本化 formal
+projection 保持旧 output schema 字节和 v9 历史 identity 不变，明确其 raw argmax 只作 zero-margin diagnostic/historical reference；训练候选、
+validation、资格与未来产品正式 projection 只能使用绑定 frozen decision config 的 decision v1 decoder。decision bundle 另直接绑定
+`successor_task.py` runtime 和历史 raw output schema 精确字节；两者任一漂移都会在正式 decode 前 fail-closed，未扩为递归依赖审计。
+
+#### 工作包二：v8 后继数据改造与有限扩充（Plan 098 阶段二；已完成并冻结）
 
 **目标**：保持 `publication-critic-v8` 原样作为历史证据，从其可复用部分和新增高信息样本形成新的后继 revision。合成数据必须服务工作包一
 冻结的新任务合同，而不是机械扩展旧数据；v8 每个旧条目、类别、pair、配比和模板都只有在新合同下仍有信息价值时才能复用。新数据应完整表达
@@ -196,6 +211,25 @@ consumer、统计/重复/捷径检查和轻量 smoke 全部闭合，训练方无
 **授权范围**：启动 ExecPlan 时应一次授权项目内数据、schema、模板、生成/审查编排、轻量代码、测试、文档、干净上下文子智能体和必要的本地
 暂存/归档，允许模块负责人在各自范围内多轮整改至一次盲审通过并由执行者修复机械集成问题。普通只读网络和依赖下载可包含；真实付费 API、
 真实本地模型、GPU/RunPod、Docker、数据外发、旧 unseen 读取和产品动作均不包含，若确需其中任一项须另行批准。
+
+**当前实现**：`publication-critic-v9` 已绑定工作包一 accepted identity 并正式冻结 216 candidates / 96 pairs；物理
+train/validation/test 为 162/27/27 candidates 与 72/12/12 pairs。`hard-boundaries`、`continuity-context`、`soft-combinations` 三个
+24-group 模块分别由干净负责人生成和整改，并由对应干净盲审员以最终 0 finding 接受。v8 mixed 主体与旧 validation/unseen 均未读取；仅安全
+train projection 被判定无法无歧义提供完整五头监督，故直接复用为零。完整 commissioning 与一次干净正式 finalizer 已闭合 manifest、renderer、
+coverage、exact/cross-group near duplicate、明显捷径、train-only smoke 和无 test 入口的 consumer。finalizer 现于写出前核对 13 个
+工作包一必要语义组件及组合 SHA，design、generation config、release identity 已绑定同一 accepted implementation；权威 Markdown
+保持不变而任一其他核心组件漂移时均 fail-closed。方向性整改保留 v9 主体且不读取、不改写其 test，另冻结只含 train/validation 的
+development-only `publication-critic-v10`：原三个模块负责人定向交付 42 个 replacements，一一对应盲审均以 0 finding 接受，scope 长度 AUC、
+honest cue 反例、旁白和重复诊断闭合。v9 test 降格为 metadata-only 同分布辅助 holdout。全新 test-only 负责人和独立盲审员已以 0 finding
+接受 50-group / 200-candidate / 100-pair 的 family-isolated `publication-critic-qualification-v1`；正文仍封存到工作包四，当前只完成机械
+冻结。v9 原 `continuity-context` 盲审员已对同一 11 个 replacements 窄复验为 0 finding 并绑定 review SHA
+`9c6c01ae78f7bee5238e77b1635b5c6c2107e66b11f7e8d2448dc9e6c49dd9f6`。方向性 finalizer/runtime、design、config、release identity
+绑定精确实现 identity，正式 v10/qualification 已从空目录机械重建并逐字节复现；v9/v10/qualification 主体与其他 review 均未重做。
+release-bound selector 现绑定并消费实际 validation pairs，pair bytes SHA、行数和逐 pair 结果进入 frozen config；全部 12 个 Boundary/soft-only
+pair 的绝对标签与 hard/applicability/gate invariance 必须闭合，才可进入原单一 bounded margin grid 的确定性 candidate-level 排序。正式
+v10/qualification 只更新必要 identity 并逐字节复现；数据正文、review 和 qualification set 均未重做。本轮 direct dependency identity
+窄修再次只机械更新 design/config/manifest/release identity，并完成独立字节复现。最终复验接受 implementation
+`056ab91a54157200e887bb03f3ddf45c259a3a2c`，Plan 098 完成并冻结；工作包三仍须单独立项与授权。
 
 #### 工作包三：一次主方案训练
 
@@ -636,8 +670,9 @@ local/cloud 各 3/3 fixture 的 `PASS + REWRITE`、正常 Producer 两次重写/
   Cargo 继续绝对复用物理根唯一 `.codex/cargo-target/rondo-multi`，模型/env/credential/raw 只在物理根 ignored 路径原位使用。
 - 三期与已经正式收口的方向 1 没有产品依赖。如果未来重新启动方向 1，普通工作仍可并行安排，但共享 API 预算、
   本地 GPU、Docker、构建锁和磁盘时必须显式错峰。
-- 历史 M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、M3-C2、M3-D 与当前四个工作包均各自对应
-  独立任务级 plan；阶段叙事不单独创建总 plan，长程 WBS 也不替执行者冻结模块布局、训练超参数、云资源或部署技术路线。
+- 历史 M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、M3-C2、M3-D 均保留各自独立任务级 plan；
+  当前工作包一、二按用户决定共享 Plan 098 并由中间验收硬闸门保持语义串行，工作包三、四仍各自立项。长程 WBS 不替执行者冻结模块布局、
+  训练超参数、云资源或部署技术路线。
 
 ## 现行产品语义合同
 

@@ -1,0 +1,19 @@
+{
+  "schema": "rondo-publication-critic-qualification-review@v1",
+  "set_id": "publication-critic-qualification-v1",
+  "reviewer_role": "plan098-test-only-qualification-blind-reviewer",
+  "source_sha256": "801129159567ac70dad0b1c39191a1d2e1f9ceb89a1014f5665119c44b09a5e7",
+  "verdict": "accept",
+  "findings": [],
+  "checklist": {
+    "contract_alignment": true,
+    "complete_absolute_labels": true,
+    "family_lineage": true,
+    "boundary_closure": true,
+    "soft_only_invariance": true,
+    "shortcut_resistance": true,
+    "language_quality": true,
+    "no_hidden_metadata": true,
+    "isolation_confirmed": true
+  }
+}

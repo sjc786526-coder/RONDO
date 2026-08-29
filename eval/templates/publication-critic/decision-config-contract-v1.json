@@ -1,0 +1,48 @@
+{
+  "kind": "rondo-contract-projection",
+  "name": "rondo-publication-critic-decision-config",
+  "version": "v1",
+  "authority": "doc/rondo-multi-publication-critic-decision-contract-v1.md",
+  "runtime_validator": "eval/rondo_eval/publication_critic/qualification.py#validate_decision_config",
+  "runtime_decoder": "eval/rondo_eval/publication_critic/qualification.py#decode_with_decision_config",
+  "formal_output_projection": "eval/templates/publication-critic/formal-decision-projection-v1.json",
+  "reference_selector": "eval/rondo_eval/publication_critic/directional_data.py#DevelopmentRelease.select_and_freeze_validation_decision_config",
+  "required_identity": [
+    "task",
+    "decision_contract",
+    "decision_implementation",
+    "model",
+    "development_data",
+    "selection"
+  ],
+  "selection": {
+    "split": "validation",
+    "method": "bounded_validation_pair_closed_grid_v1",
+    "required_data_identity": [
+      "manifest_sha256",
+      "validation_candidates_sha256",
+      "validation_pairs_sha256"
+    ],
+    "pair_eligibility": "all_validation_pairs_closed",
+    "pair_report": "frozen per pair with Boundary and soft-only absolute closure",
+    "test_access": "forbidden",
+    "frozen": true
+  },
+  "binary_head": {
+    "required": ["pass_over_fail_margin"],
+    "margin": "finite number greater than or equal to zero",
+    "decision": "PASS only when PASS minus FAIL is strictly greater than margin; otherwise FAIL"
+  },
+  "conditional_continuity": {
+    "required": ["pass_over_fail_margin", "na_over_applicable_margin"],
+    "na_margin": "finite number strictly greater than zero",
+    "decision": "N/A only when N/A minus max(PASS, FAIL) strictly exceeds na margin; otherwise PASS only when PASS is strictly above N/A and PASS minus FAIL strictly exceeds pass margin; all other cases FAIL"
+  },
+  "forbidden": [
+    "global threshold",
+    "cross-head score or compensation",
+    "soft preference",
+    "sixth qualification head",
+    "test-selected config"
+  ]
+}

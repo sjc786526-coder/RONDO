@@ -1,0 +1,136 @@
+{
+  "schema": "rondo-publication-critic-directional-remediation-design@v1",
+  "accepted_task": {
+    "name": "rondo-publication-critic-task",
+    "version": "v2",
+    "authority_path": "doc/rondo-multi-publication-critic-task-contract-v2.md",
+    "content_sha256": "3eb0539b16403ebe20e74ce1b1ea5114d2383c6118f61fef56c9c91426e6a560",
+    "accepted_implementation_commit": "55342bdb11b09c11b589fd398717f7712fca012c",
+    "accepted_implementation_bundle_sha256": "b0124de561f52fb464c223989d003af1e9f2a8a24eccd9ca349a4d769e3488d5"
+  },
+  "decision_implementation": {
+    "commit": "391378ee568f6d37b0b1288d6410f5f399fa0771",
+    "algorithm": "sha256-canonical-component-list-v1",
+    "components": [
+      {
+        "path": "doc/rondo-multi-publication-critic-decision-contract-v1.md",
+        "sha256": "58c872be7e83d5674dd6e7b99b73fba9c67b75661f2c45b136b79302b7eaeb87"
+      },
+      {
+        "path": "eval/rondo_eval/publication_critic/qualification.py",
+        "sha256": "258a20771179c973965e83c732cad229d631c4ac7f879729d74bc7c2f94d0bfe"
+      },
+      {
+        "path": "eval/rondo_eval/publication_critic/successor_task.py",
+        "sha256": "d138bbe8c44cb9e6fc43b5a27647bbca016d41e8967af7fbb14ba0dfb6de7917"
+      },
+      {
+        "path": "eval/templates/publication-critic/successor-output-schema-v1.json",
+        "sha256": "bec9c3c3ad66146f4b8b1b6a3b805ae50caa3a29217eef3575897fc952baa2d3"
+      },
+      {
+        "path": "eval/templates/publication-critic/decision-config-contract-v1.json",
+        "sha256": "9ac8db1e08ce239ea6a0d2ae8c19de603a599e045603f38ee2d601be99673af8"
+      },
+      {
+        "path": "eval/templates/publication-critic/formal-decision-projection-v1.json",
+        "sha256": "6c063c04e7e538e6bcd2b3bafbff1730465c3189624f055da959191f190b4218"
+      },
+      {
+        "path": "eval/templates/publication-critic/qualification-metrics-contract-v1.json",
+        "sha256": "1a9aadb2bf46fffa94f8a25f7bc428fb286daf54513d2b96dffbee29a42551ec"
+      }
+    ],
+    "bundle_sha256": "9ef18b6c04a63fd1b3285e69ccf2616f3c22f2558802f01794573e2e07d7afef"
+  },
+  "remediation_implementation": {
+    "commit": "3d7797b161aeb926577f70828c850f7827a80864",
+    "algorithm": "sha256-canonical-component-list-v1",
+    "components": [
+      {
+        "path": "eval/rondo_eval/publication_critic/directional_data.py",
+        "sha256": "7871dd36b38d48cb4162b10a29e601162869fd94126a24f4028432e39c5fa6ea"
+      }
+    ],
+    "bundle_sha256": "668d16476295da77ae8b0f0cd212233a071da6292e247fbba8c1e2e2d381afb6"
+  },
+  "base_release": {
+    "revision": "publication-critic-v9",
+    "root": "training/publication-critic-v9",
+    "manifest_sha256": "756d7ea4c53673a447860fb4cfc245a98f5c15383569f137b1e07eacf7f90118",
+    "release_identity_sha256": "9372525b9682bfbdd36ba013fc81bf3417172bcb19127652c344b0a08ffc81fe",
+    "development_splits": {
+      "train": {
+        "candidates_sha256": "1e2756e4b59e5802f1810bdf9b653edce5543956812ce74d83fcaf715ff9cb1f",
+        "pairs_sha256": "ae161b1033b8fb9a51ef3450281d3940411f7bf5e97a80888cc893cecd566ba8"
+      },
+      "validation": {
+        "candidates_sha256": "d7a7224515733c2f8e2158a8a404d64b0e30b436baf23181c275da03ca83bed9",
+        "pairs_sha256": "4b0fe7c7f8148b5c5d9b12fdfe9e2055c6b46e4c9cdb30e2058be0d13224edfd"
+      }
+    },
+    "sealed_auxiliary_holdout": {
+      "candidates_sha256": "bfa295eda123d6d612f55d2ead2d71ed22bd2dba5eb46cdb5ea1749dc2754b3c",
+      "pairs_sha256": "8df6d52025ece8ca11621c7e138b0140f9bab28dd7478d5bc42f1e9e4372c4a5",
+      "policy": "metadata_and_hash_only; never copied, loaded, patched, or used for decision selection"
+    }
+  },
+  "development_release": {
+    "revision": "publication-critic-v10",
+    "physical_splits": ["train", "validation"],
+    "test_entrypoint": "absent",
+    "module_ids": ["hard-boundaries", "continuity-context", "soft-combinations"],
+    "reviewer_roles": {
+      "hard-boundaries": "plan098-blind-reviewer-hard-boundaries",
+      "continuity-context": "plan098-blind-reviewer-continuity-context",
+      "soft-combinations": "plan098-blind-reviewer-soft-combinations"
+    },
+    "allowed_counterexample_tags": [
+      "honest_subtle_fail",
+      "honest_supported_absolute_pass",
+      "scope_short_confused_fail",
+      "scope_long_clear_pass",
+      "natural_multi_defect"
+    ],
+    "minimum_tags_per_module": {
+      "train": {
+        "honest_subtle_fail": 2,
+        "honest_supported_absolute_pass": 2,
+        "scope_short_confused_fail": 2,
+        "scope_long_clear_pass": 2
+      },
+      "validation": {
+        "honest_subtle_fail": 1,
+        "honest_supported_absolute_pass": 1,
+        "scope_short_confused_fail": 1,
+        "scope_long_clear_pass": 1
+      }
+    },
+    "shortcut_diagnostics": {
+      "honest_cues_are_diagnostic_only": true,
+      "scope_length_auc_maximum": {"train": 0.72, "validation": 0.72},
+      "replacement_commentary_cues": "reject",
+      "exact_and_cross_group_near_duplicates": "reject"
+    },
+    "formal_output": "training/publication-critic-v10"
+  },
+  "qualification_set": {
+    "set_id": "publication-critic-qualification-v1",
+    "owner_role": "plan098-test-only-qualification-owner",
+    "reviewer_role": "plan098-test-only-qualification-blind-reviewer",
+    "family_namespace": "pcq1-independent",
+    "groups": 50,
+    "candidates_per_group": 4,
+    "pairs_per_group": 2,
+    "boundary_targets_per_dimension": 10,
+    "required_candidate_keys": ["qplus", "qminus", "multi", "soft"],
+    "required_pair_kinds": ["boundary", "soft_only_invariance"],
+    "development_near_duplicate_threshold": 0.94,
+    "shortcut_diagnostics": {
+      "dimension_length_auc_maximum": 0.75,
+      "honest_cues_are_diagnostic_only": true
+    },
+    "access": "sealed_until_work_package_4; never training, validation, or decision selection",
+    "formal_output": "training/publication-critic-qualification-v1"
+  }
+}

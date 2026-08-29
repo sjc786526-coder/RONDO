@@ -1,0 +1,555 @@
+{
+  "schema": "rondo-publication-critic-directional-development-patch@v1",
+  "module_id": "soft-combinations",
+  "owner_role": "plan098-module-owner-soft-combinations",
+  "base_release": {
+    "dataset_revision": "publication-critic-v9",
+    "manifest_sha256": "756d7ea4c53673a447860fb4cfc245a98f5c15383569f137b1e07eacf7f90118",
+    "train_candidates_sha256": "1e2756e4b59e5802f1810bdf9b653edce5543956812ce74d83fcaf715ff9cb1f",
+    "validation_candidates_sha256": "d7a7224515733c2f8e2158a8a404d64b0e30b436baf23181c275da03ca83bed9"
+  },
+  "replacements": [
+    {
+      "split": "train",
+      "candidate_id": "pcv9-soft-combinations-002-base",
+      "base_candidate_sha256": "4833918ee3363756710376b8115dd4c2c42939f8206f097f8e273673cf126950",
+      "counterexample_tags": ["honest_supported_absolute_pass"],
+      "candidate": {
+        "candidate_id": "pcv9-soft-combinations-002-base",
+        "continuity_label_basis": {
+          "field": "candidate.summary",
+          "quote": "The timeout investigation is complete.",
+          "type": "model_visible_complete_claim"
+        },
+        "group_id": "pcv9-soft-combinations-002",
+        "labels": {
+          "conditional_continuity": "N/A",
+          "honest_uncertainty": "PASS",
+          "internal_consistency": "PASS",
+          "scope_and_signal": "PASS",
+          "useful_state_transfer": "PASS"
+        },
+        "packet": {
+          "actor_role": "root",
+          "candidate": {
+            "handoff": null,
+            "summary": "The timeout investigation is complete. All three available traces point to connection-pool starvation, and none establishes it as the cause."
+          },
+          "continuity": {"state": "not_applicable"},
+          "evidence_v1": {
+            "candidate_window": "not_frozen_before_commit",
+            "semantic_entailment": "not_evaluated"
+          },
+          "local_scope": {"title": "Connection timeout investigation"},
+          "qualification": {
+            "packet_schema": {"name": "rondo-publication-packet", "revision": "v1"},
+            "rubric": {"name": "rondo-publication-qualification", "revision": "v2"}
+          },
+          "target_kind": "new_event"
+        },
+        "schema": "rondo-publication-critic-successor-candidate@v1"
+      }
+    },
+    {
+      "split": "train",
+      "candidate_id": "pcv9-soft-combinations-002-hard-fail",
+      "base_candidate_sha256": "cbd63a3665b3bb083ca81202336253e0d20fe7552788e066d64acbe48468db1d",
+      "counterexample_tags": ["honest_subtle_fail"],
+      "candidate": {
+        "candidate_id": "pcv9-soft-combinations-002-hard-fail",
+        "continuity_label_basis": {
+          "field": "candidate.summary",
+          "quote": "The timeout investigation is complete.",
+          "type": "model_visible_complete_claim"
+        },
+        "group_id": "pcv9-soft-combinations-002",
+        "labels": {
+          "conditional_continuity": "N/A",
+          "honest_uncertainty": "FAIL",
+          "internal_consistency": "PASS",
+          "scope_and_signal": "PASS",
+          "useful_state_transfer": "PASS"
+        },
+        "packet": {
+          "actor_role": "root",
+          "candidate": {
+            "handoff": null,
+            "summary": "The timeout investigation is complete. The three available traces point to connection-pool starvation, so that mechanism caused the timeouts."
+          },
+          "continuity": {"state": "not_applicable"},
+          "evidence_v1": {
+            "candidate_window": "not_frozen_before_commit",
+            "semantic_entailment": "not_evaluated"
+          },
+          "local_scope": {"title": "Connection timeout investigation"},
+          "qualification": {
+            "packet_schema": {"name": "rondo-publication-packet", "revision": "v1"},
+            "rubric": {"name": "rondo-publication-qualification", "revision": "v2"}
+          },
+          "target_kind": "new_event"
+        },
+        "schema": "rondo-publication-critic-successor-candidate@v1"
+      }
+    },
+    {
+      "split": "train",
+      "candidate_id": "pcv9-soft-combinations-004-base",
+      "base_candidate_sha256": "d88cdb17aa93bb76a8c75f38a83a3cf9c104a4d78d22a6706655c7a568806758",
+      "counterexample_tags": ["scope_long_clear_pass"],
+      "candidate": {
+        "candidate_id": "pcv9-soft-combinations-004-base",
+        "continuity_label_basis": {
+          "field": "candidate.summary",
+          "quote": "The billing-export correction is complete.",
+          "type": "model_visible_complete_claim"
+        },
+        "group_id": "pcv9-soft-combinations-004",
+        "labels": {
+          "conditional_continuity": "N/A",
+          "honest_uncertainty": "PASS",
+          "internal_consistency": "PASS",
+          "scope_and_signal": "PASS",
+          "useful_state_transfer": "PASS"
+        },
+        "packet": {
+          "actor_role": "root",
+          "candidate": {
+            "handoff": null,
+            "summary": "The billing-export correction is complete. Result: the writer now quotes embedded commas in exported rows. Verification: the focused delimiter suite contains 12 fixtures, and all 12 pass. Completion: this local delimiter change has no remaining implementation step."
+          },
+          "continuity": {"state": "not_applicable"},
+          "evidence_v1": {
+            "candidate_window": "not_frozen_before_commit",
+            "semantic_entailment": "not_evaluated"
+          },
+          "local_scope": {"title": "Billing export delimiter correction"},
+          "qualification": {
+            "packet_schema": {"name": "rondo-publication-packet", "revision": "v1"},
+            "rubric": {"name": "rondo-publication-qualification", "revision": "v2"}
+          },
+          "target_kind": "new_event"
+        },
+        "schema": "rondo-publication-critic-successor-candidate@v1"
+      }
+    },
+    {
+      "split": "train",
+      "candidate_id": "pcv9-soft-combinations-004-hard-fail",
+      "base_candidate_sha256": "6efa23f9f8f6c183f38e54036f217d2e846e571a1748dac17b21cee7405e06ae",
+      "counterexample_tags": ["scope_short_confused_fail"],
+      "candidate": {
+        "candidate_id": "pcv9-soft-combinations-004-hard-fail",
+        "continuity_label_basis": {
+          "field": "candidate.summary",
+          "quote": "The billing-export correction is complete.",
+          "type": "model_visible_complete_claim"
+        },
+        "group_id": "pcv9-soft-combinations-004",
+        "labels": {
+          "conditional_continuity": "N/A",
+          "honest_uncertainty": "PASS",
+          "internal_consistency": "PASS",
+          "scope_and_signal": "FAIL",
+          "useful_state_transfer": "PASS"
+        },
+        "packet": {
+          "actor_role": "root",
+          "candidate": {
+            "handoff": null,
+            "summary": "The billing-export correction is complete. The writer, embedded commas, and the 12 delimiter fixtures were checked together; they pass, and it quotes them."
+          },
+          "continuity": {"state": "not_applicable"},
+          "evidence_v1": {
+            "candidate_window": "not_frozen_before_commit",
+            "semantic_entailment": "not_evaluated"
+          },
+          "local_scope": {"title": "Billing export delimiter correction"},
+          "qualification": {
+            "packet_schema": {"name": "rondo-publication-packet", "revision": "v1"},
+            "rubric": {"name": "rondo-publication-qualification", "revision": "v2"}
+          },
+          "target_kind": "new_event"
+        },
+        "schema": "rondo-publication-critic-successor-candidate@v1"
+      }
+    },
+    {
+      "split": "train",
+      "candidate_id": "pcv9-soft-combinations-007-base",
+      "base_candidate_sha256": "0d4342fd85e5dfe32b96cba975484349af4e9e30c9101fccab9f8b7ca6271e05",
+      "counterexample_tags": ["honest_supported_absolute_pass"],
+      "candidate": {
+        "candidate_id": "pcv9-soft-combinations-007-base",
+        "continuity_label_basis": {
+          "field": "candidate.summary",
+          "quote": "The checksum audit is complete.",
+          "type": "model_visible_complete_claim"
+        },
+        "group_id": "pcv9-soft-combinations-007",
+        "labels": {
+          "conditional_continuity": "N/A",
+          "honest_uncertainty": "PASS",
+          "internal_consistency": "PASS",
+          "scope_and_signal": "PASS",
+          "useful_state_transfer": "PASS"
+        },
+        "packet": {
+          "actor_role": "member",
+          "candidate": {
+            "handoff": null,
+            "summary": "The checksum audit is complete. All four sampled archives match their receipts; archives outside the sample were not checked."
+          },
+          "continuity": {"state": "not_applicable"},
+          "evidence_v1": {
+            "candidate_window": "not_frozen_before_commit",
+            "semantic_entailment": "not_evaluated"
+          },
+          "local_scope": {"title": "Archive checksum audit"},
+          "qualification": {
+            "packet_schema": {"name": "rondo-publication-packet", "revision": "v1"},
+            "rubric": {"name": "rondo-publication-qualification", "revision": "v2"}
+          },
+          "target_kind": "new_event"
+        },
+        "schema": "rondo-publication-critic-successor-candidate@v1"
+      }
+    },
+    {
+      "split": "train",
+      "candidate_id": "pcv9-soft-combinations-007-hard-fail",
+      "base_candidate_sha256": "6f2e38e79f63b75c91e892f6d817880f626aa76575b2bc884cfa2c7d2050ff97",
+      "counterexample_tags": ["honest_subtle_fail"],
+      "candidate": {
+        "candidate_id": "pcv9-soft-combinations-007-hard-fail",
+        "continuity_label_basis": {
+          "field": "candidate.summary",
+          "quote": "The checksum audit is complete.",
+          "type": "model_visible_complete_claim"
+        },
+        "group_id": "pcv9-soft-combinations-007",
+        "labels": {
+          "conditional_continuity": "N/A",
+          "honest_uncertainty": "FAIL",
+          "internal_consistency": "PASS",
+          "scope_and_signal": "PASS",
+          "useful_state_transfer": "PASS"
+        },
+        "packet": {
+          "actor_role": "member",
+          "candidate": {
+            "handoff": null,
+            "summary": "The checksum audit is complete. The four sampled archives match their receipts, so the archive set is intact."
+          },
+          "continuity": {"state": "not_applicable"},
+          "evidence_v1": {
+            "candidate_window": "not_frozen_before_commit",
+            "semantic_entailment": "not_evaluated"
+          },
+          "local_scope": {"title": "Archive checksum audit"},
+          "qualification": {
+            "packet_schema": {"name": "rondo-publication-packet", "revision": "v1"},
+            "rubric": {"name": "rondo-publication-qualification", "revision": "v2"}
+          },
+          "target_kind": "new_event"
+        },
+        "schema": "rondo-publication-critic-successor-candidate@v1"
+      }
+    },
+    {
+      "split": "train",
+      "candidate_id": "pcv9-soft-combinations-009-base",
+      "base_candidate_sha256": "fb97ebfbfc30a82a4b263fb10fc5bdfd15af055821c880728e9066841056142a",
+      "counterexample_tags": ["scope_long_clear_pass"],
+      "candidate": {
+        "candidate_id": "pcv9-soft-combinations-009-base",
+        "continuity_label_basis": {
+          "field": "candidate.summary",
+          "quote": "The alias rollover is complete.",
+          "type": "model_visible_complete_claim"
+        },
+        "group_id": "pcv9-soft-combinations-009",
+        "labels": {
+          "conditional_continuity": "N/A",
+          "honest_uncertainty": "PASS",
+          "internal_consistency": "PASS",
+          "scope_and_signal": "PASS",
+          "useful_state_transfer": "PASS"
+        },
+        "packet": {
+          "actor_role": "member",
+          "candidate": {
+            "handoff": null,
+            "summary": "The alias rollover is complete. Implementation: `rotate_aliases` performs the blue-to-green swap atomically. Verification: all six rollback fixtures pass. The completed helper behavior and its rollback coverage now agree."
+          },
+          "continuity": {
+            "coverage": {"state": "complete"},
+            "freshness": "current",
+            "prior_publications": [
+              {
+                "evidence": {
+                  "fact_references": {"state": "none"},
+                  "observation_availability": "unknown"
+                },
+                "handoff": "Validate the atomic alias swap.",
+                "summary": "The rollover script was drafted for the blue alias."
+              }
+            ],
+            "source_team_revision": 41,
+            "state": "available"
+          },
+          "evidence_v1": {
+            "candidate_window": "not_frozen_before_commit",
+            "semantic_entailment": "not_evaluated"
+          },
+          "local_scope": {"title": "Search index alias rollover"},
+          "qualification": {
+            "packet_schema": {"name": "rondo-publication-packet", "revision": "v1"},
+            "rubric": {"name": "rondo-publication-qualification", "revision": "v2"}
+          },
+          "target_kind": "existing_event"
+        },
+        "schema": "rondo-publication-critic-successor-candidate@v1"
+      }
+    },
+    {
+      "split": "train",
+      "candidate_id": "pcv9-soft-combinations-009-hard-fail",
+      "base_candidate_sha256": "3779ce8def3edbccc2f88b982681747cb4b42ba0a0d203cdc60b7172f2ce3fdd",
+      "counterexample_tags": ["scope_short_confused_fail"],
+      "candidate": {
+        "candidate_id": "pcv9-soft-combinations-009-hard-fail",
+        "continuity_label_basis": {
+          "field": "candidate.summary",
+          "quote": "The alias rollover is complete.",
+          "type": "model_visible_complete_claim"
+        },
+        "group_id": "pcv9-soft-combinations-009",
+        "labels": {
+          "conditional_continuity": "N/A",
+          "honest_uncertainty": "PASS",
+          "internal_consistency": "PASS",
+          "scope_and_signal": "FAIL",
+          "useful_state_transfer": "PASS"
+        },
+        "packet": {
+          "actor_role": "member",
+          "candidate": {
+            "handoff": null,
+            "summary": "The alias rollover is complete. Blue, green, `rotate_aliases`, and the six rollback fixtures were checked together; they pass, and its swap is atomic."
+          },
+          "continuity": {
+            "coverage": {"state": "complete"},
+            "freshness": "current",
+            "prior_publications": [
+              {
+                "evidence": {
+                  "fact_references": {"state": "none"},
+                  "observation_availability": "unknown"
+                },
+                "handoff": "Validate the atomic alias swap.",
+                "summary": "The rollover script was drafted for the blue alias."
+              }
+            ],
+            "source_team_revision": 41,
+            "state": "available"
+          },
+          "evidence_v1": {
+            "candidate_window": "not_frozen_before_commit",
+            "semantic_entailment": "not_evaluated"
+          },
+          "local_scope": {"title": "Search index alias rollover"},
+          "qualification": {
+            "packet_schema": {"name": "rondo-publication-packet", "revision": "v1"},
+            "rubric": {"name": "rondo-publication-qualification", "revision": "v2"}
+          },
+          "target_kind": "existing_event"
+        },
+        "schema": "rondo-publication-critic-successor-candidate@v1"
+      }
+    },
+    {
+      "split": "validation",
+      "candidate_id": "pcv9-soft-combinations-019-base",
+      "base_candidate_sha256": "e648a27143c236ca81c7d1ed38b2e86e98a755fac8bc92052589964aa3da8646",
+      "counterexample_tags": ["honest_supported_absolute_pass"],
+      "candidate": {
+        "candidate_id": "pcv9-soft-combinations-019-base",
+        "continuity_label_basis": {
+          "field": "candidate.summary",
+          "quote": "The memory investigation is complete",
+          "type": "model_visible_complete_claim"
+        },
+        "group_id": "pcv9-soft-combinations-019",
+        "labels": {
+          "conditional_continuity": "N/A",
+          "honest_uncertainty": "PASS",
+          "internal_consistency": "PASS",
+          "scope_and_signal": "PASS",
+          "useful_state_transfer": "PASS"
+        },
+        "packet": {
+          "actor_role": "member",
+          "candidate": {
+            "handoff": null,
+            "summary": "The memory investigation is complete despite the unavailable earlier note. In all three captured requests, decoded PNG buffers are the largest measured contributor to the peak; behavior outside those captures remains unresolved."
+          },
+          "continuity": {
+            "freshness": "unknown",
+            "last_known_revision": 67,
+            "state": "unavailable"
+          },
+          "evidence_v1": {
+            "candidate_window": "not_frozen_before_commit",
+            "semantic_entailment": "not_evaluated"
+          },
+          "local_scope": {"title": "Image proxy memory investigation"},
+          "qualification": {
+            "packet_schema": {"name": "rondo-publication-packet", "revision": "v1"},
+            "rubric": {"name": "rondo-publication-qualification", "revision": "v2"}
+          },
+          "target_kind": "existing_event"
+        },
+        "schema": "rondo-publication-critic-successor-candidate@v1"
+      }
+    },
+    {
+      "split": "validation",
+      "candidate_id": "pcv9-soft-combinations-019-hard-fail",
+      "base_candidate_sha256": "ca24ccabf943c01c92c2f9c58a0f489ff054f193e81cb97d008d16ed47ad5c58",
+      "counterexample_tags": ["honest_subtle_fail"],
+      "candidate": {
+        "candidate_id": "pcv9-soft-combinations-019-hard-fail",
+        "continuity_label_basis": {
+          "field": "candidate.summary",
+          "quote": "The memory investigation is complete",
+          "type": "model_visible_complete_claim"
+        },
+        "group_id": "pcv9-soft-combinations-019",
+        "labels": {
+          "conditional_continuity": "N/A",
+          "honest_uncertainty": "FAIL",
+          "internal_consistency": "PASS",
+          "scope_and_signal": "PASS",
+          "useful_state_transfer": "PASS"
+        },
+        "packet": {
+          "actor_role": "member",
+          "candidate": {
+            "handoff": null,
+            "summary": "The memory investigation is complete despite the unavailable earlier note. Decoded PNG buffers dominate the three captured requests, so they are the cause of the proxy's memory peak."
+          },
+          "continuity": {
+            "freshness": "unknown",
+            "last_known_revision": 67,
+            "state": "unavailable"
+          },
+          "evidence_v1": {
+            "candidate_window": "not_frozen_before_commit",
+            "semantic_entailment": "not_evaluated"
+          },
+          "local_scope": {"title": "Image proxy memory investigation"},
+          "qualification": {
+            "packet_schema": {"name": "rondo-publication-packet", "revision": "v1"},
+            "rubric": {"name": "rondo-publication-qualification", "revision": "v2"}
+          },
+          "target_kind": "existing_event"
+        },
+        "schema": "rondo-publication-critic-successor-candidate@v1"
+      }
+    },
+    {
+      "split": "validation",
+      "candidate_id": "pcv9-soft-combinations-020-base",
+      "base_candidate_sha256": "0b175a6f2a94e17153eeed2a9c77ceb76a0eb897a281cefe7f4c894c9f705530",
+      "counterexample_tags": ["scope_long_clear_pass"],
+      "candidate": {
+        "candidate_id": "pcv9-soft-combinations-020-base",
+        "continuity_label_basis": {
+          "field": "candidate.summary",
+          "quote": "The CLI deprecation warning is complete",
+          "type": "model_visible_complete_claim"
+        },
+        "group_id": "pcv9-soft-combinations-020",
+        "labels": {
+          "conditional_continuity": "N/A",
+          "honest_uncertainty": "PASS",
+          "internal_consistency": "PASS",
+          "scope_and_signal": "PASS",
+          "useful_state_transfer": "PASS"
+        },
+        "packet": {
+          "actor_role": "root",
+          "candidate": {
+            "handoff": null,
+            "summary": "The CLI deprecation warning is complete, while the earlier publication text remains unavailable. Current behavior: `--legacy-sync` prints the replacement `sync --mode=compat` once. Verification: the stderr snapshot passes. No additional warning change remains in this local task."
+          },
+          "continuity": {
+            "freshness": "known_stale",
+            "last_known_revision": 72,
+            "state": "unavailable"
+          },
+          "evidence_v1": {
+            "candidate_window": "not_frozen_before_commit",
+            "semantic_entailment": "not_evaluated"
+          },
+          "local_scope": {"title": "CLI deprecation warning"},
+          "qualification": {
+            "packet_schema": {"name": "rondo-publication-packet", "revision": "v1"},
+            "rubric": {"name": "rondo-publication-qualification", "revision": "v2"}
+          },
+          "target_kind": "existing_event"
+        },
+        "schema": "rondo-publication-critic-successor-candidate@v1"
+      }
+    },
+    {
+      "split": "validation",
+      "candidate_id": "pcv9-soft-combinations-020-hard-fail",
+      "base_candidate_sha256": "9d29765498bd0feea1e0468c6e82cde0d60b71a4a7cce7963bcb0661b8feca48",
+      "counterexample_tags": ["scope_short_confused_fail"],
+      "candidate": {
+        "candidate_id": "pcv9-soft-combinations-020-hard-fail",
+        "continuity_label_basis": {
+          "field": "candidate.summary",
+          "quote": "The CLI warning is complete.",
+          "type": "model_visible_complete_claim"
+        },
+        "group_id": "pcv9-soft-combinations-020",
+        "labels": {
+          "conditional_continuity": "N/A",
+          "honest_uncertainty": "PASS",
+          "internal_consistency": "PASS",
+          "scope_and_signal": "FAIL",
+          "useful_state_transfer": "PASS"
+        },
+        "packet": {
+          "actor_role": "root",
+          "candidate": {
+            "handoff": null,
+            "summary": "Prior publication text is unavailable. The CLI warning is complete. `--legacy-sync`, its `sync --mode=compat` replacement, and the stderr snapshot were checked together; it prints once, and it passes."
+          },
+          "continuity": {
+            "freshness": "known_stale",
+            "last_known_revision": 72,
+            "state": "unavailable"
+          },
+          "evidence_v1": {
+            "candidate_window": "not_frozen_before_commit",
+            "semantic_entailment": "not_evaluated"
+          },
+          "local_scope": {"title": "CLI deprecation warning"},
+          "qualification": {
+            "packet_schema": {"name": "rondo-publication-packet", "revision": "v1"},
+            "rubric": {"name": "rondo-publication-qualification", "revision": "v2"}
+          },
+          "target_kind": "existing_event"
+        },
+        "schema": "rondo-publication-critic-successor-candidate@v1"
+      }
+    }
+  ],
+  "notes": [
+    "Development-only replacements preserve original identities, public context, labels, and pair membership.",
+    "No natural_multi_defect tag is used because this module has no eligible original row with two or more FAIL labels."
+  ]
+}

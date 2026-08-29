@@ -1,0 +1,70 @@
+{
+  "kind": "rondo-contract-projection",
+  "name": "rondo-publication-critic-successor-release",
+  "version": "v1",
+  "authority": "rondo-publication-critic-task@v2",
+  "runtime_validator": "eval/rondo_eval/publication_critic/successor_data.py",
+  "runtime_relational_constraints": [
+    "manifest task identity and every physical file hash and row count match",
+    "candidate packet, labels, and quoted continuity basis validate together",
+    "pair endpoints share public context and satisfy absolute label closure",
+    "train and validation are opened only through separate entrypoints",
+    "test has no training or selection loader"
+  ],
+  "manifest": {
+    "schema": "rondo-publication-critic-successor-release-manifest@v1",
+    "required_task_binding": ["name", "version", "content_sha256", "accepted_commit"],
+    "physical_splits": ["train", "validation", "test"],
+    "files_per_split": ["candidates", "pairs"],
+    "file_binding": ["path", "sha256", "rows"],
+    "consumer_access": {
+      "train": "opens only train candidates and pairs",
+      "validation": "separate explicit entrypoint",
+      "test": "no training or selection entrypoint"
+    }
+  },
+  "candidate": {
+    "schema": "rondo-publication-critic-successor-candidate@v1",
+    "required": ["schema", "candidate_id", "group_id", "packet", "labels", "continuity_label_basis"],
+    "packet": "rondo-publication-packet@v1 with rondo-publication-qualification@v2",
+    "labels": {
+      "useful_state_transfer": ["PASS", "FAIL"],
+      "honest_uncertainty": ["PASS", "FAIL"],
+      "conditional_continuity": ["PASS", "FAIL", "N/A"],
+      "scope_and_signal": ["PASS", "FAIL"],
+      "internal_consistency": ["PASS", "FAIL"]
+    },
+    "continuity_label_basis": {
+      "required": ["type", "field", "quote"],
+      "types": [
+        "model_visible_complete_claim",
+        "model_visible_unfinished_or_not_closed"
+      ],
+      "fields": ["candidate.summary", "candidate.handoff"],
+      "quote": "non-empty canonical substring of the named model-visible field, at most 240 scalars"
+    },
+    "forbidden_model_input_fields": [
+      "completion_state",
+      "public_state",
+      "candidate_brief",
+      "hidden_generation_intent",
+      "split",
+      "labels",
+      "defects",
+      "source",
+      "generator",
+      "reviewer",
+      "pair_direction",
+      "rationale"
+    ]
+  },
+  "pair": {
+    "schema": "rondo-publication-critic-successor-pair@v1",
+    "required": ["schema", "pair_id", "group_id", "kind", "left_candidate_id", "right_candidate_id", "target_dimension", "soft_change"],
+    "kinds": {
+      "boundary": "left is Q+ PASS, right is Q- REWRITE, target changes PASS to FAIL, every non-target label is invariant",
+      "soft_only_invariance": "both endpoints PASS and every hard label including applicability is invariant"
+    },
+    "soft_change": "null for Boundary; a bounded description of the model-visible soft-only counterfactual for invariance"
+  }
+}

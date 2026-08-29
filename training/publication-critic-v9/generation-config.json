@@ -1,0 +1,49 @@
+{
+  "schema": "rondo-publication-critic-successor-generation-config@v1",
+  "dataset_revision": "publication-critic-v9",
+  "accepted_task": {
+    "name": "rondo-publication-critic-task",
+    "version": "v2",
+    "authority_path": "doc/rondo-multi-publication-critic-task-contract-v2.md",
+    "content_sha256": "3eb0539b16403ebe20e74ce1b1ea5114d2383c6118f61fef56c9c91426e6a560",
+    "accepted_implementation_commit": "55342bdb11b09c11b589fd398717f7712fca012c"
+  },
+  "accepted_implementation": {
+    "commit": "55342bdb11b09c11b589fd398717f7712fca012c",
+    "bundle_sha256": "b0124de561f52fb464c223989d003af1e9f2a8a24eccd9ca349a4d769e3488d5"
+  },
+  "design_lock": {
+    "path": "eval/templates/publication-critic/successor-data-design-v1.json",
+    "sha256": "6fa235dce3dc37ce38514f6fbf1aee01194c164f90bc557897a2c9746f77afd7"
+  },
+  "module_contract": {
+    "path": "eval/templates/publication-critic/successor-module-contract-v1.json",
+    "sha256": "3ecca56e24aee52f618a79be6ca11fe27b8e0c3cd7dd49ac2a7b0e8631c77827"
+  },
+  "ignored_namespace": "/home/sjc/desktop/RONDO/eval-data/publication-critic/plan098",
+  "modules": [
+    {
+      "module_id": "hard-boundaries",
+      "source_file": "modules/hard-boundaries.json",
+      "review_file": "reviews/hard-boundaries.json"
+    },
+    {
+      "module_id": "continuity-context",
+      "source_file": "modules/continuity-context.json",
+      "review_file": "reviews/continuity-context.json"
+    },
+    {
+      "module_id": "soft-combinations",
+      "source_file": "modules/soft-combinations.json",
+      "review_file": "reviews/soft-combinations.json"
+    }
+  ],
+  "serialization": {
+    "json": "utf8 sorted keys compact with trailing newline",
+    "jsonl": "one canonical JSON object per line with trailing newline",
+    "candidate_order": "split then module_id group_id candidate_id",
+    "pair_order": "split then module_id group_id pair_id"
+  },
+  "formal_output": "training/publication-critic-v9",
+  "runtime": "eval/rondo_eval/publication_critic/successor_build.py"
+}

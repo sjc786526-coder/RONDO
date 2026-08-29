@@ -2,7 +2,9 @@
 
 本文是 RONDO Multi M3-A1 对 **Publication Critic 产品语义和最低质量边界**的权威合同，适用于
 `main@ea03202ba838f3d6ba4a2061b76b9f3fdbf73c66` 所承载的现行 Team State 语义及其后续三期实现。
-当前阶段只冻结产品含义；Publication Critic、数据链、本地服务和 `team_publish` 接入尚未由本文实现。
+本文只冻结稳定产品含义，不承载实现进度或训练任务细节。现行实现与路线以 WBS 为准；后继五头训练任务的
+唯一权威语义合同是
+[`rondo-multi-publication-critic-task-contract-v2.md`](rondo-multi-publication-critic-task-contract-v2.md)。
 
 当前阶段与任务顺序仍以 [`doc/WBS.md`](WBS.md) 和
 [`doc/WBS/multi-agent-trusted-evidence.md`](WBS/multi-agent-trusted-evidence.md) 为准。两份
@@ -110,6 +112,11 @@ Critic 只判断 publication 用词是否诚实保留 `observed/inferred/suspect
 | packet 内部一致 | title、summary、handoff 和实际提供的 continuity context 在关键状态上相容。 | 同一 packet 对是否完成、已验证内容或接手动作给出关键冲突。 |
 
 这些要求只评价 packet 呈现的内容。Critic 不因无法看到 Producer 私有上下文而猜测“还有遗漏发现”，也不独立调查世界真相。
+
+产品意图中的“工作确实未完成”在 Critic 的受限观察面操作化为 candidate 是否清楚且内部一致地声明完成：清楚完成时
+continuation 不适用；未完成、未明确闭合或可见陈述冲突时仍适用。完成声明若与同一 packet 的可见内容冲突，至少违反
+“packet 内部一致”，对可见限制发生确定性越级时也违反“诚实保留不确定性”。只有私有或隐藏事实才能证明的真假不进入
+Critic packet，也不能通过隐藏 completion label 改变本次判定。
 
 ### 3.2 Soft preferences：只优化 `PASS` 区
 
@@ -258,6 +265,11 @@ REWRITE candidate:
 依据不是 handoff 字段缺失，同样的缺失在已完成事项中合法。
 
 ## 8. 下游共同交接
+
+本文的五项 hard requirement、公共输入、Evidence V1 与 typed `PASS/REWRITE` 产品边界由
+`rondo-publication-critic-task@v2` 投影成一次 backbone forward 的五头训练与评价语义。task contract 可以增加内部
+结构化诊断和派生 scalar，但不得改写本文的发布、重写、fallback、取消、canonical commit 或 Team State 不变量。
+冻结 v8 与旧 scalar 路径保留历史身份，不与后继 task contract 并列成为当前训练语义。
 
 M3-A2 与 M3-B2a 可以独立依赖本文，不需重新讨论被审对象、最小公共输入语义、hard/soft 分层、四类一致门槛、Evidence V1、
 职责边界或重写/故障/取消语义。

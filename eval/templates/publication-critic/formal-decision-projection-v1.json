@@ -1,0 +1,26 @@
+{
+  "kind": "rondo-contract-projection",
+  "name": "rondo-publication-critic-formal-decision",
+  "version": "v1",
+  "raw_output": {
+    "schema": "rondo-publication-critic-structured-output@v1",
+    "schema_path": "eval/templates/publication-critic/successor-output-schema-v1.json",
+    "schema_sha256": "bec9c3c3ad66146f4b8b1b6a3b805ae50caa3a29217eef3575897fc952baa2d3",
+    "validator": "eval/rondo_eval/publication_critic/successor_task.py#validate_structured_output",
+    "historical_decoder": "eval/rondo_eval/publication_critic/successor_task.py#decode_structured_output",
+    "historical_decoder_role": "zero_margin_diagnostic_only",
+    "formal_decision_use": "forbidden"
+  },
+  "formal_decision": {
+    "contract": "rondo-publication-critic-decision@v1",
+    "config_projection": "eval/templates/publication-critic/decision-config-contract-v1.json",
+    "decoder": "eval/rondo_eval/publication_critic/qualification.py#decode_with_decision_config",
+    "requires_frozen_decision_config": true,
+    "required_call_paths": [
+      "training_candidate_assessment",
+      "validation_selection",
+      "qualification",
+      "future_product_projection"
+    ]
+  }
+}
