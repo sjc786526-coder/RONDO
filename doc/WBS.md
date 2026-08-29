@@ -5,7 +5,8 @@
 ExecPlan；Plan 098 的任务合同、v9/v10/qualification、formal decoder、pair-aware margin selection 与 direct-dependency identity 已全部
 通过最终复验并冻结完成。工作包三 Plan 099 已完成阶段 B：commissioning 通过，clean formal 固定完成 16 次 update 和
 2/4/8/12/16 五点评价，step 8 经 fresh process 恢复复现；有效轨迹未达到预冻结开发准入门，终态冻结为 `VALID_FORMAL_NO_GO`，
-没有候选。任务 compute Pod 已全部删除并复核 `$0/h`，既有网络卷扩至 100GB 后保留完整 checkpoint/cache；当前等待最终独立验收。
+没有候选。任务 compute Pod 已全部删除并复核 `$0/h`，既有网络卷扩至 100GB 后保留完整 checkpoint/cache；Plan 099 外部动作授权已关闭，
+当前只进行最终文档整改复验。
 Plan 097 的 `M3_D_DUAL_BACKEND_ENGINEERING_PASS / FINAL_REVIEW_ACCEPTED / INTEGRATED / PUSHED`、Plan 096 的
 `CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH`、Plan 095 最终验收、Plan 094 有效负向研究终态和 Plan 093 Linux 全 workspace 正确性基线
 均保持有效；新路线不自动解锁产品质量、默认启用或生产）
@@ -28,7 +29,7 @@ Plan 097 的 `M3_D_DUAL_BACKEND_ENGINEERING_PASS / FINAL_REVIEW_ACCEPTED / INTEG
 | 0：量化测评基准 | 既有设施与首次 schema v7 正式 canary 已完成，当前无 active campaign | 保留设施；历史结果见 COMPLETED，新 campaign 须重新立项与授权 |
 | 1：Harness 优化 | **正式收口；当前无 active 工作包** | 当前不继续新增观测或内核/热路径优化；既有实现、设施与历史结果保留。未来可由用户另行决定是否重新立项，本次收口不作永久禁止 |
 | 2：本地审批模型 | **已收口，今后不再开启** | 最终结论为“保留为实验”；不改生产默认，不再规划后续工作包 |
-| 3：RONDO Multi | 第一、二期、第四期已完成；三期 Plan 099 执行完成、待最终验收 | 工程链与双 backend 可替换性 GO；v2/v9/v10/qualification、formal decoder、pair-aware selector 与 direct-dependency identity 已冻结。Plan 099 唯一主方案形成有效训练 `NO-GO`，没有开发候选，故工作包四未解锁；不读冻结测试、不改产品默认、不授予质量、产品价值或生产资格 |
+| 3：RONDO Multi | 第一、二期、第四期已完成；三期 Plan 099 有效 `NO-GO`、最终文档整改复验中 | 工程链与双 backend 可替换性 GO；v2/v9/v10/qualification、formal decoder、pair-aware selector 与 direct-dependency identity 已冻结。Plan 099 唯一主方案形成有效训练 `NO-GO`，没有开发候选，故工作包四未解锁；`NO_FURTHER_COMPUTE`，不读冻结测试、不改产品默认、不授予质量、产品价值或生产资格 |
 
 方向 3 当前 Linux 正确性基线由 Plan 093 建立：default features、standard local Nextest、checksum-verified V8 的完整 workspace
 为 `14660/14660` passed、0 failure/error/timeout，另有 1/1 setup passed；24 个 skip 不计 passed。正式证据和精确边界见
@@ -77,11 +78,12 @@ Plan 097 的 `M3_D_DUAL_BACKEND_ENGINEERING_PASS / FINAL_REVIEW_ACCEPTED / INTEG
   的 Boundary Q+/Q-、非目标不变性与 soft invariance 报告必须全部闭合才可进入原单一 bounded margin grid 的确定性排序。v10/qualification
   只更新必要 identity 后从空目录机械重建并逐字节复现，数据正文和已接受 review 未重做。本轮 dependency identity 窄修同样只机械更新
   design/config/manifest/release identity 并完成独立字节复现。
-- **工作包三 / Plan 099 阶段 B 执行完成、待最终验收**：唯一方案为 exact Skywork Reward V2 Qwen3 1.7B 冻结 BF16 backbone 加五个
+- **工作包三 / Plan 099 阶段 B 执行完成、最终文档整改复验中**：唯一方案为 exact Skywork Reward V2 Qwen3 1.7B 冻结 BF16 backbone 加五个
   FP32 linear heads，只训练 22,528 个参数。commissioning 闭合一次非零更新、checkpoint-first 评价、新进程恢复和小型回传；clean formal
   从 exact base 与空 namespace 完成固定 16 次 update，在 2/4/8/12/16 评价，step 8 由 fresh process 恢复并复现。有效轨迹未形成 decision
   config，按预冻结门冻结为 `NO-GO`，没有最佳 checkpoint 或 inference-ready 候选；完整 step 8/16 checkpoint 与大型环境资产留在 100GB
-  网络卷，本地只回传必要小型证据。两个任务 Pod 均已删除，实时终态为 0 Pod / compute `$0/h`，保守总费用 `$1.5345929717`。
+  网络卷，本地只回传必要小型证据。两个任务 Pod 均已删除，实时终态为 0 Pod / compute `$0/h`，保守总费用 `$1.5345929717`。Plan 099
+  外部动作授权已关闭，不得重建 Pod、恢复训练、调参或追求正向结果。
 - **工作包四保持锁定**：Plan 099 没有形成候选，不读取 qualification 或 v9 test 正文，不启动资格与横评；若用户以后改变路线，须另立任务和授权。
 
 各工作包的详细目标、边界、宏观验收与授权门以 `doc/WBS/multi-agent-trusted-evidence.md` 为准。工作包一与二由
@@ -304,8 +306,8 @@ Plan 097 的一次性本地模型、DeepSeek scorer、正常 Producer 与 30 RMB
 main 合并和随 Plan 098 主线更新推送；分支归档或 worktree 删除继续等待用户批准。任何后续真实模型/API、质量测量、产品价值验证或生产动作都须
 服从对应新任务授权。
 Plan 099 阶段 A 已通过独立验收，阶段 B 唯一冻结主方案已完成 commissioning 与 clean formal 并形成有效训练 `NO-GO`。用户随后将资源收口
-改为轻量 evidence-first：核心证据完整回传后立即释放 compute，不为 queue 审查保留 GPU；后续确有同路线技术恢复需要时不设固定 Pod 次数，
-只受实时预算与网络卷六小时保留费约束。当前全部任务 Pod 已删除、compute `$0/h`，100GB 既有卷保留；Plan 099 等待最终独立验收。
+改为轻量 evidence-first：核心证据完整回传后立即释放 compute，不为 queue 审查保留 GPU。当前全部任务 Pod 已删除、compute `$0/h`，100GB
+既有卷保留；有效 `NO-GO` 接受后 Plan 099 外部动作授权关闭，任何后续 GPU、恢复、新路线、资格测试或卷变更都须另立任务并重新授权。
 工作包四的真实推理、冻结测试和付费横评仍需再次独立授权。
 
 ## 7. 子 WBS 索引

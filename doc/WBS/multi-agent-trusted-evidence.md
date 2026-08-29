@@ -1,11 +1,12 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
 最后更新：2026-08-29 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
-状态：**第一期、第二期、第四期已完成；Publication Critic 三期 Plan 097 已完成并闭合双 backend 工程 E2E 与可替换接缝，现正式进入
-质量重构路线。后续严格串行为“任务合同重构 → v8 后继数据改造与有限扩充 → 一次主方案训练 → 模型资格验收与横评”。Plan 098 已把
+状态：**第一期、第二期、第四期已完成；Publication Critic 三期 Plan 097 已完成并闭合双 backend 工程 E2E 与可替换接缝。质量重构原定串行为
+“任务合同重构 → v8 后继数据改造与有限扩充 → 一次主方案训练 → 模型资格验收与横评”；前三个工作包已执行，第四个因无候选未解锁。Plan 098 已把
 前两个工作包规划为严格串行的两个阶段；Plan 098 的 v2/v9/v10/qualification 主体与此前方向性整改保留，formal
 decoder 唯一入口、pair-aware margin selection 和 frozen decision direct-dependency identity 均已通过最终复验，Plan 098 完成并冻结。
-工作包三 Plan 099 阶段 A 已实现并提交、正等待独立验收，阶段 B 由阶段 A 独立验收后的审查者明确批准门锁定。Plan 097 的
+工作包三 Plan 099 已完成唯一主方案 commissioning 与 clean formal，终态为 `VALID_FORMAL_NO_GO`；没有候选，工作包四未解锁，Plan 099
+外部动作授权已关闭。Plan 097 的
 `M3_D_DUAL_BACKEND_ENGINEERING_PASS / FINAL_REVIEW_ACCEPTED / INTEGRATED / PUSHED`、Plan 096 的
 `CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH / FINAL_REVIEW_ACCEPTED / INTEGRATED / PUSHED`、Plan 094 的有效负向终态和 Plan 095 的
 最终验收均保持有效；新路线完成资格前，本地/云端质量、产品价值、Publication Critic 默认与生产启用继续锁定**
@@ -140,9 +141,9 @@ M3-B1c 正式分阶段训练与工件回收          │
                        ↓
         工作包二：v8 后继数据改造与有限扩充（Plan 098 阶段二；已完成并冻结）
                        ↓
-        工作包三：一次主方案训练（Plan 099；阶段 A 已实现并提交待验收，阶段 B 审查者批准门锁定）
-                       ↓
-        工作包四：模型资格验收与横评
+        工作包三：一次主方案训练（Plan 099；`VALID_FORMAL_NO_GO`、0 Pod、无候选）
+                       ╳
+        工作包四：模型资格验收与横评（未解锁）
 
 并列 reference 支线：M3-B2a 已有可替换 service → Plan 095 云端参考 scorer backend（已完成）
                                               ↓
@@ -151,11 +152,10 @@ M3-B1c 正式分阶段训练与工件回收          │
                          作为 Plan 097 cloud engineering fixture 接入同一产品链
 ```
 
-历史 A/B/C/D 阶段及 Plan 097 的工程结果保持冻结。当前权威后续路线是上述四个质量重构工作包。工作包一和二已由 Plan 098 串行完成并冻结；
-工作包三由 Plan 099 规划为阶段 A 本地非付费准备与审查者批准后的阶段 B 云端付费执行；工作包四仍单独建立任务级 ExecPlan。
-本 WBS 不替执行者冻结具体模块、训练超参数、云资源或实现步骤。
+历史 A/B/C/D 阶段及 Plan 097 的工程结果保持冻结。工作包一和二已由 Plan 098 串行完成并冻结；工作包三 Plan 099 形成有效训练 `NO-GO`，
+没有可交给资格验收的候选，因此本轮串行路线在此停止，工作包四不启动。任何改变路线、重新训练或启动工作包四的动作须另立任务并重新授权。
 
-### 当前后续路线：三期质量重构
+### 三期质量重构工作包终态
 
 #### 工作包一：任务合同重构（Plan 098 阶段一；已完成并冻结）
 
@@ -229,18 +229,18 @@ release-bound selector 现绑定并消费实际 validation pairs，pair bytes SH
 pair 的绝对标签与 hard/applicability/gate invariance 必须闭合，才可进入原单一 bounded margin grid 的确定性 candidate-level 排序。正式
 v10/qualification 只更新必要 identity 并逐字节复现；数据正文、review 和 qualification set 均未重做。本轮 direct dependency identity
 窄修再次只机械更新 design/config/manifest/release identity，并完成独立字节复现。最终复验接受 implementation
-`056ab91a54157200e887bb03f3ddf45c259a3a2c`，Plan 098 完成并冻结；工作包三 Plan 099 阶段 A 已实现并提交、等待独立验收。
+`056ab91a54157200e887bb03f3ddf45c259a3a2c`，Plan 098 完成并冻结；后继工作包三 Plan 099 已形成有效训练 `NO-GO`，没有候选。
 
-#### 工作包三：一次主方案训练
+#### 工作包三：一次主方案训练（Plan 099；有效 `NO-GO`）
 
 **目标**：在工作包一、二冻结后形成一个可进入资格验收的本地候选模型。Plan 099 分为同一 ExecPlan 内的两个串行阶段：先完成不产生云训练费用的
 本地准备与审查，再由审查者按用户委托明确冻结付费边界并批准后执行一次主方案训练；不以本包为新的多路线搜索平台。
 
-**阶段 A——本地非付费准备**：冻结学生基座、数据 revision、输入/输出/损失合同、主 recipe、开发指标、停止与候选保留规则；闭合 consumer、
+**阶段 A——本地非付费准备（历史执行合同，已完成）**：冻结学生基座、数据 revision、输入/输出/损失合同、主 recipe、开发指标、停止与候选保留规则；闭合 consumer、
 模型无关 objective 测试、训练控制、checkpoint/recovery、费用/资源门、归档和 dry-run/fake 流程。阶段 A 须经独立审查接受，并形成清晰的
 付费执行申请；未获审查者按用户委托明确批准时在此安全停止，不创建计费资源或上传资产。
 
-**阶段 B——云端付费执行**：阶段 A 验收通过后，用户授权审查者通过指定队列明确冻结 provider、区域/硬件、最长时限、动态预算、允许上传/下载的
+**阶段 B——云端付费执行（历史执行合同，已关闭）**：阶段 A 验收通过后，用户授权审查者通过指定队列明确冻结 provider、区域/硬件、最长时限、动态预算、允许上传/下载的
 精确资产、可创建的 Pod/卷、技术重试与恢复范围及最终停止/删除/保留策略并批准执行。授权后，执行者可在这些总边界内自主处理库存、环境、依赖、
 传输、训练中断、checkpoint 恢复、代码或配置的普通正确性问题并重跑必要步骤，不因一个可自行修复的窄故障反复停下请示；超预算、换模型/任务/
 数据、扩大资源、读取测试集、新增付费分支或改变外部状态范围仍须重新授权。
@@ -250,10 +250,18 @@ v10/qualification 只更新必要 identity 并逐字节复现；数据正文、r
 checkpoint 等其他大型资产留在网络卷；核心任务提交并经审查者确认不再需要 Pod 后立即释放 compute，再在本地完成文档与费用收口。若主方案语义有效
 但未形成候选，应诚实终止为 no-go 并回交 WBS，不在同一授权内开启多路线搜索；产品资格、冻结测试结论、默认启用和生产仍留给工作包四及其后续决定。
 
-#### 工作包四：模型资格验收与横评
+**当前结果**：阶段 A 已通过独立验收；阶段 B commissioning 与从 exact base/空 namespace 开始的 16-update clean formal 均已完成，step 8
+经 fresh process 恢复复现。正式轨迹有效但未达到预冻结开发准入门，冻结为 `VALID_FORMAL_NO_GO`，没有 best checkpoint 或 candidate。
+两个任务 Pod 均已删除并复核 0 Pod / compute `$0/h`；100GB 网络卷 `mwemzrn33y` 保留 step 8/16 checkpoint 与大型环境资产。Plan 099
+外部动作授权关闭，`NO_FURTHER_COMPUTE`。
+
+#### 工作包四：模型资格验收与横评（未解锁）
 
 **目标**：冻结候选与判定配置后，使用未参与训练和方案选择的集合完成本地资格、相对 base/历史候选及必要异构 reference 的同口径横评，
 给出最终模型和 GO/NO-GO。
+
+**当前状态**：Plan 099 未形成候选，本包不启动，不读取 qualification 或 v9 test 正文。任何后续资格测试、真实模型推理或付费横评须另立任务并
+重新授权。
 
 **边界与宏观验收**：测试集只允许一次正式释放，不得用于返调任务、数据、模型或 threshold；资格以 false PASS、各 hard dimension 的失败召回、
 两端 Boundary 闭合、总体 operating point、稳定性和有界运行资源为主，Within-PASS 只作 invariance/独立报告。任何真实本地模型、付费 API、
@@ -663,7 +671,8 @@ local/cloud 各 3/3 fixture 的 `PASS + REWRITE`、正常 Producer 两次重写/
   不写/清理共享 Cargo target，也不以 Plan 079 卷为前置。Plan 082 已完成真实正式轮、GPU 专项验收和大型资产交接，训练 Pod 与一次性
   transfer Pod 均已释放并确认 compute 止费；最终验收已通过，用户本人决定继续保留网络卷 `mwemzrn33y`，该卷当前仍未删除。
 - Plan 087/090 均已结束并释放全部 Pod，当前不占本地 Cargo build lock、Docker、真实本地模型或云 compute。用户决定保留的
-  `mwemzrn33y` 网络卷已由 Plan 094 按需扩到 70GB 并继续计费，未经授权不得删除；Plan 082/087/090 既有根保持只读。
+  `mwemzrn33y` 网络卷已由 Plan 099 因 quota 扩到 100GB并继续计费，未经授权不得删除；Plan 082/087/090/094 既有根保持只读，Plan 099
+  step 8/16 checkpoint 与环境资产按终态保留。
   真实本地模型、Docker 与重型 Cargo 仍按根 `AGENTS.md` 全局串行。
 - Plan 095 未使用 GPU、RunPod、真实本地模型、Docker 或既有训练卷，只用付费 API 与本地 Cargo；Cargo 全部从 095 worktree 经正式入口
   复用主物理根 `.codex/cargo-target/rondo-multi`，未在 worktree 另建 target。
@@ -672,8 +681,8 @@ local/cloud 各 3/3 fixture 的 `PASS + REWRITE`、正常 Producer 两次重写/
 - 三期与已经正式收口的方向 1 没有产品依赖。如果未来重新启动方向 1，普通工作仍可并行安排，但共享 API 预算、
   本地 GPU、Docker、构建锁和磁盘时必须显式错峰。
 - 历史 M3-A1、M3-A2、M3-B1a、M3-B1b、M3-B1c、M3-B2a、M3-B2b、M3-C1、M3-C2、M3-D 均保留各自独立任务级 plan；
-  工作包一、二已按 Plan 098 串行冻结，工作包三已建立 Plan 099，工作包四仍待候选冻结后单独立项。长程 WBS 不替执行者冻结模块布局、训练超参数、
-  云资源或部署技术路线。
+  工作包一、二已按 Plan 098 串行冻结，工作包三 Plan 099 以 `VALID_FORMAL_NO_GO` 结束且没有候选，工作包四未解锁。本轮三期质量重构路线
+  在此停止；任何改变路线、重新训练或资格测试须另立任务并重新授权。
 
 ## 现行产品语义合同
 
@@ -753,8 +762,8 @@ local/cloud 各 3/3 fixture 的 `PASS + REWRITE`、正常 Producer 两次重写/
 ## 外部授权与实施边界
 
 - M3-A1 产品合同与 Plan 054 / M3-A2 已完成；M3-B2a 已按 Plan 055 完成实现、独立验收与主线整合；M3-B2b 已按 Plan 057 完成实现、
-  审查整改、最终独立验收与主线整合。工作包一、二已按 Plan 098 冻结；工作包三已按 Plan 099 建立任务合同并取得阶段 A 授权；工作包四启动时
-  仍须按 `plan/plan-example.md` 建立任务合同并取得授权。
+  审查整改、最终独立验收与主线整合。工作包一、二已按 Plan 098 冻结；工作包三 Plan 099 已形成 `VALID_FORMAL_NO_GO` 且外部动作授权关闭；
+  工作包四未解锁。
 - RunPod 创建或计费、模型与数据上传、云端训练、权重下载、真实本地模型加载/推理、Docker 和付费 API 均须在对应任务
   开始前取得明确授权。23 USD 只是 Plan 060/066 已完成训练链的历史连续总账上限；Plan 082 的实际训练活动使用独立的 12 小时/
   15 USD 上限，且该付费授权只有在阶段 A 经最终审查者验收、用户本人再明确人工批准后才生效。训练完成后的强制审查等待、0 Pod
@@ -778,10 +787,10 @@ local/cloud 各 3/3 fixture 的 `PASS + REWRITE`、正常 Producer 两次重写/
   不向后续任务延伸。Plan 097 的 exact base/8GB GPU、DeepSeek scorer、正常 Producer 与 30 RMB 真实 API 授权也已随最终验收关闭，余额不转移；
   用户已批准并完成本地 main 合并，相关主线随后随 Plan 098 集成一并推送；当前保留 097 分支、worktree 与既有证据，归档/worktree 删除等待
   用户批准。后续真实模型/API、validation/unseen、产品价值或生产动作须服从对应新任务授权。
-- Plan 099 阶段 A 已授权项目内编辑、必要重构、合法 v10 train/validation 读取、定向测试、fake/dry-run、独立审查与整改重跑；不包含真实模型、
-  Docker、GPU/RunPod、付费 API、外部上传或冻结测试。阶段 A 提交并通过独立验收后，用户授权审查者通过指定队列一次冻结主方案、资源、时间、
-  动态预算、技术重试/恢复、资产传输和收口动作并批准阶段 B；收到该批准前不得开始付费动作。批准后范围内普通故障修复与必要重跑可自主完成，
-  只有超出这些总边界时才再次停下确认。
-- 工作包四必须单独取得真实模型推理、冻结测试释放及任何付费异构横评的任务授权；历史 Plan 096/097 余额、provider 请求和数据权限均不转移。
+- Plan 099 阶段 A 与阶段 B 已执行完成，唯一主方案形成 `VALID_FORMAL_NO_GO`；两个任务 Pod 已删除并确认 compute `$0/h`，100GB 网络卷
+  `mwemzrn33y` 按用户决定保留。Plan 099 全部外部动作授权已关闭，不得沿用本任务重建 Pod、恢复训练、调参、追求正向结果、读取冻结测试或
+  变更网络卷。任何后续 GPU、恢复、新路线、资格测试或卷处置都须另立任务并重新授权。
+- 工作包四当前未解锁；若以后重新立项，必须单独取得真实模型推理、冻结测试释放及任何付费异构横评的任务授权。历史 Plan 096/097/099 余额、
+  provider 请求和数据权限均不转移。
 - 训练数据、权重、逐样本输出与私有运行材料留在 `eval-data/` 或仓库外；`training/` 只保存体积合规的轻量合同与数据。
 - 正确性测试随产品能力建设；测评只保留能指导模型选择和产品验收的轻量指标，不建设数据资产审计或可信证明平台。

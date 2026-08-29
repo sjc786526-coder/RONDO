@@ -22,7 +22,7 @@ development-only `publication-critic-v10`，只形成一套本地可运行的五
 
 本任务不证明独立泛化或产品资格，不读取冻结资格正文，不修改 Publication Critic 默认状态、产品发布流程或生产配置。
 
-### 阶段门
+### 阶段门（历史执行过程，均已关闭）
 
 - **阶段 A：前置本地非付费准备。** 用户已经一次授权本计划第 2 节列出的项目内编辑、合法 v10 train/validation 读取、普通依赖与只读资料查询、
   定向测试、fake/dry-run、独立审查整改和提交。阶段 A 不加载、推理或训练真实模型，不使用 GPU/RunPod/Docker/付费 API，不上传资产、
@@ -32,7 +32,7 @@ development-only `publication-critic-v10`，只形成一套本地可运行的五
   动态预算、Pod/卷数量、资产传输、commissioning、技术恢复/重跑和收口边界后，本阶段授权才生效；不需要再等待一次用户回复。
   未收到该明确批准时，任何真实模型、RunPod、上传下载、训练、卷变更或费用动作都不得开始。阶段 B 执行中用户随后将收口改为轻量
   evidence-first：核心训练、恢复、候选/`NO-GO` 冻结和必要回传完成后立即 exact stop/delete compute 并确认 `$0/h`，不让 GPU 为 queue
-  审查继续计费；后续确有同路线技术恢复需要时可按实时预算重新创建 Pod。
+  审查继续计费。该动作已经完成；有效 `NO-GO` 接受后阶段 B 外部动作授权关闭，当前为 `NO_FURTHER_COMPUTE`。
 
 ### 完成/验收标准
 
@@ -155,28 +155,27 @@ trainable scope、精确训练强度或普通调试顺序，这些由执行者�
     `max(实时可用余额 - 已知未结或延迟费用 - 6 × 现有网络卷实时小时费率, 0)`。
 
     该余额是不可突破上限，不是花费目标，也不授权充值。Pod、容器盘、任务期间卷费、模型/数据传输、commissioning、formal、恢复、回传和止费
-    都计入同一总账；启动任何长步骤前必须确认剩余预算足够完成该步骤、必要回传和安全止费，否则不启动或立即止费。用户后续明确解除固定 Pod
-    次数和跨 queue 长期 guard，把同路线技术恢复的资源上限收敛为实时预算；当可用余额只够网络卷继续保留 6 小时时，必须先把任务资产保存到
-    网络卷，再立即释放 compute。
+    都计入同一总账；启动任何长步骤前必须确认剩余预算足够完成该步骤、必要回传和安全止费，否则不启动或立即止费。执行期间用户曾解除固定 Pod
+    次数并以实时预算和网络卷六小时保留费约束必要技术恢复；本轮未再创建第三个 Pod，随后有效 `NO-GO` 终态关闭了全部 Plan 099 付费动作。
 11. **资源与抢卡。** 阶段 A 的付费申请必须冻结 RunPod 区域、单卡硬件、最长墙钟、同时/累计 Pod 与卷数量、exact image/environment、上传下载
     allowlist、现有 `mwemzrn33y` 的复用资格或新建/扩容/删除策略，以及最终保留/删除动作。历史 Plan 082/087/090/094 roots 保持只读；若复用
     `mwemzrn33y`，只写 Plan 099 独立 root。静态上传只含两份 bundle 及两份 receipt；Pod 创建核验后的 runtime host→Pod 上传只含
     live-resource、lifecycle、paid-segment 三类 canonical content-addressed JSON，不开放任意 JSON 或其他资产。库存紧张时必须使用
     `scripts/create-runpod-when-ready.py`；创建后由执行者独立核验实际价格、硬件、
-    机房和卷挂载，不符则立即释放，不能让创建脚本承担这些职责。后续确有同路线技术恢复必要时可创建其他 Pod，不设固定累计次数；同一时刻只
-    保留必要 compute，并继续遵守动态预算和六小时卷费保留门。
-12. **候选回传与 Pod 预释放门。** 候选模型、decision config、tokenizer/input、recipe、开发结果与恢复证据须形成校验和一致的冻结集合。
+    机房和卷挂载，不符则立即释放，不能让创建脚本承担这些职责。以上只记录阶段 B 执行期资源合同；Plan 099 现已关闭，不再授权创建任何 Pod、
+    恢复训练或变更网络卷。
+12. **候选回传与资源释放（历史合同；本轮无候选）。** 候选模型、decision config、tokenizer/input、recipe、开发结果与恢复证据须形成校验和一致的冻结集合。
     若形成候选，必须在 Pod 预释放审查前把工作包四所需的完整 inference-ready 模型工件（全部学生/五头推理权重及必要 config/tokenizer/input）
     下载到本地 Plan 099 ignored namespace，并独立核对 exact-tree、bytes 和 SHA-256；不能只回传 manifest、adapter 或摘要后把唯一可运行权重留在云端。
     完整训练 checkpoint、optimizer/scheduler/RNG state 和其他大型资产继续留在网络卷的 Plan 099 独立 root，只回传验收必需的小型证据。
 13. **先证据回传、再释放 compute、后本地收口。** 阶段 B 核心训练、fresh-process 恢复、正式评价、候选/`NO-GO` 冻结、必要模型/证据回传和仍
     依赖 GPU 的验证全部完成后，执行者立即 exact stop/delete 全部任务 compute Pod并实时确认 0 Pod / compute `$0/h`，随后在无 Pod 状态下整理
-    最终结果、WBS、COMPLETED 和日志并申请最终审查。审查若暴露确需 GPU 的同路线技术问题，可在实时预算和六小时卷费保留门内重新抢卡；不得仅为
-    文档或常规审查等待保留、重建 Pod。
+    最终结果、WBS、COMPLETED 和日志并申请最终审查。该流程已执行完成；有效 `NO-GO` 后不得为审查、整改或追求结果重建 Pod，任何后续外部动作
+    必须另立任务并重新授权。
 14. **测试与诚实口径。** 只运行受影响模块必要的 pure/fake/focused 门禁和相称格式/静态检查；若改 Rust，遵循共享 target/build-lock 规则，
     不默认扩大全 workspace。fake、dry-run、commissioning、formal、skip 和未运行必须分开记录，不以弱化测试、安全门或审批逻辑换取绿色结果。
-15. **提交与下游边界。** 阶段 A、Pod 预释放、整改和最终交付都先提交 099 分支再向审查者报告；不合并、不推送。工作包四的冻结测试、横评、最终产品 GO/NO-GO
-    和启用决策不在本计划内，Plan 099 完成后只按 WBS 交接候选或有效训练 `NO-GO`。
+15. **提交与下游边界。** 阶段 A、阶段 B 和整改交付均先提交 099 分支再向审查者报告；不合并、不推送。工作包四的冻结测试、横评、最终产品 GO/NO-GO
+    和启用决策不在本计划内。Plan 099 只交接有效训练 `NO-GO`，没有候选，工作包四未解锁。
 
 ## 4. 软性建议
 
@@ -234,24 +233,24 @@ trainable scope、精确训练强度或普通调试顺序，这些由执行者�
 
 ### 当前工作
 
-- `PHASE_B_EXECUTION_COMPLETE / VALID_FORMAL_NO_GO / FINAL_REVIEW_PENDING / ZERO_POD / VOLUME_RETAINED`。
+- `PHASE_B_EXECUTION_COMPLETE / VALID_FORMAL_NO_GO / FINAL_REVIEW_REMEDIATION / ZERO_POD / VOLUME_RETAINED / NO_FURTHER_COMPUTE`。
 
 ### 本任务剩余步骤
 
-1. 提交无 Pod 的最终 WBS、COMPLETED、ExecPlan 与执行日志收口，保持 worktree clean。
-2. 使用 §7 队列申请最终独立验收并停止。
+1. 提交无 Pod 的最终授权终态、ExecPlan 历史口径和子 WBS 同步整改，保持 worktree clean。
+2. 使用 §7 队列申请纯文档复验并停止。
 
 ### 阻塞项
 
 - 无执行阻塞；当前不需要 GPU，全部 compute 已释放。
-- 若最终审查发现确需 GPU 的同路线技术问题，用户已允许在实时预算和网络卷六小时保留费门内创建其他 Pod；不得为普通审查或文档重建。
+- Plan 099 为 `NO_FURTHER_COMPUTE`；任何后续 GPU、恢复、新路线、资格测试或卷变更都须另立任务并重新授权。
 
 ### 当前验收状态
 
 - 规划：`COMPLETED / COMMITTED`。
 - 阶段 A：`REVIEW_ACCEPTED / COMPLETE`。
-- 阶段 B：`EXECUTION_COMPLETE / VALID_FORMAL_NO_GO / ZERO_POD / VOLUME_RETAINED`。
-- 完整任务：`GOAL_FAILED_AS_QUALITY_OUTCOME / FINAL_REVIEW_PENDING`。
+- 阶段 B：`EXECUTION_COMPLETE / VALID_FORMAL_NO_GO / ZERO_POD / VOLUME_RETAINED / NO_FURTHER_COMPUTE`。
+- 完整任务：`GOAL_FAILED_AS_QUALITY_OUTCOME / FINAL_REVIEW_REMEDIATION`。
 
 ### 交接边界
 
@@ -283,9 +282,14 @@ trainable scope、精确训练强度或普通调试顺序，这些由执行者�
 | 014 | 正常提前释放仍由 reviewer receipt 解锁；不可移动绝对 trigger 由 Plan 094 guard 的固定 Plan 099 profile 自动 exact stop/delete 并确认 0 Pod、compute `$0/h` | queue 等待不能突破累计墙钟和动态预算，deadline 安全终止不应依赖人工及时响应 | 生命周期、费用、审批 | 已被 016 取代 |
 | 015 | `maximum_lifecycle_seconds` 是 Pod 主体窗口；累计计费上限机械包含 60 秒 kill grace 与 360 秒确认。runtime host→Pod 只开放 resource/lifecycle/segment 三类 16 KiB canonical content-addressed JSON | 使 10,800 秒硬上限覆盖最坏收口，同时只传 worker 必需控制面，不扩大任意上传能力 | 生命周期、资产传输 | 已采纳 |
 | 016 | 用户将核心完成后的资源收口改为 evidence-first：必要证据本地验签后立即释放 compute，不建设或等待跨 queue 长期 guard | queue 自动唤醒且审查通常很快，长期 guard 已实际增加 Pod 失败与重新抢卡风险 | 生命周期、费用、审查 | 已采纳并执行 |
-| 017 | 后续确有同路线技术恢复需要时不设固定 Pod 次数；资源上限只看实时预算并始终预留网络卷 6 小时费用，可用余额仅剩该保留额时先保存资产到卷再释放 compute | 避免机械 Pod 次数阻断必要恢复，同时不突破用户给定的唯一资源约束 | 恢复、预算、资产 | 已采纳 |
+| 017 | 阶段 B 执行期间，必要同路线技术恢复曾不设固定 Pod 次数并只受实时预算与网络卷 6 小时保留费约束；本轮未再创建第三个 Pod | 避免执行期机械 Pod 次数阻断必要恢复，同时不突破用户给定资源约束 | 恢复、预算、资产 | 执行期历史；终态失效 |
+| 018 | 有效 `NO-GO` 接受后关闭 Plan 099 全部外部动作授权，冻结 `NO_FURTHER_COMPUTE`；任何后续 GPU、恢复、新路线、资格测试或卷变更须另立任务并重新授权 | 防止执行期恢复许可越过有效质量终态，误变成不限次数追结果入口 | 终态、授权、资源 | 已采纳 |
 
-## 7. 给执行者的启动提示词
+## 7. 历史启动提示词（已完成且失效）
+
+以下内容逐字保留为 Plan 099 启动时的历史任务合同，不再是当前可执行指令。其中 Pod 预释放、absolute guard 和阶段 B 付费流程均已完成；
+用户实际采用 evidence-first 立即释放，两个任务 Pod 已删除并确认 compute `$0/h`。有效 `NO-GO` 接受后 Plan 099 为
+`NO_FURTHER_COMPUTE`，本节不授权重建 Pod、恢复训练、变更网络卷或读取冻结测试；任何后续外部动作必须另立任务并重新授权。
 
 你是 Plan 099 的执行者。请在 `/home/sjc/desktop/RONDO/.claude/worktrees/099-publication-critic-five-head-training/`、分支
 `worktree-099-publication-critic-five-head-training` 内工作。开始前完整阅读根 `AGENTS.md`、`multidev/AGENTS.md`、当前 WBS、

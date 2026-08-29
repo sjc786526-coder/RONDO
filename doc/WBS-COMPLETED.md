@@ -2589,7 +2589,7 @@ INTEGRATED / NOT_PUSHED`。clean formal source 为 `0ae9623`，执行者交付�
 
 ## Publication Critic 五头主方案训练（Plan 099，2026-08-29）
 
-**状态**：`EXECUTION_COMPLETED / VALID_FORMAL_NO_GO / FINAL_REVIEW_PENDING / ZERO_POD / VOLUME_RETAINED`。
+**状态**：`EXECUTION_COMPLETED / GOAL_FAILED / VALID_FORMAL_NO_GO / FINAL_REVIEW_REMEDIATION / ZERO_POD / VOLUME_RETAINED / NO_FURTHER_COMPUTE`。
 
 - 阶段 A 冻结 exact Skywork Reward V2 Qwen3 1.7B BF16 backbone 与五个 FP32 无 bias heads，只训练 22,528 参数；五头 loss、v10
   train/validation、checkpoint-first、fresh-process 恢复、pair-aware selector 与开发准入门均在真实结果前冻结并通过独立验收。
@@ -2601,4 +2601,5 @@ INTEGRATED / NOT_PUSHED`。clean formal source 为 `0ae9623`，执行者交付�
   v10 正文、loss、scope、recipe 与准入门均未改变。
 - 两个任务 Pod 均已删除并复核 0 Pod / compute `$0/h`；100GB 网络卷保留完整 step 8/16 checkpoint、exact model、venv 与 cache。保守任务费用
   `$1.5345929717`，compute 删除后余额 `$2.018521311`，卷继续约 `$0.01/h`。本地 ignored namespace 只保留四件 bundle/receipt、必要小型正式证据
-  与生命周期/费用回执；详情见 `agent_log/2026-08-29-plan099-stage-b-execution.md`。
+  与生命周期/费用回执。有效 `NO-GO` 后 Plan 099 外部动作授权关闭，任何后续 GPU、恢复、资格测试或卷变更须另立任务并重新授权；详情见
+  `agent_log/2026-08-29-plan099-stage-b-execution.md`。
