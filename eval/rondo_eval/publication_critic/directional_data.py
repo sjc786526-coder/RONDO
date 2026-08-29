@@ -20,6 +20,7 @@ from .qualification import (
     DECISION_IMPLEMENTATION_COMPONENT_PATHS,
     decision_contract_sha256,
     decision_implementation_identity,
+    _select_and_freeze_decision_config,
 )
 from .successor_build import (
     ACCEPTED_IMPLEMENTATION_BUNDLE_SHA256,
@@ -51,9 +52,9 @@ DESIGN_PATH = TEMPLATE_ROOT / "directional-remediation-design-v1.json"
 CONFIG_PATH = TEMPLATE_ROOT / "directional-remediation-config-v1.json"
 DEVELOPMENT_REVISION = "publication-critic-v10"
 QUALIFICATION_SET_ID = "publication-critic-qualification-v1"
-DECISION_IMPLEMENTATION_COMMIT = "9d281cf56d1b66140b24a765cfced12db78af9c1"
+DECISION_IMPLEMENTATION_COMMIT = "cec96f613ded3893bc6639823a38f57004baede0"
 DECISION_IMPLEMENTATION_BUNDLE_SHA256 = (
-    "ebddb382d8fd166b69763665bf4efcdae20fd187d390954c322f80fefbadb824"
+    "a77f5cb6f41c192664aa1ce7c1c34f5761cf7fcae80b64feb27d24d0a43cb448"
 )
 DEVELOPMENT_PATCH_SCHEMA = "rondo-publication-critic-directional-development-patch@v1"
 DEVELOPMENT_REVIEW_SCHEMA = "rondo-publication-critic-directional-development-review@v1"
@@ -218,6 +219,35 @@ class DevelopmentRelease:
         self,
     ) -> tuple[tuple[Mapping[str, Any], ...], tuple[Mapping[str, Any], ...]]:
         return self._load_split("validation")
+
+    def select_and_freeze_validation_decision_config(
+        self,
+        *,
+        validation_candidate_ids: Sequence[str],
+        validation_output: Mapping[str, Any],
+        candidate_head_margins: Sequence[Mapping[str, Mapping[str, Any]]],
+        model_artifact_sha256: str,
+    ) -> dict[str, Any]:
+        """Select a config bound to this release's ordered validation bytes."""
+
+        candidates, _ = self.load_validation()
+        expected_ids = tuple(row["candidate_id"] for row in candidates)
+        if tuple(validation_candidate_ids) != expected_ids:
+            raise DirectionalDataError(
+                "validation output candidate order does not match development release"
+            )
+        return _select_and_freeze_decision_config(
+            validation_output=validation_output,
+            validation_labels=tuple(row["labels"] for row in candidates),
+            candidate_head_margins=candidate_head_margins,
+            model_artifact_sha256=model_artifact_sha256,
+            development_revision=self.manifest["dataset_revision"],
+            development_manifest_sha256=sha256_file(self.root / "manifest.json"),
+            validation_candidates_sha256=self.manifest["splits"]["validation"][
+                "candidates"
+            ]["sha256"],
+            repo_root=self.repo_root,
+        )
 
     def _load_split(
         self,

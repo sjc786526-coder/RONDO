@@ -385,7 +385,7 @@ def decode_with_decision_config(
     return tuple(decoded)
 
 
-def select_and_freeze_decision_config(
+def _select_and_freeze_decision_config(
     *,
     validation_output: Mapping[str, Any],
     validation_labels: Sequence[Mapping[str, Any]],
@@ -396,7 +396,7 @@ def select_and_freeze_decision_config(
     validation_candidates_sha256: str,
     repo_root: Path | str = REPO_ROOT,
 ) -> dict[str, Any]:
-    """Select deterministically from a bounded validation-only candidate set."""
+    """Pure selection core; callers must supply a release-derived binding."""
 
     validate_structured_output(validation_output)
     if len(validation_labels) != validation_output["batch_size"]:

@@ -33,10 +33,11 @@ all-applicable-heads AND 唯一派生。
 - 五个逐 head margin；
 - `selection.split=validation`、有界选择方法、`test_access=forbidden` 和 `frozen=true`。
 
-margin 可由训练阶段在显式候选集合中使用 validation 确定。标准 reference selector 只接收 validation labels 与 logits，以逐 head
-macro recall 的最弱项为第一目标，再依次偏好更少 gate False PASS、更高 gate correct、更少 False REWRITE，并用 canonical config
-bytes 确定性破同分；它不提供 test 参数或 test loader。调用者也可采用等强的 validation-only 选择法，但最终 config 必须通过同一
-strict validator 并在任何资格集合释放前冻结。
+margin 可由训练阶段在显式候选集合中使用 validation 确定。标准 reference selector 只能通过已验证的 development release 调用：release
+从实际 manifest 和 validation candidate bytes 机械派生 revision、manifest SHA、candidate SHA 与 labels，并要求随 logits 提供的 candidate
+ID 顺序和实际文件行序完全相同。随后纯选择核以逐 head macro recall 的最弱项为第一目标，再依次偏好更少 gate False PASS、更高 gate
+correct、更少 False REWRITE，并用 canonical config bytes 确定性破同分；该入口不接受调用者自报的数据 identity/labels，也不提供 test
+参数或 test loader。调用者可采用等强的 validation-only 选择法，但最终 config 必须通过同一 strict validator 并在任何资格集合释放前冻结。
 
 test、现有 v9 同分布辅助 holdout、独立 qualification set 都不得参与 margin 搜索、候选淘汰或 config 修改。model、task、decision
 contract、decision implementation bundle 或 development data 任一身份变化都使已冻结 config 失效，必须重新使用 validation 选择；

@@ -31,6 +31,11 @@ from rondo_eval.publication_critic.successor_build import (  # noqa: E402
     ACCEPTED_IMPLEMENTATION_BUNDLE_SHA256,
     ACCEPTED_IMPLEMENTATION_COMMIT,
 )
+from rondo_eval.publication_critic.successor_task import (  # noqa: E402
+    DIMENSION_CLASSES,
+    HARD_DIMENSIONS,
+    STRUCTURED_OUTPUT_SCHEMA,
+)
 
 
 class PublicationCriticDirectionalDataTests(unittest.TestCase):
@@ -85,6 +90,50 @@ class PublicationCriticDirectionalDataTests(unittest.TestCase):
         self.assertFalse(hasattr(release, "load_test"))
         self.assertEqual(set(release.manifest["splits"]), {"train", "validation"})
         self.assertFalse((self.development_root / "splits/test").exists())
+
+    def test_validation_selector_binds_release_bytes_labels_and_row_order(self) -> None:
+        release = DevelopmentRelease.open(
+            self.development_root,
+            repo_root=REPO_ROOT,
+        )
+        candidates, _ = release.load_validation()
+        candidate_ids = tuple(row["candidate_id"] for row in candidates)
+        config = release.select_and_freeze_validation_decision_config(
+            validation_candidate_ids=candidate_ids,
+            validation_output=self._structured_output(len(candidates)),
+            candidate_head_margins=[self._margins()],
+            model_artifact_sha256="1" * 64,
+        )
+        self.assertEqual(
+            config["development_data"],
+            {
+                "revision": release.manifest["dataset_revision"],
+                "manifest_sha256": sha256_file(
+                    self.development_root / "manifest.json"
+                ),
+                "validation_candidates_sha256": release.manifest["splits"][
+                    "validation"
+                ]["candidates"]["sha256"],
+            },
+        )
+        self.assertEqual(config["selection"]["validation_rows"], len(candidates))
+        with self.assertRaisesRegex(
+            DirectionalDataError,
+            "candidate order",
+        ):
+            release.select_and_freeze_validation_decision_config(
+                validation_candidate_ids=tuple(reversed(candidate_ids)),
+                validation_output=self._structured_output(len(candidates)),
+                candidate_head_margins=[self._margins()],
+                model_artifact_sha256="1" * 64,
+            )
+        with self.assertRaisesRegex(ValueError, "1..1024"):
+            release.select_and_freeze_validation_decision_config(
+                validation_candidate_ids=candidate_ids,
+                validation_output=self._structured_output(len(candidates)),
+                candidate_head_margins=[],
+                model_artifact_sha256="1" * 64,
+            )
 
     def test_v9_test_is_only_a_sealed_metadata_binding(self) -> None:
         base = self.contracts.design["base_release"]
@@ -262,6 +311,42 @@ class PublicationCriticDirectionalDataTests(unittest.TestCase):
     @staticmethod
     def _load_json(path: Path) -> dict:
         return json.loads(path.read_text(encoding="utf-8"))
+
+    @staticmethod
+    def _margins() -> dict[str, dict[str, float]]:
+        return {
+            **{
+                dimension: {"pass_over_fail_margin": 0.2}
+                for dimension in HARD_DIMENSIONS
+                if dimension != "conditional_continuity"
+            },
+            "conditional_continuity": {
+                "pass_over_fail_margin": 0.2,
+                "na_over_applicable_margin": 0.5,
+            },
+        }
+
+    @staticmethod
+    def _structured_output(batch_size: int) -> dict:
+        return {
+            "schema": STRUCTURED_OUTPUT_SCHEMA,
+            "backbone_forward_count": 1,
+            "batch_size": batch_size,
+            "heads": {
+                dimension: {
+                    "classes": list(DIMENSION_CLASSES[dimension]),
+                    "logits": [
+                        (
+                            [1.0, 0.0, 0.0]
+                            if dimension == "conditional_continuity"
+                            else [1.0, 0.0]
+                        )
+                        for _ in range(batch_size)
+                    ],
+                }
+                for dimension in HARD_DIMENSIONS
+            },
+        }
 
 
 if __name__ == "__main__":

@@ -22,7 +22,6 @@ from rondo_eval.publication_critic.qualification import (  # noqa: E402
     decode_with_decision_config,
     evaluate_qualification_predictions,
     freeze_decision_config,
-    select_and_freeze_decision_config,
     validate_decision_config,
 )
 from rondo_eval.publication_critic.successor_task import (  # noqa: E402
@@ -45,6 +44,11 @@ class PublicationCriticQualificationTests(unittest.TestCase):
         self.assertEqual(decision["version"], "v1")
         self.assertEqual(decision["selection"]["split"], "validation")
         self.assertEqual(decision["selection"]["test_access"], "forbidden")
+        self.assertEqual(
+            decision["reference_selector"],
+            "eval/rondo_eval/publication_critic/directional_data.py#"
+            "DevelopmentRelease.select_and_freeze_validation_decision_config",
+        )
         self.assertNotIn("global threshold", decision["required_identity"])
         self.assertEqual(
             metrics["confusion"]["binary_heads"],
@@ -145,36 +149,6 @@ class PublicationCriticQualificationTests(unittest.TestCase):
         self.assertEqual(derive_verdict(decoded[3]), "PASS")
         self.assertEqual(derive_verdict(decoded[4]), "REWRITE")
         self.assertEqual(derive_verdict(decoded[5]), "REWRITE")
-
-    def test_selector_accepts_only_bounded_validation_candidates(self) -> None:
-        labels = [self._labels(), self._labels(continuity="N/A")]
-        output = self._structured_output(batch_size=2)
-        selected = select_and_freeze_decision_config(
-            validation_output=output,
-            validation_labels=labels,
-            candidate_head_margins=[self._margins()],
-            model_artifact_sha256="1" * 64,
-            development_revision="publication-critic-v10",
-            development_manifest_sha256="2" * 64,
-            validation_candidates_sha256="3" * 64,
-            repo_root=REPO_ROOT,
-        )
-        self.assertEqual(
-            selected["selection"]["method"],
-            "bounded_validation_grid_v1",
-        )
-        self.assertEqual(selected["selection"]["validation_rows"], 2)
-        with self.assertRaisesRegex(QualificationError, "1..1024"):
-            select_and_freeze_decision_config(
-                validation_output=output,
-                validation_labels=labels,
-                candidate_head_margins=[],
-                model_artifact_sha256="1" * 64,
-                development_revision="publication-critic-v10",
-                development_manifest_sha256="2" * 64,
-                validation_candidates_sha256="3" * 64,
-                repo_root=REPO_ROOT,
-            )
 
     def test_metrics_fix_every_confusion_cell_and_head_failure_recall(self) -> None:
         gold = []

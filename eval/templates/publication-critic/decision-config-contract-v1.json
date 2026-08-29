@@ -5,6 +5,7 @@
   "authority": "doc/rondo-multi-publication-critic-decision-contract-v1.md",
   "runtime_validator": "eval/rondo_eval/publication_critic/qualification.py#validate_decision_config",
   "runtime_decoder": "eval/rondo_eval/publication_critic/qualification.py#decode_with_decision_config",
+  "reference_selector": "eval/rondo_eval/publication_critic/directional_data.py#DevelopmentRelease.select_and_freeze_validation_decision_config",
   "required_identity": [
     "task",
     "decision_contract",

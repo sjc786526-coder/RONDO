@@ -4,20 +4,20 @@
   "components": [
     {
       "path": "doc/rondo-multi-publication-critic-decision-contract-v1.md",
-      "sha256": "fe23d7e3a50a605211fb1a47324a0cfdc2d17c66e8ea33d7746dd636ff0dbf1b"
+      "sha256": "bd42731081e01c435c0138536c3375e1d8f14220d446c7b2e4252a69fcc29cd0"
     },
     {
       "path": "eval/rondo_eval/publication_critic/qualification.py",
-      "sha256": "f1d5116de73e55ea954c2809973e53de9215d043670eeb59b8573a620598910f"
+      "sha256": "5ceee8c5bd7c67c3bd2b975a15f6e00c2a8e6fb0ef5cf481a3968de2990cb4a8"
     },
     {
       "path": "eval/templates/publication-critic/decision-config-contract-v1.json",
-      "sha256": "c68e60c03bd7944538de82633f4df099b502536d6352fa326165c7479f7ae374"
+      "sha256": "3a651e1a9373e382dffdec085ec06d259627c1c5ca9c9d97611b144d2a0f512a"
     },
     {
       "path": "eval/templates/publication-critic/qualification-metrics-contract-v1.json",
       "sha256": "1a9aadb2bf46fffa94f8a25f7bc428fb286daf54513d2b96dffbee29a42551ec"
     }
   ],
-  "bundle_sha256": "a77f5cb6f41c192664aa1ce7c1c34f5761cf7fcae80b64feb27d24d0a43cb448"
+  "bundle_sha256": "00700f45afb6c5f7bb97cc90ecd3f859c82f1cc604e5c242abcd9590284d6201"
 }
