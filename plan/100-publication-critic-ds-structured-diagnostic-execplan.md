@@ -234,17 +234,21 @@ Plan 100 不属于原工作包四，不读取 qualification 或 v9 test 正文�
   token recounter，不改 rubric、packet、输出 schema、labels、metrics 或路线阈值。Plan 100 Python 21 项与 Rust 69 项定向门禁通过。
 - 2026-08-29：首轮 B1 为 9/9 strict success、0 retry/parse/technical failure，实际结算 `0.0069217 RMB`；binding 因 recount calibration
   fail-closed。九项只读核对均为 provider prompt 比官方 rendered tokenizer 固定多 21 tokens、completion 完全相等，故按 B1 校准职责冻结
-  21-token provider chat envelope；不修改原始 usage、prompt/schema/packet 或质量语义，准备新 clean source 重跑 B1。
+  21-token provider chat envelope；不修改原始 usage、prompt/schema/packet 或质量语义。
+- 2026-08-29：从新 clean commit 完成第二轮 B1，9/9 strict success、9/9 usage recount 精确一致，冻结实际 B1 binding；两轮 B1 共结算
+  `0.0088322 RMB`。随后从空 namespace 执行 B2 clean formal，81/81 observation 完整、A/B/C parse failure 均为 0、无 retry，formal 结算
+  `0.0307772 RMB`。首个完整有效 authority 形成后停止全部 API 消费。
+- 2026-08-29：authority-bound tracked/detailed 独立复算通过，task-wide 99 HTTP attempts 全部按 provider usage 结算 `0.0396094 RMB`，余额
+  `19.9603906 RMB`、outstanding reservation 为 0。三臂均未满足预冻结 basic/gate，唯一路线终态为
+  `TASK_EXECUTABILITY_INSUFFICIENT`；这是完整有效负向质量结果，不是技术 `INCONCLUSIVE`，不解锁训练、qualification 或产品启用。
 
 ### 当前工作
 
-- `STAGE_A_ACCEPTED / STAGE_B1_RECOUNT_CALIBRATED_PENDING_CLEAN_RERUN`。
+- `STAGE_A_ACCEPTED / STAGE_B_COMPLETE_PENDING_FINAL_REVIEW / TASK_EXECUTABILITY_INSUFFICIENT`。
 
 ### 本任务剩余步骤
 
-- 提交 B1 provider/token recount 兼容修复，从唯一 task root 执行 B1 commissioning。
-- B1 三链与 usage recount 校准通过后冻结 clean source/config；执行 B2 clean formal、独立复算和唯一路线裁决。
-- 完成相称门禁、文档/结果/费用/ignored 状态收口、任务分支提交和最终独立验收。
+- 提交阶段 B 结果与收口文档，保持任务 worktree clean，通过指定 queue 申请最终独立验收。
 
 ### 阻塞项
 
@@ -254,8 +258,8 @@ Plan 100 不属于原工作包四，不读取 qualification 或 v9 test 正文�
 
 - 规划：`COMPLETE / EXECUTION_ACTIVE`。
 - 阶段 A：`ACCEPTED / COMPLETE`。
-- 阶段 B：`AUTHORIZED / B1_PREFLIGHT_READY`。
-- 完整任务：`IN_PROGRESS / NO_QUALITY_CONCLUSION`。
+- 阶段 B：`COMPLETE / PENDING_FINAL_REVIEW`。
+- 完整任务：`PENDING_FINAL_REVIEW / TASK_EXECUTABILITY_INSUFFICIENT`。
 
 ### 交接边界
 

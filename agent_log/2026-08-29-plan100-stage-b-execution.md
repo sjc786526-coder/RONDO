@@ -22,6 +22,20 @@
 - 首轮真实 commissioning 为 9/9 strict success、0 retry、0 parse/technical failure，全部 provider usage-present，实际结算 `0.0069217 RMB`；因
   recounter prompt 与 provider usage 固定相差 21 tokens，binding 按合同未生成，既有 receipt/费用保留。
 - 只读核对九项 usage/recount：A/B/C、synthetic/public 的 prompt delta 全部精确为 `+21`，completion delta 全部为 `0`。据此冻结 provider chat
-  envelope 21 tokens 并绑定 recounter source hash；不修改 provider usage、prompt、schema、packet 或质量语义。下一步从新 clean commit 重跑 B1。
+  envelope 21 tokens 并绑定 recounter source hash；不修改 provider usage、prompt、schema、packet 或质量语义。
+- 从新 clean commit 重跑 B1：9/9 strict success、9/9 usage recount 精确一致，binding 成功冻结。两轮 commissioning 共结算
+  `0.0088322 RMB`。
 
-当前状态：`STAGE_A_ACCEPTED / STAGE_B1_RECOUNT_CALIBRATED_PENDING_CLEAN_RERUN / NO_QUALITY_CONCLUSION`。
+## B2 clean formal 与结果
+
+- 从空 namespace 执行唯一 clean formal：81/81 observation 完整、A/B/C 各 27/27 strict success、parse failure `0/0/0`、0 retry。首个完整
+  authority 形成后停止 API 消费。
+- task-wide 共 99 HTTP attempts，全部按 provider usage 结算 `0.0396094 RMB`；其中 formal 为 81 attempts / `0.0307772 RMB`，余额
+  `19.9603906 RMB`，outstanding reservation 为 0。
+- authority-bound tracked 与 detailed 独立复算均成功。A/B/C balanced accuracy 分别为 `0.625000`、`0.583333`、`0.700000`；False PASS
+  分别为 `10/15`、`5/15`、`9/15`，pair closure 分别为 `2/9` boundary strict、`4/12`、`5/12`。三臂均未满足预冻结 basic/gate，唯一路线
+  终态为 `TASK_EXECUTABILITY_INSUFFICIENT`。
+- 该终态是完整有效负向结果，不是技术 `INCONCLUSIVE`，不支持新增 API、训练解冻、qualification 或产品启用。tracked aggregate 与 bounded
+  detailed projection 均不含 packet、response body 或 credential；raw write-once 证据保留在任务专属 ignored namespace。
+
+当前状态：`STAGE_A_ACCEPTED / STAGE_B_COMPLETE_PENDING_FINAL_REVIEW / TASK_EXECUTABILITY_INSUFFICIENT`。
