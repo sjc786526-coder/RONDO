@@ -9,38 +9,42 @@
     "accepted_implementation_bundle_sha256": "b0124de561f52fb464c223989d003af1e9f2a8a24eccd9ca349a4d769e3488d5"
   },
   "decision_implementation": {
-    "commit": "a9a856ad8f742f62474ba8bf473769d2fca1c571",
+    "commit": "29eb4a75b5d8abcd7e404747c93012efa6da9e34",
     "algorithm": "sha256-canonical-component-list-v1",
     "components": [
       {
         "path": "doc/rondo-multi-publication-critic-decision-contract-v1.md",
-        "sha256": "bd42731081e01c435c0138536c3375e1d8f14220d446c7b2e4252a69fcc29cd0"
+        "sha256": "13c0c7d2614500855a7a0751ff98fd51d7bf8f372e4f026ca25282a5dce967cb"
       },
       {
         "path": "eval/rondo_eval/publication_critic/qualification.py",
-        "sha256": "5ceee8c5bd7c67c3bd2b975a15f6e00c2a8e6fb0ef5cf481a3968de2990cb4a8"
+        "sha256": "28ae53c3728d2c19c4d6ca059968f7001a6a779a59fee1f5603c638d2cdc8e7b"
       },
       {
         "path": "eval/templates/publication-critic/decision-config-contract-v1.json",
-        "sha256": "3a651e1a9373e382dffdec085ec06d259627c1c5ca9c9d97611b144d2a0f512a"
+        "sha256": "9ac8db1e08ce239ea6a0d2ae8c19de603a599e045603f38ee2d601be99673af8"
+      },
+      {
+        "path": "eval/templates/publication-critic/formal-decision-projection-v1.json",
+        "sha256": "6c063c04e7e538e6bcd2b3bafbff1730465c3189624f055da959191f190b4218"
       },
       {
         "path": "eval/templates/publication-critic/qualification-metrics-contract-v1.json",
         "sha256": "1a9aadb2bf46fffa94f8a25f7bc428fb286daf54513d2b96dffbee29a42551ec"
       }
     ],
-    "bundle_sha256": "00700f45afb6c5f7bb97cc90ecd3f859c82f1cc604e5c242abcd9590284d6201"
+    "bundle_sha256": "f86894faabedfa3f8a9d95ba26d2c9d8297e373503c975d332c7c08b631eeacc"
   },
   "remediation_implementation": {
-    "commit": "535bfbe9ba31b3110c243b3af15230a2ff5c382b",
+    "commit": "0ebab613193580c1e8296442fa023dc4ca01e6c8",
     "algorithm": "sha256-canonical-component-list-v1",
     "components": [
       {
         "path": "eval/rondo_eval/publication_critic/directional_data.py",
-        "sha256": "1d68f86291a64f10697f96e8dc35a8a8210631fcccff92fbf4f3296a62f25212"
+        "sha256": "88dc62ee7bab4549cf99df6a23e07e767c3144feaff0126c1c5a35ab4b9f7b00"
       }
     ],
-    "bundle_sha256": "b1706139a755b857d8dc8f909490c31a42c2ace3e6123012f78679dc1dd1e869"
+    "bundle_sha256": "b56d12aa8811642eb7cc9c5c4efea794e457c6828873995be2431308bb75f955"
   },
   "base_release": {
     "revision": "publication-critic-v9",

@@ -160,26 +160,28 @@
 - 最终复验三个窄 finding 已闭合：continuity 只有决定性 N/A 才排除，弱 N/A 最高、N/A margin 相等、平局或未达 PASS 边界均 fail-closed；公开 reference selector 只通过 `DevelopmentRelease` 机械派生并核对实际 v10 revision、manifest、candidate bytes、labels、行序和 batch size；v9 原 continuity 盲审员对同一 11 个 replacements 以新 review SHA `9c6c01ae78f7bee5238e77b1635b5c6c2107e66b11f7e8d2448dc9e6c49dd9f6` 窄复验为 0 finding。v10/qualification 从空目录重建并完成一次逐字节复现，76/76 定向回归通过。
 - 最终独立复验确认三个窄 finding 全部闭合、无新增 correctness/functionality finding，接受最终 implementation `bb093ec4023b6ed41445f51793ebfdd2c4a5a646`；报告见 `agent_log/2026-08-28-201403-plan098-directional-remediation-final-recheck.md`。Plan 098 完成并冻结，后续只交接 WBS。
 - 随后任务规划者复审确认两项 Medium：旧 raw argmax 与 decision v1 margin decoder 同时暴露为 runtime 判定入口；release-bound selector 丢弃 validation pairs，未把 Boundary/invariance 闭合纳入 margin 选择。两项均经审查者复核属实，暂停完成态；报告见 `agent_log/2026-08-28-211445-plan098-post-acceptance-formal-decode-pair-selector-review.md`。
+- 两项 Medium 已窄整改：新增版本化 formal projection，在不改旧 schema 字节和 v9 历史 identity 的前提下把 raw argmax 限为 zero-margin diagnostic/historical reference，正式路径唯一使用 frozen decision config decoder；`DevelopmentRelease` selector 同时消费实际 validation candidates/pairs，pair SHA、行数和逐 pair 报告进入 frozen config，全部 Boundary/soft-only pair 闭合成为原单一 bounded grid 的 hard eligibility。
+- decision implementation 绑定 commit `29eb4a75b5d8abcd7e404747c93012efa6da9e34`、bundle `f86894faabedfa3f8a9d95ba26d2c9d8297e373503c975d332c7c08b631eeacc`；directional runtime 绑定 commit `0ebab613193580c1e8296442fa023dc4ca01e6c8`、bundle `b56d12aa8811642eb7cc9c5c4efea794e457c6828873995be2431308bb75f955`。正式 v10/qualification 只更新必要 identity 后从空目录重建并完成一次逐字节复现，focused 28/28 与既有定向回归 76/76 通过；数据正文、review、v8/v9 未改写。
 
 ### 当前工作
 
-- `POST_ACCEPTANCE_NARROW_REMEDIATION_REQUIRED / 0_HIGH_2_MEDIUM`：主体保留，只整改 formal decoder 唯一入口与 pair-aware selector；工作包三继续锁定。
+- `POST_ACCEPTANCE_FORMAL_DECODE_PAIR_SELECTOR_REMEDIATION_IMPLEMENTED / FINAL_REVIEW_PENDING`：两项窄整改已实现并验证，等待最终复验；工作包三继续锁定。
 
 ### 本任务剩余步骤
 
-1. 唯一化正式 decoder：旧 argmax 只保留 zero-margin diagnostic/historical reference，正式 projection/call path 必须绑定 frozen decision config。
-2. 让 selector 绑定 validation pair bytes、逐 pair 报告 Boundary/soft-only 闭合，并纳入预冻结准入或确定性选择顺序；重跑定向回归与 release 复现后申请复验。
+1. 提交整改实现、生成工件、权威状态和实施日志，保持工作树 clean。
+2. 通过指定 Codex queue 申请最终复验并停止会话。
 
 ### 阻塞项
 
-- 两项 Medium 窄整改待复验；真实模型、付费训练、资格正文释放、工作包三和产品动作继续禁止。
+- 最终复验待审查者接受；真实模型、付费训练、资格正文释放、工作包三和产品动作继续禁止。
 
 ### 当前验收状态
 
-- 规划：`NARROW_REMEDIATION_REQUIRED`。
-- 工作包一：`SUBJECT_PRESERVED / FORMAL_DECODER_REMEDIATION_REQUIRED`。
-- 工作包二：`SUBJECT_PRESERVED / PAIR_SELECTOR_REMEDIATION_REQUIRED`。
-- 完整任务：`IN_PROGRESS / POST_ACCEPTANCE_REVIEW_FAILED`。
+- 规划：`NARROW_REMEDIATION_IMPLEMENTED / FINAL_REVIEW_PENDING`。
+- 工作包一：`SUBJECT_PRESERVED / FORMAL_DECODER_REMEDIATED_PENDING_REVIEW`。
+- 工作包二：`SUBJECT_PRESERVED / PAIR_SELECTOR_REMEDIATED_PENDING_REVIEW`。
+- 完整任务：`IN_PROGRESS / FINAL_REVIEW_PENDING`。
 
 ### 交接边界
 
@@ -187,7 +189,7 @@
 - 工作包一完成汇报、工作包二解锁申请、计划外请示、整改复验和最终完成汇报只通过 §7 指定的 Codex queue；消息发送后主动停止会话，不等待或轮询。
 - 审查者对每轮有意义的验收形成精炼 `agent_log` 报告；若需要代用户作范围内普通决策，给出理由和影响并写入报告。工作包一通过时由审查者通过同一队列明确解锁工作包二；最终通过后不再唤醒执行者。
 - 工作包一接受记录必须包含 exact commit、权威合同版本与内容 SHA-256。工作包二的设计锁、生成配置和最终 manifest 都绑定并核对该身份；任何核心合同变化都使阶段一接受失效并重新锁定工作包二。
-- 本计划完成态因验收后两项 Medium 复审暂停；只在上述边界窄修。工作包三/四仍只由 WBS 规划，不在本计划扩写训练路线。
+- 本计划完成态因验收后两项 Medium 复审暂停；窄整改已实现但在最终复验前不恢复接受。工作包三/四仍只由 WBS 规划，不在本计划扩写训练路线。
 - 未经用户批准，不合并、不推送、不归档/重命名分支、不删除 worktree。
 
 ## 6. 关键决策记录
@@ -221,7 +223,9 @@
 | 023 | 方向性 finalizer 只核对本任务必要的 decision/runtime/design/config/source/review identity，并将精确 runtime component/bundle 写入 design 与 release；不扩成通用审计平台 | 轻量字节门足以阻止当前语义实现静默漂移，保持职责窄且可复现 | finalizer、runtime、维护 | 已采纳 |
 | 024 | continuity 采用“决定性 N/A 才排除；PASS 必须同时高于 N/A 且超过 FAIL margin；其余 FAIL”的保守三路规则；标准 selector 只暴露 release-bound typed 入口 | 直接封闭 weak-N/A False PASS，并让 config identity、labels 与 logits 行序来自真实 v10 validation bytes，而非调用者自报 | decoder、selection、回归 | 已采纳 |
 | 025 | 最终接受 implementation `bb093ec4023b6ed41445f51793ebfdd2c4a5a646`；Plan 098 完成并冻结，ignored namespace 保留待用户以后按需清理，工作包三另立 ExecPlan 和授权 | 三个最终窄 finding 均闭合，76/76 定向回归、release 独立字节复现、review/identity 和历史保护无新增 finding；本计划不授权训练、资格正文或产品动作 | 验收、归档、交接 | 历史接受，终态由 026 暂停 |
-| 026 | 验收后复审暂停 025，只补 formal decoder 唯一入口与 pair-aware validation selector；pair bytes SHA 进入 frozen selection identity | output schema 仍可把 raw argmax 当 runtime decoder，且 selector 丢弃 validation pairs；二者都会使工作包三采用与冻结资格语义不一致的 operating config | 判定、selector、身份、验收 | 待整改复验 |
+| 026 | 验收后复审暂停 025，只补 formal decoder 唯一入口与 pair-aware validation selector；pair bytes SHA 进入 frozen selection identity | output schema 仍可把 raw argmax 当 runtime decoder，且 selector 丢弃 validation pairs；二者都会使工作包三采用与冻结资格语义不一致的 operating config | 判定、selector、身份、验收 | 已实现，待最终复验 |
+| 027 | 保持 accepted v9 所绑定的旧 output schema 和 raw helper 字节不变，以新增版本化 formal projection 明确其只作 zero-margin diagnostic/historical reference；所有正式 projection/call path 唯一指向绑定 frozen decision config 的 decision v1 decoder | 直接改写旧 schema 会破坏已接受历史 identity；前向版本化既消除正式入口歧义，又不重开 v2/v9 历史数据和合同 | decoder、projection、历史兼容 | 已实现，待最终复验 |
+| 028 | validation selector 以全部实际 Boundary/soft-only pairs 闭合作为原单一 bounded margin grid 的 hard eligibility，并在 frozen config 绑定 pairs SHA、行数和完整逐 pair 报告 | candidate-level confusion/failure recall 不能证明 Q+/Q-、非目标 head 和 soft invariance；hard eligibility 最保守且不引入多路线 threshold 搜索 | selector、pairs、身份、测试 | 已实现，待最终复验 |
 
 ## 7. 给执行者的启动提示词
 
