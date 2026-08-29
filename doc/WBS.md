@@ -9,7 +9,7 @@ ExecPlan；Plan 098 的任务合同、v9/v10/qualification、formal decoder、pa
 最终文档整改复验已通过，Plan 099 以“验收通过 / 任务目标失败”完整收口、合入本地 `main` 并推送；工作包四未解锁。
 Plan 097 的 `M3_D_DUAL_BACKEND_ENGINEERING_PASS / FINAL_REVIEW_ACCEPTED / INTEGRATED / PUSHED`、Plan 096 的
 `CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH`、Plan 095 最终验收、Plan 094 有效负向研究终态和 Plan 093 Linux 全 workspace 正确性基线
-均保持有效；新路线不自动解锁产品质量、默认启用或生产）
+均保持有效；Plan 100 独立诊断以 `TASK_EXECUTABILITY_INSUFFICIENT / FINAL_REVIEW_ACCEPTED` 收口，新路线不自动解锁产品质量、默认启用或生产）
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段指针、跨方向关系、
 稳定工程边界和授权门；已完成成果与验收见 `doc/WBS-COMPLETED.md`，单次任务合同见 `plan/`，执行细节见
@@ -29,7 +29,7 @@ Plan 097 的 `M3_D_DUAL_BACKEND_ENGINEERING_PASS / FINAL_REVIEW_ACCEPTED / INTEG
 | 0：量化测评基准 | 既有设施与首次 schema v7 正式 canary 已完成，当前无 active campaign | 保留设施；历史结果见 COMPLETED，新 campaign 须重新立项与授权 |
 | 1：Harness 优化 | **正式收口；当前无 active 工作包** | 当前不继续新增观测或内核/热路径优化；既有实现、设施与历史结果保留。未来可由用户另行决定是否重新立项，本次收口不作永久禁止 |
 | 2：本地审批模型 | **已收口，今后不再开启** | 最终结论为“保留为实验”；不改生产默认，不再规划后续工作包 |
-| 3：RONDO Multi | 第一、二期、第四期已完成；三期 Plan 099 有效 `NO-GO`；Plan 100 正式诊断待最终验收 | 工作包四仍未解锁。Plan 100 完成唯一 clean formal，冻结为 `TASK_EXECUTABILITY_INSUFFICIENT`；停止 API，不读冻结测试、不训练、不改产品默认，不授予 qualification、产品价值或生产资格 |
+| 3：RONDO Multi | 第一、二期、第四期已完成；三期 Plan 099 有效 `NO-GO`；Plan 100 正式诊断最终验收通过 | 工作包四仍未解锁。Plan 100 完成唯一 clean formal，冻结为 `TASK_EXECUTABILITY_INSUFFICIENT`；API 授权已关闭，不读冻结测试、不训练、不改产品默认，不授予 qualification、产品价值或生产资格 |
 
 方向 3 当前 Linux 正确性基线由 Plan 093 建立：default features、standard local Nextest、checksum-verified V8 的完整 workspace
 为 `14660/14660` passed、0 failure/error/timeout，另有 1/1 setup passed；24 个 skip 不计 passed。正式证据和精确边界见
@@ -87,7 +87,7 @@ Plan 097 的 `M3_D_DUAL_BACKEND_ENGINEERING_PASS / FINAL_REVIEW_ACCEPTED / INTEG
   网络卷，本地只回传必要小型证据。两个任务 Pod 均已删除，实时终态为 0 Pod / compute `$0/h`，保守总费用 `$1.5345929717`。Plan 099
   外部动作授权已关闭，不得重建 Pod、恢复训练、调参或追求正向结果。
 - **工作包四保持锁定**：Plan 099 没有形成候选，不读取 qualification 或 v9 test 正文，不启动资格与横评；若用户以后改变路线，须另立任务和授权。
-- **Plan 100 独立诊断待最终验收**：只消费 Plan 098 冻结的 task v2 与 v10 development validation 27 candidates / 12 pairs，以同一
+- **Plan 100 独立诊断最终验收通过**：只消费 Plan 098 冻结的 task v2 与 v10 development validation 27 candidates / 12 pairs，以同一
   `deepseek-v4-flash`、packet、rubric 和本地监督口径比较 scalar、直接 `PASS/REWRITE` 与五维 hard decision + 本地 non-compensating gate，
   已交付一轮 81/81 完整、零 parse failure 的可复算正式结果。三臂均未达到预冻结 basic/gate，路线终态为
   `TASK_EXECUTABILITY_INSUFFICIENT`；task-wide 99 attempts 结算 `0.0396094 RMB` 后停止 API。它不是 qualification 或训练任务，不解锁
@@ -98,7 +98,7 @@ Plan 097 的 `M3_D_DUAL_BACKEND_ENGINEERING_PASS / FINAL_REVIEW_ACCEPTED / INTEG
 `plan/099-publication-critic-five-head-training-and-candidate-freeze-execplan.md` 已完成并冻结；Plan 100 合同见
 `plan/100-publication-critic-ds-structured-diagnostic-execplan.md`。工作包四未解锁，任何后续路线须另立任务和授权。
 
-方向 3 当前 active 工作包是 Plan 100 最终验收。Plan 081 已取得 `LOCAL_TRAINING_READINESS_PASS`；三期 Plan 082 已获用户付费批准并完成
+方向 3 当前无 active 工作包；Plan 100 的负向诊断不自动启动后续路线。Plan 081 已取得 `LOCAL_TRAINING_READINESS_PASS`；三期 Plan 082 已获用户付费批准并完成
 真实 commissioning、正式 freeze、干净 formal 和新进程恢复，终态为 `VALID_NO_IMPROVEMENT`。保留 Pod 的 GPU 专项验收已经通过，
 唯一训练 Pod 已释放并确认持续 compute 费率为 0；保留卷所在 `US-TX-3` 不提供 S3 API，故按用户一次性授权使用单个 transfer Pod
 只读回传冻结 39 对象。全部对象完成本地 bytes/SHA-256 校验后 transfer Pod 已删除；最终验收通过。用户本人随后明确决定继续保留
@@ -317,7 +317,8 @@ Plan 099 阶段 A 已通过独立验收，阶段 B 唯一冻结主方案已完�
 既有卷保留；有效 `NO-GO` 接受后 Plan 099 外部动作授权关闭，任何后续 GPU、恢复、新路线、资格测试或卷变更都须另立任务并重新授权。
 工作包四的真实推理、冻结测试和付费横评仍需再次独立授权。
 Plan 100 阶段 B 已在独立 20 RMB 硬上限内完成 B1 commissioning 与 B2 clean formal，唯一使用 `deepseek-v4-flash`，task-wide
-`0.0396094 RMB` 已结算且停止 API。qualification/v9 test、训练、GPU/RunPod/Docker、真实本地模型、上传、产品启用和生产始终未授权。
+`0.0396094 RMB` 已结算且停止 API；最终验收后本任务 API 授权关闭，剩余预算不转移。qualification/v9 test、训练、GPU/RunPod/Docker、
+真实本地模型、上传、产品启用和生产始终未授权。
 
 ## 7. 子 WBS 索引
 

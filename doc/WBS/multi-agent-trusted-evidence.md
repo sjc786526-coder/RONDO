@@ -7,7 +7,7 @@
 decoder 唯一入口、pair-aware margin selection 和 frozen decision direct-dependency identity 均已通过最终复验，Plan 098 完成并冻结。
 工作包三 Plan 099 已完成唯一主方案 commissioning 与 clean formal，终态为 `VALID_FORMAL_NO_GO / FINAL_REVIEW_ACCEPTED`；没有候选，
 工作包四未解锁，Plan 099 外部动作授权已关闭。Plan 100 已在同一 v10/task v2/rubric v2 下完成 DeepSeek V4 Flash 的 scalar、直接 gate 与
-五维 hard decision 正式 development-validation 诊断，冻结为 `TASK_EXECUTABILITY_INSUFFICIENT` 并等待最终验收；它不属于工作包四，也不解锁
+五维 hard decision 正式 development-validation 诊断，冻结为 `TASK_EXECUTABILITY_INSUFFICIENT` 并通过最终验收；它不属于工作包四，也不解锁
 qualification、训练或产品启用。Plan 097 的
 `M3_D_DUAL_BACKEND_ENGINEERING_PASS / FINAL_REVIEW_ACCEPTED / INTEGRATED / PUSHED`、Plan 096 的
 `CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH / FINAL_REVIEW_ACCEPTED / INTEGRATED / PUSHED`、Plan 094 的有效负向终态和 Plan 095 的
@@ -260,7 +260,7 @@ checkpoint 等其他大型资产留在网络卷；核心任务提交并经审查
 两个任务 Pod 均已删除并复核 0 Pod / compute `$0/h`；100GB 网络卷 `mwemzrn33y` 保留 step 8/16 checkpoint 与大型环境资产。Plan 099
 外部动作授权关闭，`NO_FURTHER_COMPUTE`。
 
-#### Plan 100：DS-V4-Flash 五维任务合同诊断（待最终验收）
+#### Plan 100：DS-V4-Flash 五维任务合同诊断（最终验收通过）
 
 **定位与依赖**：Plan 100 是 Plan 099 有效 `NO-GO` 后的独立 development-validation 诊断，只消费 Plan 098 冻结的 task v2 / rubric v2 与
 `publication-critic-v10` 27 candidates / 12 pairs。它不属于工作包四，不读取 qualification 或 v9 test 正文。
@@ -276,7 +276,7 @@ rubric、产品 scorer/default 或发布语义，不运行训练、真实本地�
 **当前状态**：阶段 A 已通过独立准入；B1 从唯一 task root 形成 9/9 strict success 与 9/9 usage recount 精确一致的 binding。B2 从空 namespace
 完成 81/81 clean formal，A/B/C 各 27/27 strict success、零 parse failure；首个 authority 后全部 provider 入口封闭。task-wide 99 attempts 全部按
 provider usage 结算 `0.0396094 RMB`，余额 `19.9603906 RMB`、outstanding reservation 为 0。authority-bound aggregate/detailed 独立复算通过；
-三臂均未达到预冻结 basic/gate，终态为 `TASK_EXECUTABILITY_INSUFFICIENT`，等待最终独立验收。
+三臂均未达到预冻结 basic/gate，终态为 `TASK_EXECUTABILITY_INSUFFICIENT`；最终独立验收确认实现、正式证据、费用与路线裁决闭合，任务目标完成。
 
 **路线交接**：完整有效 formal 按预冻结规则形成“五维结构强支持 / 离散判定支持但五维增益未确认 / 约束或数据问题 / 任务可执行性不足”之一；
 技术或预算未闭合只报 `INCONCLUSIVE`。只有“五维结构强支持”可以建议未来另立部分解冻后层的五头训练任务，该任务仍需用户决定、新 ExecPlan 与
@@ -820,7 +820,7 @@ local/cloud 各 3/3 fixture 的 `PASS + REWRITE`、正常 Producer 两次重写/
   变更网络卷。任何后续 GPU、恢复、新路线、资格测试或卷处置都须另立任务并重新授权。
 - Plan 100 使用独立授权与 20 RMB 账本，不继承 Plan 095/096/097/099 的余额、请求或数据权限。阶段 B 唯一使用 `deepseek-v4-flash`
   完成 B1/B2，task-wide 结算 `0.0396094 RMB` 后停止 API；外发只含 bounded public v10 packet、必要无监督 synthetic packet 与冻结指令。
-  qualification/v9 test、训练、GPU/RunPod/Docker、真实本地模型、上传、产品启用和生产始终未授权。
+  最终验收后本任务 API 授权关闭，剩余预算不转移；qualification/v9 test、训练、GPU/RunPod/Docker、真实本地模型、上传、产品启用和生产始终未授权。
 - 工作包四当前未解锁；若以后重新立项，必须单独取得真实模型推理、冻结测试释放及任何付费异构横评的任务授权。历史 Plan 096/097/099 余额、
   provider 请求和数据权限均不转移。
 - 训练数据、权重、逐样本输出与私有运行材料留在 `eval-data/` 或仓库外；`training/` 只保存体积合规的轻量合同与数据。

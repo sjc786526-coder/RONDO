@@ -241,14 +241,16 @@ Plan 100 不属于原工作包四，不读取 qualification 或 v9 test 正文�
 - 2026-08-29：authority-bound tracked/detailed 独立复算通过，task-wide 99 HTTP attempts 全部按 provider usage 结算 `0.0396094 RMB`，余额
   `19.9603906 RMB`、outstanding reservation 为 0。三臂均未满足预冻结 basic/gate，唯一路线终态为
   `TASK_EXECUTABILITY_INSUFFICIENT`；这是完整有效负向质量结果，不是技术 `INCONCLUSIVE`，不解锁训练、qualification 或产品启用。
+- 2026-08-29：最终独立验收复现 authority-bound tracked/detailed 结果与费用，Plan 100 Python 21/21 通过，未发现 High/Medium；任务以
+  `FINAL_REVIEW_ACCEPTED / GOAL_COMPLETED / TASK_EXECUTABILITY_INSUFFICIENT` 冻结完成，API 授权关闭且余额不转移。
 
 ### 当前工作
 
-- `STAGE_A_ACCEPTED / STAGE_B_COMPLETE_PENDING_FINAL_REVIEW / TASK_EXECUTABILITY_INSUFFICIENT`。
+- `STAGE_A_ACCEPTED / STAGE_B_ACCEPTED / FINAL_REVIEW_ACCEPTED / TASK_EXECUTABILITY_INSUFFICIENT`。
 
 ### 本任务剩余步骤
 
-- 提交阶段 B 结果与收口文档，保持任务 worktree clean，通过指定 queue 申请最终独立验收。
+- 任务内无剩余实施步骤；合并、推送、分支归档与 worktree 处置继续等待用户明确批准。
 
 ### 阻塞项
 
@@ -256,10 +258,10 @@ Plan 100 不属于原工作包四，不读取 qualification 或 v9 test 正文�
 
 ### 当前验收状态
 
-- 规划：`COMPLETE / EXECUTION_ACTIVE`。
+- 规划：`COMPLETE / FROZEN`。
 - 阶段 A：`ACCEPTED / COMPLETE`。
-- 阶段 B：`COMPLETE / PENDING_FINAL_REVIEW`。
-- 完整任务：`PENDING_FINAL_REVIEW / TASK_EXECUTABILITY_INSUFFICIENT`。
+- 阶段 B：`ACCEPTED / COMPLETE`。
+- 完整任务：`FINAL_REVIEW_ACCEPTED / GOAL_COMPLETED / TASK_EXECUTABILITY_INSUFFICIENT`。
 
 ### 交接边界
 
@@ -287,6 +289,8 @@ Plan 100 不属于原工作包四，不读取 qualification 或 v9 test 正文�
 | 011 | Plan 100 三臂统一显式关闭 V4 thinking，并以官方 tokenizer + 同一 Rust prompt renderer 做离线复算 | live V4 默认 thinking 会忽略冻结 temperature，reasoning token 也无法从最终 JSON 复算；关闭后保留三臂公平性和严格短 JSON 合同 | B1/B2 provider、费用 | 已采纳 |
 
 ## 7. 执行者启动提示词
+
+> 本提示词随 Plan 100 最终验收完成而失效，仅保留为历史任务合同；不再授权任何 API、数据外发、训练、qualification、产品或集成动作。
 
 你是 Plan 100 的执行者。请在
 `/home/sjc/desktop/RONDO/.claude/worktrees/100-publication-critic-ds-structured-diagnostic/`、分支
