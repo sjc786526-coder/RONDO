@@ -1,3 +1,4 @@
+import copy
 import json
 import shutil
 import sys
@@ -17,6 +18,7 @@ from rondo_eval.publication_critic.directional_data import (  # noqa: E402
     DevelopmentRelease,
     DirectionalDataError,
     ValidatedPatch,
+    _validate_remediation_implementation,
     load_directional_contracts,
     validate_development_review,
     validate_qualification_release_metadata,
@@ -237,6 +239,25 @@ class PublicationCriticDirectionalDataTests(unittest.TestCase):
                     patch,
                     contracts=self.contracts,
                 )
+
+    def test_directional_runtime_component_drift_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            relative = Path("eval/rondo_eval/publication_critic/directional_data.py")
+            destination = root / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(REPO_ROOT / relative, destination)
+            identity = copy.deepcopy(
+                self.contracts.design["remediation_implementation"]
+            )
+            _validate_remediation_implementation(identity, root)
+            with destination.open("ab") as handle:
+                handle.write(b"\n")
+            with self.assertRaisesRegex(
+                DirectionalDataError,
+                "directional remediation component",
+            ):
+                _validate_remediation_implementation(identity, root)
 
     @staticmethod
     def _load_json(path: Path) -> dict:

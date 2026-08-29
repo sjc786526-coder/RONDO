@@ -98,6 +98,7 @@ QUALIFICATION_CANDIDATE_TAGS = {
     "soft": "qualification_soft_counterfactual",
 }
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
+_GIT_COMMIT = re.compile(r"^[0-9a-f]{40}$")
 _IDENTIFIER = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}$")
 _HONEST_ABSOLUTE_CUES = (
     "all",
@@ -1512,6 +1513,7 @@ def _validate_design(value: Mapping[str, Any], repo_root: Path) -> None:
             "schema",
             "accepted_task",
             "decision_implementation",
+            "remediation_implementation",
             "base_release",
             "development_release",
             "qualification_set",
@@ -1537,6 +1539,11 @@ def _validate_design(value: Mapping[str, Any], repo_root: Path) -> None:
         "directional decision implementation",
     )
     _validate_decision_implementation(decision, repo_root)
+    remediation = _object(
+        value["remediation_implementation"],
+        "directional remediation implementation",
+    )
+    _validate_remediation_implementation(remediation, repo_root)
     base = _object(value["base_release"], "directional base release")
     _exact_keys(
         base,
@@ -1915,6 +1922,51 @@ def _validate_decision_implementation(
         decision_contract_sha256(repo_root),
         components[0]["sha256"],
         "decision authority identity",
+    )
+
+
+def _validate_remediation_implementation(
+    value: Mapping[str, Any],
+    repo_root: Path,
+) -> None:
+    _exact_keys(
+        value,
+        {"commit", "algorithm", "components", "bundle_sha256"},
+        "directional remediation implementation",
+    )
+    _git_commit(value["commit"], "directional remediation implementation.commit")
+    _literal(
+        value["algorithm"],
+        "sha256-canonical-component-list-v1",
+        "directional remediation implementation.algorithm",
+    )
+    components = value["components"]
+    if not isinstance(components, list):
+        raise DirectionalDataError(
+            "directional remediation implementation.components differs"
+        )
+    _literal(
+        [component.get("path") for component in components],
+        ["eval/rondo_eval/publication_critic/directional_data.py"],
+        "directional remediation implementation paths",
+    )
+    for component in components:
+        _exact_keys(
+            component,
+            {"path", "sha256"},
+            "directional remediation implementation component",
+        )
+        path = _safe_repo_file(repo_root, component["path"])
+        _literal(
+            component["sha256"],
+            sha256_file(path),
+            f"directional remediation component {component['path']}",
+        )
+    actual_bundle = hashlib.sha256(canonical_json_bytes(components)).hexdigest()
+    _literal(
+        value["bundle_sha256"],
+        actual_bundle,
+        "directional remediation implementation.bundle_sha256",
     )
 
 
@@ -2642,4 +2694,10 @@ def _identifier(value: Any, where: str) -> str:
 def _sha256(value: Any, where: str) -> str:
     if not isinstance(value, str) or not _SHA256.fullmatch(value):
         raise DirectionalDataError(f"{where} is not a SHA-256")
+    return value
+
+
+def _git_commit(value: Any, where: str) -> str:
+    if not isinstance(value, str) or not _GIT_COMMIT.fullmatch(value):
+        raise DirectionalDataError(f"{where} is not a full git commit")
     return value
