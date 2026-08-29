@@ -152,30 +152,32 @@
 - 工作包二最终验收整改已把工作包一的 13 个必要语义组件冻结为组合 SHA-256 `b0124de561f52fb464c223989d003af1e9f2a8a24eccd9ca349a4d769e3488d5`；finalizer 在写出前核验实际组件字节，design、generation config 与 release identity 绑定同一 identity。权威 Markdown 不变而任一其他组件漂移的 focused regression 与定向旧回归均通过，v9 数据正文和 manifest 未变化。
 - 最终整改复验确认首轮 High 闭合、无新增 finding，接受工作包二 implementation `7ee479beb1f34677a54b815faf42284c0d8968e4`；报告见 `agent_log/2026-08-28-122011-plan098-final-review-remediation-recheck.md`。Plan 098 两个工作包均已冻结。
 - 用户要求的验收后方向性复审确认四项窄缺口：逐头/N/A operating config 未显式冻结，逐维 failure recall/confusion 不足，train/validation 存在 honest 词汇与 scope 长度/旁白捷径，现有 test 只能作为同分布 holdout 且不足以独立承担最终资格。主体结论保留，最终接受暂停；报告见 `agent_log/2026-08-28-183143-plan098-post-acceptance-directional-review.md`。
-- 方向性合同已冻结为下游 `rondo-publication-critic-decision@v1`：显式逐头 margin、保守 continuity N/A、validation-only decision config、固定逐维 confusion/failure recall 和 non-compensating verdict 均已闭合。每份 config 绑定 decoder/metrics implementation commit `9d281cf56d1b66140b24a765cfced12db78af9c1` 与 bundle `ebddb382d8fd166b69763665bf4efcdae20fd187d390954c322f80fefbadb824`，原 v2 accepted identity 不变。
-- 原三个模块负责人只整改 v9 train/validation 并交付 42 个 replacements（hard 19、continuity 11、soft 12），原三个盲审员分别复验为 0 finding；v9 test 正文未读取、未改写。机械整合冻结 development-only `publication-critic-v10`，只含 162 train / 27 validation candidates，scope 长度 AUC、honest cue 反例、旁白和重复诊断闭合。
+- 方向性合同已形成下游 `rondo-publication-critic-decision@v1`：逐头 margin、validation-only decision config、固定逐维 confusion/failure recall 和 non-compensating verdict 的主体已闭合。每份 config 绑定 decoder/metrics implementation bundle `ebddb382d8fd166b69763665bf4efcdae20fd187d390954c322f80fefbadb824`，directional design 另绑定 implementation commit `9d281cf56d1b66140b24a765cfced12db78af9c1`；原 v2 accepted identity 不变。
+- 原三个模块负责人只整改 v9 train/validation 并交付 42 个 replacements（hard 19、continuity 11、soft 12），三个一一对应盲审结果均为 0 finding；v9 test 正文未读取、未改写。机械整合冻结 development-only `publication-critic-v10`，只含 162 train / 27 validation candidates，scope 长度 AUC、honest cue 反例、旁白和重复诊断闭合。
 - 全新 test-only 负责人和独立盲审员在不接触 v9 test、旧 unseen 或开发数据正文的边界内，以 0 finding 接受 family-isolated `publication-critic-qualification-v1`：50 groups / 200 candidates / 100 pairs，逐维至少 20 个 failure 支持、每维 10 个 boundary targets，template/scenario family 与开发集近重复均为 0。总执行者只执行 schema/coverage/identity 的机械冻结，未读取资格正文。
 - 方向性 finalizer/runtime 已绑定精确 implementation identity，runtime 漂移、decoder/metrics 漂移、review/source identity 和 qualification 行数/路径漂移均 fail-closed。正式 v10 与 qualification release 从空目录一次生成，并在临时目录完成逐字节复现；directional/qualification/successor 33/33、旧 contract/training-data/identity/v7 43/43，合计 76/76 定向回归通过，v8/v9 tree identity 不变。
+- 方向性整改最终复验确认上述数据与指标主体成立，但发现 continuity 弱 N/A 最高类仍可回退为 PASS、reference selector 未机械核对所绑定 validation 来源，且 continuity-context reviewer role 与 v9 原 reviewer 不一致；本轮不接受，报告见 `agent_log/2026-08-28-195321-plan098-directional-remediation-final-review.md`。
 
 ### 当前工作
 
-- `POST_ACCEPTANCE_DIRECTIONAL_REMEDIATION_IMPLEMENTED / FINAL_REVIEW_PENDING`：四项资格前置已冻结并完成定向验证，工作包三继续锁定。
+- `POST_ACCEPTANCE_DIRECTIONAL_REMEDIATION_REVIEW_FAILED / NARROW_REMEDIATION_REQUIRED`：保留 v9/v10/qualification 主体，只整改最终复验三个边界，工作包三继续锁定。
 
 ### 本任务剩余步骤
 
-1. 由指定审查者完成方向性整改的独立最终复验；若有 finding，只在对应边界内整改、复测和重新提交。
-2. 仅在独立复验明确通过后恢复 Plan 098 完成态；工作包三仍须另立 ExecPlan 和重新授权。
+1. 修复 continuity fail-closed 解码、validation typed selection binding 和 continuity 原 reviewer 身份闭合，修正相应实时陈述；不重做数据或扩大审计设施。
+2. 只重跑受影响 focused tests、76 项定向回归及一次轻量正式复现，再由指定审查者最终复验。
+3. 仅在独立复验明确通过后恢复 Plan 098 完成态；工作包三仍须另立 ExecPlan 和重新授权。
 
 ### 阻塞项
 
-- 方向性整改尚待独立最终复验；真实模型、付费训练、资格正文释放和工作包三继续禁止。
+- 方向性整改最终复验未通过，三个窄边界待修；真实模型、付费训练、资格正文释放和工作包三继续禁止。
 
 ### 当前验收状态
 
-- 规划：`FINAL_REVIEW_PENDING`。
-- 工作包一：`DIRECTIONAL_REMEDIATION_IMPLEMENTED / PENDING_REVIEW`。
-- 工作包二：`DIRECTIONAL_REMEDIATION_IMPLEMENTED / PENDING_REVIEW`。
-- 完整任务：`IN_PROGRESS / FINAL_REVIEW_PENDING`。
+- 规划：`NARROW_REMEDIATION_REQUIRED`。
+- 工作包一：`DIRECTIONAL_REMEDIATION_REVIEW_FAILED / REMEDIATION_REQUIRED`。
+- 工作包二：`DIRECTIONAL_REMEDIATION_REVIEW_FAILED / REMEDIATION_REQUIRED`。
+- 完整任务：`IN_PROGRESS / FINAL_REVIEW_FAILED`。
 
 ### 交接边界
 

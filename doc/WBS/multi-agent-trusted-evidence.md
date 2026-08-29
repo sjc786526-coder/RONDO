@@ -3,8 +3,8 @@
 最后更新：2026-08-28 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
 状态：**第一期、第二期、第四期已完成；Publication Critic 三期 Plan 097 已完成并闭合双 backend 工程 E2E 与可替换接缝，现正式进入
 质量重构路线。后续严格串行为“任务合同重构 → v8 后继数据改造与有限扩充 → 一次主方案训练 → 模型资格验收与横评”。Plan 098 已把
-前两个工作包规划为严格串行的两个阶段；Plan 098 验收后方向性整改已形成待复验实现：逐头判定、资格指标、开发数据捷径与独立资格集均已
-窄闭合，但在独立最终复验通过前工作包三继续锁定。Plan 097 的
+前两个工作包规划为严格串行的两个阶段；Plan 098 验收后方向性整改的 v9/v10/qualification 主体保留，最终复验发现 continuity
+fail-closed、validation selection binding 和一项 reviewer 身份仍需窄修，工作包三继续锁定。Plan 097 的
 `M3_D_DUAL_BACKEND_ENGINEERING_PASS / FINAL_REVIEW_ACCEPTED / INTEGRATED / NOT_PUSHED`、Plan 096 的
 `CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH / FINAL_REVIEW_ACCEPTED / INTEGRATED / PUSHED`、Plan 094 的有效负向终态和 Plan 095 的
 最终验收均保持有效；新路线完成资格前，本地/云端质量、产品价值、Publication Critic 默认与生产启用继续锁定**
@@ -214,10 +214,12 @@ train projection 被判定无法无歧义提供完整五头监督，故直接复
 coverage、exact/cross-group near duplicate、明显捷径、train-only smoke 和无 test 入口的 consumer。finalizer 现于写出前核对 13 个
 工作包一必要语义组件及组合 SHA，design、generation config、release identity 已绑定同一 accepted implementation；权威 Markdown
 保持不变而任一其他核心组件漂移时均 fail-closed。方向性整改保留 v9 主体且不读取、不改写其 test，另冻结只含 train/validation 的
-development-only `publication-critic-v10`：原三个模块负责人定向交付 42 个 replacements，原盲审员均以 0 finding 接受，scope 长度 AUC、
+development-only `publication-critic-v10`：原三个模块负责人定向交付 42 个 replacements，一一对应盲审均以 0 finding 接受，scope 长度 AUC、
 honest cue 反例、旁白和重复诊断闭合。v9 test 降格为 metadata-only 同分布辅助 holdout。全新 test-only 负责人和独立盲审员已以 0 finding
 接受 50-group / 200-candidate / 100-pair 的 family-isolated `publication-critic-qualification-v1`；正文仍封存到工作包四，当前只完成机械
-冻结。方向性 finalizer/runtime、design、config、release identity 绑定精确实现 identity 并可字节复现；独立最终复验通过前工作包三继续锁定。
+冻结。方向性 finalizer/runtime、design、config、release identity 绑定精确实现 identity 并可字节复现。最终复验发现 continuity 的弱 N/A
+最高类可回退为 PASS、reference selector 未机械核对 validation 来源，且 continuity-context reviewer role 与 v9 原 reviewer 不同；只需在这些
+边界窄修，v9/v10/qualification 主体均保留。复验通过前工作包三继续锁定。
 
 #### 工作包三：一次主方案训练
 
