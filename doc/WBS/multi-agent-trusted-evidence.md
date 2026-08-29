@@ -1,11 +1,11 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
-最后更新：2026-08-28 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
+最后更新：2026-08-29 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
 状态：**第一期、第二期、第四期已完成；Publication Critic 三期 Plan 097 已完成并闭合双 backend 工程 E2E 与可替换接缝，现正式进入
 质量重构路线。后续严格串行为“任务合同重构 → v8 后继数据改造与有限扩充 → 一次主方案训练 → 模型资格验收与横评”。Plan 098 已把
 前两个工作包规划为严格串行的两个阶段；Plan 098 的 v2/v9/v10/qualification 主体与此前方向性整改保留，formal
 decoder 唯一入口、pair-aware margin selection 和 frozen decision direct-dependency identity 均已通过最终复验，Plan 098 完成并冻结。
-工作包三已建立 Plan 099 ExecPlan，阶段 A 已获授权待执行，阶段 B 由阶段 A 独立验收后的审查者明确批准门锁定。Plan 097 的
+工作包三 Plan 099 阶段 A 已实现并提交、正等待独立验收，阶段 B 由阶段 A 独立验收后的审查者明确批准门锁定。Plan 097 的
 `M3_D_DUAL_BACKEND_ENGINEERING_PASS / FINAL_REVIEW_ACCEPTED / INTEGRATED / PUSHED`、Plan 096 的
 `CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH / FINAL_REVIEW_ACCEPTED / INTEGRATED / PUSHED`、Plan 094 的有效负向终态和 Plan 095 的
 最终验收均保持有效；新路线完成资格前，本地/云端质量、产品价值、Publication Critic 默认与生产启用继续锁定**
@@ -140,7 +140,7 @@ M3-B1c 正式分阶段训练与工件回收          │
                        ↓
         工作包二：v8 后继数据改造与有限扩充（Plan 098 阶段二；已完成并冻结）
                        ↓
-        工作包三：一次主方案训练（Plan 099；阶段 A 已授权待执行，阶段 B 审查者批准门锁定）
+        工作包三：一次主方案训练（Plan 099；阶段 A 已实现并提交待验收，阶段 B 审查者批准门锁定）
                        ↓
         工作包四：模型资格验收与横评
 
@@ -229,7 +229,7 @@ release-bound selector 现绑定并消费实际 validation pairs，pair bytes SH
 pair 的绝对标签与 hard/applicability/gate invariance 必须闭合，才可进入原单一 bounded margin grid 的确定性 candidate-level 排序。正式
 v10/qualification 只更新必要 identity 并逐字节复现；数据正文、review 和 qualification set 均未重做。本轮 direct dependency identity
 窄修再次只机械更新 design/config/manifest/release identity，并完成独立字节复现。最终复验接受 implementation
-`056ab91a54157200e887bb03f3ddf45c259a3a2c`，Plan 098 完成并冻结；工作包三已由 Plan 099 单独立项，阶段 A 获授权待执行。
+`056ab91a54157200e887bb03f3ddf45c259a3a2c`，Plan 098 完成并冻结；工作包三 Plan 099 阶段 A 已实现并提交、等待独立验收。
 
 #### 工作包三：一次主方案训练
 

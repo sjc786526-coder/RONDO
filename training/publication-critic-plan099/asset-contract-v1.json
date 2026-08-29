@@ -1,0 +1,66 @@
+{
+  "schema": "rondo-publication-critic-plan099-asset-contract-v1",
+  "local_namespace": "eval-data/publication-critic/plan099",
+  "remote_namespace_prefix": "/workspace/rondo-plan099-",
+  "upload_allowlist": [
+    "phase-a/source-bundle.tar",
+    "phase-a/source-bundle-receipt.json",
+    "phase-a/data-bundle.tar",
+    "phase-a/data-bundle-receipt.json"
+  ],
+  "remote_public_download_allowlist": {
+    "repository": "Skywork/Skywork-Reward-V2-Qwen3-1.7B",
+    "revision": "e51ea3e08fb81326c3b812a7ff0cb9cee83e59cc",
+    "files": [
+      ".gitattributes",
+      "README.md",
+      "added_tokens.json",
+      "assets/skywork_logo.png",
+      "chat_template.jinja",
+      "config.json",
+      "merges.txt",
+      "model.safetensors",
+      "special_tokens_map.json",
+      "tokenizer.json",
+      "tokenizer_config.json",
+      "vocab.json"
+    ]
+  },
+  "local_return_allowlist": [
+    "candidate/inference-ready/**",
+    "candidate/decision-config.json",
+    "candidate/development-assessment.json",
+    "candidate/recovery-receipt.json",
+    "candidate/controller-state.json",
+    "candidate/manifest.json",
+    "evidence/formal-result.json",
+    "evidence/recovery-receipt.json",
+    "evidence/environment-receipt.json",
+    "evidence/cost-and-resource-receipts/**",
+    "evidence/log-tail.txt"
+  ],
+  "candidate_required_tree": [
+    "config.json",
+    "inference-manifest.json",
+    "model.safetensors",
+    "tokenizer.json",
+    "tokenizer_config.json",
+    "special_tokens_map.json",
+    "merges.txt",
+    "vocab.json",
+    "chat_template.jinja",
+    "rondo-plan099-model-identity.json"
+  ],
+  "remote_only_large_assets": [
+    "formal/artifacts/recovery-checkpoints/**",
+    "formal/optimizer-and-scheduler-state/**",
+    "hf-cache/**",
+    "venv/**"
+  ],
+  "forbidden": [
+    ".env.local",
+    "training/publication-critic-v9/splits/test/**",
+    "training/publication-critic-qualification-v1/sealed/**",
+    "historical-plan-roots-write/**"
+  ]
+}

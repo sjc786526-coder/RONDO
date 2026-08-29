@@ -1,9 +1,9 @@
 # RONDO 长程规划（WBS）
 
-最后更新：2026-08-28（方向 3 Publication Critic 三期在 Plan 097 双 backend 工程闭环后正式进入质量重构路线；后续固定串行为
+最后更新：2026-08-29（方向 3 Publication Critic 三期在 Plan 097 双 backend 工程闭环后正式进入质量重构路线；后续固定串行为
 “任务合同重构 → v8 后继数据改造与有限扩充 → 一次主方案训练 → 模型资格验收与横评”。Plan 098 已为前两个工作包建立同一两阶段
 ExecPlan；Plan 098 的任务合同、v9/v10/qualification、formal decoder、pair-aware margin selection 与 direct-dependency identity 已全部
-通过最终复验并冻结完成。工作包三已建立 Plan 099 ExecPlan，阶段 A 已获授权待执行，阶段 B 由阶段 A 独立验收后的审查者明确批准门锁定。
+通过最终复验并冻结完成。工作包三 Plan 099 阶段 A 已实现并提交、正等待独立验收，阶段 B 由审查者明确批准门锁定。
 Plan 097 的 `M3_D_DUAL_BACKEND_ENGINEERING_PASS / FINAL_REVIEW_ACCEPTED / INTEGRATED / PUSHED`、Plan 096 的
 `CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH`、Plan 095 最终验收、Plan 094 有效负向研究终态和 Plan 093 Linux 全 workspace 正确性基线
 均保持有效；新路线不自动解锁产品质量、默认启用或生产）
@@ -26,7 +26,7 @@ Plan 097 的 `M3_D_DUAL_BACKEND_ENGINEERING_PASS / FINAL_REVIEW_ACCEPTED / INTEG
 | 0：量化测评基准 | 既有设施与首次 schema v7 正式 canary 已完成，当前无 active campaign | 保留设施；历史结果见 COMPLETED，新 campaign 须重新立项与授权 |
 | 1：Harness 优化 | **正式收口；当前无 active 工作包** | 当前不继续新增观测或内核/热路径优化；既有实现、设施与历史结果保留。未来可由用户另行决定是否重新立项，本次收口不作永久禁止 |
 | 2：本地审批模型 | **已收口，今后不再开启** | 最终结论为“保留为实验”；不改生产默认，不再规划后续工作包 |
-| 3：RONDO Multi | 第一、二期、第四期已完成；三期 Plan 099 阶段 A 已授权待执行 | 工程链与双 backend 可替换性 GO；v2/v9/v10/qualification、formal decoder、pair-aware selector 与 direct-dependency identity 已冻结。Plan 099 只训练一套主方案，阶段 B 仍由阶段 A 独立验收后的审查者明确批准门锁定；新四包串行路线未完成前不读冻结测试、不改产品默认、不授予质量、产品价值或生产资格 |
+| 3：RONDO Multi | 第一、二期、第四期已完成；三期 Plan 099 阶段 A 已实现并提交、等待独立验收 | 工程链与双 backend 可替换性 GO；v2/v9/v10/qualification、formal decoder、pair-aware selector 与 direct-dependency identity 已冻结。Plan 099 只训练一套主方案，阶段 B 仍由阶段 A 独立验收后的审查者明确批准门锁定；新四包串行路线未完成前不读冻结测试、不改产品默认、不授予质量、产品价值或生产资格 |
 
 方向 3 当前 Linux 正确性基线由 Plan 093 建立：default features、standard local Nextest、checksum-verified V8 的完整 workspace
 为 `14660/14660` passed、0 failure/error/timeout，另有 1/1 setup passed；24 个 skip 不计 passed。正式证据和精确边界见
@@ -75,8 +75,9 @@ Plan 097 的 `M3_D_DUAL_BACKEND_ENGINEERING_PASS / FINAL_REVIEW_ACCEPTED / INTEG
   的 Boundary Q+/Q-、非目标不变性与 soft invariance 报告必须全部闭合才可进入原单一 bounded margin grid 的确定性排序。v10/qualification
   只更新必要 identity 后从空目录机械重建并逐字节复现，数据正文和已接受 review 未重做。本轮 dependency identity 窄修同样只机械更新
   design/config/manifest/release identity 并完成独立字节复现。
-- **工作包三 / Plan 099 已立项，阶段 A 已授权待执行**：只训练一套冻结主方案，不恢复同一旧目标上的多路线搜索。本地非付费阶段先闭合实现、
-  消费、控制、测评、恢复和资源门；完成并提交后由审查者独立验收。用户已授权审查者在验收通过后，通过指定队列明确冻结模型、资源、时间、
+- **工作包三 / Plan 099 阶段 A 已实现并提交、等待独立验收**：唯一方案为 exact Skywork Reward V2 Qwen3 1.7B 冻结 BF16 backbone 加五个
+  FP32 linear heads，只训练 22,528 个参数；本地已闭合消费、objective、checkpoint-first 控制、双 fresh-process 恢复、候选与资源门。用户已授权
+  审查者在验收通过后，通过指定队列明确冻结模型、资源、时间、
   动态预算、技术重试、资产传输和收口边界并批准阶段 B；收到该批准前不得进入付费执行。
 - **工作包四待候选冻结后启动**：使用未参与训练和方案选择的冻结集合完成资格与横评，给出最终模型、判定配置和 GO/NO-GO；不得用
   测试集返调任务、数据或 threshold，也不因通过而自动默认启用或进入生产。

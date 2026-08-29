@@ -1,0 +1,57 @@
+{
+  "schema": "rondo-publication-critic-plan099-model-contract-v1",
+  "base": {
+    "repository": "Skywork/Skywork-Reward-V2-Qwen3-1.7B",
+    "revision": "e51ea3e08fb81326c3b812a7ff0cb9cee83e59cc",
+    "class": "Qwen3ForSequenceClassification",
+    "license": "apache-2.0",
+    "parameter_count": 1720577024,
+    "weight_file": "model.safetensors",
+    "weight_sha256": "117da8e3a6c3e9c9b9b66e74d69373b8f186e7fe27be2d64e0bb18510c9a07d9",
+    "storage_dtype": "BF16",
+    "original_num_labels": 1,
+    "hidden_size": 2048,
+    "pad_token_id": 151654,
+    "eos_token_id": 151645,
+    "bos_token_id": null
+  },
+  "student": {
+    "backbone_forward_count": 1,
+    "logical_head_count": 5,
+    "flat_logit_count": 11,
+    "head_module": "five_heads.<dimension>.weight",
+    "head_bias": false,
+    "layout": {
+      "useful_state_transfer": {"classes": ["PASS", "FAIL"], "start": 0, "stop": 2},
+      "honest_uncertainty": {"classes": ["PASS", "FAIL"], "start": 2, "stop": 4},
+      "conditional_continuity": {"classes": ["PASS", "FAIL", "N/A"], "start": 4, "stop": 7},
+      "scope_and_signal": {"classes": ["PASS", "FAIL"], "start": 7, "stop": 9},
+      "internal_consistency": {"classes": ["PASS", "FAIL"], "start": 9, "stop": 11}
+    },
+    "initialization": {
+      "method": "deterministic_scalar_head_projection_v1",
+      "pass_rows": "copy_0.5_times_exact_base_score_weight",
+      "fail_rows": "copy_-0.5_times_exact_base_score_weight",
+      "continuity_na_row": "zeros",
+      "random_head_initialization": false,
+      "legacy_scalar_head_retained": false
+    },
+    "formal_output_schema": "eval/templates/publication-critic/successor-output-schema-v1.json",
+    "formal_output_schema_sha256": "bec9c3c3ad66146f4b8b1b6a3b805ae50caa3a29217eef3575897fc952baa2d3"
+  },
+  "input": {
+    "tokenizer_source": "same_exact_base_revision",
+    "chat_template_source": "same_exact_base_revision",
+    "adopted_window_tokens": 16384,
+    "padding_side": "right",
+    "candidate_truncation": "forbidden",
+    "pooling": "last_non_padding_token_matching_exact_base_classifier",
+    "pooling_parity_required": true,
+    "input_contract": "eval/templates/publication-critic/input-contract-v3.md",
+    "input_contract_sha256": "9c43c7ca81caa20c337d025375020548bab3b0508f1a4aeff2ca4647c8197f7d",
+    "rubric": "eval/templates/publication-critic/qualification-rubric-v2.md",
+    "rubric_sha256": "c26ffffc41aa9adf68cffc38b14eb8e1da34f2e28dcb966fae8fec8055675946",
+    "render_contract": "eval/templates/publication-critic/render-contract-v4.json",
+    "render_contract_sha256": "74f4623fe47188bc947a8a7559f90364fd528a6f9eebdc1b9676cbb2e3d96dde"
+  }
+}

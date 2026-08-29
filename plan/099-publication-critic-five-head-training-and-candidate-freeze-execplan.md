@@ -201,32 +201,34 @@ trainable scope、精确训练强度或普通调试顺序，这些由执行者�
   `worktree-099-publication-critic-five-head-training`。
 - 2026-08-28：完成 ExecPlan 与 WBS 当前状态窄同步；规划期间未读取 v9 test、qualification sealed 正文或旧 unseen，未运行真实模型、
   GPU/RunPod/Docker/付费 API，未上传资产或产生训练费用。
+- 2026-08-29：阶段 A 冻结 exact Skywork 1.7B base、五头 linear-probe recipe、开发准入门、checkpoint-first 恢复、候选 exact-tree、动态预算与
+  RunPod 生命周期设施；pure/fake/focused `6/6`、freeze CLI、Ruff、compile、shell/diff 门通过。source/data bundle 已在提交后从 exact commit
+  生成并完成独立解包、合并与 freeze 复验；阶段 A 未运行真实模型、GPU/RunPod/Docker/付费 API，未上传资产或读取禁止正文。
 
 ### 当前工作
 
-- `PLAN099_EXECPLAN_ESTABLISHED / PHASE_A_AUTHORIZED_PENDING_EXECUTION / PHASE_B_REVIEWER_GATED`。
+- `PHASE_A_IMPLEMENTED_COMMITTED_AWAITING_REVIEW / PHASE_B_REVIEWER_GATED`。
 
 ### 本任务剩余步骤
 
-1. 执行阶段 A：选择并冻结唯一主方案，闭合训练/评价/恢复/归档/资源设施及 fake/dry-run，冻结开发准入数值和阶段 B 申请。
-2. 提交阶段 A，使用 §7 队列申请独立审查并停止；按 findings 在阶段 A 授权内整改重跑，直至审查者明确接受或任务失败。
-3. 审查者接受阶段 A 后，通过队列明确给出是否批准阶段 B及最终外部边界；未批准则保持安全停止。
-4. 若批准，执行有界 commissioning、clean formal、恢复复现、候选或 `NO-GO` 冻结，并回传候选完整 inference-ready 权重与必要小型证据。
-5. 提交阶段 B 核心交付，使用 §7 队列申请 Pod 预释放审查并停止；审查者确认无需 Pod 并明确批准后，立即 stop/delete Pod、复核 compute `$0/h`。
-6. 在无 Pod 状态下完成本地结果、WBS、COMPLETED 与日志收口；提交最终 tracked 变更，使用 §7 队列申请最终独立验收并停止。
+1. 审查阶段 A；按 findings 在阶段 A 授权内整改重跑，直至审查者明确接受或任务失败。
+2. 审查者接受阶段 A 后，通过队列明确给出是否批准阶段 B及最终外部边界；未批准则保持安全停止。
+3. 若批准，执行有界 commissioning、clean formal、恢复复现、候选或 `NO-GO` 冻结，并回传候选完整 inference-ready 权重与必要小型证据。
+4. 提交阶段 B 核心交付，使用 §7 队列申请 Pod 预释放审查并停止；审查者确认无需 Pod 并明确批准后，立即 stop/delete Pod、复核 compute `$0/h`。
+5. 在无 Pod 状态下完成本地结果、WBS、COMPLETED 与日志收口；提交最终 tracked 变更，使用 §7 队列申请最终独立验收并停止。
 
 ### 阻塞项
 
-- 阶段 A 无授权阻塞，尚待执行。
+- 阶段 A 实现已提交，正在等待指定队列的独立验收。
 - 阶段 B 在审查者完成阶段 A 独立验收并通过指定队列明确批准前保持锁定。
 - 阶段 B 核心任务完成后，Pod 删除由 Pod 预释放审查门控制；当前尚未进入该门。
 
 ### 当前验收状态
 
 - 规划：`COMPLETED / COMMITTED`。
-- 阶段 A：`AUTHORIZED / NOT_STARTED`。
+- 阶段 A：`IMPLEMENTED / COMMITTED / AWAITING_INDEPENDENT_REVIEW`。
 - 阶段 B：`REVIEWER_GATED / NOT_AUTHORIZED_YET`。
-- 完整任务：`NOT_STARTED`。
+- 完整任务：`IN_PROGRESS / PHASE_B_NOT_STARTED`。
 
 ### 交接边界
 
@@ -251,6 +253,9 @@ trainable scope、精确训练强度或普通调试顺序，这些由执行者�
 | 007 | 职责契合时复用已有训练设施；复用会扭曲五头语义时允许新建架构契合的专用能力，不建设重复平台 | 兼顾干净复用与任务语义，不因历史 scalar 路线强行耦合 | 架构、维护 | 已采纳 |
 | 008 | 候选完整 inference-ready 权重必须回传本地 ignored namespace；完整训练 checkpoint 等其他大型资产留在云端网络卷 | 工作包四需要直接消费候选模型，同时避免无必要下载所有训练大资产 | 工件、回传、资格前置 | 已采纳 |
 | 009 | 阶段 B 核心交付先做 Pod 预释放审查；审查者确认不再需要 Pod 后立即释放，再做本地文档收口 | 避免为了慢速文档整理继续支付 compute，同时防止过早删 Pod 导致必要 GPU 复验无法完成 | 审查、止费、收口 | 已采纳 |
+| 010 | 唯一主方案冻结为 exact Skywork Reward V2 Qwen3 1.7B BF16 backbone，加五个独立 FP32 无 bias linear heads；只训练 22,528 个 head 参数，16 次 full-cohort update | 与既有本地运行目标、48GB L40S、v2 五头语义和有限预算直接匹配，不引入第二路线或 adapter-only 交付 | 模型、scope、recipe | 已采纳 |
+| 011 | 正式点固定为 2/4/8/12/16，step 8 与最终最佳点都须新进程复现；任何进程中断只从 checkpoint-first 外部状态恢复 | 同时证明中程继续训练与最终候选本体可恢复，避免可编辑 controller state 冒充 checkpoint 证据 | checkpoint、恢复、候选 | 已采纳 |
+| 012 | 开发准入固定使用 12 项 bounded margin grid、全 pair 闭合、五头非塌缩、gate FP≤3/FR≤4/BA≥0.75、逐头 failure recall 与 macro recall 下限，并要求相对 step zero 严格改善或新获准入 | 在正式结果出现前把风险门和 tie-break 固定，validation 只承担开发选择 | 开发评价、NO-GO | 已采纳 |
 
 ## 7. 给执行者的启动提示词
 
