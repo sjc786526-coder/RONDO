@@ -1,0 +1,95 @@
+{
+  "schema": "rondo-publication-critic-plan099-asset-contract-v1",
+  "local_namespace": "eval-data/publication-critic/plan099",
+  "remote_namespace_prefix": "/workspace/rondo-plan099-",
+  "upload_allowlist_scope": "phase_a_static_only",
+  "upload_allowlist": [
+    "phase-a/source-bundle.tar",
+    "phase-a/source-bundle-receipt.json",
+    "phase-a/data-bundle.tar",
+    "phase-a/data-bundle-receipt.json"
+  ],
+  "runtime_control_upload_allowlist": {
+    "content_sha256_basis": "canonical_json_core_v1",
+    "file_bytes": "pretty_json_bytes_v1",
+    "file_mode": "0600",
+    "directory_mode": "0700",
+    "ephemeral": true,
+    "fresh_create_on_environment_rebuild": true,
+    "pod_id_source": "validated_actual_pod_id",
+    "pod_name_binding": "validated_live_resource_receipt",
+    "retired_pod_ids": ["z1z3m7n90nz4xr"],
+    "maximum_file_bytes": 16384,
+    "path_template": "/run/rondo-plan099-{validated_actual_pod_id}/runtime-control/{role}/{content_sha256}.json",
+    "roles": [
+      {
+        "role": "live-resource",
+        "schema": "rondo-publication-critic-plan099-live-resource-receipt-v1"
+      },
+      {
+        "role": "lifecycle",
+        "schema": "rondo-publication-critic-plan099-pod-lifecycle-authorization-v1"
+      },
+      {
+        "role": "segment",
+        "schema": "rondo-publication-critic-plan099-paid-segment-authorization-v1"
+      }
+    ]
+  },
+  "remote_public_download_allowlist": {
+    "repository": "Skywork/Skywork-Reward-V2-Qwen3-1.7B",
+    "revision": "e51ea3e08fb81326c3b812a7ff0cb9cee83e59cc",
+    "files": [
+      ".gitattributes",
+      "README.md",
+      "added_tokens.json",
+      "assets/skywork_logo.png",
+      "chat_template.jinja",
+      "config.json",
+      "merges.txt",
+      "model.safetensors",
+      "special_tokens_map.json",
+      "tokenizer.json",
+      "tokenizer_config.json",
+      "vocab.json"
+    ]
+  },
+  "local_return_allowlist": [
+    "candidate/inference-ready/**",
+    "candidate/decision-config.json",
+    "candidate/development-assessment.json",
+    "candidate/recovery-receipt.json",
+    "candidate/controller-state.json",
+    "candidate/manifest.json",
+    "evidence/formal-result.json",
+    "evidence/recovery-receipt.json",
+    "evidence/environment-receipt.json",
+    "evidence/model-snapshot-receipt.json",
+    "evidence/cost-and-resource-receipts/**",
+    "evidence/log-tail.txt"
+  ],
+  "candidate_required_tree": [
+    "config.json",
+    "inference-manifest.json",
+    "model.safetensors",
+    "tokenizer.json",
+    "tokenizer_config.json",
+    "special_tokens_map.json",
+    "merges.txt",
+    "vocab.json",
+    "chat_template.jinja",
+    "rondo-plan099-model-identity.json"
+  ],
+  "remote_only_large_assets": [
+    "formal/artifacts/recovery-checkpoints/**",
+    "formal/optimizer-and-scheduler-state/**",
+    "hf-cache/**",
+    "venv/**"
+  ],
+  "forbidden": [
+    ".env.local",
+    "training/publication-critic-v9/splits/test/**",
+    "training/publication-critic-qualification-v1/sealed/**",
+    "historical-plan-roots-write/**"
+  ]
+}

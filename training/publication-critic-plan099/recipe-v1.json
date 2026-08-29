@@ -1,0 +1,101 @@
+{
+  "schema": "rondo-publication-critic-plan099-recipe-v1",
+  "seed": 99099,
+  "precision": {
+    "backbone_parameter_dtype": "bfloat16",
+    "pooled_feature_storage_dtype": "bfloat16",
+    "head_parameter_dtype": "float32",
+    "logit_and_loss_dtype": "float32",
+    "allow_tf32": false,
+    "float32_matmul_precision": "highest"
+  },
+  "scope": {
+    "scope_id": "plan099-five-head-linear-probe",
+    "update_method": "replacement_five_head_only",
+    "parameter_names": [
+      "five_heads.useful_state_transfer.weight",
+      "five_heads.honest_uncertainty.weight",
+      "five_heads.conditional_continuity.weight",
+      "five_heads.scope_and_signal.weight",
+      "five_heads.internal_consistency.weight"
+    ],
+    "trainable_parameter_elements": 22528,
+    "backbone_trainable_parameter_elements": 0,
+    "head_trainable_parameter_elements": 22528,
+    "backbone_mode": "frozen_eval_no_grad",
+    "peft": false,
+    "quantized_training": false
+  },
+  "objective": {
+    "formula": "L_dim + lambda_gate*L_gate + lambda_boundary*L_boundary + lambda_invariance*L_invariance",
+    "component_weights": {
+      "dimension": 1.0,
+      "gate": 0.25,
+      "boundary": 0.5,
+      "invariance": 0.25
+    },
+    "boundary_subweights": {
+      "target_absolute_margin": 0.5,
+      "endpoint_gate": 0.25,
+      "non_target_invariance": 0.25
+    },
+    "invariance_subweights": {
+      "heads": 0.8,
+      "gate": 0.2
+    },
+    "dimension_class_weighting": "inverse_frequency_per_head_train_only",
+    "dimension_class_weights": {
+      "useful_state_transfer": [0.6585365853658537, 2.076923076923077],
+      "honest_uncertainty": [0.6230769230769231, 2.53125],
+      "conditional_continuity": [0.7714285714285715, 1.8620689655172413, 0.8571428571428571],
+      "scope_and_signal": [0.6136363636363636, 2.7],
+      "internal_consistency": [0.5869565217391305, 3.375]
+    },
+    "target_logit_margin": 1.0,
+    "endpoint_gate_margin": 0.5,
+    "smooth_min_temperature": 0.25,
+    "gate_probability_floor": 1e-06,
+    "soft_preference_qualification_weight": 0.0
+  },
+  "optimizer": {
+    "name": "torch.optim.AdamW",
+    "fused": false,
+    "foreach": false,
+    "learning_rate": 0.0003,
+    "betas": [0.9, 0.999],
+    "epsilon": 1e-08,
+    "weight_decay": 0.01,
+    "gradient_clip_norm": 1.0
+  },
+  "scheduler": {
+    "name": "constant"
+  },
+  "batching": {
+    "candidate_micro_batch_size": 1,
+    "pair_micro_batch_size": 1,
+    "macro_update": "one_full_v10_train_cohort",
+    "shuffle": false,
+    "loader_workers": 0,
+    "activation_checkpointing": false,
+    "attention_backend": "sdpa",
+    "feature_cache": "task_owned_model_input_order_bound_bfloat16"
+  },
+  "control": {
+    "maximum_formal_updates": 16,
+    "evaluation_steps": [2, 4, 8, 12, 16],
+    "checkpoint_steps": [2, 4, 8, 12, 16],
+    "fresh_process_recovery_step": 8,
+    "formal_start": "exact_base_empty_namespace",
+    "commissioning_pairs": 6,
+    "commissioning_updates": 1,
+    "stop_on_first_admissible": false,
+    "valid_negative_at_maximum": true
+  },
+  "retention": {
+    "maximum_full_checkpoints_after_selection": 3,
+    "roles": ["best", "latest", "fresh_process_recovery"],
+    "role_overlap_reuses_checkpoint": true,
+    "complete_training_state_remote_only": true,
+    "inference_ready_candidate_download_required": true
+  }
+}

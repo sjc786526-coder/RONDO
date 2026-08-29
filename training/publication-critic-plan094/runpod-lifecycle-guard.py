@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Wait for one Plan 094 Pod deadline, then confirm exact deletion."""
+"""Wait for one frozen task Pod deadline, then confirm exact deletion."""
 
 from __future__ import annotations
 
@@ -18,11 +18,16 @@ from rondo_eval.publication_critic.full_model_training.contract import (
     FullModelTrainingError,
 )
 from rondo_eval.publication_critic.full_model_training.plan094_contract import (
-    validate_pod_lifecycle_authorization,
+    validate_pod_lifecycle_authorization as validate_plan094_lifecycle,
+)
+from rondo_eval.publication_critic.full_model_training.plan099_contract import (
+    validate_pod_lifecycle_authorization as validate_plan099_lifecycle,
 )
 
 ARMED_SCHEMA = "rondo-publication-critic-plan094-pod-lifecycle-guard-armed-v1"
 RESULT_SCHEMA = "rondo-publication-critic-plan094-pod-lifecycle-guard-result-v1"
+PLAN099_ARMED_SCHEMA = "rondo-publication-critic-plan099-pod-lifecycle-guard-armed-v1"
+PLAN099_RESULT_SCHEMA = "rondo-publication-critic-plan099-pod-lifecycle-guard-result-v1"
 ARM_MAX_DELAY_SECONDS = 60
 POLL_SECONDS = 30.0
 RETRY_SECONDS = 5.0
@@ -33,18 +38,40 @@ class LifecycleGuardError(RuntimeError):
 
 
 Terminator = Callable[[Mapping[str, Any], datetime, float], Mapping[str, Any]]
+Validator = Callable[[Any], dict[str, Any]]
+
+PROFILES = {
+    "plan094": {
+        "validator": validate_plan094_lifecycle,
+        "approval_environment": "RONDO_PLAN094_STAGE_B_APPROVED",
+        "task_prefix": "rondo-plan094-",
+        "started_at_field": "task_started_at",
+        "armed_schema": ARMED_SCHEMA,
+        "result_schema": RESULT_SCHEMA,
+    },
+    "plan099": {
+        "validator": validate_plan099_lifecycle,
+        "approval_environment": "RONDO_PLAN099_STAGE_B_APPROVED",
+        "task_prefix": "rondo-plan099-",
+        "started_at_field": "pod_started_at",
+        "armed_schema": PLAN099_ARMED_SCHEMA,
+        "result_schema": PLAN099_RESULT_SCHEMA,
+    },
+}
 
 
 def enforce_lifecycle(
     authorization: Any,
     *,
     terminator: Terminator,
+    validator: Validator = validate_plan094_lifecycle,
+    result_schema: str = RESULT_SCHEMA,
     now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
     sleeper: Callable[[float], None] = time.sleep,
 ) -> dict[str, Any]:
     """Use the provider-start absolute trigger, including idle launch gaps."""
 
-    receipt = validate_pod_lifecycle_authorization(authorization)
+    receipt = validator(authorization)
     trigger = _utc(receipt["termination_trigger_at"])
     while (remaining := (trigger - _now(now)).total_seconds()) > 0.0:
         sleeper(min(POLL_SECONDS, remaining))
@@ -64,7 +91,15 @@ def enforce_lifecycle(
             terminal = terminator(
                 receipt,
                 observed,
-                min(float(receipt["terminal_helper_timeout_seconds"]), remaining),
+                min(
+                    float(
+                        receipt.get(
+                            "terminal_helper_timeout_seconds",
+                            receipt["terminal_confirmation_seconds"],
+                        )
+                    ),
+                    remaining,
+                ),
             )
             _require_zero_pod(terminal, receipt)
         except LifecycleGuardError as exc:
@@ -79,7 +114,7 @@ def enforce_lifecycle(
                 "terminal_confirmation_deadline_exceeded:terminal_succeeded_late"
             )
         return {
-            "schema": RESULT_SCHEMA,
+            "schema": result_schema,
             "status": "pod_absent_confirmed",
             "termination_trigger_at": receipt["termination_trigger_at"],
             "confirmed_at": confirmed.isoformat().replace("+00:00", "Z"),
@@ -96,6 +131,9 @@ def _run_terminal(
     receipt: Mapping[str, Any],
     captured_at: datetime,
     timeout_seconds: float,
+    *,
+    task_prefix: str = "rondo-plan094-",
+    started_at_field: str = "task_started_at",
 ) -> Mapping[str, Any]:
     helper_timeout = max(timeout_seconds - 5.0, 1.0)
     try:
@@ -112,11 +150,11 @@ def _run_terminal(
                 "--pod-name",
                 receipt["pod_name"],
                 "--task-pod-name-prefix",
-                "rondo-plan094-",
+                task_prefix,
                 "--captured-at",
                 captured_at.isoformat().replace("+00:00", "Z"),
                 "--task-started-at",
-                receipt["task_started_at"],
+                receipt[started_at_field],
                 "--timeout-seconds",
                 str(helper_timeout),
             ],
@@ -188,6 +226,7 @@ def _utc(value: str) -> datetime:
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--profile", choices=tuple(PROFILES), default="plan094")
     parser.add_argument("--authorization", type=Path, required=True)
     parser.add_argument("--terminal-helper", type=Path, required=True)
     parser.add_argument("--runpodctl", default="runpodctl")
@@ -201,10 +240,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     os.umask(0o077)
     args = _parser().parse_args(argv)
     try:
-        if os.getenv("RONDO_PLAN094_STAGE_B_APPROVED") != "1":
+        profile = PROFILES[args.profile]
+        if os.getenv(str(profile["approval_environment"])) != "1":
             raise LifecycleGuardError("stage_b_approval_required")
         root = args.task_root.resolve(strict=True)
-        if not root.is_dir() or not root.name.startswith("rondo-plan094-"):
+        if not root.is_dir() or not root.name.startswith(str(profile["task_prefix"])):
             raise LifecycleGuardError("task_root_invalid")
         authorization_path = _task_path(args.authorization, root, must_exist=True)
         armed_path = _task_path(args.armed_output, root, must_exist=False)
@@ -214,7 +254,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         helper = args.terminal_helper.resolve(strict=True)
         if not helper.is_file() or args.terminal_helper.is_symlink():
             raise LifecycleGuardError("terminal_helper_invalid")
-        authorization = validate_pod_lifecycle_authorization(
+        validator = profile["validator"]
+        assert callable(validator)
+        authorization = validator(
             json.loads(authorization_path.read_text(encoding="utf-8"))
         )
         observed = _now(lambda: datetime.now(timezone.utc))
@@ -228,7 +270,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         _write_exclusive(
             armed_path,
             {
-                "schema": ARMED_SCHEMA,
+                "schema": profile["armed_schema"],
                 "status": "armed",
                 "pid": os.getpid(),
                 "pod_id": authorization["pod_id"],
@@ -240,8 +282,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         result = enforce_lifecycle(
             authorization,
             terminator=lambda receipt, captured, timeout: _run_terminal(
-                helper, args.runpodctl, receipt, captured, timeout
+                helper,
+                args.runpodctl,
+                receipt,
+                captured,
+                timeout,
+                task_prefix=str(profile["task_prefix"]),
+                started_at_field=str(profile["started_at_field"]),
             ),
+            validator=validator,
+            result_schema=str(profile["result_schema"]),
         )
         _write_exclusive(result_path, result)
     except (

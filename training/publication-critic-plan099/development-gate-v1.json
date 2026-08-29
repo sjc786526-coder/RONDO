@@ -1,0 +1,61 @@
+{
+  "schema": "rondo-publication-critic-plan099-development-gate-v1",
+  "validation": {
+    "candidate_rows": 27,
+    "pair_rows": 12,
+    "gate_gold_pass": 12,
+    "gate_gold_rewrite": 15,
+    "gold_fail_support": {
+      "useful_state_transfer": 6,
+      "honest_uncertainty": 5,
+      "conditional_continuity": 3,
+      "scope_and_signal": 6,
+      "internal_consistency": 4
+    }
+  },
+  "eligibility": {
+    "finite_structured_rows": 27,
+    "required_predicted_classes": {
+      "useful_state_transfer": ["PASS", "FAIL"],
+      "honest_uncertainty": ["PASS", "FAIL"],
+      "conditional_continuity": ["PASS", "FAIL", "N/A"],
+      "scope_and_signal": ["PASS", "FAIL"],
+      "internal_consistency": ["PASS", "FAIL"]
+    },
+    "maximum_gate_false_pass": 3,
+    "maximum_gate_false_rewrite": 4,
+    "minimum_gate_balanced_accuracy": 0.75,
+    "minimum_failure_recall": {
+      "useful_state_transfer": 0.6666666666666666,
+      "honest_uncertainty": 0.8,
+      "conditional_continuity": 0.6666666666666666,
+      "scope_and_signal": 0.6666666666666666,
+      "internal_consistency": 0.75
+    },
+    "minimum_continuity_na_recall": 0.6666666666666666,
+    "minimum_supported_class_macro_recall": 0.6,
+    "all_validation_pairs_closed": true,
+    "decision_config_required": true,
+    "training_loss_must_be_finite": true,
+    "selected_must_strictly_improve_step_zero_or_become_newly_eligible": true
+  },
+  "decision_grid": {
+    "shared_pass_over_fail_margins": [0.0, 0.1, 0.25, 0.5],
+    "continuity_na_over_applicable_margins": [0.1, 0.25, 0.5],
+    "candidate_count": 12,
+    "selection": "existing bounded_validation_pair_closed_grid_v1"
+  },
+  "best_checkpoint_order": [
+    "eligible_true",
+    "minimum_supported_class_macro_recall_descending",
+    "gate_false_pass_ascending",
+    "gate_correct_descending",
+    "gate_false_rewrite_ascending",
+    "per_dimension_correct_sum_descending",
+    "global_step_ascending",
+    "decision_config_sha256_ascending",
+    "checkpoint_content_sha256_ascending"
+  ],
+  "undefined_denominator": "ineligible_fail_closed",
+  "validation_claim": "development_selection_only"
+}

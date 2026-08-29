@@ -1,0 +1,54 @@
+{
+  "schema": "rondo-publication-critic-plan099-resource-contract-v1",
+  "provider": "RunPod",
+  "cloud_type": "SECURE",
+  "data_center_id": "US-TX-3",
+  "gpu": {"name": "NVIDIA L40S", "count": 1, "minimum_vram_gb": 48},
+  "container": {
+    "image": "runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404",
+    "container_disk_gb": 20,
+    "volume_mount_path": "/workspace"
+  },
+  "network_volume": {
+    "id": "mwemzrn33y",
+    "reuse_required": true,
+    "expected_initial_size_gb": 70,
+    "maximum_size_gb": 100,
+    "maximum_new_volumes": 0,
+    "delete_at_task_end": false,
+    "historical_roots_read_only": true,
+    "plan099_root_prefix": "/workspace/rondo-plan099-"
+  },
+  "pods": {
+    "maximum_simultaneous_billing": 1,
+    "maximum_cumulative_created": 2,
+    "replacement_only_after_exact_absence": true,
+    "maximum_total_wall_seconds": 10800,
+    "maximum_lifecycle_seconds": 10380,
+    "maximum_total_wall_formula": "prior+maximum_lifecycle+worker_kill_grace+terminal_confirmation",
+    "task_prior_pod_wall_seconds_definition": "conservative_sum_from_provider_start_to_zero_pod_confirmation",
+    "automatic_create_script": "scripts/create-runpod-when-ready.py"
+  },
+  "budget": {
+    "formula": "max(live_available_balance_usd-known_unsettled_or_delayed_usd-6*existing_volume_rate_usd_per_hour,0)",
+    "recharge_allowed": false,
+    "must_cover": ["commissioning", "formal", "recovery", "candidate_download", "pod_prerelease_review_wait", "pod_stop_delete_confirmation"],
+    "worker_kill_grace_seconds": 60,
+    "terminal_confirmation_seconds": 360,
+    "absolute_deadline_guard": {
+      "profile": "plan099",
+      "arm_within_authorization_seconds": 60,
+      "termination_trigger_basis": "pod_started_at_plus_maximum_lifecycle_seconds_plus_worker_kill_grace_seconds",
+      "confirmation_deadline_basis": "termination_trigger_at_plus_terminal_confirmation_seconds",
+      "reviewer_approval_required_at_trigger": false,
+      "normal_early_release_still_reviewer_gated": true
+    }
+  },
+  "resource_end_state": {
+    "task_pods": 0,
+    "compute_rate_usd_per_hour": 0.0,
+    "network_volume": "retain_existing_with_plan099_large_checkpoints",
+    "pod_release_requires_reviewer_message": "确认不再需要 Pod，批准立即释放",
+    "absolute_deadline_exception": "automatic_exact_pod_stop_delete_and_zero_compute_confirmation"
+  }
+}
