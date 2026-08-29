@@ -3,7 +3,7 @@
 最后更新：2026-08-28 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
 状态：**第一期、第二期、第四期已完成；Publication Critic 三期 Plan 097 已完成并闭合双 backend 工程 E2E 与可替换接缝，现正式进入
 质量重构路线。后续严格串行为“任务合同重构 → v8 后继数据改造与有限扩充 → 一次主方案训练 → 模型资格验收与横评”。Plan 098 已把
-前两个工作包规划为严格串行的两个阶段，现均已通过最终验收并冻结，Plan 098 完成；工作包三成为下一工作包但尚未启动。Plan 097 的
+前两个工作包规划为严格串行的两个阶段；用户要求的验收后方向性复审现发现逐头判定、资格指标、数据捷径与独立资格集四项窄缺口，Plan 098 主体保留并重新整改，工作包三继续锁定。Plan 097 的
 `M3_D_DUAL_BACKEND_ENGINEERING_PASS / FINAL_REVIEW_ACCEPTED / INTEGRATED / NOT_PUSHED`、Plan 096 的
 `CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH / FINAL_REVIEW_ACCEPTED / INTEGRATED / PUSHED`、Plan 094 的有效负向终态和 Plan 095 的
 最终验收均保持有效；新路线完成资格前，本地/云端质量、产品价值、Publication Critic 默认与生产启用继续锁定**
@@ -134,9 +134,9 @@ M3-B1c 正式分阶段训练与工件回收          │
                        ↓
         Plan 097 M3-D 双 backend 工程前置闭环（已完成并通过最终独立验收）
                        ↓
-        工作包一：任务合同重构（Plan 098 阶段一；已通过并冻结）
+        工作包一：任务合同重构（Plan 098 阶段一；主体保留，方向性窄修中）
                        ↓
-        工作包二：v8 后继数据改造与有限扩充（Plan 098 阶段二；已通过并冻结）
+        工作包二：v8 后继数据改造与有限扩充（Plan 098 阶段二；主体保留，方向性窄修中）
                        ↓
         工作包三：一次主方案训练（本地非付费准备 → 用户授权后的云端付费执行）
                        ↓
@@ -155,7 +155,7 @@ Plan 098，但仍是两个严格串行、分别验收的任务阶段；工作包
 
 ### 当前后续路线：三期质量重构
 
-#### 工作包一：任务合同重构（Plan 098 阶段一；已通过并冻结）
+#### 工作包一：任务合同重构（Plan 098 阶段一；主体保留，方向性窄修中）
 
 **目标**：把上文“冻结任务设计方向”完整落实为单一权威训练任务，使模型内部五头判断、同向损失、非补偿聚合、模型可见事实与产品
 `PASS/REWRITE` 语义一致，并为后续数据和训练提供稳定接口；执行者不得把五头 gate 降格为自由单总分或重新引入 hard/soft 混合排序。
@@ -175,8 +175,9 @@ dimension 如何表达和聚合、Binary、Boundary、Within-PASS 各自承担�
 完整 target、轻量 projection parity、逐 pair evaluation、物理 split consumer 与历史隔离已经第二轮复验接受。accepted implementation
 commit 为 `55342bdb11b09c11b589fd398717f7712fca012c`，合同 SHA-256 为
 `3eb0539b16403ebe20e74ce1b1ea5114d2383c6118f61fef56c9c91426e6a560`。冻结 v8、旧 scalar validator/render 与产品 typed seam 保持不变。
+验收后方向性复审只重新打开逐头/N/A decision config 与逐维 failure-recall/confusion metrics；五头和 non-compensating gate 不重开。
 
-#### 工作包二：v8 后继数据改造与有限扩充（Plan 098 阶段二；已通过并冻结）
+#### 工作包二：v8 后继数据改造与有限扩充（Plan 098 阶段二；主体保留，方向性窄修中）
 
 **目标**：保持 `publication-critic-v8` 原样作为历史证据，从其可复用部分和新增高信息样本形成新的后继 revision。合成数据必须服务工作包一
 冻结的新任务合同，而不是机械扩展旧数据；v8 每个旧条目、类别、pair、配比和模板都只有在新合同下仍有信息价值时才能复用。新数据应完整表达
@@ -209,8 +210,8 @@ train/validation/test 为 162/27/27 candidates 与 72/12/12 pairs。`hard-bounda
 train projection 被判定无法无歧义提供完整五头监督，故直接复用为零。完整 commissioning 与一次干净正式 finalizer 已闭合 manifest、renderer、
 coverage、exact/cross-group near duplicate、明显捷径、train-only smoke 和无 test 入口的 consumer。finalizer 现于写出前核对 13 个
 工作包一必要语义组件及组合 SHA，design、generation config、release identity 已绑定同一 accepted implementation；权威 Markdown
-保持不变而任一其他核心组件漂移时均 fail-closed。最终整改复验接受 implementation
-`7ee479beb1f34677a54b815faf42284c0d8968e4`；Plan 098 完成，工作包三成为下一工作包但尚未启动。
+保持不变而任一其他核心组件漂移时均 fail-closed。验收后方向性复审不否定 v9 主体，但要求只整改 train/validation 的 honest/scope
+捷径、补逐维资格 metrics，并在不读取现有 test 的前提下冻结不同 template/scenario family 的独立资格确认集；复验通过前工作包三继续锁定。
 
 #### 工作包三：一次主方案训练
 

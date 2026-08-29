@@ -2561,26 +2561,3 @@ INTEGRATED / NOT_PUSHED`。clean formal source 为 `0ae9623`，执行者交付�
   `agent_log/2026-08-28-004839-plan097-main-integration.md`。
 - 本任务只完成工程链与双 backend 可替换性 GO。本地模型质量仍为 `NO-GO / 待替换`，云端 scorer 仍为 `NOT QUALIFIED`，M3-D 产品价值仍未验收，
   Publication Critic 默认 `OFF`，生产启用 `NO`。
-
-## Publication Critic v2 任务合同与 v9 后继数据（Plan 098，2026-08-28）
-
-**状态**：`COMPLETED / FINAL_REVIEW_ACCEPTED / GOAL_COMPLETED / NOT_INTEGRATED / NOT_PUSHED`。工作包一 accepted implementation
-为 `55342bdb11b09c11b589fd398717f7712fca012c`；工作包二 accepted implementation 为
-`7ee479beb1f34677a54b815faf42284c0d8968e4`。
-
-- 工作包一冻结唯一权威 `rondo-publication-critic-task@v2`，合同内容 SHA-256 为
-  `3eb0539b16403ebe20e74ce1b1ea5114d2383c6118f61fef56c9c91426e6a560`。资格由五个 hard heads 的确定性 all-pass gate
-  决定；soft preference 不进入资格 loss、threshold 或 verdict，scalar 只能由适用维度的最小满足度派生。
-- 工作包二冻结 `publication-critic-v9`：216 candidates / 96 pairs，train/validation/test 为 162/27/27 candidates 与
-  72/12/12 pairs。三个 24-group 模块分别由干净负责人生成整改、对应盲审员最终以 0 finding 接受；v8 保持不可改写，只检查允许的
-  train-only safe projection，因旧 scalar 监督不足而直接复用为零。
-- manifest SHA-256 为 `756d7ea4c53673a447860fb4cfc245a98f5c15383569f137b1e07eacf7f90118`，最终 release identity 文件
-  SHA-256 为 `9372525b9682bfbdd36ba013fc81bf3417172bcb19127652c344b0a08ffc81fe`。13 个工作包一必要语义组件组合
-  SHA-256 为 `b0124de561f52fb464c223989d003af1e9f2a8a24eccd9ca349a4d769e3488d5`，finalizer 在任何输出前逐文件
-  fail-closed 核对。
-- 最终整改复验独立运行 successor 与旧 contract/training-data/identity `47/47` passed；v7/v8 tree、v9 manifest/coverage/smoke/
-  modules/splits 原字节保持，未读取 mixed v8、旧 unseen 或 v9 test 正文。首轮和最终复验见
-  `agent_log/2026-08-28-120115-plan098-work-package-2-final-review.md` 与
-  `agent_log/2026-08-28-122011-plan098-final-review-remediation-recheck.md`。
-- 未运行真实模型、GPU/RunPod、Docker、付费 API、产品启用或生产动作。Plan 098 授权随验收关闭；工作包三为下一工作包，须另立 ExecPlan
-  和授权。分支/worktree 尚未合并、推送或归档；Plan 098 ignored namespace 保留等待用户批准集成/清理。

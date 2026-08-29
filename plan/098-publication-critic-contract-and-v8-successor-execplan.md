@@ -151,25 +151,29 @@
 - 工作包二最终验收首轮确认当前 v9 工件和数据闭合，但发现 finalizer 只写入 accepted implementation commit 常量，没有核验工作包一必要语义组件仍与 accepted commit 相同；报告见 `agent_log/2026-08-28-120115-plan098-work-package-2-final-review.md`。
 - 工作包二最终验收整改已把工作包一的 13 个必要语义组件冻结为组合 SHA-256 `b0124de561f52fb464c223989d003af1e9f2a8a24eccd9ca349a4d769e3488d5`；finalizer 在写出前核验实际组件字节，design、generation config 与 release identity 绑定同一 identity。权威 Markdown 不变而任一其他组件漂移的 focused regression 与定向旧回归均通过，v9 数据正文和 manifest 未变化。
 - 最终整改复验确认首轮 High 闭合、无新增 finding，接受工作包二 implementation `7ee479beb1f34677a54b815faf42284c0d8968e4`；报告见 `agent_log/2026-08-28-122011-plan098-final-review-remediation-recheck.md`。Plan 098 两个工作包均已冻结。
+- 用户要求的验收后方向性复审确认四项窄缺口：逐头/N/A operating config 未显式冻结，逐维 failure recall/confusion 不足，train/validation 存在 honest 词汇与 scope 长度/旁白捷径，现有 test 只能作为同分布 holdout 且不足以独立承担最终资格。主体结论保留，最终接受暂停；报告见 `agent_log/2026-08-28-183143-plan098-post-acceptance-directional-review.md`。
 
 ### 当前工作
 
-- `COMPLETED / FINAL_REVIEW_ACCEPTED / GOAL_COMPLETED`：工作包一、二均已接受并冻结；后续路线只回到 WBS。
+- `POST_ACCEPTANCE_DIRECTIONAL_REMEDIATION_REQUIRED / IN_PROGRESS`：只整改四项资格前置，工作包三继续锁定。
 
 ### 本任务剩余步骤
 
-1. 无任务内剩余步骤。合并、推送、分支归档、ignored namespace 和 worktree 清理继续等待用户另行批准；工作包三须另立 ExecPlan 与授权。
+1. 显式闭合逐头 decision config、continuity N/A 保守规则和资格级逐维 confusion/failure recall；保持五头 non-compensating gate。
+2. 原模块负责人只整改受影响 train/validation 反例并由原盲审员复验，不读取或改写 v9 test，不全量重审已通过语义。
+3. 由全新 test-only 负责人/盲审员冻结 family-isolated 独立资格确认集；总执行者只做合同和机械冻结，不读取正文。
+4. 更新 accepted semantic bundle 与 release identity，完成 clean finalizer、定向测试和独立复验；通过后 Plan 098 才重新完成。
 
 ### 阻塞项
 
-- 无。
+- 四项方向性 finding 尚待整改；真实模型、付费训练和 test 释放继续禁止。
 
 ### 当前验收状态
 
-- 规划：`FROZEN`。
-- 工作包一：`ACCEPTED_AT_55342BDB`。
-- 工作包二：`FINAL_REVIEW_ACCEPTED_AT_7EE479B`。
-- 完整任务：`COMPLETED / GOAL_COMPLETED`。
+- 规划：`ACTIVE_REMEDIATION`。
+- 工作包一：`ACCEPTED_BASELINE_REOPENED_FOR_DECISION_AND_METRICS`。
+- 工作包二：`ACCEPTED_BASELINE_REOPENED_FOR_SHORTCUT_AND_QUALIFICATION_SET`。
+- 完整任务：`IN_PROGRESS`。
 
 ### 交接边界
 
@@ -177,7 +181,7 @@
 - 工作包一完成汇报、工作包二解锁申请、计划外请示、整改复验和最终完成汇报只通过 §7 指定的 Codex queue；消息发送后主动停止会话，不等待或轮询。
 - 审查者对每轮有意义的验收形成精炼 `agent_log` 报告；若需要代用户作范围内普通决策，给出理由和影响并写入报告。工作包一通过时由审查者通过同一队列明确解锁工作包二；最终通过后不再唤醒执行者。
 - 工作包一接受记录必须包含 exact commit、权威合同版本与内容 SHA-256。工作包二的设计锁、生成配置和最终 manifest 都绑定并核对该身份；任何核心合同变化都使阶段一接受失效并重新锁定工作包二。
-- 本计划已冻结为历史任务合同。后续训练只回到 WBS，不在本计划继续扩写工作包三/四。
+- 本计划因用户要求的方向性复审重新进入窄整改；通过后再冻结。工作包三/四仍只由 WBS 规划，不在本计划扩写训练路线。
 - 未经用户批准，不合并、不推送、不归档/重命名分支、不删除 worktree。
 
 ## 6. 关键决策记录
@@ -204,7 +208,8 @@
 | 016 | 第二轮复验接受工作包一：implementation commit `55342bdb11b09c11b589fd398717f7712fca012c`，合同 `rondo-publication-critic-task@v2`，SHA-256 `3eb0539b16403ebe20e74ce1b1ea5114d2383c6118f61fef56c9c91426e6a560`；工作包二解锁 | 首轮全部 findings 已闭合，42/42 定向门禁与独立复验无新增 finding | 阶段、合同、数据前置 | 已采纳 |
 | 017 | 后继 revision 冻结为 `publication-critic-v9`，由三个 24-group 模块组成；旧 v8 安全投影只用于判断可复用性且直接复用为零 | v1 scalar 监督不足以无歧义投影完整五头标签；新合同原生数据以 216 candidates / 96 pairs 有界覆盖 Boundary、invariance、自然组合与三类 public context | 数据、split、消费 | 已采纳 |
 | 018 | 工作包二首轮最终验收不接受“accepted implementation commit 仅作为常量自洽写入”；对工作包一 13 个必要语义组件执行轻量字节/组合 SHA 漂移门，并绑定 design、generation config 与 release identity | 权威 Markdown 不变时，renderer/schema/loss/consumer 等实现仍可能漂移；固定组件序列的 canonical SHA 足以让阶段一 accepted identity 成为可执行前置，无需建设通用审计体系 | finalizer、身份、验收 | 已采纳 |
-| 019 | 最终整改复验接受工作包二 implementation `7ee479beb1f34677a54b815faf42284c0d8968e4`，Plan 098 完成；工作包三只作为 WBS 下一工作包，不继承本计划执行授权 | 首轮 High 已闭合，47/47 定向回归与独立身份/字节复核无新增 finding；训练、云资源和产品动作仍需单独规划授权 | 验收、交接 | 已采纳 |
+| 019 | 最终整改复验接受工作包二 implementation `7ee479beb1f34677a54b815faf42284c0d8968e4`，Plan 098 完成；工作包三只作为 WBS 下一工作包，不继承本计划执行授权 | 首轮 High 已闭合，47/47 定向回归与独立身份/字节复核无新增 finding；训练、云资源和产品动作仍需单独规划授权 | 验收、交接 | 历史接受，终态由 020 暂停 |
+| 020 | 用户要求的验收后方向性复审暂停 019 的终态，只窄补逐头 decision config、逐维资格 metrics、honest/scope 反例与 family-isolated 独立资格确认集 | unique argmax 可接受 calibrated decision logits，故不推翻五头 decoder；但当前隐含 operating seam、开发集表面捷径和小型同作者 test 不足以支撑付费训练后的资格 GO/NO-GO | 任务、数据、资格前置 | 整改中 |
 
 ## 7. 给执行者的启动提示词
 
