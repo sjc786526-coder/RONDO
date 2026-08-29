@@ -166,27 +166,33 @@
   实际调用的 accepted-task runtime/schema 直接依赖；这些依赖漂移后旧 frozen config 仍可能通过 validation。本轮以 1 Medium 不接受，只要求
   复用既有 accepted-task identity 或补入两个直接组件并增加漂移回归，不重做数据、盲审或通用可信设施；报告见
   `agent_log/2026-08-28-213723-plan098-formal-decode-pair-selector-final-recheck.md`。
+- direct dependency identity 已窄修：decision component list 增加正式 decoder 直接调用的 `successor_task.py` 与
+  `successor-output-schema-v1.json`，分别漂移时旧 frozen config 均在正式 decode 前 fail-closed；没有绑定 accepted-task 的 renderer、consumer
+  等非直接组件，也没有修改 accepted v2/v9 字节、五头、margin、loss、pair 或数据正文。
+- 更新后的 decision implementation 为 commit `391378ee568f6d37b0b1288d6410f5f399fa0771`、bundle
+  `9ef18b6c04a63fd1b3285e69ccf2616f3c22f2558802f01794573e2e07d7afef`；directional runtime 为 commit
+  `3d7797b161aeb926577f70828c850f7827a80864`、bundle `668d16476295da77ae8b0f0cd212233a071da6292e247fbba8c1e2e2d381afb6`。
+  v10/qualification 只更新必要 identity 后重建并完成一次独立逐字节复现；相关 34/34 与旧合同 43/43，合计 77/77 回归通过。
 
 ### 当前工作
 
-- `POST_ACCEPTANCE_FORMAL_DECISION_IDENTITY_REMEDIATION_REQUIRED / FINAL_REVIEW_NOT_ACCEPTED`：原两项 Medium 已确认修对；尚余 1 项正式 decoder
-  直接 runtime/schema identity 缺口，工作包三继续锁定。
+- `POST_ACCEPTANCE_FORMAL_DECISION_IDENTITY_REMEDIATION_IMPLEMENTED / FINAL_REVIEW_PENDING`：直接 runtime/schema identity 缺口已窄修并验证；
+  等待最终复验，工作包三继续锁定。
 
 ### 本任务剩余步骤
 
-1. 窄补正式 decoder 的 accepted-task runtime/schema identity 与对应漂移回归，机械更新受影响身份和 release，保持数据正文与历史 v9 不变。
-2. 跑相关 Python 门和必要 release 字节复现，提交实现、权威状态和实施日志。
-3. 通过指定 Codex queue 申请最终复验并停止会话。
+1. 提交受影响 identity/release、权威状态和实施日志，保持工作树 clean。
+2. 通过指定 Codex queue 申请最终复验并停止会话。
 
 ### 阻塞项
 
-- 上述 1 项 Medium 待整改和最终复验；真实模型、付费训练、资格正文释放、工作包三和产品动作继续禁止。
+- 上述 1 项 Medium 已实现整改、待最终复验；真实模型、付费训练、资格正文释放、工作包三和产品动作继续禁止。
 
 ### 当前验收状态
 
-- 规划：`NARROW_REMEDIATION_IMPLEMENTED / FINAL_REVIEW_PENDING`。
-- 工作包一：`SUBJECT_PRESERVED / FORMAL_DECODER_REMEDIATED_PENDING_REVIEW`。
-- 工作包二：`SUBJECT_PRESERVED / PAIR_SELECTOR_REMEDIATED_PENDING_REVIEW`。
+- 规划：`FORMAL_DECISION_IDENTITY_REMEDIATION_IMPLEMENTED / FINAL_REVIEW_PENDING`。
+- 工作包一：`SUBJECT_PRESERVED / FORMAL_DECISION_IDENTITY_REMEDIATED_PENDING_REVIEW`。
+- 工作包二：`SUBJECT_PRESERVED / RELEASE_IDENTITY_REBUILT_PENDING_REVIEW`。
 - 完整任务：`IN_PROGRESS / FINAL_REVIEW_PENDING`。
 
 ### 交接边界
@@ -232,7 +238,8 @@
 | 026 | 验收后复审暂停 025，只补 formal decoder 唯一入口与 pair-aware validation selector；pair bytes SHA 进入 frozen selection identity | output schema 仍可把 raw argmax 当 runtime decoder，且 selector 丢弃 validation pairs；二者都会使工作包三采用与冻结资格语义不一致的 operating config | 判定、selector、身份、验收 | 已确认闭合，终态由 029 暂停 |
 | 027 | 保持 accepted v9 所绑定的旧 output schema 和 raw helper 字节不变，以新增版本化 formal projection 明确其只作 zero-margin diagnostic/historical reference；所有正式 projection/call path 唯一指向绑定 frozen decision config 的 decision v1 decoder | 直接改写旧 schema 会破坏已接受历史 identity；前向版本化既消除正式入口歧义，又不重开 v2/v9 历史数据和合同 | decoder、projection、历史兼容 | 已确认闭合 |
 | 028 | validation selector 以全部实际 Boundary/soft-only pairs 闭合作为原单一 bounded margin grid 的 hard eligibility，并在 frozen config 绑定 pairs SHA、行数和完整逐 pair 报告 | candidate-level confusion/failure recall 不能证明 Q+/Q-、非目标 head 和 soft invariance；hard eligibility 最保守且不引入多路线 threshold 搜索 | selector、pairs、身份、测试 | 已确认闭合 |
-| 029 | 最终复验不接受 decision bundle 只绑定 `qualification.py` 而遗漏其直接执行的 accepted-task runtime/schema；只复用现有 accepted identity 或补入两个直接组件和漂移回归 | 正式 decoder 的 class order、validator、gate 与 pair 语义来自该 runtime；依赖漂移后旧 frozen config 仍通过会破坏 operating point 冻结。本修正不扩成递归依赖审计或通用可信体系 | decoder、identity、回归、验收 | 待整改 |
+| 029 | 最终复验不接受 decision bundle 只绑定 `qualification.py` 而遗漏其直接执行的 accepted-task runtime/schema；只复用现有 accepted identity 或补入两个直接组件和漂移回归 | 正式 decoder 的 class order、validator、gate 与 pair 语义来自该 runtime；依赖漂移后旧 frozen config 仍通过会破坏 operating point 冻结。本修正不扩成递归依赖审计或通用可信体系 | decoder、identity、回归、验收 | 已实现，待最终复验 |
+| 030 | 直接把 `successor_task.py` 与 `successor-output-schema-v1.json` 纳入现有 decision component list，不复用完整 13 组件 accepted-task bundle | 两者是 formal decoder 明确执行/验证的直接依赖；完整 task bundle 还含 renderer、consumer 等非直接组件，会不必要扩大 operating config 耦合。固定两项字节门已等强覆盖本 finding | decoder、identity、维护 | 已实现，待最终复验 |
 
 ## 7. 给执行者的启动提示词
 
