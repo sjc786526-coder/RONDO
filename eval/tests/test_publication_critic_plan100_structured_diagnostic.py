@@ -21,6 +21,9 @@ from rondo_eval.publication_critic.structured_diagnostic import (
 from rondo_eval.publication_critic.structured_diagnostic import (
     runner as diagnostic_runner,
 )
+from rondo_eval.publication_critic.structured_diagnostic import (
+    token_recounter as diagnostic_recounter,
+)
 from rondo_eval.publication_critic.structured_diagnostic.archive import (
     RECEIPT_SCHEMA,
     TERMINAL_SCHEMA,
@@ -199,6 +202,12 @@ class _FakeRecounter:
         }
 
 
+class _CharacterTokenizer:
+    def encode(self, value: str, *, add_special_tokens: bool) -> SimpleNamespace:
+        assert add_special_tokens is False
+        return SimpleNamespace(ids=list(value))
+
+
 class Plan100CostAndArchiveTest(unittest.TestCase):
     def test_price_tier_uses_weekday_beijing_windows_and_exact_boundaries(
         self,
@@ -206,7 +215,7 @@ class Plan100CostAndArchiveTest(unittest.TestCase):
         self.assertEqual(PRICE_CARD["peak_days"], "monday_through_friday")
         self.assertEqual(
             PRICE_CARD_SHA256,
-            "b0ed7297408c252edff1fc022e7e22538dfcb798a706db457b89cf2bb9834307",
+            "46851a8c8446220a74afe98574aa36be8e8d4e50d584f6c2ce43a72cc645f9b1",
         )
         tracked = json.loads(
             (
@@ -314,6 +323,53 @@ class Plan100CostAndArchiveTest(unittest.TestCase):
             settle_attempt(complete[0])["settlement_method"],
             "recount_cache_miss_conservative",
         )
+
+    def test_official_recounter_uses_exact_rust_messages_without_body_output(
+        self,
+    ) -> None:
+        request = {
+            "schema": "rondo-publication-critic-plan100-token-recount-request@v1",
+            "task": "B",
+            "packet": {"bounded": "public"},
+            "response_text": '{"verdict":"PASS"}',
+        }
+        rendered = json.dumps(
+            {"system": "frozen system", "user": "frozen user"}
+        ).encode()
+        completed = SimpleNamespace(returncode=0, stdout=rendered)
+        with mock.patch.object(
+            diagnostic_recounter.subprocess,
+            "run",
+            return_value=completed,
+        ) as invoked:
+            result = diagnostic_recounter.recount(
+                request,
+                tokenizer=_CharacterTokenizer(),
+                tokenizer_config={
+                    "tokenizer_class": "LlamaTokenizerFast",
+                    "add_bos_token": False,
+                    "add_eos_token": False,
+                    "bos_token": {"content": diagnostic_recounter.BEGIN},
+                },
+                renderer=Path("/frozen/diagnostic"),
+                descriptor=Path("/frozen/descriptor"),
+            )
+        expected_prompt = (
+            diagnostic_recounter.BEGIN
+            + "frozen system"
+            + diagnostic_recounter.USER
+            + "frozen user"
+            + diagnostic_recounter.ASSISTANT
+        )
+        self.assertEqual(
+            result,
+            {
+                "prompt_tokens": len(expected_prompt),
+                "completion_tokens": len(request["response_text"]),
+                "method": diagnostic_recounter.METHOD,
+            },
+        )
+        self.assertEqual(invoked.call_args.args[0][-1], "--render-messages")
 
     def test_ledger_counts_settled_and_outstanding_before_next_action(self) -> None:
         reserve = worst_case_reservation_rmb(

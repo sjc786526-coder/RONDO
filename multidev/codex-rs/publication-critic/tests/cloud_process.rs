@@ -312,6 +312,12 @@ struct CapturedProbe {
     stderr: String,
 }
 
+#[derive(Clone, Copy)]
+enum DiagnosticMode {
+    Evaluate,
+    RenderMessages,
+}
+
 struct CloudService {
     child: Child,
     stdout: BufReader<ChildStdout>,
@@ -480,6 +486,7 @@ async fn run_cloud_diagnostic(
     fixture: &Fixture,
     task: &str,
     input: &[u8],
+    mode: DiagnosticMode,
 ) -> TestResult<CapturedProbe> {
     let mut command = Command::new(cargo_bin("codex-publication-critic-cloud-diagnostic")?);
     command
@@ -487,11 +494,18 @@ async fn run_cloud_diagnostic(
         .arg(&fixture.descriptor_path)
         .arg("--task")
         .arg(task)
-        .env(API_KEY_ENV, API_KEY)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
+    match mode {
+        DiagnosticMode::Evaluate => {
+            command.env(API_KEY_ENV, API_KEY);
+        }
+        DiagnosticMode::RenderMessages => {
+            command.arg("--render-messages");
+        }
+    }
     let mut child = command.spawn()?;
     let mut stdin = child
         .stdin
@@ -670,7 +684,7 @@ async fn diagnostic_entry_point_keeps_only_output_contract_variable_and_never_re
         }
         let fixture = Fixture::new(&provider.base_url(), DescriptorOptions::default())?;
         let input = std::fs::read(&fixture.packet_path)?;
-        let output = run_cloud_diagnostic(&fixture, task, &input).await?;
+        let output = run_cloud_diagnostic(&fixture, task, &input, DiagnosticMode::Evaluate).await?;
         assert!(
             output.status.success(),
             "diagnostic failed: {}",
@@ -696,6 +710,7 @@ async fn diagnostic_entry_point_keeps_only_output_contract_variable_and_never_re
         let requests = provider.requests().await;
         assert_eq!(requests.len(), expected_attempts);
         let mut body = serde_json::from_slice::<Value>(&requests[0].body)?;
+        assert_eq!(body["thinking"]["type"], json!("disabled"));
         let system = body["messages"][0]["content"]
             .as_str()
             .ok_or("system message must be a string")?;
@@ -724,7 +739,8 @@ async fn diagnostic_entry_point_keeps_only_output_contract_variable_and_never_re
         .await;
     let fixture = Fixture::new(&provider.base_url(), DescriptorOptions::default())?;
     let input = std::fs::read(&fixture.packet_path)?;
-    let output = run_cloud_diagnostic(&fixture, "five-dimension", &input).await?;
+    let output =
+        run_cloud_diagnostic(&fixture, "five-dimension", &input, DiagnosticMode::Evaluate).await?;
     assert!(
         output.status.success(),
         "diagnostic failed: {}",
@@ -736,6 +752,51 @@ async fn diagnostic_entry_point_keeps_only_output_contract_variable_and_never_re
     assert_eq!(observation["response_text"], json!(invalid));
     assert_eq!(observation["outcome"]["kind"], "output_contract_violation");
     assert_eq!(provider.requests().await.len(), 1);
+    Ok(())
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn diagnostic_message_renderer_is_offline_and_matches_the_paid_request() -> TestResult {
+    let provider = FakeProvider::start().await;
+    provider
+        .mount(
+            ResponseTemplate::new(200).set_body_json(detailed_completion(
+                PROVIDER_MODEL,
+                Some(r#"{"verdict":"PASS"}"#),
+                Some("stop"),
+            )),
+        )
+        .await;
+    let fixture = Fixture::new(&provider.base_url(), DescriptorOptions::default())?;
+    let input = std::fs::read(&fixture.packet_path)?;
+    let rendered = run_cloud_diagnostic(
+        &fixture,
+        "direct-gate",
+        &input,
+        DiagnosticMode::RenderMessages,
+    )
+    .await?;
+    assert!(
+        rendered.status.success(),
+        "renderer failed: {}",
+        rendered.stderr
+    );
+    assert!(rendered.stderr.is_empty());
+    assert_eq!(provider.requests().await.len(), 0);
+    let rendered: Value = serde_json::from_str(rendered.stdout.trim())?;
+
+    let evaluated =
+        run_cloud_diagnostic(&fixture, "direct-gate", &input, DiagnosticMode::Evaluate).await?;
+    assert!(
+        evaluated.status.success(),
+        "diagnostic failed: {}",
+        evaluated.stderr
+    );
+    let requests = provider.requests().await;
+    assert_eq!(requests.len(), 1);
+    let body: Value = serde_json::from_slice(&requests[0].body)?;
+    assert_eq!(rendered["system"], body["messages"][0]["content"]);
+    assert_eq!(rendered["user"], body["messages"][1]["content"]);
     Ok(())
 }
 

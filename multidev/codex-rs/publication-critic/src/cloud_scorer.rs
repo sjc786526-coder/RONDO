@@ -26,8 +26,8 @@ use crate::cloud_diagnostic::CloudDiagnosticObservation;
 use crate::cloud_diagnostic::CloudDiagnosticOutcome;
 use crate::cloud_diagnostic::CloudDiagnosticOutput;
 use crate::cloud_diagnostic::CloudDiagnosticTask;
+use crate::cloud_diagnostic::diagnostic_messages;
 use crate::cloud_diagnostic::parse_output;
-use crate::cloud_diagnostic::system_message;
 use crate::cloud_template;
 use codex_http_client::ClientRouteClass;
 use codex_http_client::HttpClient;
@@ -218,13 +218,16 @@ impl CloudPublicationScorer {
         if packet.qualification != self.inner.qualification {
             return Err(CloudEvaluationInputError::QualificationMismatch);
         }
-        let user = cloud_template::render_user_message(&packet)
-            .ok_or(CloudEvaluationInputError::InvalidPacket)?;
-        let system = system_message(task);
+        let messages =
+            diagnostic_messages(&packet, task).ok_or(CloudEvaluationInputError::InvalidPacket)?;
         Ok(self.inner.diagnostic_observation(
             task,
             self.inner
-                .call(&system, user, ResponseProjection::Diagnostic(task))
+                .call(
+                    &messages.system,
+                    messages.user,
+                    ResponseProjection::Diagnostic(task),
+                )
                 .await,
         ))
     }
@@ -281,7 +284,7 @@ impl CloudScorerInner {
         user: String,
         projection: ResponseProjection,
     ) -> CloudCallObservation {
-        let request = self.build_request(system, user);
+        let request = self.build_request(system, user, projection);
         let started = Instant::now();
         let mut attempt = 1_u8;
         let mut attempt_requested_at_unix_ms =
@@ -325,7 +328,12 @@ impl CloudScorerInner {
         }
     }
 
-    fn build_request(&self, system: &str, user: String) -> ChatCompletionsRequest {
+    fn build_request(
+        &self,
+        system: &str,
+        user: String,
+        projection: ResponseProjection,
+    ) -> ChatCompletionsRequest {
         ChatCompletionsRequest {
             model: self.provider.model.clone(),
             messages: vec![
@@ -347,6 +355,9 @@ impl CloudScorerInner {
                 }),
                 CloudResponseFormat::Unconstrained => None,
             },
+            thinking: matches!(projection, ResponseProjection::Diagnostic(_)).then_some(Thinking {
+                thinking_type: "disabled",
+            }),
         }
     }
 
@@ -744,6 +755,8 @@ struct ChatCompletionsRequest {
     stream: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     response_format: Option<ResponseFormat>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    thinking: Option<Thinking>,
 }
 
 #[derive(Serialize)]
@@ -756,6 +769,12 @@ struct ChatRequestMessage {
 struct ResponseFormat {
     #[serde(rename = "type")]
     format: &'static str,
+}
+
+#[derive(Serialize)]
+struct Thinking {
+    #[serde(rename = "type")]
+    thinking_type: &'static str,
 }
 
 #[derive(Deserialize)]

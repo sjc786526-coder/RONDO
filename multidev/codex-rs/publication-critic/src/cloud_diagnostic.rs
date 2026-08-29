@@ -9,6 +9,8 @@ use serde::Serialize;
 use std::str::FromStr;
 use thiserror::Error;
 
+use crate::PublicationPacket;
+
 const MAX_CONTENT_BYTES: usize = 4 * 1024;
 
 const COMMON_SYSTEM_MESSAGE: &str = r#"You are the RONDO Publication Critic structured diagnostic. Judge only the submitted candidate and bounded public packet. The following frozen rubric is the model-input projection of `rondo-publication-critic-task@v2`.
@@ -56,6 +58,28 @@ pub enum CloudDiagnosticTask {
     Scalar,
     DirectGate,
     FiveDimension,
+}
+
+/// Exact provider-visible messages for one Plan 100 diagnostic request.
+///
+/// The offline token recounter obtains these bytes from the same Rust implementation that owns
+/// the paid request so prompt reconstruction cannot drift into a second template.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct CloudDiagnosticMessages {
+    pub system: String,
+    pub user: String,
+}
+
+/// Renders the two provider-visible messages without constructing a provider client.
+pub fn diagnostic_messages(
+    packet: &PublicationPacket,
+    task: CloudDiagnosticTask,
+) -> Option<CloudDiagnosticMessages> {
+    Some(CloudDiagnosticMessages {
+        system: system_message(task),
+        user: serde_json::to_string(packet).ok()?,
+    })
 }
 
 impl FromStr for CloudDiagnosticTask {

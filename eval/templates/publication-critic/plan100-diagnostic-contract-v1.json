@@ -67,9 +67,13 @@
       "retry_backoff_ms": 1000,
       "response_format": "json_object"
     },
+    "environment_candidate": {
+      "path": "eval/locks/publication-critic-plan100-recount-environment-v1.json",
+      "sha256": "efca618c1c585e1bf3f27970d58e3646008d6b6fa5213e238ab4b6c14002d296"
+    },
     "prompt_candidate": {
       "source_path": "multidev/codex-rs/publication-critic/src/cloud_diagnostic.rs",
-      "source_sha256": "7b40de963b838ad946b36bfae096945921641bf6f87d8286cc1ff1a10a584ea1",
+      "source_sha256": "f1478f9f5768d333ee0ea5509c184251b54053a0e375ce79a3c73f93d137c49d",
       "common_semantics": "task_v2_rubric_v2_semantics_and_public_evidence_boundary",
       "arm_specific_suffix": "output_instruction_and_exact_output_schema_only",
       "formal_identity": "compiled_executable_sha256_after_three_arm_B1"
@@ -77,7 +81,8 @@
     "same_packet_bytes_per_candidate": true,
     "arm_order": ["A", "B", "C"],
     "candidate_order": "release_physical_jsonl_line_order",
-    "provider_visible_difference": "output_instruction_and_exact_output_schema_only"
+    "provider_visible_difference": "output_instruction_and_exact_output_schema_only",
+    "thinking": "disabled_for_all_three_arms_to_preserve_frozen_temperature_and_recountable_json_completion"
   },
   "outputs": {
     "A": {
@@ -282,9 +287,9 @@
     "task_root": "main_physical_root/eval-data/publication-critic/plan100",
     "ledger_lifecycle": "B1_may_create_unique_ledger_B2_requires_existing_ledger_with_exact_B1_settlements_recompute_existing_read_only",
     "price_card": {
-      "identity": "deepseek-v4-flash-live-2026-08-29-weekday-v2",
+      "identity": "deepseek-v4-flash-live-2026-08-30-weekday-v3",
       "source": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/",
-      "checked_at": "2026-08-29",
+      "checked_at": "2026-08-30",
       "timezone": "Asia/Shanghai",
       "peak_days_beijing": ["monday", "tuesday", "wednesday", "thursday", "friday"],
       "peak_windows_beijing": ["09:00-12:00", "14:00-18:00"],

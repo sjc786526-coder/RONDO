@@ -5,12 +5,13 @@
 //! descriptor-selected process environment only; neither arguments nor output can carry them.
 
 use clap::Parser;
-use codex_publication_critic::CloudDiagnosticObservation;
 use codex_publication_critic::CloudDiagnosticTask;
 use codex_publication_critic::CloudPublicationScorer;
 use codex_publication_critic::CloudScorerConfig;
 use codex_publication_critic::CloudScorerDescriptor;
 use codex_publication_critic::PublicationPacket;
+use codex_publication_critic::diagnostic_messages;
+use serde::Serialize;
 use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
@@ -26,6 +27,9 @@ struct Args {
     descriptor: PathBuf,
     #[arg(long)]
     task: CloudDiagnosticTask,
+    /// Render the exact provider-visible messages without loading credentials or sending HTTP.
+    #[arg(long)]
+    render_messages: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Error, PartialEq)]
@@ -68,6 +72,10 @@ async fn run(args: Args) -> Result<(), DiagnosticError> {
     if packet.qualification != descriptor.service_descriptor().identity.qualification {
         return Err(DiagnosticError::Packet);
     }
+    if args.render_messages {
+        let messages = diagnostic_messages(&packet, args.task).ok_or(DiagnosticError::Packet)?;
+        return write_json(&messages);
+    }
 
     let scorer = CloudPublicationScorer::new(
         CloudScorerConfig::from_process_env(descriptor)
@@ -78,7 +86,7 @@ async fn run(args: Args) -> Result<(), DiagnosticError> {
         .score_for_diagnostic(packet, args.task)
         .await
         .map_err(|_| DiagnosticError::Packet)?;
-    write_observation(&observation)
+    write_json(&observation)
 }
 
 async fn read_stdin_packet() -> Result<PublicationPacket, DiagnosticError> {
@@ -111,10 +119,10 @@ fn read_json_file(path: &Path) -> Result<CloudScorerDescriptor, DiagnosticError>
     serde_json::from_slice(&body).map_err(|_| DiagnosticError::Descriptor)
 }
 
-fn write_observation(observation: &CloudDiagnosticObservation) -> Result<(), DiagnosticError> {
+fn write_json(value: &impl Serialize) -> Result<(), DiagnosticError> {
     let stdout = std::io::stdout();
     let mut stdout = stdout.lock();
-    serde_json::to_writer(&mut stdout, observation).map_err(|_| DiagnosticError::Configuration)?;
+    serde_json::to_writer(&mut stdout, value).map_err(|_| DiagnosticError::Configuration)?;
     stdout
         .write_all(b"\n")
         .and_then(|()| stdout.flush())

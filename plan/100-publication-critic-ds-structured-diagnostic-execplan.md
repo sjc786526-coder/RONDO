@@ -228,27 +228,30 @@ Plan 100 不属于原工作包四，不读取 qualification 或 v9 test 正文�
   source identity 并要求账本保留精确 B1 settlements，recompute 改为 existing/read-only 并校验 authority freeze/result hash。首个 authority
   现在封锁全部 commissioning/formal provider 入口；显式同 freeze resume 只追加 technical logical 下一 ordinal；无 response/usage 的 attempt 走
   0.1 RMB fallback；新增 body-free detailed projection。Python 定向回归增至 20 项。
+- 2026-08-29：审查提交 `f0af3360` 明确验收阶段 A 并批准阶段 B。B1 请求前 live refresh 确认北京时间工作日双峰窗与费率未变，当前周日使用
+  off-peak；官方 V4 tokenizer 下载到 task-owned ignored namespace 并冻结 hash。live 文档同时确认 V4 默认开启 thinking、会忽略 temperature 且
+  reasoning token 无法从最终 JSON 独立复算；按 B1 provider 兼容授权对三臂统一显式关闭 thinking，并增加复用同一 Rust prompt renderer 的离线
+  token recounter，不改 rubric、packet、输出 schema、labels、metrics 或路线阈值。Plan 100 Python 21 项与 Rust 69 项定向门禁通过。
 
 ### 当前工作
 
-- `STAGE_A_REMEDIATED_AFTER_ACCEPTANCE_REJECTION_PENDING_REVIEW / STAGE_B_LOCKED_PENDING_STAGE_A_REVIEW`。
+- `STAGE_A_ACCEPTED / STAGE_B1_PREFLIGHT_READY`。
 
 ### 本任务剩余步骤
 
-- 提交本轮阶段 A 整改并通过指定 queue 申请准入验收。
-- 审查者若验收通过，明确批准阶段 B；执行 B1 commissioning、冻结、B2 clean formal、独立复算和唯一路线裁决。
+- 提交 B1 provider/token recount 兼容修复，从唯一 task root 执行 B1 commissioning。
+- B1 三链与 usage recount 校准通过后冻结 clean source/config；执行 B2 clean formal、独立复算和唯一路线裁决。
 - 完成相称门禁、文档/结果/费用/ignored 状态收口、任务分支提交和最终独立验收。
 
 ### 阻塞项
 
-- 阶段 A 无实现阻塞；等待指定审查者验收。
-- 阶段 B 的审查者明确批准是设计内硬闸门；在批准前保持锁定，不视为阶段 A 阻塞。
+- 当前无实现或授权阻塞。
 
 ### 当前验收状态
 
 - 规划：`COMPLETE / EXECUTION_ACTIVE`。
-- 阶段 A：`REMEDIATED / PENDING_INDEPENDENT_ACCEPTANCE`。
-- 阶段 B：`AUTHORIZED_CONDITIONALLY / LOCKED_PENDING_STAGE_A_REVIEW`。
+- 阶段 A：`ACCEPTED / COMPLETE`。
+- 阶段 B：`AUTHORIZED / B1_PREFLIGHT_READY`。
 - 完整任务：`IN_PROGRESS / NO_QUALITY_CONCLUSION`。
 
 ### 交接边界
@@ -274,6 +277,7 @@ Plan 100 不属于原工作包四，不读取 qualification 或 v9 test 正文�
 | 008 | tracked 变动只在 100 worktree；ignored raw/ledger/archive 只在主物理根 `eval-data/publication-critic/plan100/` | linked worktree 不共享 ignored 资产，需保持主工作区 tracked clean | Git、资产 | 已采纳 |
 | 009 | 审查、计划外批示和阶段沟通只走指定 queue；每次主动表明身份，发送后停止且不轮询 | 使用用户指定的跨会话审批通道 | 协作、交付 | 已采纳 |
 | 010 | 任务结束只提交任务分支，合并/推送/归档/worktree 删除均等待用户批准 | 遵循本次明确的 Git 交付边界 | Git | 已采纳 |
+| 011 | Plan 100 三臂统一显式关闭 V4 thinking，并以官方 tokenizer + 同一 Rust prompt renderer 做离线复算 | live V4 默认 thinking 会忽略冻结 temperature，reasoning token 也无法从最终 JSON 复算；关闭后保留三臂公平性和严格短 JSON 合同 | B1/B2 provider、费用 | 已采纳 |
 
 ## 7. 执行者启动提示词
 

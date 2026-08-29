@@ -27,7 +27,7 @@ PRICE_CARD = {
     "currency": "RMB",
     "unit_tokens": 1_000_000,
     "source": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/",
-    "checked_date": "2026-08-29",
+    "checked_date": "2026-08-30",
     "timezone": "Asia/Shanghai",
     "peak_windows": ["09:00-12:00", "14:00-18:00"],
     "peak_days": "monday_through_friday",

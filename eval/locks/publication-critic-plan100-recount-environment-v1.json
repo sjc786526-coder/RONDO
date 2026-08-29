@@ -1,0 +1,18 @@
+{
+  "schema": "rondo-publication-critic-plan100-recount-environment@v1",
+  "python_environment": {
+    "lock_path": "eval/uv.lock",
+    "lock_sha256": "0ae149ea87324439c8fe56d05a8dd14ed6af6b50140363f62d31d0615b449014",
+    "runner": "uv isolated offline no-project",
+    "tokenizers_version": "0.23.1"
+  },
+  "official_tokenizer": {
+    "source": "https://cdn.deepseek.com/api-docs/deepseek_v4_tokenizer.zip",
+    "checked_at_beijing": "2026-08-30",
+    "archive_sha256": "e7310d1dafe0a86d8a5629fe78a7c763760f651db9b8682718a1781dcd6fe495",
+    "tokenizer_json_sha256": "89085f12ef79460ac5f66d1119325ddfc694b4ab209d80bbd81d35f081dc9614",
+    "tokenizer_config_sha256": "841f8cf146e3f0ad1082594a31f68ecf7608c20467ef355081333d85bbaeb1cb"
+  },
+  "prompt_renderer": "same frozen Rust diagnostic executable in offline render-messages mode",
+  "thinking": "disabled for all Plan 100 arms before B1"
+}
