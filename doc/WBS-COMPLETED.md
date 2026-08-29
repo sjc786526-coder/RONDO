@@ -2561,26 +2561,3 @@ INTEGRATED / NOT_PUSHED`。clean formal source 为 `0ae9623`，执行者交付�
   `agent_log/2026-08-28-004839-plan097-main-integration.md`。
 - 本任务只完成工程链与双 backend 可替换性 GO。本地模型质量仍为 `NO-GO / 待替换`，云端 scorer 仍为 `NOT QUALIFIED`，M3-D 产品价值仍未验收，
   Publication Critic 默认 `OFF`，生产启用 `NO`。
-
-## Publication Critic 任务合同与后继数据重构（Plan 098，2026-08-28）
-
-**状态**：`COMPLETED / FINAL_REVIEW_ACCEPTED / GOAL_COMPLETED / NOT_INTEGRATED / NOT_PUSHED`。最终实现提交为
-`bb093ec4023b6ed41445f51793ebfdd2c4a5a646`；工作包一、工作包二与验收后方向性整改均已独立验收接受。
-
-- 工作包一冻结 `rondo-publication-critic-task@v2`：单 backbone、一次 forward、五个 hard heads、continuity `PASS/FAIL/N/A`、
-  non-compensating all-hard-pass gate、仅派生 diagnostic scalar、五维主体 loss、Boundary 与 soft invariance 职责及模型可见事实均闭合。
-  accepted implementation 为 `55342bdb11b09c11b589fd398717f7712fca012c`，合同 SHA-256 为
-  `3eb0539b16403ebe20e74ce1b1ea5114d2383c6118f61fef56c9c91426e6a560`。
-- 工作包二冻结 `publication-critic-v9` 216 candidates / 96 pairs；三模块分别由独立负责人和盲审员生成、整改、接受。v8 保持冻结且
-  正式复用为零；v9 test 只作为同分布辅助 holdout，未在方向性整改中读取或改写。
-- 验收后方向性整改新增 `rondo-publication-critic-decision@v1`、development-only `publication-critic-v10` 和 sealed
-  `publication-critic-qualification-v1`。逐头 margin、保守 N/A、validation-only release-bound selector、固定逐维 confusion/failure
-  recall、42 个 train/validation 高信息 replacements、50-group / 200-candidate / 100-pair family-isolated qualification set 均闭合。
-- decision implementation bundle 为 `00700f45afb6c5f7bb97cc90ecd3f859c82f1cc604e5c242abcd9590284d6201`；v10 与
-  qualification manifest SHA-256 分别为 `595768fad0f17ff49cb3aea04d9cfb607fa9fde537c6cbc196cabc6e7bed7172` 和
-  `366983baf08412e8a26662d974407721d2d11c521862d7f606e80c4f3a8dad82`。最终审查 76/76 定向回归和两份 release 独立字节复现通过，
-  v8/v9 历史 identity 保持不变。
-- 最终审查见 `agent_log/2026-08-28-201403-plan098-directional-remediation-final-recheck.md`。未运行真实模型、Rust/Cargo、Docker、GPU、
-  付费 API，未读取旧 unseen 或 qualification sealed 正文；Publication Critic 产品默认和生产资格均未改变。
-- Plan 098 专属 ignored namespace 继续保留，未在验收中清理。工作包三只成为 WBS 下一工作包，须另立 ExecPlan 和重新授权；本计划授权不
-  转移到训练、云资源、资格正文读取或产品动作。

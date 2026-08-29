@@ -3,8 +3,8 @@
 最后更新：2026-08-28 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
 状态：**第一期、第二期、第四期已完成；Publication Critic 三期 Plan 097 已完成并闭合双 backend 工程 E2E 与可替换接缝，现正式进入
 质量重构路线。后续严格串行为“任务合同重构 → v8 后继数据改造与有限扩充 → 一次主方案训练 → 模型资格验收与横评”。Plan 098 已把
-前两个工作包规划为严格串行的两个阶段；Plan 098 两阶段与验收后方向性整改已经最终验收通过，v2/v9/v10/qualification 前置冻结；
-工作包三成为下一工作包，须另立 ExecPlan 和重新授权。Plan 097 的
+前两个工作包规划为严格串行的两个阶段；Plan 098 的 v2/v9/v10/qualification 主体与此前方向性整改保留，但验收后复审确认 formal
+decoder 唯一入口和 pair-aware margin selection 两项 Medium 待窄修，工作包三继续锁定。Plan 097 的
 `M3_D_DUAL_BACKEND_ENGINEERING_PASS / FINAL_REVIEW_ACCEPTED / INTEGRATED / NOT_PUSHED`、Plan 096 的
 `CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH / FINAL_REVIEW_ACCEPTED / INTEGRATED / PUSHED`、Plan 094 的有效负向终态和 Plan 095 的
 最终验收均保持有效；新路线完成资格前，本地/云端质量、产品价值、Publication Critic 默认与生产启用继续锁定**
@@ -135,9 +135,9 @@ M3-B1c 正式分阶段训练与工件回收          │
                        ↓
         Plan 097 M3-D 双 backend 工程前置闭环（已完成并通过最终独立验收）
                        ↓
-        工作包一：任务合同重构（Plan 098 阶段一；已完成并最终接受）
+        工作包一：任务合同重构（Plan 098 阶段一；主体保留，判定入口待窄修）
                        ↓
-        工作包二：v8 后继数据改造与有限扩充（Plan 098 阶段二；已完成并最终接受）
+        工作包二：v8 后继数据改造与有限扩充（Plan 098 阶段二；主体保留，pair selector 待窄修）
                        ↓
         工作包三：一次主方案训练（本地非付费准备 → 用户授权后的云端付费执行）
                        ↓
@@ -156,7 +156,7 @@ Plan 098，但仍是两个严格串行、分别验收的任务阶段；工作包
 
 ### 当前后续路线：三期质量重构
 
-#### 工作包一：任务合同重构（Plan 098 阶段一；已完成并最终接受）
+#### 工作包一：任务合同重构（Plan 098 阶段一；主体保留，判定入口待窄修）
 
 **目标**：把上文“冻结任务设计方向”完整落实为单一权威训练任务，使模型内部五头判断、同向损失、非补偿聚合、模型可见事实与产品
 `PASS/REWRITE` 语义一致，并为后续数据和训练提供稳定接口；执行者不得把五头 gate 降格为自由单总分或重新引入 hard/soft 混合排序。
@@ -179,10 +179,11 @@ commit 为 `55342bdb11b09c11b589fd398717f7712fca012c`，合同 SHA-256 为
 验收后方向性整改保持上述 v2 identity 不变，并在下游 `rondo-publication-critic-decision@v1` 显式冻结逐头 margin、保守 continuity N/A、
 validation-only decision config 和固定逐维 confusion/failure recall；decision config 同时绑定 decoder/metrics implementation bundle。五头和
 non-compensating gate 不重开。continuity 弱 N/A 最高和 margin 边界现 fail-closed；标准 selector 只通过已验证的 `DevelopmentRelease`
-机械派生 v10 manifest/candidate/labels identity 并核对行序。directional design 另绑定 implementation commit 与 bundle；最终复验 0 finding，
-本工作包完成。
+机械派生 v10 manifest/candidate/labels identity 并核对行序。directional design 另绑定 implementation commit 与 bundle。验收后复审确认旧
+raw argmax decoder 仍被 output schema 暴露为 runtime decoder；须限定为 diagnostic/historical reference，并让训练候选、validation、资格和
+未来产品接线唯一使用 frozen decision config decoder。
 
-#### 工作包二：v8 后继数据改造与有限扩充（Plan 098 阶段二；已完成并最终接受）
+#### 工作包二：v8 后继数据改造与有限扩充（Plan 098 阶段二；主体保留，pair selector 待窄修）
 
 **目标**：保持 `publication-critic-v8` 原样作为历史证据，从其可复用部分和新增高信息样本形成新的后继 revision。合成数据必须服务工作包一
 冻结的新任务合同，而不是机械扩展旧数据；v8 每个旧条目、类别、pair、配比和模板都只有在新合同下仍有信息价值时才能复用。新数据应完整表达
@@ -222,7 +223,8 @@ honest cue 反例、旁白和重复诊断闭合。v9 test 降格为 metadata-onl
 冻结。v9 原 `continuity-context` 盲审员已对同一 11 个 replacements 窄复验为 0 finding 并绑定 review SHA
 `9c6c01ae78f7bee5238e77b1635b5c6c2107e66b11f7e8d2448dc9e6c49dd9f6`。方向性 finalizer/runtime、design、config、release identity
 绑定精确实现 identity，正式 v10/qualification 已从空目录机械重建并逐字节复现；v9/v10/qualification 主体与其他 review 均未重做。
-最终窄修复验 0 finding，Plan 098 完成；工作包三成为下一工作包，但须另立 ExecPlan 和重新授权后启动。
+验收后复审确认 selector 丢弃已验证的 validation pairs；须绑定 pair bytes，并把 Boundary 与 soft-only 闭合纳入轻量预冻结选择规则。数据正文、
+review 和 qualification set 均不重做；窄修复验通过前工作包三继续锁定。
 
 #### 工作包三：一次主方案训练
 
