@@ -44,8 +44,7 @@ from .freeze import (
     validate_freeze,
 )
 from .metrics import (
-    UnmappedRouteError,
-    decide_route,
+    decide_route_with_metadata,
     direct_metrics,
     scalar_metrics,
     structured_metrics,
@@ -1146,17 +1145,7 @@ def recompute_formal(
         ],
         release.pair_supervision,
     )
-    route_valid = True
-    route_gap: str | None = None
-    try:
-        route = decide_route(scalar, direct, structured, formal_valid=True)
-    except UnmappedRouteError as exc:
-        # The five user-frozen quality predicates are not logically exhaustive. Do not invent a
-        # sixth quality meaning or widen one after seeing output: mark this formal technically
-        # invalid and retain the exact pre-quality signature for stage-A reviewer adjudication.
-        route = "INCONCLUSIVE_TECHNICAL_OR_BUDGET"
-        route_valid = False
-        route_gap = str(exc)
+    route = decide_route_with_metadata(scalar, direct, structured, formal_valid=True)
     parse_failures = {
         arm: sum(row["status"] == "parse_failure" for row in rows)
         for arm, rows in terminals.items()
@@ -1164,11 +1153,12 @@ def recompute_formal(
     return {
         "schema": RESULT_SCHEMA,
         "freeze_sha256": freeze_sha256(freeze),
-        "complete": route_valid,
+        "complete": True,
         "observations_complete": True,
         "terminal_observation_count": 81,
-        "route_terminal": route,
-        "route_contract_gap": route_gap,
+        "route_terminal": route["terminal"],
+        "residual_mixed_signal": route["residual_mixed_signal"],
+        "route_contract_gap": None,
         "parse_failure_count": parse_failures,
         "provider_identity": {
             "requested_model": REQUESTED_MODEL,
@@ -1202,6 +1192,7 @@ def _incomplete_result(
         "observations_complete": False,
         "terminal_observation_count": count,
         "route_terminal": "INCONCLUSIVE_TECHNICAL_OR_BUDGET",
+        "residual_mixed_signal": False,
         "route_contract_gap": reason,
         "parse_failure_count": None,
         "provider_identity": None,
@@ -1266,6 +1257,7 @@ def tracked_projection(result: Mapping[str, Any]) -> dict[str, Any]:
         "observations_complete": result.get("observations_complete"),
         "terminal_observation_count": result.get("terminal_observation_count"),
         "route_terminal": result.get("route_terminal"),
+        "residual_mixed_signal": result.get("residual_mixed_signal"),
         "route_contract_gap": result.get("route_contract_gap"),
         "parse_failure_count": result.get("parse_failure_count"),
         "freeze_sha256": result.get("freeze_sha256"),

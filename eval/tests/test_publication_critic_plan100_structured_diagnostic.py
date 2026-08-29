@@ -27,6 +27,8 @@ from rondo_eval.publication_critic.structured_diagnostic.contract import (
     parse_output,
 )
 from rondo_eval.publication_critic.structured_diagnostic.cost import (
+    PRICE_CARD,
+    PRICE_CARD_SHA256,
     DiagnosticBudgetExceeded,
     Plan100BudgetLedger,
     price_tier_at,
@@ -40,8 +42,8 @@ from rondo_eval.publication_critic.structured_diagnostic.freeze import (
     validate_commissioning_binding,
 )
 from rondo_eval.publication_critic.structured_diagnostic.metrics import (
-    UnmappedRouteError,
     decide_route,
+    decide_route_with_metadata,
     direct_metrics,
     scalar_metrics,
     structured_metrics,
@@ -134,6 +136,38 @@ class _FakeEvaluator:
         }
 
 
+class _AOnlyResidualEvaluator:
+    def __init__(self, release) -> None:
+        supervision = release.supervision_by_id()
+        self.gold_by_packet = {
+            item.packet_bytes: supervision[item.candidate_id].gold_verdict
+            for item in release.public_items
+        }
+
+    def evaluate(self, task: DiagnosticTask, packet: dict) -> dict:
+        gold = self.gold_by_packet[canonical_json_bytes(packet)]
+        if task is DiagnosticTask.SCALAR:
+            response = '{"quality":1.0}' if gold == "PASS" else '{"quality":0.0}'
+        elif task is DiagnosticTask.DIRECT:
+            response = '{"verdict":"PASS"}'
+        else:
+            response = (
+                '{"useful_state_transfer":"PASS",'
+                '"honest_uncertainty":"PASS",'
+                '"conditional_continuity":"PASS",'
+                '"scope_and_signal":"PASS",'
+                '"internal_consistency":"PASS"}'
+            )
+        return {
+            "requested_model": "deepseek-v4-flash",
+            "served_model": "deepseek-v4-flash",
+            "response_text": response,
+            "attempts": [_attempt()],
+            "elapsed_ms": 1,
+            "outcome": {"type": "success"},
+        }
+
+
 class _FakeRecounter:
     def __init__(self, *, identity: str = "7" * 64, prompt_tokens: int = 100) -> None:
         self.identity = identity
@@ -149,24 +183,46 @@ class _FakeRecounter:
 
 
 class Plan100CostAndArchiveTest(unittest.TestCase):
-    def test_price_tier_uses_current_daily_beijing_windows(self) -> None:
-        # 2026-08-29 is Saturday UTC, but the current price card applies peak windows daily.
+    def test_price_tier_uses_weekday_beijing_windows_and_exact_boundaries(
+        self,
+    ) -> None:
+        self.assertEqual(PRICE_CARD["peak_days"], "monday_through_friday")
         self.assertEqual(
-            price_tier_at(datetime(2026, 8, 29, 1, 0, tzinfo=timezone.utc)),
-            "peak",
+            PRICE_CARD_SHA256,
+            "b0ed7297408c252edff1fc022e7e22538dfcb798a706db457b89cf2bb9834307",
+        )
+        tracked = json.loads(
+            (
+                REPO_ROOT
+                / "eval/templates/publication-critic/plan100-diagnostic-contract-v1.json"
+            ).read_text(encoding="utf-8")
+        )["budget"]["price_card"]
+        self.assertEqual(
+            tracked["peak_days_beijing"],
+            ["monday", "tuesday", "wednesday", "thursday", "friday"],
         )
         self.assertEqual(
-            price_tier_at(datetime(2026, 8, 29, 4, 0, tzinfo=timezone.utc)),
-            "off_peak",
+            tracked["peak_windows_beijing"],
+            ["09:00-12:00", "14:00-18:00"],
         )
-        self.assertEqual(
-            price_tier_at(datetime(2026, 8, 29, 6, 0, tzinfo=timezone.utc)),
-            "peak",
+        self.assertEqual(tracked["weekends"], "off_peak_all_day")
+        cases = (
+            (datetime(2026, 8, 31, 0, 59, tzinfo=timezone.utc), "off_peak"),
+            (datetime(2026, 8, 31, 1, 0, tzinfo=timezone.utc), "peak"),
+            (datetime(2026, 8, 31, 3, 59, tzinfo=timezone.utc), "peak"),
+            (datetime(2026, 8, 31, 4, 0, tzinfo=timezone.utc), "off_peak"),
+            (datetime(2026, 8, 31, 5, 59, tzinfo=timezone.utc), "off_peak"),
+            (datetime(2026, 8, 31, 6, 0, tzinfo=timezone.utc), "peak"),
+            (datetime(2026, 8, 31, 9, 59, tzinfo=timezone.utc), "peak"),
+            (datetime(2026, 8, 31, 10, 0, tzinfo=timezone.utc), "off_peak"),
+            (datetime(2026, 8, 29, 1, 0, tzinfo=timezone.utc), "off_peak"),
+            (datetime(2026, 8, 29, 6, 0, tzinfo=timezone.utc), "off_peak"),
+            (datetime(2026, 8, 30, 1, 0, tzinfo=timezone.utc), "off_peak"),
+            (datetime(2026, 8, 30, 6, 0, tzinfo=timezone.utc), "off_peak"),
         )
-        self.assertEqual(
-            price_tier_at(datetime(2026, 8, 29, 10, 0, tzinfo=timezone.utc)),
-            "off_peak",
-        )
+        for instant, expected in cases:
+            with self.subTest(instant=instant):
+                self.assertEqual(price_tier_at(instant), expected)
 
     def test_usage_recount_and_last_resort_fallback_are_distinct(self) -> None:
         self.assertEqual(
@@ -293,6 +349,7 @@ class Plan100CostAndArchiveTest(unittest.TestCase):
                 "complete": True,
                 "terminal_observation_count": 81,
                 "route_terminal": "TASK_EXECUTABILITY_INSUFFICIENT",
+                "residual_mixed_signal": False,
             }
             resumed.claim_formal_result(freeze, result)
             reopened = DiagnosticArchive(
@@ -400,6 +457,36 @@ class Plan100ContractAndReleaseTest(unittest.TestCase):
 
 
 class Plan100RunnerLifecycleTest(unittest.TestCase):
+    def test_complete_a_only_formal_uses_explicit_residual_quality_route(self) -> None:
+        release = load_validation_release(REPO_ROOT)
+        freeze = _freeze("formal", "plan100-formal-20260829T120000Z-residual")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            archive = DiagnosticArchive(
+                root / "runs", freeze["run_id"], "formal"
+            ).start(freeze)
+            ledger = Plan100BudgetLedger(root / "ledger.json")
+            execution = run_batch(
+                freeze,
+                release.public_items,
+                archive=archive,
+                ledger=ledger,
+                evaluator=_AOnlyResidualEvaluator(release),
+            )
+            self.assertTrue(execution["complete"])
+            result = recompute_formal(freeze, release, archive, ledger)
+            self.assertTrue(result["complete"])
+            self.assertTrue(result["observations_complete"])
+            self.assertEqual(result["route_terminal"], "CONSTRAINT_OR_DATA_ISSUE")
+            self.assertTrue(result["residual_mixed_signal"])
+            self.assertIsNone(result["route_contract_gap"])
+            self.assertTrue(result["metrics"]["A"]["meets_gate"])
+            self.assertFalse(result["metrics"]["B"]["meets_basic"])
+            self.assertFalse(result["metrics"]["C"]["meets_basic"])
+            tracked = tracked_projection(result)
+            self.assertTrue(tracked["residual_mixed_signal"])
+            self.assertEqual(tracked["route_terminal"], "CONSTRAINT_OR_DATA_ISSUE")
+
     def test_fake_formal_runs_81_once_and_recomputes_without_supervision_leak(
         self,
     ) -> None:
@@ -692,13 +779,31 @@ class Plan100RouteTest(unittest.TestCase):
             "concentrated_blocker": concentrated,
         }
 
-    def test_five_frozen_terminals_and_unmapped_gap_are_explicit(self) -> None:
+    def test_priority_terminals_and_exhaustive_residual_marker_are_explicit(
+        self,
+    ) -> None:
+        tracked_route = json.loads(
+            (
+                REPO_ROOT
+                / "eval/templates/publication-critic/plan100-diagnostic-contract-v1.json"
+            ).read_text(encoding="utf-8")
+        )["route"]
+        self.assertEqual(
+            tracked_route["otherwise"],
+            "CONSTRAINT_OR_DATA_ISSUE_with_residual_mixed_signal_true_for_complete_valid_formal",
+        )
+        self.assertTrue(tracked_route["residual_preserves_metrics"])
         scalar_low = self._scalar(18, 4, basic=False, gate=False)
         direct_low = self._arm(19, 5, basic=False, gate=False)
         structured_high = self._arm(24, 10, basic=True, gate=True)
         self.assertEqual(
             decide_route(scalar_low, direct_low, structured_high, formal_valid=True),
             "FIVE_DIMENSION_STRONGLY_SUPPORTED",
+        )
+        self.assertFalse(
+            decide_route_with_metadata(
+                scalar_low, direct_low, structured_high, formal_valid=True
+            )["residual_mixed_signal"]
         )
 
         direct_high = self._arm(24, 10, basic=True, gate=True)
@@ -719,6 +824,11 @@ class Plan100RouteTest(unittest.TestCase):
             decide_route(scalar_low, direct_low, constrained, formal_valid=True),
             "CONSTRAINT_OR_DATA_ISSUE",
         )
+        self.assertFalse(
+            decide_route_with_metadata(
+                scalar_low, direct_low, constrained, formal_valid=True
+            )["residual_mixed_signal"]
+        )
         self.assertEqual(
             decide_route(
                 scalar_low,
@@ -732,13 +842,45 @@ class Plan100RouteTest(unittest.TestCase):
             decide_route(scalar_low, direct_low, structured_high, formal_valid=False),
             "INCONCLUSIVE_TECHNICAL_OR_BUDGET",
         )
-        with self.assertRaises(UnmappedRouteError):
-            decide_route(
+        self.assertFalse(
+            decide_route_with_metadata(
+                scalar_low, direct_low, structured_high, formal_valid=False
+            )["residual_mixed_signal"]
+        )
+
+        residuals = {
+            "A_only": (
                 self._scalar(24, 10, basic=True, gate=True),
                 direct_low,
                 self._arm(20, 6, basic=False, gate=False),
-                formal_valid=True,
-            )
+            ),
+            "B_only": (
+                scalar_low,
+                self._arm(24, 10, basic=True, gate=True),
+                self._arm(20, 6, basic=False, gate=False),
+            ),
+            "mixed_basic": (
+                self._scalar(21, 7, basic=True, gate=False),
+                self._arm(21, 7, basic=True, gate=False),
+                self._arm(
+                    21,
+                    7,
+                    basic=True,
+                    gate=False,
+                    dimensions_good=True,
+                ),
+            ),
+        }
+        for name, (scalar, direct, structured) in residuals.items():
+            with self.subTest(name=name):
+                decision = decide_route_with_metadata(
+                    scalar, direct, structured, formal_valid=True
+                )
+                self.assertEqual(decision["terminal"], "CONSTRAINT_OR_DATA_ISSUE")
+                self.assertTrue(decision["residual_mixed_signal"])
+                self.assertNotEqual(
+                    decision["terminal"], "INCONCLUSIVE_TECHNICAL_OR_BUDGET"
+                )
 
 
 if __name__ == "__main__":

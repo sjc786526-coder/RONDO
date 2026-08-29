@@ -179,7 +179,8 @@
     "technical_receipt": "formal_invalid_commissioning_may_resume_with_new_logical_attempt",
     "output_contract_failure": "terminal_quality_observation_no_retry",
     "first_complete_valid_formal_stops_new_api_consumption": true,
-    "post_authority_recompute": "read_only_reopen_allowed_while_provider_run_resume_remains_locked"
+    "post_authority_recompute": "read_only_reopen_allowed_while_provider_run_resume_remains_locked",
+    "residual_route_marker": "complete_valid_unmatched_quality_predicates_use_constraint_or_data_issue_with_residual_mixed_signal_true"
   },
   "metrics": {
     "shared_binary": [
@@ -262,7 +263,10 @@
         "when": "A_B_C_all_fail_arm_basic_gate"
       }
     ],
-    "otherwise": "raise_unmapped_valid_formal_error_then_mark_formal_invalid_and_INCONCLUSIVE_TECHNICAL_OR_BUDGET_without_semantic_expansion"
+    "otherwise": "CONSTRAINT_OR_DATA_ISSUE_with_residual_mixed_signal_true_for_complete_valid_formal",
+    "residual_semantics": "mixed_signal_not_attributable_to_existing_positive_or_all_fail_routes_without_claiming_data_defect_concentrated_blocker_or_backbone_cause",
+    "residual_preserves_metrics": true,
+    "residual_supports_direct_training_unlock": false
   },
   "budget": {
     "currency": "RMB",
@@ -271,11 +275,13 @@
     "planned_logical_calls": 90,
     "planned_worst_case_reservation": 18.0,
     "price_card": {
-      "identity": "deepseek-v4-flash-live-2026-08-29-v1",
+      "identity": "deepseek-v4-flash-live-2026-08-29-weekday-v2",
       "source": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/",
       "checked_at": "2026-08-29",
       "timezone": "Asia/Shanghai",
-      "peak_windows_daily": ["09:00-12:00", "14:00-18:00"],
+      "peak_days_beijing": ["monday", "tuesday", "wednesday", "thursday", "friday"],
+      "peak_windows_beijing": ["09:00-12:00", "14:00-18:00"],
+      "weekends": "off_peak_all_day",
       "off_peak_rmb_per_million_tokens": {
         "cache_hit_input": 0.05,
         "cache_miss_input": 1.5,

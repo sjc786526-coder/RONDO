@@ -12,7 +12,10 @@
   与成功 B1 的 source/provider/request/release/comparison/price identity 完全一致；authority 后 provider resume 保持锁定，但允许只读独立复算。
 - raw/tracked formal 结果绑定 task-wide ledger snapshot/aggregate，覆盖 commissioning、retry、恢复与技术无效 clean run，不再只报告本轮 formal 费用。
 - tracked 合同与 fixture 冻结阶段 A descriptor、v2 prompt 候选、1 synthetic + v10 public min/max commissioning、A/B/C metrics 与 formal 准入。
-  五类路线原文字面条件不穷尽所有 formal 组合，未暗中扩写；未映射签名显式令 formal 无效并归入技术型 `INCONCLUSIVE`，交由阶段 A 审查裁决。
+  经审查者语义裁决，完整有效 formal 未命中既有四个质量谓词时返回既有 `CONSTRAINT_OR_DATA_ISSUE` 并单列 `residual_mixed_signal=true`；该
+  fallback 不改变 metrics、不伪造 concentrated blocker、不证明数据缺陷或 backbone 原因，也不直接支持付费解冻训练。
+- 修正 DeepSeek 价档为北京时间周一至周五 09:00–12:00、14:00–18:00 peak，周末全天 off-peak；价卡 identity/合同/边界测试同步更新，首次
+  真实请求前仍必须 live refresh/freeze。
 
 ## 边界与事件
 
@@ -23,8 +26,8 @@
 
 ## 验证
 
-- `PYTHONPATH=eval python -m unittest -v eval.tests.test_publication_critic_plan100_structured_diagnostic`：14 tests 通过。
-- `pytest -q eval/tests/test_publication_critic_plan100_structured_diagnostic.py`：`13 passed, 9 subtests passed`。
+- `PYTHONPATH=eval python -m unittest -v eval.tests.test_publication_critic_plan100_structured_diagnostic`：15 tests 通过。
+- 隔离 uv pytest：`15 passed, 24 subtests passed`。
 - Plan 100 Python 文件定向 `ruff check`：通过；JSON 合同/descriptor 解析与 `git diff --check`：通过。
 - `just fmt`：通过。
 - 正式 build-lock/shared `rondo-multi` target 下 `just test -p codex-publication-critic`：`68 passed, 0 skipped`。

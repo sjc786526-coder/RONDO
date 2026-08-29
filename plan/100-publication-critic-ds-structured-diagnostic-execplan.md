@@ -219,27 +219,30 @@ Plan 100 不属于原工作包四，不读取 qualification 或 v9 test 正文�
 - 2026-08-29：独立代码审查发现 commissioning 成功门、authority 后只读复算与 task-wide 费用证据三处实现缺口；已改为 9/9 strict success +
   usage-present recount 全量校准才生成自包含 B1 binding，formal freeze 必须与该 B1 的 source/provider/request/release/comparison/price identity
   完全一致，authority 后只允许只读重开，formal 结果与 tracked projection 绑定覆盖 commissioning/retry/技术轮的总账。定向 Python 回归增至 14 项。
+- 2026-08-29：审查者批准穷尽路线：既有四个质量谓词之后的完整有效 residual 返回 `CONSTRAINT_OR_DATA_ISSUE` 并标记
+  `residual_mixed_signal=true`，不修改 metrics、不伪造 concentrated blocker 或数据/backbone 归因；A-only 完整 81-row formal 与 A/B/mixed
+  路由回归通过。同时修正价卡为北京时间周一至周五双峰窗、周末全天 off-peak，保留首次真实请求前 live refresh/freeze。Python 定向门禁为
+  `15 passed, 24 subtests passed`。
 
 ### 当前工作
 
-- `STAGE_A_REMEDIATION_PENDING_ROUTE_SEMANTIC_DECISION / STAGE_B_LOCKED_PENDING_STAGE_A_REVIEW`。
+- `STAGE_A_REMEDIATED_PENDING_ACCEPTANCE / STAGE_B_LOCKED_PENDING_STAGE_A_REVIEW`。
 
 ### 本任务剩余步骤
 
-- 取得审查者对完整有效 formal 残余组合的穷尽路线语义裁决，冻结实现与测试后完成阶段 A 整改、提交任务分支并申请准入验收。
+- 提交本轮阶段 A 整改并通过指定 queue 申请准入验收。
 - 审查者若验收通过，明确批准阶段 B；执行 B1 commissioning、冻结、B2 clean formal、独立复算和唯一路线裁决。
 - 完成相称门禁、文档/结果/费用/ignored 状态收口、任务分支提交和最终独立验收。
 
 ### 阻塞项
 
-- 五类路线的硬合同不逻辑穷尽所有完整有效 formal：例如 A 达门而 B/C 不达基本门时，四个质量终态均不满足，但硬边界又禁止把完整有效 formal
-  归为技术型 `INCONCLUSIVE`。该矛盾涉及质量语义而非普通实现策略，已准备通过指定 queue 请求审查者冻结穷尽规则；收到裁决前不进入阶段 B。
+- 阶段 A 无实现阻塞；等待指定审查者验收。
 - 阶段 B 的审查者明确批准是设计内硬闸门；在批准前保持锁定，不视为阶段 A 阻塞。
 
 ### 当前验收状态
 
 - 规划：`COMPLETE / EXECUTION_ACTIVE`。
-- 阶段 A：`REMEDIATION_IN_PROGRESS / BLOCKED_ON_ROUTE_SEMANTIC_DECISION`。
+- 阶段 A：`REMEDIATED / PENDING_INDEPENDENT_ACCEPTANCE`。
 - 阶段 B：`AUTHORIZED_CONDITIONALLY / LOCKED_PENDING_STAGE_A_REVIEW`。
 - 完整任务：`IN_PROGRESS / NO_QUALITY_CONCLUSION`。
 

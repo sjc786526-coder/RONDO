@@ -264,6 +264,11 @@ class DiagnosticArchive:
             or result.get("complete") is not True
             or result.get("terminal_observation_count") != 81
             or result.get("route_terminal") not in AUTHORITY_TERMINALS
+            or type(result.get("residual_mixed_signal")) is not bool
+            or (
+                result.get("residual_mixed_signal") is True
+                and result.get("route_terminal") != "CONSTRAINT_OR_DATA_ISSUE"
+            )
         ):
             raise DiagnosticArchiveError("formal_result_invalid")
         value = {

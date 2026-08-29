@@ -30,7 +30,7 @@ PRICE_CARD = {
     "checked_date": "2026-08-29",
     "timezone": "Asia/Shanghai",
     "peak_windows": ["09:00-12:00", "14:00-18:00"],
-    "peak_days": "daily",
+    "peak_days": "monday_through_friday",
     "rates_rmb_per_million": {
         "off_peak": {
             "cache_hit_input": "0.05",
@@ -76,7 +76,9 @@ def price_tier_at(value: datetime) -> str:
         raise DiagnosticCostError("attempt_time_invalid")
     local = value.astimezone(BEIJING)
     minute = local.hour * 60 + local.minute
-    return "peak" if 540 <= minute < 720 or 840 <= minute < 1080 else "off_peak"
+    is_weekday = local.weekday() < 5
+    is_peak_window = 540 <= minute < 720 or 840 <= minute < 1080
+    return "peak" if is_weekday and is_peak_window else "off_peak"
 
 
 def _count(value: Any, code: str) -> int:

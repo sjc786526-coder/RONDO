@@ -29,10 +29,6 @@ class MetricsError(ValueError):
     """Metric inputs do not form one complete comparable validation cohort."""
 
 
-class UnmappedRouteError(MetricsError):
-    """A valid formal combination is outside the five pre-frozen route predicates."""
-
-
 def binary_metrics(
     candidate_ids: Sequence[str],
     gold_verdicts: Sequence[str],
@@ -399,12 +395,32 @@ def decide_route(
     *,
     formal_valid: bool,
 ) -> str:
-    """Apply the explicit route priority; undefined quality combinations fail closed."""
+    """Return the terminal from the exhaustive, pre-frozen route decision."""
+
+    return decide_route_with_metadata(
+        scalar, direct, structured, formal_valid=formal_valid
+    )["terminal"]
+
+
+def decide_route_with_metadata(
+    scalar: Mapping[str, Any],
+    direct: Mapping[str, Any],
+    structured: Mapping[str, Any],
+    *,
+    formal_valid: bool,
+) -> dict[str, Any]:
+    """Apply priority without altering metrics and identify the approved residual path."""
 
     if not formal_valid:
-        return "INCONCLUSIVE_TECHNICAL_OR_BUDGET"
+        return {
+            "terminal": "INCONCLUSIVE_TECHNICAL_OR_BUDGET",
+            "residual_mixed_signal": False,
+        }
     if structured["meets_gate"] and _noticeably_better(structured, direct):
-        return "FIVE_DIMENSION_STRONGLY_SUPPORTED"
+        return {
+            "terminal": "FIVE_DIMENSION_STRONGLY_SUPPORTED",
+            "residual_mixed_signal": False,
+        }
     if (
         direct["meets_gate"]
         and structured["meets_gate"]
@@ -412,25 +428,28 @@ def decide_route(
         and _noticeably_better(structured, scalar)
         and _close(direct, structured)
     ):
-        return "DISCRETE_SUPPORTED_FIVE_DIMENSION_INCREMENT_UNCONFIRMED"
+        return {
+            "terminal": "DISCRETE_SUPPORTED_FIVE_DIMENSION_INCREMENT_UNCONFIRMED",
+            "residual_mixed_signal": False,
+        }
     if structured["dimensions_generally_good"] and structured["concentrated_blocker"]:
-        return "CONSTRAINT_OR_DATA_ISSUE"
+        return {
+            "terminal": "CONSTRAINT_OR_DATA_ISSUE",
+            "residual_mixed_signal": False,
+        }
     if (
         not scalar["meets_basic"]
         and not direct["meets_basic"]
         and not structured["meets_basic"]
     ):
-        return "TASK_EXECUTABILITY_INSUFFICIENT"
-    signature = (
-        bool(scalar["meets_basic"]),
-        bool(scalar["meets_gate"]),
-        bool(direct["meets_basic"]),
-        bool(direct["meets_gate"]),
-        bool(structured["meets_basic"]),
-        bool(structured["meets_gate"]),
-        bool(structured["concentrated_blocker"]),
-    )
-    raise UnmappedRouteError(f"unmapped valid-formal route signature: {signature}")
+        return {
+            "terminal": "TASK_EXECUTABILITY_INSUFFICIENT",
+            "residual_mixed_signal": False,
+        }
+    return {
+        "terminal": "CONSTRAINT_OR_DATA_ISSUE",
+        "residual_mixed_signal": True,
+    }
 
 
 def _structured_pair_metrics(
