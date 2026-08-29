@@ -24,14 +24,21 @@ from rondo_eval.publication_critic.full_model_training.plan099_artifacts import 
 from rondo_eval.publication_critic.full_model_training.plan099_cli import (
     _export_candidate,
     _resume_checkpoint,
+    _validate_environment_receipt,
     verify_candidate_handoff,
 )
+from rondo_eval.publication_critic.full_model_training.plan099_cli import (
+    main as plan099_main,
+)
 from rondo_eval.publication_critic.full_model_training.plan099_contract import (
+    MINIMUM_L40S_VISIBLE_MEMORY_BYTES,
     assess_development_checkpoint,
     authorize_paid_segment,
     authorize_pod_lifecycle,
+    create_budget_snapshot,
     load_freeze,
     validate_budget_snapshot,
+    validate_live_resource_receipt,
     validate_pod_lifecycle_authorization,
     validate_runtime_control_chain,
     validate_runtime_control_file,
@@ -180,6 +187,198 @@ def test_dynamic_budget_reserves_existing_volume_and_closure() -> None:
     exhausted["conservative_task_cost_usd"] = 9.0
     with pytest.raises(FullModelTrainingError, match="plan099_budget_exhausted"):
         validate_budget_snapshot(exhausted)
+
+
+def test_cli_creates_budget_resource_and_accepts_real_l40s_visible_memory(
+    tmp_path: Path,
+) -> None:
+    budget_path = tmp_path / "budget.json"
+    assert (
+        plan099_main(
+            [
+                "create-budget-snapshot",
+                "--captured-at",
+                "2026-08-28T12:00:00Z",
+                "--baseline-available-balance-usd",
+                "10",
+                "--baseline-known-unsettled-usd",
+                "1",
+                "--baseline-volume-rate-usd-per-hour",
+                "0.1",
+                "--current-available-balance-usd",
+                "9.5",
+                "--current-known-unsettled-usd",
+                "1.1",
+                "--current-volume-rate-usd-per-hour",
+                "0.1",
+                "--conservative-task-cost-usd",
+                "4",
+                "--closure-reserve-usd",
+                "1",
+                "--next-action",
+                "commissioning",
+                "--output",
+                str(budget_path),
+            ]
+        )
+        == 0
+    )
+    budget = json.loads(budget_path.read_text(encoding="utf-8"))
+    assert budget == create_budget_snapshot(
+        captured_at="2026-08-28T12:00:00Z",
+        stage_b_baseline_available_balance_usd=10.0,
+        stage_b_baseline_known_unsettled_usd=1.0,
+        stage_b_baseline_volume_rate_usd_per_hour=0.1,
+        current_available_balance_usd=9.5,
+        current_known_unsettled_usd=1.1,
+        current_volume_rate_usd_per_hour=0.1,
+        conservative_task_cost_usd=4.0,
+        closure_reserve_usd=1.0,
+        next_action="commissioning",
+    )
+    assert budget_path.read_bytes() == pretty_json_bytes(budget)
+    assert os.stat(budget_path).st_mode & 0o777 == 0o600
+
+    resource_path = tmp_path / "resource.json"
+    visible_memory = 46_068 * 1024**2
+    assert MINIMUM_L40S_VISIBLE_MEMORY_BYTES <= visible_memory < 48 * 1024**3
+    assert (
+        plan099_main(
+            [
+                "create-live-resource-receipt",
+                "--captured-at",
+                "2026-08-28T12:00:00Z",
+                "--provider",
+                "RunPod",
+                "--cloud-type",
+                "SECURE",
+                "--data-center-id",
+                "US-TX-3",
+                "--pod-id",
+                "pod099",
+                "--pod-name",
+                "rondo-plan099-test",
+                "--pod-started-at",
+                "2026-08-28T12:00:00Z",
+                "--account-task-pod-count",
+                "1",
+                "--task-cumulative-pods-created",
+                "1",
+                "--task-prior-pod-wall-seconds",
+                "0",
+                "--gpu-name",
+                "NVIDIA L40S",
+                "--gpu-count",
+                "1",
+                "--gpu-total-memory-bytes",
+                str(visible_memory),
+                "--compute-rate-usd-per-hour",
+                "0.5",
+                "--container-rate-usd-per-hour",
+                "0.1",
+                "--container-disk-gb",
+                "20",
+                "--image-identity",
+                "runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404",
+                "--volume-id",
+                "mwemzrn33y",
+                "--volume-mount-path",
+                "/workspace",
+                "--volume-size-gb",
+                "70",
+                "--output",
+                str(resource_path),
+            ]
+        )
+        == 0
+    )
+    resource = json.loads(resource_path.read_text(encoding="utf-8"))
+    assert resource == validate_live_resource_receipt(resource)
+    assert resource_path.read_bytes() == pretty_json_bytes(resource)
+    assert os.stat(resource_path).st_mode & 0o777 == 0o600
+
+    environment_core = {
+        "schema": "rondo-publication-critic-plan099-environment-receipt-v1",
+        "python": "3.12.3",
+        "torch": "2.8.0+cu128",
+        "cuda": "12.8",
+        "transformers": "4.52.3",
+        "tokenizers": "0.21.4",
+        "huggingface_hub": "0.36.2",
+        "safetensors": "0.5.3",
+        "psutil": "7.0.0",
+        "gpu_name": "NVIDIA L40S",
+        "gpu_count": 1,
+        "gpu_total_memory_bytes": visible_memory,
+        "image_identity": "runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404",
+        "live_resource_receipt_sha256": resource["content_sha256"],
+        "pod_id": resource["pod_id"],
+        "pod_name": resource["pod_name"],
+    }
+    environment = {
+        **environment_core,
+        "content_sha256": hashlib.sha256(
+            canonical_json_bytes(environment_core)
+        ).hexdigest(),
+    }
+    assert (
+        _validate_environment_receipt(environment, expected_resource=resource)
+        == environment
+    )
+
+    below_floor = dict(resource)
+    below_floor["gpu_total_memory_bytes"] = MINIMUM_L40S_VISIBLE_MEMORY_BYTES - 1
+    core = {key: value for key, value in below_floor.items() if key != "content_sha256"}
+    below_floor["content_sha256"] = hashlib.sha256(
+        canonical_json_bytes(core)
+    ).hexdigest()
+    with pytest.raises(
+        FullModelTrainingError, match="plan099_live_resource_receipt_invalid"
+    ):
+        validate_live_resource_receipt(below_floor)
+
+    identity_path = tmp_path / "runtime-local/source-identity.json"
+    assembled = {
+        "schema": "rondo-publication-critic-plan099-execution-root-v1",
+        "commit": "a" * 40,
+        "source_archive_sha256": "b" * 64,
+        "data_archive_sha256": "c" * 64,
+        "freeze_sha256": "d" * 64,
+    }
+    with patch(
+        "rondo_eval.publication_critic.full_model_training.plan099_cli.assemble_execution_root",
+        return_value=assembled,
+    ):
+        assert (
+            plan099_main(
+                [
+                    "assemble-execution-root",
+                    "--source-archive",
+                    str(tmp_path / "source.tar"),
+                    "--data-archive",
+                    str(tmp_path / "data.tar"),
+                    "--source-sha256",
+                    "b" * 64,
+                    "--data-sha256",
+                    "c" * 64,
+                    "--commit",
+                    "a" * 40,
+                    "--output",
+                    str(tmp_path / "source"),
+                    "--identity-output",
+                    str(identity_path),
+                ]
+            )
+            == 0
+        )
+    identity = json.loads(identity_path.read_text(encoding="utf-8"))
+    assert identity == {
+        "commit": "a" * 40,
+        "source_archive_sha256": "b" * 64,
+        "freeze_sha256": "d" * 64,
+    }
+    assert identity_path.read_bytes() == pretty_json_bytes(identity)
+    assert os.stat(identity_path).st_mode & 0o777 == 0o600
 
 
 def test_plan099_guard_consumes_absolute_trigger_and_closes_exact_pod() -> None:
@@ -350,6 +549,15 @@ def test_plan099_bootstrap_reuses_exact_image_torch_and_guard_is_host_armed(
     assert 'python3 -m venv --copies --system-site-packages "$task_root/venv"' in source
     assert source.count('torch.__version__ == "2.8.0+cu128"') == 2
     assert source.count('torch.version.cuda == "12.8"') == 2
+    assert "validate-runtime-controls" in source
+    assert '--identity-output "$runtime_local/source-identity.json"' in source
+    assert "--no-cache-dir" in source
+    assert '"$task_root/venv/bin/python" -m pip check' in source
+    assert (
+        'exec timeout --signal=TERM --kill-after=60s "$RONDO_PLAN099_MAX_SECONDS"'
+        in source
+    )
+    assert "RONDO_PLAN099_BOOTSTRAP_INNER=1" in source
     venv = tmp_path / "worker-venv"
     subprocess.run(
         [

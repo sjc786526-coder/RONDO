@@ -1,8 +1,8 @@
 # Plan 099 阶段 B 运行手册
 
-本手册只执行 `freeze-lock-v1.json` 锁定的唯一方案。阶段 A 审查者尚未通过指定队列明确回复
-“Plan 099 阶段 A 验收通过，批准进入阶段 B”及完整外部边界时，以下任何真实模型、上传、RunPod、
-GPU 或付费步骤都不得执行。
+本手册只执行 `freeze-lock-v1.json` 锁定的唯一方案。只有指定队列中存在审查者明确回复
+“Plan 099 阶段 A 验收通过，批准进入阶段 B”及完整外部边界，才可执行真实模型、上传、RunPod、
+GPU 或付费步骤；每次启动仍须核对该批准及本轮预算和资源 receipt。
 
 ## 固定边界
 
@@ -35,7 +35,8 @@ GPU 或付费步骤都不得执行。
 Pod 独立核验后，host→Pod 运行时控制 JSON 只允许三类：live-resource receipt、Pod lifecycle authorization、
 paid-segment authorization。每份必须是不超过 16 KiB、权限 `0600` 的 canonical JSON，并放在当前 task root 的
 `runtime-control/{live-resource|lifecycle|segment}/{content_sha256}.json`；文件名必须等于经对应 schema 校验后的
-content SHA-256。worker 在启动任何 CLI 动作前逐文件校验路径、权限、canonical bytes、schema、content SHA 与
+content SHA-256。三类文件只由冻结 CLI 生成并逐字节复制，禁止手工编辑或重算：content SHA 基于 core 的 canonical
+JSON，实际文件则是确定性的 `pretty_json_bytes_v1`。worker 在启动任何 CLI 动作前逐文件校验路径、权限、文件字节、schema、content SHA 与
 三者交叉绑定。budget snapshot、guard/release receipt、环境或训练状态、provider 原始响应、任意第四类 JSON、
 模型、日志及密钥均不在此运行时上传边界内。
 
@@ -44,19 +45,24 @@ container disk 和卷 `mwemzrn33y` 的挂载；任一项不符立即释放，不
 exact name 对账，不得重复创建。将核验结果、source/data receipt、模型 snapshot receipt、版本、GPU、价格和预算
 快照写入任务 root 的小型 JSON evidence。
 
-每次付费动作紧邻执行前按以下唯一链路重新授权：先生成带 canonical content SHA-256 的 live-resource receipt 和
-lifecycle authorization，再刷新 budget snapshot，最后生成 paid-segment authorization。若已结束任务 Pod 的累计
+每个 Pod 的唯一授权链路是：先刷新 launch budget snapshot，并用冻结 CLI 生成 live-resource receipt；在二者和
+`pod_started_at` 均不超过 300 秒时生成 immutable lifecycle authorization。每次后续付费动作紧邻执行前再刷新 budget
+snapshot，最后生成 fresh paid-segment authorization。若已结束任务 Pod 的累计
 保守墙钟为 `P`、本 Pod 主体窗口为 `L`，则必须满足 `P + L + 60 + 360 <= 10800`；绝对 termination trigger 固定为
 `pod_started_at + L + 60`，确认 deadline 固定为 trigger 后 360 秒，因而最晚 0-Pod 确认不会越过累计硬上限。
 segment 必须逐哈希绑定 budget、resource、lifecycle、exact Pod id/name、实际 compute/container 单价、termination
 trigger、60 秒 kill grace 与 360 秒终态确认预留；worker 的 `RONDO_PLAN099_MAX_SECONDS` 必须与 segment 完全相等。
 所有云端 snapshot、artifact、state 和输出路径都必须在当前 `/workspace/rondo-plan099-*` task root 内；宿主 lifecycle
 authorization 与 guard receipt 留在主物理根 Plan 099 ignored host namespace；按上述三类 runtime-control allowlist
-把 resource、immutable lifecycle 和每段新生成的 segment 文件复制进云端 task root，供 worker 逐哈希绑定。
+把 resource、immutable lifecycle 和每段新生成的 segment 文件复制进云端 task root，供 bootstrap/worker 逐哈希绑定。
 
 Pod 创建并独立核验后，必须先在主物理根 Plan 099 ignored host namespace 生成 lifecycle authorization，并在授权后
 60 秒内用 `nohup setsid` 启动冻结的宿主 guard；armed receipt 中的 PID 必须仍存活且 exact Pod id/name、绝对 trigger
-与 authorization 一致。未成功武装不得上传、bootstrap 或使用 Pod。固定调用轮廓如下（变量值均来自本轮已核验 receipt）：
+与 authorization 一致。未成功武装不得上传、bootstrap 或使用 Pod。bootstrap 本身也必须消费一个 fresh segment，
+在 execution assembly、venv 或依赖动作前验证三类控制链；assembly 同时在 Pod 内 exclusive-create `runtime-local/source-identity.json`，
+不从 host 上传第四类 JSON。已验 SHA 的外层只提取小型 bootstrap tree，随后立即以 `timeout --kill-after=60s` 在
+segment `maximum_seconds` 内重新进入脚本；assembly、venv、pip、pip-check 与 freeze 校验全部处于该机械窗口。
+固定 guard 调用轮廓如下（变量值均来自本轮已核验 receipt）：
 
 ```bash
 nohup setsid env RONDO_PLAN099_STAGE_B_APPROVED=1 PYTHONPATH=eval \
@@ -75,6 +81,23 @@ stop/delete，并在 360 秒窗口内确认 0 Pod、compute `$0/h`。guard 不�
 
 ## Commissioning
 
+bootstrap 后只允许显式下载 asset contract 中的 12 个文件，单 worker、exact revision、独立 task-owned cache：
+
+```bash
+HF_HOME="$RONDO_PLAN099_TASK_ROOT/hf-cache" HF_HUB_DISABLE_IMPLICIT_TOKEN=1 \
+  "$RONDO_PLAN099_TASK_ROOT/venv/bin/hf" download \
+  Skywork/Skywork-Reward-V2-Qwen3-1.7B \
+  .gitattributes README.md added_tokens.json assets/skywork_logo.png \
+  chat_template.jinja config.json merges.txt model.safetensors \
+  special_tokens_map.json tokenizer.json tokenizer_config.json vocab.json \
+  --revision e51ea3e08fb81326c3b812a7ff0cb9cee83e59cc \
+  --local-dir "$RONDO_PLAN099_TASK_ROOT/model/exact-snapshot" \
+  --cache-dir "$RONDO_PLAN099_TASK_ROOT/hf-cache/hub" --max-workers 1
+```
+
+下载后用冻结 CLI `verify-snapshot --root ... --output .../evidence/model-snapshot-receipt.json` 校验 exact tree、
+model lock 与逐文件 SHA；receipt 必须在 snapshot 目录外。未通过不得加载模型。
+
 设置 `RONDO_PLAN099_STAGE_B_APPROVED=1`、exact image identity、任务 root、source root、segment authorization
 等 worker 所需环境后，从 exact base 和独立空 `rondo-plan099-commissioning-*` namespace 运行 `start --run-kind
 commissioning`。它只取 train 中每头一条 boundary 加一条 soft-only pair，执行 1 次非零更新，先原子保存完整
@@ -87,6 +110,12 @@ selection 和冻结 feature cache 恢复，逐字节复现 checkpoint 后评价�
 
 commissioning 只有在新进程复现成功后才能形成 `COMMISSIONING-PASS`；正式 `start` 必须显式读取并绑定该终态、
 同一 source identity 与 freeze。commissioning 永远不能形成 `CANDIDATE` 或 `NO-GO`。
+
+`capture-environment`、commissioning `start` 和新 OS 进程的 `resume` 分别使用 fresh segment；worker 的共同环境
+必须显式给出 task/source root、三类 runtime-control path、exact image 和等于 segment `maximum_seconds` 的 timeout。
+`start` 使用 `runtime-local/source-identity.json`、snapshot、独立 `rondo-plan099-commissioning-*` namespace、artifact/state
+与 environment receipt；`resume` 复用相同 state/artifact 但必须是新的 worker/Python invocation。环境 receipt 绑定 exact
+Pod；若发生已授权的第二 Pod 技术恢复，必须重新 capture，不能复用首 Pod receipt。
 
 ## Clean formal
 
@@ -101,6 +130,10 @@ checkpoint 恢复并补齐或逐字节复现 evaluation。正常暂停也只能�
 若轨迹因代码、依赖、OOM、存储、连接、保存或恢复等技术正确性问题无效，可在同一 exact recipe 和总边界内
 修复，从相称完整 checkpoint 恢复，或清空本任务无效 formal namespace 后最多用第二个 Pod clean rerun。若轨迹
 有效但质量未过冻结开发门，终态必须是 `NO-GO`，不得追结果调参或开启第二路线。
+
+formal `start` 使用全新的 `rondo-plan099-formal-*` namespace、空 artifact root、commissioning terminal state 以及 fresh
+segment。step 8 后每个 `resume` 都是新的 OS 进程并使用新的 segment；若 step 16 后 best 尚未 fresh-process 恢复，
+继续以同样方式运行最后一次 `resume`。不得在同一 worker 进程内伪造 fresh-process seam。
 
 ## 候选回传和资源收口
 

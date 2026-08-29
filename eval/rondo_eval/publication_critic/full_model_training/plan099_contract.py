@@ -56,6 +56,10 @@ WORKER_KILL_GRACE_SECONDS = 60
 TERMINAL_CONFIRMATION_SECONDS = 360
 MAXIMUM_TASK_POD_WALL_SECONDS = 10800
 MAXIMUM_RUNTIME_CONTROL_BYTES = 16 * 1024
+# CUDA reports usable device memory, not the vendor's nominal decimal 48 GB.
+# The exact GPU identity remains mandatory; this lower bound only avoids treating
+# a real L40S as if it had to expose 48 GiB of addressable memory.
+MINIMUM_L40S_VISIBLE_MEMORY_BYTES = 44 * 1024**3
 RUNTIME_CONTROL_ROLES = {
     "live-resource": LIVE_RESOURCE_SCHEMA,
     "lifecycle": LIFECYCLE_SCHEMA,
@@ -366,6 +370,101 @@ def validate_budget_snapshot(value: Any) -> dict[str, Any]:
     return json.loads(json.dumps(result))
 
 
+def create_budget_snapshot(
+    *,
+    captured_at: str,
+    stage_b_baseline_available_balance_usd: float,
+    stage_b_baseline_known_unsettled_usd: float,
+    stage_b_baseline_volume_rate_usd_per_hour: float,
+    current_available_balance_usd: float,
+    current_known_unsettled_usd: float,
+    current_volume_rate_usd_per_hour: float,
+    conservative_task_cost_usd: float,
+    closure_reserve_usd: float,
+    next_action: str,
+) -> dict[str, Any]:
+    """Create the canonical budget input instead of accepting hand-built JSON."""
+
+    dynamic_budget = max(
+        float(stage_b_baseline_available_balance_usd)
+        - float(stage_b_baseline_known_unsettled_usd)
+        - 6.0 * float(stage_b_baseline_volume_rate_usd_per_hour),
+        0.0,
+    )
+    return validate_budget_snapshot(
+        {
+            "schema": BUDGET_SCHEMA,
+            "captured_at": captured_at,
+            "stage_b_baseline_available_balance_usd": stage_b_baseline_available_balance_usd,
+            "stage_b_baseline_known_unsettled_usd": stage_b_baseline_known_unsettled_usd,
+            "stage_b_baseline_volume_rate_usd_per_hour": stage_b_baseline_volume_rate_usd_per_hour,
+            "stage_b_dynamic_budget_usd": dynamic_budget,
+            "current_available_balance_usd": current_available_balance_usd,
+            "current_known_unsettled_usd": current_known_unsettled_usd,
+            "current_volume_rate_usd_per_hour": current_volume_rate_usd_per_hour,
+            "conservative_task_cost_usd": conservative_task_cost_usd,
+            "closure_reserve_usd": closure_reserve_usd,
+            "next_action": next_action,
+        }
+    )
+
+
+def create_live_resource_receipt(
+    *,
+    captured_at: str,
+    provider: str,
+    cloud_type: str,
+    data_center_id: str,
+    pod_id: str,
+    pod_name: str,
+    pod_started_at: str,
+    account_task_pod_count: int,
+    task_cumulative_pods_created: int,
+    task_prior_pod_wall_seconds: int,
+    gpu_name: str,
+    gpu_count: int,
+    gpu_total_memory_bytes: int,
+    compute_rate_usd_per_hour: float,
+    container_rate_usd_per_hour: float,
+    container_disk_gb: int,
+    image_identity: str,
+    volume_id: str,
+    volume_mount_path: str,
+    volume_size_gb: float,
+) -> dict[str, Any]:
+    """Create and validate the only uploadable live-resource receipt bytes."""
+
+    core = {
+        "schema": LIVE_RESOURCE_SCHEMA,
+        "captured_at": captured_at,
+        "provider": provider,
+        "cloud_type": cloud_type,
+        "data_center_id": data_center_id,
+        "pod_id": pod_id,
+        "pod_name": pod_name,
+        "pod_started_at": pod_started_at,
+        "account_task_pod_count": account_task_pod_count,
+        "task_cumulative_pods_created": task_cumulative_pods_created,
+        "task_prior_pod_wall_seconds": task_prior_pod_wall_seconds,
+        "gpu_name": gpu_name,
+        "gpu_count": gpu_count,
+        "gpu_total_memory_bytes": gpu_total_memory_bytes,
+        "compute_rate_usd_per_hour": compute_rate_usd_per_hour,
+        "container_rate_usd_per_hour": container_rate_usd_per_hour,
+        "container_disk_gb": container_disk_gb,
+        "image_identity": image_identity,
+        "volume_id": volume_id,
+        "volume_mount_path": volume_mount_path,
+        "volume_size_gb": volume_size_gb,
+    }
+    return validate_live_resource_receipt(
+        {
+            **core,
+            "content_sha256": hashlib.sha256(canonical_json_bytes(core)).hexdigest(),
+        }
+    )
+
+
 def validate_live_resource_receipt(value: Any) -> dict[str, Any]:
     fields = {
         "schema",
@@ -429,7 +528,7 @@ def validate_live_resource_receipt(value: Any) -> dict[str, Any]:
         or value.get("gpu_count") != 1
         or not isinstance(value.get("gpu_total_memory_bytes"), int)
         or isinstance(value.get("gpu_total_memory_bytes"), bool)
-        or value["gpu_total_memory_bytes"] < 48 * 1024**3
+        or value["gpu_total_memory_bytes"] < MINIMUM_L40S_VISIBLE_MEMORY_BYTES
         or compute <= 0.0
         or value.get("container_disk_gb") != 20
         or value.get("image_identity")
@@ -1064,7 +1163,8 @@ def _validate_asset_contract(value: Any) -> dict[str, Any]:
         ]
         or value.get("runtime_control_upload_allowlist")
         != {
-            "canonical_json_required": True,
+            "content_sha256_basis": "canonical_json_core_v1",
+            "file_bytes": "pretty_json_bytes_v1",
             "file_mode": "0600",
             "maximum_file_bytes": MAXIMUM_RUNTIME_CONTROL_BYTES,
             "path_template": ("runtime-control/{role}/{content_sha256}.json"),
@@ -1263,6 +1363,7 @@ __all__ = [
     "BUDGET_SCHEMA",
     "MAXIMUM_RUNTIME_CONTROL_BYTES",
     "MAXIMUM_TASK_POD_WALL_SECONDS",
+    "MINIMUM_L40S_VISIBLE_MEMORY_BYTES",
     "MODEL_REPOSITORY",
     "MODEL_REVISION",
     "MODEL_WEIGHT_SHA256",
@@ -1274,6 +1375,8 @@ __all__ = [
     "authorize_paid_segment",
     "authorize_pod_lifecycle",
     "checkpoint_selection_key",
+    "create_budget_snapshot",
+    "create_live_resource_receipt",
     "decision_margin_grid",
     "freeze_sha256",
     "load_freeze",

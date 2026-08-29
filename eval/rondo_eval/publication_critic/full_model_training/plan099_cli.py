@@ -23,6 +23,7 @@ from .contract import (
     sha256_bytes,
     sha256_file,
 )
+from .plan082_adapter import verify_snapshot
 from .plan099_artifacts import Plan099ArtifactStore
 from .plan099_bundle import (
     assemble_execution_root,
@@ -30,9 +31,12 @@ from .plan099_bundle import (
     create_source_archive,
 )
 from .plan099_contract import (
+    MINIMUM_L40S_VISIBLE_MEMORY_BYTES,
     REPO_ROOT,
     authorize_paid_segment,
     authorize_pod_lifecycle,
+    create_budget_snapshot,
+    create_live_resource_receipt,
     freeze_sha256,
     load_freeze,
     validate_budget_snapshot,
@@ -70,6 +74,7 @@ def _parser() -> argparse.ArgumentParser:
     assemble.add_argument("--data-sha256", required=True)
     assemble.add_argument("--commit", required=True)
     assemble.add_argument("--output", type=Path, required=True)
+    assemble.add_argument("--identity-output", type=Path, required=True)
     source = commands.add_parser("create-source-archive")
     source.add_argument("--repo", type=Path, required=True)
     source.add_argument("--commit", required=True)
@@ -81,6 +86,54 @@ def _parser() -> argparse.ArgumentParser:
     data.add_argument("--output", type=Path, required=True)
     data.add_argument("--receipt-output", type=Path, required=True)
 
+    create_budget = commands.add_parser("create-budget-snapshot")
+    create_budget.add_argument("--captured-at", required=True)
+    create_budget.add_argument(
+        "--baseline-available-balance-usd", type=float, required=True
+    )
+    create_budget.add_argument(
+        "--baseline-known-unsettled-usd", type=float, required=True
+    )
+    create_budget.add_argument(
+        "--baseline-volume-rate-usd-per-hour", type=float, required=True
+    )
+    create_budget.add_argument(
+        "--current-available-balance-usd", type=float, required=True
+    )
+    create_budget.add_argument(
+        "--current-known-unsettled-usd", type=float, required=True
+    )
+    create_budget.add_argument(
+        "--current-volume-rate-usd-per-hour", type=float, required=True
+    )
+    create_budget.add_argument(
+        "--conservative-task-cost-usd", type=float, required=True
+    )
+    create_budget.add_argument("--closure-reserve-usd", type=float, required=True)
+    create_budget.add_argument("--next-action", required=True)
+    create_budget.add_argument("--output", type=Path, required=True)
+    resource = commands.add_parser("create-live-resource-receipt")
+    resource.add_argument("--captured-at", required=True)
+    resource.add_argument("--provider", required=True)
+    resource.add_argument("--cloud-type", required=True)
+    resource.add_argument("--data-center-id", required=True)
+    resource.add_argument("--pod-id", required=True)
+    resource.add_argument("--pod-name", required=True)
+    resource.add_argument("--pod-started-at", required=True)
+    resource.add_argument("--account-task-pod-count", type=int, required=True)
+    resource.add_argument("--task-cumulative-pods-created", type=int, required=True)
+    resource.add_argument("--task-prior-pod-wall-seconds", type=int, required=True)
+    resource.add_argument("--gpu-name", required=True)
+    resource.add_argument("--gpu-count", type=int, required=True)
+    resource.add_argument("--gpu-total-memory-bytes", type=int, required=True)
+    resource.add_argument("--compute-rate-usd-per-hour", type=float, required=True)
+    resource.add_argument("--container-rate-usd-per-hour", type=float, required=True)
+    resource.add_argument("--container-disk-gb", type=int, required=True)
+    resource.add_argument("--image-identity", required=True)
+    resource.add_argument("--volume-id", required=True)
+    resource.add_argument("--volume-mount-path", required=True)
+    resource.add_argument("--volume-size-gb", type=float, required=True)
+    resource.add_argument("--output", type=Path, required=True)
     budget = commands.add_parser("validate-budget")
     budget.add_argument("--snapshot", type=Path, required=True)
     lifecycle = commands.add_parser("authorize-lifecycle")
@@ -93,6 +146,8 @@ def _parser() -> argparse.ArgumentParser:
     segment.add_argument("--lifecycle-authorization", type=Path, required=True)
     segment.add_argument("--maximum-seconds", type=int, required=True)
     segment.add_argument("--output", type=Path, required=True)
+    runtime = commands.add_parser("validate-runtime-controls")
+    _run_arguments(runtime)
     environment = commands.add_parser("capture-environment")
     _run_arguments(environment)
     environment.add_argument("--output", type=Path, required=True)
@@ -124,6 +179,9 @@ def _parser() -> argparse.ArgumentParser:
     export.add_argument("--output", type=Path, required=True)
     verify = commands.add_parser("verify-inference-ready")
     verify.add_argument("--root", type=Path, required=True)
+    snapshot = commands.add_parser("verify-snapshot")
+    snapshot.add_argument("--root", type=Path, required=True)
+    snapshot.add_argument("--output", type=Path, required=True)
     verify_candidate = commands.add_parser("verify-candidate")
     verify_candidate.add_argument("--root", type=Path, required=True)
     return parser
@@ -159,7 +217,9 @@ def _dispatch(args: argparse.Namespace) -> Any:
             "freeze_sha256": sha256_bytes(canonical_json_bytes(freeze)),
         }
     if args.command == "assemble-execution-root":
-        return assemble_execution_root(
+        if args.identity_output.exists() or args.identity_output.is_symlink():
+            raise FullModelTrainingError("plan099_output_exists")
+        result = assemble_execution_root(
             args.source_archive,
             args.data_archive,
             args.output,
@@ -167,6 +227,15 @@ def _dispatch(args: argparse.Namespace) -> Any:
             data_sha256=args.data_sha256,
             expected_commit=args.commit,
         )
+        identity = validate_source_identity(
+            {
+                "commit": result["commit"],
+                "source_archive_sha256": result["source_archive_sha256"],
+                "freeze_sha256": result["freeze_sha256"],
+            }
+        )
+        _write_exclusive(args.identity_output, identity)
+        return result
     if args.command == "create-source-archive":
         receipt = create_source_archive(
             args.repo, args.output, source_commit=args.commit
@@ -179,6 +248,46 @@ def _dispatch(args: argparse.Namespace) -> Any:
         return receipt
     if args.command == "validate-budget":
         return validate_budget_snapshot(read_json(args.snapshot))
+    if args.command == "create-budget-snapshot":
+        snapshot = create_budget_snapshot(
+            captured_at=args.captured_at,
+            stage_b_baseline_available_balance_usd=args.baseline_available_balance_usd,
+            stage_b_baseline_known_unsettled_usd=args.baseline_known_unsettled_usd,
+            stage_b_baseline_volume_rate_usd_per_hour=args.baseline_volume_rate_usd_per_hour,
+            current_available_balance_usd=args.current_available_balance_usd,
+            current_known_unsettled_usd=args.current_known_unsettled_usd,
+            current_volume_rate_usd_per_hour=args.current_volume_rate_usd_per_hour,
+            conservative_task_cost_usd=args.conservative_task_cost_usd,
+            closure_reserve_usd=args.closure_reserve_usd,
+            next_action=args.next_action,
+        )
+        _write_exclusive(args.output, snapshot)
+        return snapshot
+    if args.command == "create-live-resource-receipt":
+        receipt = create_live_resource_receipt(
+            captured_at=args.captured_at,
+            provider=args.provider,
+            cloud_type=args.cloud_type,
+            data_center_id=args.data_center_id,
+            pod_id=args.pod_id,
+            pod_name=args.pod_name,
+            pod_started_at=args.pod_started_at,
+            account_task_pod_count=args.account_task_pod_count,
+            task_cumulative_pods_created=args.task_cumulative_pods_created,
+            task_prior_pod_wall_seconds=args.task_prior_pod_wall_seconds,
+            gpu_name=args.gpu_name,
+            gpu_count=args.gpu_count,
+            gpu_total_memory_bytes=args.gpu_total_memory_bytes,
+            compute_rate_usd_per_hour=args.compute_rate_usd_per_hour,
+            container_rate_usd_per_hour=args.container_rate_usd_per_hour,
+            container_disk_gb=args.container_disk_gb,
+            image_identity=args.image_identity,
+            volume_id=args.volume_id,
+            volume_mount_path=args.volume_mount_path,
+            volume_size_gb=args.volume_size_gb,
+        )
+        _write_exclusive(args.output, receipt)
+        return receipt
     if args.command == "authorize-lifecycle":
         receipt = authorize_pod_lifecycle(
             read_json(args.snapshot),
@@ -195,6 +304,18 @@ def _dispatch(args: argparse.Namespace) -> Any:
         )
         _write_exclusive(args.output, receipt)
         return receipt
+    if args.command == "validate-runtime-controls":
+        authorization = _require_stage_b(args)
+        return {
+            "status": "verified",
+            "live_resource_receipt_sha256": authorization["resource"]["content_sha256"],
+            "pod_lifecycle_authorization_sha256": authorization["lifecycle"][
+                "content_sha256"
+            ],
+            "paid_segment_authorization_sha256": authorization["segment"][
+                "content_sha256"
+            ],
+        }
     if args.command == "capture-environment":
         authorization = _require_stage_b(args)
         _scoped_new_path(args.output, _task_root())
@@ -365,6 +486,14 @@ def _dispatch(args: argparse.Namespace) -> Any:
         )
     if args.command == "verify-inference-ready":
         return verify_inference_ready(args.root)
+    if args.command == "verify-snapshot":
+        receipt = verify_snapshot(
+            args.root,
+            REPO_ROOT
+            / "eval/model-locks/publication-critic/skywork-reward-v2-qwen3-1.7b-e51ea3e0.json",
+        )
+        _write_exclusive(args.output, receipt)
+        return receipt
     if args.command == "verify-candidate":
         return verify_candidate_handoff(args.root)
     raise AssertionError(args.command)
@@ -617,8 +746,10 @@ def _validate_environment_receipt(
         "torch",
         "cuda",
         "transformers",
+        "tokenizers",
         "huggingface_hub",
         "safetensors",
+        "psutil",
         "gpu_name",
         "gpu_count",
         "gpu_total_memory_bytes",
@@ -634,9 +765,17 @@ def _validate_environment_receipt(
     if (
         value.get("schema") != "rondo-publication-critic-plan099-environment-receipt-v1"
         or value.get("content_sha256") != sha256_bytes(canonical_json_bytes(core))
+        or not str(value.get("python", "")).startswith("3.12.")
+        or value.get("torch") != "2.8.0+cu128"
+        or value.get("cuda") != "12.8"
+        or value.get("transformers") != "4.52.3"
+        or value.get("tokenizers") != "0.21.4"
+        or value.get("huggingface_hub") != "0.36.2"
+        or value.get("safetensors") != "0.5.3"
+        or value.get("psutil") != "7.0.0"
         or value.get("gpu_name") != "NVIDIA L40S"
         or value.get("gpu_count") != 1
-        or value.get("gpu_total_memory_bytes", 0) < 48 * 1024**3
+        or value.get("gpu_total_memory_bytes", 0) < MINIMUM_L40S_VISIBLE_MEMORY_BYTES
         or value.get("image_identity")
         != "runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404"
         or value.get("live_resource_receipt_sha256")
@@ -663,7 +802,9 @@ def _capture_environment(resource: Mapping[str, Any]) -> dict[str, Any]:
 
     try:
         import huggingface_hub
+        import psutil
         import safetensors
+        import tokenizers
         import torch
         import transformers
     except ImportError as exc:
@@ -683,8 +824,10 @@ def _capture_environment(resource: Mapping[str, Any]) -> dict[str, Any]:
         "torch": str(torch.__version__),
         "cuda": str(torch.version.cuda),
         "transformers": str(transformers.__version__),
+        "tokenizers": str(tokenizers.__version__),
         "huggingface_hub": str(huggingface_hub.__version__),
         "safetensors": str(safetensors.__version__),
+        "psutil": str(psutil.__version__),
         "gpu_name": str(torch.cuda.get_device_name(0)),
         "gpu_count": int(torch.cuda.device_count()),
         "gpu_total_memory_bytes": int(torch.cuda.get_device_properties(0).total_memory),

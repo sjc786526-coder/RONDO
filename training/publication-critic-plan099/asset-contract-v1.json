@@ -10,7 +10,8 @@
     "phase-a/data-bundle-receipt.json"
   ],
   "runtime_control_upload_allowlist": {
-    "canonical_json_required": true,
+    "content_sha256_basis": "canonical_json_core_v1",
+    "file_bytes": "pretty_json_bytes_v1",
     "file_mode": "0600",
     "maximum_file_bytes": 16384,
     "path_template": "runtime-control/{role}/{content_sha256}.json",
@@ -57,6 +58,7 @@
     "evidence/formal-result.json",
     "evidence/recovery-receipt.json",
     "evidence/environment-receipt.json",
+    "evidence/model-snapshot-receipt.json",
     "evidence/cost-and-resource-receipts/**",
     "evidence/log-tail.txt"
   ],
