@@ -216,31 +216,34 @@ trainable scope、精确训练强度或普通调试顺序，这些由执行者�
 - 2026-08-29：整改复验确认 venv symlink、累计墙钟口径及 runtime control 上传边界三项剩余阻断；已改用 copied venv 并真实复用 worker 判定，
   冻结 `prior + lifecycle + 60 + 360 <= 10800` 与 absolute-trigger 唯一自动释放例外，并只开放三类 canonical/content-addressed runtime JSON。
   Plan 099 focused `14/14`、Plan 094/087 回归 `9/9`、freeze/Ruff/compile/shell/diff 门通过，等待绑定最终整改提交的四份 bundle/receipt 后申请复验。
+- 2026-08-29：阶段 A 通过独立验收，阶段 B 获明确外部授权。首 Pod `z1z3m7n90nz4xr` 完成 provider、L40S、区域、镜像、价格与卷挂载核验；
+  bootstrap 在模型下载前因网络卷 FUSE 将控制 JSON 呈现为 `0666` 而 fail-closed。审查者批准的 current-Pod `/run` 窄例外已由提交
+  `a84fb5dd` 闭合，定向 `24 passed`，四件 bundle/receipt 已绑定新提交重建。
+- 2026-08-29：进入云端恢复前发现 host guard PID 不存活，按已授权 guard safety failure 止费路径立即 exact delete 首 Pod；实时确认
+  `pod_count=0`、compute `$0/h`，未下载/加载模型、未执行 commissioning 或 formal，网络卷保留。
 
 ### 当前工作
 
-- `PHASE_A_SECOND_REMEDIATED_AWAITING_REREVIEW / PHASE_B_REVIEWER_GATED`。
+- `PHASE_B_TECHNICAL_RECOVERY_AWAITING_REVIEWER_DECISION / ZERO_POD`。
 
 ### 本任务剩余步骤
 
-1. 审查阶段 A；按 findings 在阶段 A 授权内整改重跑，直至审查者明确接受或任务失败。
-2. 审查者接受阶段 A 后，通过队列明确给出是否批准阶段 B及最终外部边界；未批准则保持安全停止。
-3. 若批准，执行有界 commissioning、clean formal、恢复复现、候选或 `NO-GO` 冻结，并回传候选完整 inference-ready 权重与必要小型证据。
-4. 提交阶段 B 核心交付，使用 §7 队列申请 Pod 预释放审查并停止；审查者确认无需 Pod 并明确批准后，立即 stop/delete Pod、复核 compute `$0/h`。
-5. 在无 Pod 状态下完成本地结果、WBS、COMPLETED 与日志收口；提交最终 tracked 变更，使用 §7 队列申请最终独立验收并停止。
+1. 通过指定队列取得 replacement Pod 新 exact `/run` 控制路径与稳定 host guard 启动方式批示；未批准则保持 0 Pod。
+2. 在原冻结路线、剩余累计墙钟与动态预算内执行 replacement Pod commissioning、clean formal、恢复复现、候选或 `NO-GO` 冻结与必要回传。
+3. 提交阶段 B 核心交付，使用 §7 队列申请 Pod 预释放审查并停止；审查者确认无需 Pod 并明确批准后，立即 stop/delete Pod、复核 compute `$0/h`。
+4. 在无 Pod 状态下完成本地结果、WBS、COMPLETED 与日志收口；提交最终 tracked 变更，使用 §7 队列申请最终独立验收并停止。
 
 ### 阻塞项
 
-- 阶段 A 整改复验 findings 已在既有授权内窄修，正在等待新提交与 bundle 绑定完成后的再次独立复验。
-- 阶段 B 在审查者完成阶段 A 独立验收并通过指定队列明确批准前保持锁定。
-- 阶段 B 核心任务完成后，Pod 删除由 Pod 预释放审查门控制；当前尚未进入该门。
+- current-Pod `/run` 例外不自动沿用 replacement Pod；host guard 的原 `nohup setsid` 进程也未持续存活。二者须经审查者批示后才重建第二 Pod。
+- 阶段 B 核心任务完成后，正常 Pod 删除仍由 Pod 预释放审查门控制；安全止费与 absolute trigger 例外保持有效。
 
 ### 当前验收状态
 
 - 规划：`COMPLETED / COMMITTED`。
-- 阶段 A：`SECOND_REMEDIATION_COMPLETE / AWAITING_INDEPENDENT_REREVIEW`。
-- 阶段 B：`REVIEWER_GATED / NOT_AUTHORIZED_YET`。
-- 完整任务：`IN_PROGRESS / PHASE_B_NOT_STARTED`。
+- 阶段 A：`REVIEW_ACCEPTED / COMPLETE`。
+- 阶段 B：`AUTHORIZED / TECHNICAL_RECOVERY_REVIEWER_GATED / ZERO_POD`。
+- 完整任务：`IN_PROGRESS / MODEL_NOT_DOWNLOADED / TRAINING_NOT_STARTED`。
 
 ### 交接边界
 

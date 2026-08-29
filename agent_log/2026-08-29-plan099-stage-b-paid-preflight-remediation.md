@@ -21,3 +21,7 @@ validator、worker、资产合同、runbook 与拒绝路径测试已同步；易
 
 定向结果：相同组合 `24 passed`；freeze CLI、Ruff、compileall、shell syntax 和 diff-check 通过，freeze SHA-256 为
 `5b045e4c00a706244e097e94cf4710abc255c107b1a83f8a67c089ca9633f71d`。独立只读审查 findings 已全部闭合。
+
+进入云端恢复前复核发现 host guard armed receipt 所记 PID 已不存活且无结果 receipt。该失败触发既有安全止费授权：首 Pod
+`z1z3m7n90nz4xr` 已 exact delete，终态为 `pod_count=0`、compute `$0/h`，账户只剩既有卷费 `$0.007/h`。未下载或加载模型，未执行
+commissioning/formal；replacement Pod 的新 exact `/run` 路径和可持续 guard 启动方式改由指定队列批示。
