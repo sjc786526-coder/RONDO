@@ -6,7 +6,7 @@ ExecPlan；Plan 098 的任务合同、v9/v10/qualification、formal decoder、pa
 通过最终复验并冻结完成。工作包三 Plan 099 已完成阶段 B：commissioning 通过，clean formal 固定完成 16 次 update 和
 2/4/8/12/16 五点评价，step 8 经 fresh process 恢复复现；有效轨迹未达到预冻结开发准入门，终态冻结为 `VALID_FORMAL_NO_GO`，
 没有候选。任务 compute Pod 已全部删除并复核 `$0/h`，既有网络卷扩至 100GB 后保留完整 checkpoint/cache；Plan 099 外部动作授权已关闭，
-最终文档整改复验已通过，Plan 099 以“验收通过 / 任务目标失败”完整收口并合入本地 `main`，当前等待推送；工作包四未解锁。
+最终文档整改复验已通过，Plan 099 以“验收通过 / 任务目标失败”完整收口、合入本地 `main` 并推送；工作包四未解锁。
 Plan 097 的 `M3_D_DUAL_BACKEND_ENGINEERING_PASS / FINAL_REVIEW_ACCEPTED / INTEGRATED / PUSHED`、Plan 096 的
 `CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH`、Plan 095 最终验收、Plan 094 有效负向研究终态和 Plan 093 Linux 全 workspace 正确性基线
 均保持有效；新路线不自动解锁产品质量、默认启用或生产）
@@ -29,7 +29,7 @@ Plan 097 的 `M3_D_DUAL_BACKEND_ENGINEERING_PASS / FINAL_REVIEW_ACCEPTED / INTEG
 | 0：量化测评基准 | 既有设施与首次 schema v7 正式 canary 已完成，当前无 active campaign | 保留设施；历史结果见 COMPLETED，新 campaign 须重新立项与授权 |
 | 1：Harness 优化 | **正式收口；当前无 active 工作包** | 当前不继续新增观测或内核/热路径优化；既有实现、设施与历史结果保留。未来可由用户另行决定是否重新立项，本次收口不作永久禁止 |
 | 2：本地审批模型 | **已收口，今后不再开启** | 最终结论为“保留为实验”；不改生产默认，不再规划后续工作包 |
-| 3：RONDO Multi | 第一、二期、第四期已完成；三期 Plan 099 有效 `NO-GO`、最终验收通过并已本地整合 | 工程链与双 backend 可替换性 GO；v2/v9/v10/qualification、formal decoder、pair-aware selector 与 direct-dependency identity 已冻结。Plan 099 唯一主方案形成有效训练 `NO-GO`，没有开发候选，故工作包四未解锁；`NO_FURTHER_COMPUTE`，不读冻结测试、不改产品默认、不授予质量、产品价值或生产资格 |
+| 3：RONDO Multi | 第一、二期、第四期已完成；三期 Plan 099 有效 `NO-GO`、最终验收通过且已整合推送 | 工程链与双 backend 可替换性 GO；v2/v9/v10/qualification、formal decoder、pair-aware selector 与 direct-dependency identity 已冻结。Plan 099 唯一主方案形成有效训练 `NO-GO`，没有开发候选，故工作包四未解锁；`NO_FURTHER_COMPUTE`，不读冻结测试、不改产品默认、不授予质量、产品价值或生产资格 |
 
 方向 3 当前 Linux 正确性基线由 Plan 093 建立：default features、standard local Nextest、checksum-verified V8 的完整 workspace
 为 `14660/14660` passed、0 failure/error/timeout，另有 1/1 setup passed；24 个 skip 不计 passed。正式证据和精确边界见

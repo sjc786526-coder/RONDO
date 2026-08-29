@@ -2589,7 +2589,7 @@ INTEGRATED / NOT_PUSHED`。clean formal source 为 `0ae9623`，执行者交付�
 
 ## Publication Critic 五头主方案训练（Plan 099，2026-08-29）
 
-**状态**：`COMPLETED / GOAL_FAILED / VALID_FORMAL_NO_GO / FINAL_REVIEW_ACCEPTED / INTEGRATED / PUSH_PENDING / ZERO_POD / VOLUME_RETAINED / NO_FURTHER_COMPUTE`。
+**状态**：`COMPLETED / GOAL_FAILED / VALID_FORMAL_NO_GO / FINAL_REVIEW_ACCEPTED / INTEGRATED / PUSHED / ZERO_POD / VOLUME_RETAINED / NO_FURTHER_COMPUTE`。
 
 - 阶段 A 冻结 exact Skywork Reward V2 Qwen3 1.7B BF16 backbone 与五个 FP32 无 bias heads，只训练 22,528 参数；五头 loss、v10
   train/validation、checkpoint-first、fresh-process 恢复、pair-aware selector 与开发准入门均在真实结果前冻结并通过独立验收。
@@ -2607,4 +2607,5 @@ INTEGRATED / NOT_PUSHED`。clean formal source 为 `0ae9623`，执行者交付�
   correctness 或 functionality finding。验收通过，但预期合格候选未形成，因此任务目标失败；最终报告见
   `agent_log/2026-08-29-plan099-final-documentation-remediation-recheck.md`。
 - 用户批准后，最终验收提交以非快进 merge `03c3582441d108d16077e44677ec1d928517b6bb` 合入本地 `main`；主线 Plan 099 focused
-  `16/16` 与 freeze/diff 门通过，当前等待推送 `origin main`。集成记录见 `agent_log/2026-08-29-plan099-main-integration.md`。
+  `16/16` 与 freeze/diff 门通过，merge 与首次集成记录已推送至 `origin main@964e5f70`。本地任务分支已归档为
+  `zz-done/worktree-099-publication-critic-five-head-training`，worktree 保留；集成记录见 `agent_log/2026-08-29-plan099-main-integration.md`。
