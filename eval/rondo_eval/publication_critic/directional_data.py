@@ -52,9 +52,9 @@ DESIGN_PATH = TEMPLATE_ROOT / "directional-remediation-design-v1.json"
 CONFIG_PATH = TEMPLATE_ROOT / "directional-remediation-config-v1.json"
 DEVELOPMENT_REVISION = "publication-critic-v10"
 QUALIFICATION_SET_ID = "publication-critic-qualification-v1"
-DECISION_IMPLEMENTATION_COMMIT = "a9a856ad8f742f62474ba8bf473769d2fca1c571"
+DECISION_IMPLEMENTATION_COMMIT = "29eb4a75b5d8abcd7e404747c93012efa6da9e34"
 DECISION_IMPLEMENTATION_BUNDLE_SHA256 = (
-    "00700f45afb6c5f7bb97cc90ecd3f859c82f1cc604e5c242abcd9590284d6201"
+    "f86894faabedfa3f8a9d95ba26d2c9d8297e373503c975d332c7c08b631eeacc"
 )
 DEVELOPMENT_PATCH_SCHEMA = "rondo-publication-critic-directional-development-patch@v1"
 DEVELOPMENT_REVIEW_SCHEMA = "rondo-publication-critic-directional-development-review@v1"
