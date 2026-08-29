@@ -374,8 +374,11 @@ def decode_with_decision_config(
         else:
             labels["conditional_continuity"] = (
                 "PASS"
-                if float(logits[0]) - float(logits[1])
-                > continuity["pass_over_fail_margin"]
+                if (
+                    float(logits[0]) > float(logits[2])
+                    and float(logits[0]) - float(logits[1])
+                    > continuity["pass_over_fail_margin"]
+                )
                 else "FAIL"
             )
         decoded.append(labels)

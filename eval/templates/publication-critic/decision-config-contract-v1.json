@@ -26,7 +26,7 @@
   "conditional_continuity": {
     "required": ["pass_over_fail_margin", "na_over_applicable_margin"],
     "na_margin": "finite number strictly greater than zero",
-    "decision": "N/A only when N/A minus max(PASS, FAIL) strictly exceeds na margin; otherwise apply binary PASS/FAIL rule"
+    "decision": "N/A only when N/A minus max(PASS, FAIL) strictly exceeds na margin; otherwise PASS only when PASS is strictly above N/A and PASS minus FAIL strictly exceeds pass margin; all other cases FAIL"
   },
   "forbidden": [
     "global threshold",

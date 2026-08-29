@@ -110,17 +110,23 @@ class PublicationCriticQualificationTests(unittest.TestCase):
                 validate_decision_config(config, repo_root=root)
 
     def test_decoder_is_per_head_fail_closed_and_conservative_for_na(self) -> None:
-        output = self._structured_output(batch_size=3)
+        output = self._structured_output(batch_size=6)
         for dimension in BINARY_DIMENSIONS:
             output["heads"][dimension]["logits"] = [
+                [1.0, 0.0],
+                [1.0, 0.0],
+                [1.0, 0.0],
                 [1.0, 0.0],
                 [1.0, 0.0],
                 [0.2, 0.0],
             ]
         output["heads"]["conditional_continuity"]["logits"] = [
-            [0.1, 0.0, 0.2],
-            [0.0, -1.0, 1.0],
-            [1.0, 0.0, 0.0],
+            [1.0, 0.0, 1.1],  # weak N/A top despite strong PASS-over-FAIL
+            [1.0, 0.0, 1.5],  # exact N/A margin boundary
+            [0.0, -1.0, 1.0],  # decisive N/A
+            [1.0, 0.0, 0.9],  # clearly applicable PASS
+            [0.9, 0.0, 1.0],  # weak N/A top without the PASS shortcut
+            [1.0, 0.0, 0.0],  # another head fails closed
         ]
         decoded = decode_with_decision_config(
             output,
@@ -128,11 +134,17 @@ class PublicationCriticQualificationTests(unittest.TestCase):
             repo_root=REPO_ROOT,
         )
         self.assertEqual(decoded[0]["conditional_continuity"], "FAIL")
-        self.assertEqual(decoded[1]["conditional_continuity"], "N/A")
-        self.assertEqual(decoded[2]["useful_state_transfer"], "FAIL")
+        self.assertEqual(decoded[1]["conditional_continuity"], "FAIL")
+        self.assertEqual(decoded[2]["conditional_continuity"], "N/A")
+        self.assertEqual(decoded[3]["conditional_continuity"], "PASS")
+        self.assertEqual(decoded[4]["conditional_continuity"], "FAIL")
+        self.assertEqual(decoded[5]["useful_state_transfer"], "FAIL")
         self.assertEqual(derive_verdict(decoded[0]), "REWRITE")
-        self.assertEqual(derive_verdict(decoded[1]), "PASS")
-        self.assertEqual(derive_verdict(decoded[2]), "REWRITE")
+        self.assertEqual(derive_verdict(decoded[1]), "REWRITE")
+        self.assertEqual(derive_verdict(decoded[2]), "PASS")
+        self.assertEqual(derive_verdict(decoded[3]), "PASS")
+        self.assertEqual(derive_verdict(decoded[4]), "REWRITE")
+        self.assertEqual(derive_verdict(decoded[5]), "REWRITE")
 
     def test_selector_accepts_only_bounded_validation_candidates(self) -> None:
         labels = [self._labels(), self._labels(continuity="N/A")]

@@ -13,7 +13,8 @@
   `PASS logit - FAIL logit > margin` 才判 `PASS`，否则 fail-closed 为 `FAIL`。
 - `conditional_continuity` 同样冻结非负 `pass_over_fail_margin`，并另冻结严格为正的
   `na_over_applicable_margin`。只有 `N/A logit - max(PASS logit, FAIL logit) > na margin` 才排除该 head；
-  否则 continuity 仍适用，再按自身 PASS/FAIL margin 判定，未超过即为 `FAIL`。
+  未达到排除 margin 时，只有 `PASS logit > N/A logit` 且 `PASS logit - FAIL logit > pass margin` 才判
+  `PASS`；其余适用性模糊、平局或未达 PASS 边界都 fail-closed 为 `FAIL`。
 - 不允许 global threshold、跨 head 分数、加权或平均补偿、soft preference、自由 scalar、第六资格 head 或第二次 backbone forward。
   margin 只移动本 head 的 operating point，不能改变其他 head。
 
