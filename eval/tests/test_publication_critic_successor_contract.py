@@ -27,7 +27,7 @@ from rondo_eval.publication_critic.successor_task import (  # noqa: E402
     HARD_DIMENSIONS,
     STRUCTURED_OUTPUT_SCHEMA,
     SuccessorTaskError,
-    decode_structured_output,
+    decode_structured_output as decode_zero_margin_diagnostic,
     derive_loss_targets,
     derive_pair_loss_targets,
     derive_quality,
@@ -63,6 +63,10 @@ class PublicationCriticSuccessorContractTests(unittest.TestCase):
             REPO_ROOT
             / "eval/templates/publication-critic/successor-output-schema-v1.json"
         )
+        formal_decision = self._load_json(
+            REPO_ROOT
+            / "eval/templates/publication-critic/formal-decision-projection-v1.json"
+        )
         release_contract = self._load_json(
             REPO_ROOT
             / "eval/templates/publication-critic/successor-release-contract-v1.json"
@@ -77,6 +81,32 @@ class PublicationCriticSuccessorContractTests(unittest.TestCase):
             output_schema["x-rondo-runtime-decoder"],
             "eval/rondo_eval/publication_critic/successor_task.py"
             "#decode_structured_output",
+        )
+        self.assertEqual(
+            formal_decision["raw_output"]["schema_sha256"],
+            hashlib.sha256(
+                (
+                    REPO_ROOT / "eval/templates/publication-critic/"
+                    "successor-output-schema-v1.json"
+                ).read_bytes()
+            ).hexdigest(),
+        )
+        self.assertEqual(
+            formal_decision["raw_output"]["historical_decoder"],
+            output_schema["x-rondo-runtime-decoder"],
+        )
+        self.assertEqual(
+            formal_decision["raw_output"]["historical_decoder_role"],
+            "zero_margin_diagnostic_only",
+        )
+        self.assertEqual(
+            formal_decision["raw_output"]["formal_decision_use"],
+            "forbidden",
+        )
+        self.assertEqual(
+            formal_decision["formal_decision"]["decoder"],
+            "eval/rondo_eval/publication_critic/qualification.py#"
+            "decode_with_decision_config",
         )
         self.assertEqual(release_contract["kind"], "rondo-contract-projection")
         self.assertNotIn("$schema", release_contract)
@@ -119,7 +149,7 @@ class PublicationCriticSuccessorContractTests(unittest.TestCase):
     def test_output_is_one_forward_and_exactly_five_heads(self) -> None:
         output = self._structured_output()
         validate_structured_output(output)
-        decoded = decode_structured_output(output)
+        decoded = decode_zero_margin_diagnostic(output)
         self.assertEqual(decoded, (self._labels(continuity="N/A"),))
 
         for mutation, message in (
@@ -150,13 +180,13 @@ class PublicationCriticSuccessorContractTests(unittest.TestCase):
         all_tied = self._structured_output()
         for head in all_tied["heads"].values():
             head["logits"] = [[0.0] * len(head["classes"])]
-        tied_labels = decode_structured_output(all_tied)[0]
+        tied_labels = decode_zero_margin_diagnostic(all_tied)[0]
         self.assertEqual(set(tied_labels.values()), {"FAIL"})
         self.assertEqual(derive_verdict(tied_labels), "REWRITE")
 
         local_tie = self._structured_output()
         local_tie["heads"]["useful_state_transfer"]["logits"] = [[0.5, 0.5]]
-        local_labels = decode_structured_output(local_tie)[0]
+        local_labels = decode_zero_margin_diagnostic(local_tie)[0]
         self.assertEqual(local_labels["useful_state_transfer"], "FAIL")
         self.assertEqual(local_labels["conditional_continuity"], "N/A")
         self.assertEqual(derive_verdict(local_labels), "REWRITE")
@@ -335,14 +365,16 @@ class PublicationCriticSuccessorContractTests(unittest.TestCase):
         self.assertFalse(failed_report["pairs"][0]["closed"])
         self.assertIn("non-target labels", failed_report["pairs"][0]["reason"])
 
-    def test_candidate_schema_uses_visible_applicability_and_rejects_hidden_state(self) -> None:
+    def test_candidate_schema_uses_visible_applicability_and_rejects_hidden_state(
+        self,
+    ) -> None:
         completed = self._candidate("complete", self._labels(continuity="N/A"))
         validate_candidate_row(completed, repo_root=REPO_ROOT)
 
         broken = copy.deepcopy(completed)
-        broken["continuity_label_basis"][
-            "type"
-        ] = "model_visible_unfinished_or_not_closed"
+        broken["continuity_label_basis"]["type"] = (
+            "model_visible_unfinished_or_not_closed"
+        )
         with self.assertRaisesRegex(SuccessorDataError, "basis.type"):
             validate_candidate_row(broken, repo_root=REPO_ROOT)
 
@@ -413,7 +445,9 @@ class PublicationCriticSuccessorContractTests(unittest.TestCase):
         accepted_commit = "a" * 40
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            train_candidates = [self._candidate("train-a", self._labels(continuity="N/A"))]
+            train_candidates = [
+                self._candidate("train-a", self._labels(continuity="N/A"))
+            ]
             train_pairs: list[dict] = []
             candidate_bytes = self._jsonl_bytes(train_candidates)
             pair_bytes = self._jsonl_bytes(train_pairs)
@@ -616,7 +650,9 @@ class PublicationCriticSuccessorContractTests(unittest.TestCase):
         for dimension in HARD_DIMENSIONS:
             classes = list(DIMENSION_CLASSES[dimension])
             logits = [0.1] * len(classes)
-            winner = classes.index("N/A") if dimension == "conditional_continuity" else 0
+            winner = (
+                classes.index("N/A") if dimension == "conditional_continuity" else 0
+            )
             logits[winner] = 0.9
             heads[dimension] = {"classes": classes, "logits": [logits]}
         return {

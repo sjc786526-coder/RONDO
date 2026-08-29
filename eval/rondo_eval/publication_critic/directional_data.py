@@ -230,7 +230,7 @@ class DevelopmentRelease:
     ) -> dict[str, Any]:
         """Select a config bound to this release's ordered validation bytes."""
 
-        candidates, _ = self.load_validation()
+        candidates, pairs = self.load_validation()
         expected_ids = tuple(row["candidate_id"] for row in candidates)
         if tuple(validation_candidate_ids) != expected_ids:
             raise DirectionalDataError(
@@ -238,7 +238,9 @@ class DevelopmentRelease:
             )
         return _select_and_freeze_decision_config(
             validation_output=validation_output,
+            validation_candidate_ids=expected_ids,
             validation_labels=tuple(row["labels"] for row in candidates),
+            validation_pairs=pairs,
             candidate_head_margins=candidate_head_margins,
             model_artifact_sha256=model_artifact_sha256,
             development_revision=self.manifest["dataset_revision"],
@@ -246,6 +248,9 @@ class DevelopmentRelease:
             validation_candidates_sha256=self.manifest["splits"]["validation"][
                 "candidates"
             ]["sha256"],
+            validation_pairs_sha256=self.manifest["splits"]["validation"]["pairs"][
+                "sha256"
+            ],
             repo_root=self.repo_root,
         )
 

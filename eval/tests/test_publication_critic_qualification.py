@@ -16,6 +16,7 @@ from rondo_eval.publication_critic.qualification import (  # noqa: E402
     DECISION_CONFIG_SCHEMA,
     DECISION_IMPLEMENTATION_COMPONENT_PATHS,
     DECISION_IMPLEMENTATION_LOCK,
+    FORMAL_DECISION_PROJECTION,
     QualificationError,
     decision_config_sha256,
     decision_implementation_identity,
@@ -41,6 +42,7 @@ class PublicationCriticQualificationTests(unittest.TestCase):
         metrics = self._load_json(
             "eval/templates/publication-critic/qualification-metrics-contract-v1.json"
         )
+        formal = self._load_json(FORMAL_DECISION_PROJECTION.as_posix())
         self.assertEqual(decision["version"], "v1")
         self.assertEqual(decision["selection"]["split"], "validation")
         self.assertEqual(decision["selection"]["test_access"], "forbidden")
@@ -48,6 +50,25 @@ class PublicationCriticQualificationTests(unittest.TestCase):
             decision["reference_selector"],
             "eval/rondo_eval/publication_critic/directional_data.py#"
             "DevelopmentRelease.select_and_freeze_validation_decision_config",
+        )
+        self.assertEqual(
+            decision["formal_output_projection"],
+            FORMAL_DECISION_PROJECTION.as_posix(),
+        )
+        self.assertEqual(
+            formal["raw_output"]["historical_decoder_role"],
+            "zero_margin_diagnostic_only",
+        )
+        self.assertEqual(formal["raw_output"]["formal_decision_use"], "forbidden")
+        self.assertEqual(
+            formal["formal_decision"]["decoder"],
+            "eval/rondo_eval/publication_critic/qualification.py#"
+            "decode_with_decision_config",
+        )
+        self.assertTrue(formal["formal_decision"]["requires_frozen_decision_config"])
+        self.assertEqual(
+            decision["selection"]["pair_eligibility"],
+            "all_validation_pairs_closed",
         )
         self.assertNotIn("global threshold", decision["required_identity"])
         self.assertEqual(
@@ -66,6 +87,15 @@ class PublicationCriticQualificationTests(unittest.TestCase):
         self.assertEqual(config["selection"]["split"], "validation")
         self.assertEqual(config["selection"]["test_access"], "forbidden")
         self.assertEqual(
+            config["selection"]["method"],
+            "bounded_validation_pair_closed_grid_v1",
+        )
+        self.assertEqual(config["selection"]["validation_pair_rows"], 2)
+        self.assertEqual(
+            config["selection"]["pair_evaluation"],
+            self._pair_evaluation(),
+        )
+        self.assertEqual(
             config["decision_implementation"],
             decision_implementation_identity(REPO_ROOT),
         )
@@ -83,6 +113,15 @@ class PublicationCriticQualificationTests(unittest.TestCase):
         broken = copy.deepcopy(config)
         broken["development_data"]["manifest_sha256"] = "0" * 63
         with self.assertRaisesRegex(QualificationError, "SHA-256"):
+            validate_decision_config(broken, repo_root=REPO_ROOT)
+        broken = copy.deepcopy(config)
+        broken["development_data"]["validation_pairs_sha256"] = "0" * 63
+        with self.assertRaisesRegex(QualificationError, "SHA-256"):
+            validate_decision_config(broken, repo_root=REPO_ROOT)
+        broken = copy.deepcopy(config)
+        broken["selection"]["pair_evaluation"]["pairs"][0]["closed"] = False
+        broken["selection"]["pair_evaluation"]["pairs"][0]["reason"] = "open"
+        with self.assertRaisesRegex(QualificationError, "closed"):
             validate_decision_config(broken, repo_root=REPO_ROOT)
         broken = copy.deepcopy(config)
         broken["decision_implementation"]["bundle_sha256"] = "0" * 64
@@ -250,8 +289,11 @@ class PublicationCriticQualificationTests(unittest.TestCase):
             development_revision="publication-critic-v10",
             development_manifest_sha256="2" * 64,
             validation_candidates_sha256="3" * 64,
+            validation_pairs_sha256="4" * 64,
             validation_rows=3,
-            selection_method="bounded_validation_grid_v1",
+            validation_pair_rows=2,
+            pair_evaluation=self._pair_evaluation(),
+            selection_method="bounded_validation_pair_closed_grid_v1",
             selection_split=selection_split,
             head_margins=self._margins(),
             repo_root=repo_root,
@@ -268,6 +310,29 @@ class PublicationCriticQualificationTests(unittest.TestCase):
                 "pass_over_fail_margin": 0.2,
                 "na_over_applicable_margin": 0.5,
             },
+        }
+
+    @staticmethod
+    def _pair_evaluation() -> dict:
+        return {
+            "summary": {
+                "boundary": {"total": 1, "closed": 1},
+                "soft_only_invariance": {"total": 1, "closed": 1},
+            },
+            "pairs": [
+                {
+                    "pair_id": "boundary-validation-a",
+                    "kind": "boundary",
+                    "closed": True,
+                    "reason": None,
+                },
+                {
+                    "pair_id": "soft-validation-a",
+                    "kind": "soft_only_invariance",
+                    "closed": True,
+                    "reason": None,
+                },
+            ],
         }
 
     @staticmethod

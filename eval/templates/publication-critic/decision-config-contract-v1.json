@@ -5,6 +5,7 @@
   "authority": "doc/rondo-multi-publication-critic-decision-contract-v1.md",
   "runtime_validator": "eval/rondo_eval/publication_critic/qualification.py#validate_decision_config",
   "runtime_decoder": "eval/rondo_eval/publication_critic/qualification.py#decode_with_decision_config",
+  "formal_output_projection": "eval/templates/publication-critic/formal-decision-projection-v1.json",
   "reference_selector": "eval/rondo_eval/publication_critic/directional_data.py#DevelopmentRelease.select_and_freeze_validation_decision_config",
   "required_identity": [
     "task",
@@ -16,6 +17,14 @@
   ],
   "selection": {
     "split": "validation",
+    "method": "bounded_validation_pair_closed_grid_v1",
+    "required_data_identity": [
+      "manifest_sha256",
+      "validation_candidates_sha256",
+      "validation_pairs_sha256"
+    ],
+    "pair_eligibility": "all_validation_pairs_closed",
+    "pair_report": "frozen per pair with Boundary and soft-only absolute closure",
     "test_access": "forbidden",
     "frozen": true
   },

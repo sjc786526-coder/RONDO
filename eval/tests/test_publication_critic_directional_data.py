@@ -5,6 +5,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Mapping
 
 
 EVAL_ROOT = Path(__file__).resolve().parents[1]
@@ -96,11 +97,12 @@ class PublicationCriticDirectionalDataTests(unittest.TestCase):
             self.development_root,
             repo_root=REPO_ROOT,
         )
-        candidates, _ = release.load_validation()
+        candidates, pairs = release.load_validation()
         candidate_ids = tuple(row["candidate_id"] for row in candidates)
+        output = self._structured_output(candidates)
         config = release.select_and_freeze_validation_decision_config(
             validation_candidate_ids=candidate_ids,
-            validation_output=self._structured_output(len(candidates)),
+            validation_output=output,
             candidate_head_margins=[self._margins()],
             model_artifact_sha256="1" * 64,
         )
@@ -112,24 +114,57 @@ class PublicationCriticDirectionalDataTests(unittest.TestCase):
                 "validation_candidates_sha256": release.manifest["splits"][
                     "validation"
                 ]["candidates"]["sha256"],
+                "validation_pairs_sha256": release.manifest["splits"]["validation"][
+                    "pairs"
+                ]["sha256"],
             },
         )
         self.assertEqual(config["selection"]["validation_rows"], len(candidates))
+        self.assertEqual(config["selection"]["validation_pair_rows"], len(pairs))
+        self.assertTrue(
+            all(
+                result["closed"]
+                for result in config["selection"]["pair_evaluation"]["pairs"]
+            )
+        )
+        self.assertEqual(
+            sum(
+                details["closed"]
+                for details in config["selection"]["pair_evaluation"][
+                    "summary"
+                ].values()
+            ),
+            len(pairs),
+        )
         with self.assertRaisesRegex(
             DirectionalDataError,
             "candidate order",
         ):
             release.select_and_freeze_validation_decision_config(
                 validation_candidate_ids=tuple(reversed(candidate_ids)),
-                validation_output=self._structured_output(len(candidates)),
+                validation_output=output,
                 candidate_head_margins=[self._margins()],
                 model_artifact_sha256="1" * 64,
             )
         with self.assertRaisesRegex(ValueError, "1..1024"):
             release.select_and_freeze_validation_decision_config(
                 validation_candidate_ids=candidate_ids,
-                validation_output=self._structured_output(len(candidates)),
+                validation_output=output,
                 candidate_head_margins=[],
+                model_artifact_sha256="1" * 64,
+            )
+        self.assertEqual(pairs[0]["kind"], "boundary")
+        broken_output = copy.deepcopy(output)
+        q_plus_index = candidate_ids.index(pairs[0]["left_candidate_id"])
+        broken_output["heads"]["internal_consistency"]["logits"][q_plus_index] = [
+            0.0,
+            1.0,
+        ]
+        with self.assertRaisesRegex(ValueError, "pair-closed"):
+            release.select_and_freeze_validation_decision_config(
+                validation_candidate_ids=candidate_ids,
+                validation_output=broken_output,
+                candidate_head_margins=[self._margins()],
                 model_artifact_sha256="1" * 64,
             )
 
@@ -325,21 +360,26 @@ class PublicationCriticDirectionalDataTests(unittest.TestCase):
         }
 
     @staticmethod
-    def _structured_output(batch_size: int) -> dict:
+    def _structured_output(candidates: tuple[Mapping, ...]) -> dict:
+        def logits(dimension: str, label: str) -> list[float]:
+            if dimension != "conditional_continuity":
+                return [1.0, 0.0] if label == "PASS" else [0.0, 1.0]
+            return {
+                "PASS": [1.0, 0.0, 0.0],
+                "FAIL": [0.0, 1.0, 0.0],
+                "N/A": [0.0, 0.0, 1.0],
+            }[label]
+
         return {
             "schema": STRUCTURED_OUTPUT_SCHEMA,
             "backbone_forward_count": 1,
-            "batch_size": batch_size,
+            "batch_size": len(candidates),
             "heads": {
                 dimension: {
                     "classes": list(DIMENSION_CLASSES[dimension]),
                     "logits": [
-                        (
-                            [1.0, 0.0, 0.0]
-                            if dimension == "conditional_continuity"
-                            else [1.0, 0.0]
-                        )
-                        for _ in range(batch_size)
+                        logits(dimension, candidate["labels"][dimension])
+                        for candidate in candidates
                     ],
                 }
                 for dimension in HARD_DIMENSIONS

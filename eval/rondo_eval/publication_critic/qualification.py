@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import math
@@ -13,10 +14,12 @@ from .identity import canonical_json_bytes
 from .successor_task import (
     DIMENSION_CLASSES,
     HARD_DIMENSIONS,
+    SuccessorTaskError,
     TASK_AUTHORITY,
     TASK_NAME,
     TASK_VERSION,
     derive_verdict,
+    evaluate_pair_predictions,
     validate_labels,
     validate_structured_output,
 )
@@ -32,10 +35,14 @@ DECISION_CONTRACT_AUTHORITY = Path(
 DECISION_IMPLEMENTATION_LOCK = Path(
     "eval/templates/publication-critic/decision-implementation-lock-v1.json"
 )
+FORMAL_DECISION_PROJECTION = Path(
+    "eval/templates/publication-critic/formal-decision-projection-v1.json"
+)
 DECISION_IMPLEMENTATION_COMPONENT_PATHS = (
     DECISION_CONTRACT_AUTHORITY.as_posix(),
     "eval/rondo_eval/publication_critic/qualification.py",
     "eval/templates/publication-critic/decision-config-contract-v1.json",
+    FORMAL_DECISION_PROJECTION.as_posix(),
     "eval/templates/publication-critic/qualification-metrics-contract-v1.json",
 )
 BINARY_DIMENSIONS = tuple(
@@ -146,7 +153,10 @@ def freeze_decision_config(
     development_revision: str,
     development_manifest_sha256: str,
     validation_candidates_sha256: str,
+    validation_pairs_sha256: str,
     validation_rows: int,
+    validation_pair_rows: int,
+    pair_evaluation: Mapping[str, Any],
     selection_method: str,
     selection_split: str,
     head_margins: Mapping[str, Mapping[str, Any]],
@@ -174,6 +184,7 @@ def freeze_decision_config(
             "revision": development_revision,
             "manifest_sha256": development_manifest_sha256,
             "validation_candidates_sha256": validation_candidates_sha256,
+            "validation_pairs_sha256": validation_pairs_sha256,
         },
         "selection": {
             "split": selection_split,
@@ -181,6 +192,9 @@ def freeze_decision_config(
             "test_access": "forbidden",
             "frozen": True,
             "validation_rows": validation_rows,
+            "validation_pair_rows": validation_pair_rows,
+            "pair_eligibility": "all_validation_pairs_closed",
+            "pair_evaluation": copy.deepcopy(pair_evaluation),
         },
         "heads": {
             dimension: dict(head_margins[dimension]) for dimension in HARD_DIMENSIONS
@@ -269,7 +283,12 @@ def validate_decision_config(
     data = _object(config["development_data"], "decision config.development_data")
     _exact_keys(
         data,
-        {"revision", "manifest_sha256", "validation_candidates_sha256"},
+        {
+            "revision",
+            "manifest_sha256",
+            "validation_candidates_sha256",
+            "validation_pairs_sha256",
+        },
         "decision config.development_data",
     )
     _identifier(data["revision"], "decision config.development_data.revision")
@@ -281,10 +300,23 @@ def validate_decision_config(
         data["validation_candidates_sha256"],
         "decision config.development_data.validation_candidates_sha256",
     )
+    _sha256(
+        data["validation_pairs_sha256"],
+        "decision config.development_data.validation_pairs_sha256",
+    )
     selection = _object(config["selection"], "decision config.selection")
     _exact_keys(
         selection,
-        {"split", "method", "test_access", "frozen", "validation_rows"},
+        {
+            "split",
+            "method",
+            "test_access",
+            "frozen",
+            "validation_rows",
+            "validation_pair_rows",
+            "pair_eligibility",
+            "pair_evaluation",
+        },
         "decision config.selection",
     )
     _literal(selection["split"], "validation", "decision config.selection.split")
@@ -301,39 +333,25 @@ def validate_decision_config(
         or selection["validation_rows"] <= 0
     ):
         raise QualificationError("decision config validation_rows must be positive")
+    if (
+        isinstance(selection["validation_pair_rows"], bool)
+        or not isinstance(selection["validation_pair_rows"], int)
+        or selection["validation_pair_rows"] <= 0
+    ):
+        raise QualificationError(
+            "decision config validation_pair_rows must be positive"
+        )
+    _literal(
+        selection["pair_eligibility"],
+        "all_validation_pairs_closed",
+        "decision config.selection.pair_eligibility",
+    )
+    _validate_pair_evaluation(
+        selection["pair_evaluation"],
+        expected_rows=selection["validation_pair_rows"],
+    )
     heads = _object(config["heads"], "decision config.heads")
-    _exact_keys(heads, set(HARD_DIMENSIONS), "decision config.heads")
-    for dimension in BINARY_DIMENSIONS:
-        head = _object(heads[dimension], f"decision config.heads.{dimension}")
-        _exact_keys(
-            head,
-            {"pass_over_fail_margin"},
-            f"decision config.heads.{dimension}",
-        )
-        _margin(
-            head["pass_over_fail_margin"],
-            f"decision config.heads.{dimension}.pass_over_fail_margin",
-            strictly_positive=False,
-        )
-    continuity = _object(
-        heads["conditional_continuity"],
-        "decision config.heads.conditional_continuity",
-    )
-    _exact_keys(
-        continuity,
-        {"pass_over_fail_margin", "na_over_applicable_margin"},
-        "decision config.heads.conditional_continuity",
-    )
-    _margin(
-        continuity["pass_over_fail_margin"],
-        "decision config.heads.conditional_continuity.pass_over_fail_margin",
-        strictly_positive=False,
-    )
-    _margin(
-        continuity["na_over_applicable_margin"],
-        "decision config.heads.conditional_continuity.na_over_applicable_margin",
-        strictly_positive=True,
-    )
+    _validate_head_margins(heads)
 
 
 def decision_config_sha256(
@@ -353,19 +371,27 @@ def decode_with_decision_config(
 ) -> tuple[dict[str, str], ...]:
     """Decode five independent heads, with conservative continuity exclusion."""
 
-    validate_structured_output(output)
     validate_decision_config(config, repo_root=repo_root)
+    return _decode_with_head_margins(output, config["heads"])
+
+
+def _decode_with_head_margins(
+    output: Mapping[str, Any],
+    head_margins: Mapping[str, Mapping[str, Any]],
+) -> tuple[dict[str, str], ...]:
+    validate_structured_output(output)
+    _validate_head_margins(_object(head_margins, "decision config.heads"))
     decoded: list[dict[str, str]] = []
     for index in range(output["batch_size"]):
         labels: dict[str, str] = {}
         for dimension in BINARY_DIMENSIONS:
             logits = output["heads"][dimension]["logits"][index]
-            margin = config["heads"][dimension]["pass_over_fail_margin"]
+            margin = head_margins[dimension]["pass_over_fail_margin"]
             labels[dimension] = (
                 "PASS" if float(logits[0]) - float(logits[1]) > margin else "FAIL"
             )
         logits = output["heads"]["conditional_continuity"]["logits"][index]
-        continuity = config["heads"]["conditional_continuity"]
+        continuity = head_margins["conditional_continuity"]
         if (
             float(logits[2]) - max(float(logits[0]), float(logits[1]))
             > continuity["na_over_applicable_margin"]
@@ -388,12 +414,15 @@ def decode_with_decision_config(
 def _select_and_freeze_decision_config(
     *,
     validation_output: Mapping[str, Any],
+    validation_candidate_ids: Sequence[str],
     validation_labels: Sequence[Mapping[str, Any]],
+    validation_pairs: Sequence[Mapping[str, Any]],
     candidate_head_margins: Sequence[Mapping[str, Mapping[str, Any]]],
     model_artifact_sha256: str,
     development_revision: str,
     development_manifest_sha256: str,
     validation_candidates_sha256: str,
+    validation_pairs_sha256: str,
     repo_root: Path | str = REPO_ROOT,
 ) -> dict[str, Any]:
     """Pure selection core; callers must supply a release-derived binding."""
@@ -401,6 +430,18 @@ def _select_and_freeze_decision_config(
     validate_structured_output(validation_output)
     if len(validation_labels) != validation_output["batch_size"]:
         raise QualificationError("validation labels and logits have different rows")
+    candidate_ids = tuple(
+        _identifier(value, "validation candidate id")
+        for value in validation_candidate_ids
+    )
+    if len(candidate_ids) != validation_output["batch_size"]:
+        raise QualificationError(
+            "validation candidate ids and logits have different rows"
+        )
+    if len(set(candidate_ids)) != len(candidate_ids):
+        raise QualificationError("validation candidate ids are not unique")
+    if not validation_pairs:
+        raise QualificationError("decision selection requires validation pairs")
     gold = [validate_labels(row) for row in validation_labels]
     if not candidate_head_margins or len(candidate_head_margins) > 1024:
         raise QualificationError("decision selection requires 1..1024 candidates")
@@ -408,20 +449,26 @@ def _select_and_freeze_decision_config(
     best_score: tuple[float | int, ...] | None = None
     best_bytes: bytes | None = None
     for margins in candidate_head_margins:
+        predicted = _decode_with_head_margins(validation_output, margins)
+        pair_evaluation = _evaluate_pair_predictions(
+            validation_pairs,
+            candidate_ids,
+            predicted,
+        )
+        if any(not pair["closed"] for pair in pair_evaluation["pairs"]):
+            continue
         config = freeze_decision_config(
             model_artifact_sha256=model_artifact_sha256,
             development_revision=development_revision,
             development_manifest_sha256=development_manifest_sha256,
             validation_candidates_sha256=validation_candidates_sha256,
+            validation_pairs_sha256=validation_pairs_sha256,
             validation_rows=len(gold),
-            selection_method="bounded_validation_grid_v1",
+            validation_pair_rows=len(validation_pairs),
+            pair_evaluation=pair_evaluation,
+            selection_method="bounded_validation_pair_closed_grid_v1",
             selection_split="validation",
             head_margins=margins,
-            repo_root=repo_root,
-        )
-        predicted = decode_with_decision_config(
-            validation_output,
-            config,
             repo_root=repo_root,
         )
         metrics = evaluate_qualification_predictions(gold, predicted)
@@ -436,7 +483,9 @@ def _select_and_freeze_decision_config(
             best_score = score
             best_bytes = encoded
     if best is None:
-        raise QualificationError("decision selection did not produce a config")
+        raise QualificationError(
+            "decision selection did not produce a pair-closed config"
+        )
     return best
 
 
@@ -496,6 +545,151 @@ def evaluate_qualification_predictions(
             ),
         },
     }
+
+
+def _evaluate_pair_predictions(
+    pairs: Sequence[Mapping[str, Any]],
+    candidate_ids: Sequence[str],
+    predicted_rows: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    if len(candidate_ids) != len(predicted_rows):
+        raise QualificationError("pair evaluation candidate rows differ")
+    predicted_by_id = dict(zip(candidate_ids, predicted_rows, strict=True))
+    rows: list[dict[str, Any]] = []
+    for index, value in enumerate(pairs):
+        pair = _object(value, f"validation pair[{index}]")
+        required = {
+            "pair_id",
+            "kind",
+            "left_candidate_id",
+            "right_candidate_id",
+            "target_dimension",
+        }
+        if not required.issubset(pair):
+            raise QualificationError(f"validation pair[{index}] is incomplete")
+        left_id = pair["left_candidate_id"]
+        right_id = pair["right_candidate_id"]
+        if left_id not in predicted_by_id or right_id not in predicted_by_id:
+            raise QualificationError(
+                f"validation pair[{index}] endpoint is missing from logits"
+            )
+        rows.append(
+            {
+                "pair_id": pair["pair_id"],
+                "kind": pair["kind"],
+                "left_labels": predicted_by_id[left_id],
+                "right_labels": predicted_by_id[right_id],
+                "target_dimension": pair["target_dimension"],
+            }
+        )
+    try:
+        return evaluate_pair_predictions(rows)
+    except SuccessorTaskError as exc:
+        raise QualificationError(f"validation pair evaluation: {exc}") from exc
+
+
+def _validate_pair_evaluation(value: Mapping[str, Any], *, expected_rows: int) -> None:
+    report = _object(value, "decision config.selection.pair_evaluation")
+    _exact_keys(
+        report,
+        {"summary", "pairs"},
+        "decision config.selection.pair_evaluation",
+    )
+    summary = _object(
+        report["summary"],
+        "decision config.selection.pair_evaluation.summary",
+    )
+    kinds = ("boundary", "soft_only_invariance")
+    _exact_keys(
+        summary,
+        set(kinds),
+        "decision config.selection.pair_evaluation.summary",
+    )
+    pairs = report["pairs"]
+    if not isinstance(pairs, list) or len(pairs) != expected_rows:
+        raise QualificationError("decision config pair evaluation rows differ")
+    counts = {kind: 0 for kind in kinds}
+    seen: set[str] = set()
+    for index, value in enumerate(pairs):
+        pair = _object(value, f"decision config pair evaluation[{index}]")
+        _exact_keys(
+            pair,
+            {"pair_id", "kind", "closed", "reason"},
+            f"decision config pair evaluation[{index}]",
+        )
+        pair_id = _identifier(
+            pair["pair_id"],
+            f"decision config pair evaluation[{index}].pair_id",
+        )
+        if pair_id in seen:
+            raise QualificationError("decision config pair evaluation ids repeat")
+        seen.add(pair_id)
+        kind = pair["kind"]
+        if kind not in counts:
+            raise QualificationError("decision config pair evaluation kind is invalid")
+        _literal(
+            pair["closed"],
+            True,
+            f"decision config pair evaluation[{index}].closed",
+        )
+        _literal(
+            pair["reason"],
+            None,
+            f"decision config pair evaluation[{index}].reason",
+        )
+        counts[kind] += 1
+    if sum(counts.values()) != expected_rows:
+        raise QualificationError("decision config pair evaluation total differs")
+    for kind in kinds:
+        details = _object(
+            summary[kind],
+            f"decision config pair evaluation.summary.{kind}",
+        )
+        _exact_keys(
+            details,
+            {"total", "closed"},
+            f"decision config pair evaluation.summary.{kind}",
+        )
+        _literal(
+            details,
+            {"total": counts[kind], "closed": counts[kind]},
+            f"decision config pair evaluation.summary.{kind}",
+        )
+
+
+def _validate_head_margins(heads: Mapping[str, Any]) -> None:
+    _exact_keys(heads, set(HARD_DIMENSIONS), "decision config.heads")
+    for dimension in BINARY_DIMENSIONS:
+        head = _object(heads[dimension], f"decision config.heads.{dimension}")
+        _exact_keys(
+            head,
+            {"pass_over_fail_margin"},
+            f"decision config.heads.{dimension}",
+        )
+        _margin(
+            head["pass_over_fail_margin"],
+            f"decision config.heads.{dimension}.pass_over_fail_margin",
+            strictly_positive=False,
+        )
+    continuity = _object(
+        heads["conditional_continuity"],
+        "decision config.heads.conditional_continuity",
+    )
+    _exact_keys(
+        continuity,
+        {"pass_over_fail_margin", "na_over_applicable_margin"},
+        "decision config.heads.conditional_continuity",
+    )
+    _margin(
+        continuity["pass_over_fail_margin"],
+        "decision config.heads.conditional_continuity.pass_over_fail_margin",
+        strictly_positive=False,
+    )
+    _margin(
+        continuity["na_over_applicable_margin"],
+        "decision config.heads.conditional_continuity.na_over_applicable_margin",
+        strictly_positive=True,
+    )
 
 
 def _selection_score(metrics: Mapping[str, Any]) -> tuple[float | int, ...]:
