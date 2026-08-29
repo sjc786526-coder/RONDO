@@ -61,7 +61,7 @@ development-only `publication-critic-v10`，只形成一套本地可运行的五
 - [x] 阶段 B 核心证据回传并本地验签后，按用户 evidence-first 轻量收口立即 stop/delete 全部任务 compute Pod并实时确认 compute `$0/h`，
       之后才在本地整理最终文档与完成记录。
 - [x] 费用完整结算；卷、缓存和大型资产终态清楚；Pod 释放后的本地收口不为整理文档继续占用计费 compute。
-- [ ] 最终独立审查分别给出“验收通过/不通过”和“任务目标完成/失败”，并明确终态是候选冻结、有效训练 `NO-GO` 或真正未闭合的 `INCONCLUSIVE`。
+- [x] 最终独立审查分别给出“验收通过/不通过”和“任务目标完成/失败”，并明确终态是候选冻结、有效训练 `NO-GO` 或真正未闭合的 `INCONCLUSIVE`。
 
 ## 2. 范围
 
@@ -230,15 +230,16 @@ trainable scope、精确训练强度或普通调试顺序，这些由执行者�
 - 2026-08-29：clean formal 固定完成 16 updates 与 2/4/8/12/16 五点评价，step 8 fresh-process 恢复为 `reproduced=true`；有效轨迹未达到
   预冻结开发准入门，冻结 `NO-GO`，没有 candidate/best checkpoint。step 8/16 完整 checkpoint 与大型环境资产留卷，小型证据回传本地验签。
   用户改用 evidence-first 轻量收口后立即删除 replacement Pod；终态 0 Pod / compute `$0/h`，100GB 卷保留，保守任务费用 `$1.5345929717`。
+- 2026-08-29：最终文档整改复验关闭了终态后付费入口、失效历史提示词与方向 3 子 WBS 冲突，无遗留 High/Medium finding。Plan 099
+  以 `VALID_FORMAL_NO_GO / FINAL_REVIEW_ACCEPTED / NO_FURTHER_COMPUTE` 冻结；验收通过，预期合格候选未形成，任务目标失败。
 
 ### 当前工作
 
-- `PHASE_B_EXECUTION_COMPLETE / VALID_FORMAL_NO_GO / FINAL_REVIEW_REMEDIATION / ZERO_POD / VOLUME_RETAINED / NO_FURTHER_COMPUTE`。
+- `COMPLETED / VALID_FORMAL_NO_GO / FINAL_REVIEW_ACCEPTED / ZERO_POD / VOLUME_RETAINED / NO_FURTHER_COMPUTE`。
 
 ### 本任务剩余步骤
 
-1. 提交无 Pod 的最终授权终态、ExecPlan 历史口径和子 WBS 同步整改，保持 worktree clean。
-2. 使用 §7 队列申请纯文档复验并停止。
+- 无。本任务已完成执行、资源收口和最终验收；后续状态只以 WBS 为准。
 
 ### 阻塞项
 
@@ -247,10 +248,10 @@ trainable scope、精确训练强度或普通调试顺序，这些由执行者�
 
 ### 当前验收状态
 
-- 规划：`COMPLETED / COMMITTED`。
+- 规划：`COMPLETED / FINAL_REVIEW_ACCEPTED / COMMITTED`。
 - 阶段 A：`REVIEW_ACCEPTED / COMPLETE`。
 - 阶段 B：`EXECUTION_COMPLETE / VALID_FORMAL_NO_GO / ZERO_POD / VOLUME_RETAINED / NO_FURTHER_COMPUTE`。
-- 完整任务：`GOAL_FAILED_AS_QUALITY_OUTCOME / FINAL_REVIEW_REMEDIATION`。
+- 完整任务：`GOAL_FAILED_AS_QUALITY_OUTCOME / FINAL_REVIEW_ACCEPTED`。
 
 ### 交接边界
 

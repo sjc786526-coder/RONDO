@@ -5,8 +5,8 @@
 “任务合同重构 → v8 后继数据改造与有限扩充 → 一次主方案训练 → 模型资格验收与横评”；前三个工作包已执行，第四个因无候选未解锁。Plan 098 已把
 前两个工作包规划为严格串行的两个阶段；Plan 098 的 v2/v9/v10/qualification 主体与此前方向性整改保留，formal
 decoder 唯一入口、pair-aware margin selection 和 frozen decision direct-dependency identity 均已通过最终复验，Plan 098 完成并冻结。
-工作包三 Plan 099 已完成唯一主方案 commissioning 与 clean formal，终态为 `VALID_FORMAL_NO_GO`；没有候选，工作包四未解锁，Plan 099
-外部动作授权已关闭。Plan 097 的
+工作包三 Plan 099 已完成唯一主方案 commissioning 与 clean formal，终态为 `VALID_FORMAL_NO_GO / FINAL_REVIEW_ACCEPTED`；没有候选，
+工作包四未解锁，Plan 099 外部动作授权已关闭。Plan 097 的
 `M3_D_DUAL_BACKEND_ENGINEERING_PASS / FINAL_REVIEW_ACCEPTED / INTEGRATED / PUSHED`、Plan 096 的
 `CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH / FINAL_REVIEW_ACCEPTED / INTEGRATED / PUSHED`、Plan 094 的有效负向终态和 Plan 095 的
 最终验收均保持有效；新路线完成资格前，本地/云端质量、产品价值、Publication Critic 默认与生产启用继续锁定**
@@ -655,8 +655,7 @@ local/cloud 各 3/3 fixture 的 `PASS + REWRITE`、正常 Producer 两次重写/
 
 ## 串并行与资源关系
 
-- 当前唯一主路线为工作包一 → 二 → 三 → 四严格串行。工作包一冻结任务语义后工作包二才能生成正式后继数据；工作包二冻结完整 revision 后
-  工作包三才能准备并训练；工作包三冻结候选和配置后工作包四才能释放独立测试并验收。四包不得并行改写同一任务合同、数据标签或候选身份。
+- 原定路线为工作包一 → 二 → 三 → 四严格串行；前三包已依次执行，Plan 099 未冻结候选和配置，因此工作包四未解锁，本轮路线在工作包三停止。
 - 工作包二内部允许且要求按独立数据模块并行：多个负责人和对应盲审员仅处理自己的块，冻结块之间互不返工；执行者最终只做机械整合与全局覆盖门。
   工作包三内部的本地准备与云端付费执行严格串行，付费阶段在阶段 A 审查通过和审查者按用户委托明确批准前保持锁定。
 - M3-A1、M3-A2 与 M3-B1a 已完成共同前置。Plan 060 / M3-B1b 与已完成的 Plan 064 构成 M3-B1c 的并列资格门；产品链的

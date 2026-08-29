@@ -2589,7 +2589,7 @@ INTEGRATED / NOT_PUSHED`。clean formal source 为 `0ae9623`，执行者交付�
 
 ## Publication Critic 五头主方案训练（Plan 099，2026-08-29）
 
-**状态**：`EXECUTION_COMPLETED / GOAL_FAILED / VALID_FORMAL_NO_GO / FINAL_REVIEW_REMEDIATION / ZERO_POD / VOLUME_RETAINED / NO_FURTHER_COMPUTE`。
+**状态**：`COMPLETED / GOAL_FAILED / VALID_FORMAL_NO_GO / FINAL_REVIEW_ACCEPTED / ZERO_POD / VOLUME_RETAINED / NO_FURTHER_COMPUTE`。
 
 - 阶段 A 冻结 exact Skywork Reward V2 Qwen3 1.7B BF16 backbone 与五个 FP32 无 bias heads，只训练 22,528 参数；五头 loss、v10
   train/validation、checkpoint-first、fresh-process 恢复、pair-aware selector 与开发准入门均在真实结果前冻结并通过独立验收。
@@ -2603,3 +2603,6 @@ INTEGRATED / NOT_PUSHED`。clean formal source 为 `0ae9623`，执行者交付�
   `$1.5345929717`，compute 删除后余额 `$2.018521311`，卷继续约 `$0.01/h`。本地 ignored namespace 只保留四件 bundle/receipt、必要小型正式证据
   与生命周期/费用回执。有效 `NO-GO` 后 Plan 099 外部动作授权关闭，任何后续 GPU、恢复、资格测试或卷变更须另立任务并重新授权；详情见
   `agent_log/2026-08-29-plan099-stage-b-execution.md`。
+- 最终文档整改复验关闭了终态后付费入口、ExecPlan 历史提示词与方向 3 子 WBS 的状态冲突；最终未发现遗留 High/Medium
+  correctness 或 functionality finding。验收通过，但预期合格候选未形成，因此任务目标失败；最终报告见
+  `agent_log/2026-08-29-plan099-final-documentation-remediation-recheck.md`。

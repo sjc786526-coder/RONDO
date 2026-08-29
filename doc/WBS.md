@@ -1,12 +1,12 @@
 # RONDO 长程规划（WBS）
 
-最后更新：2026-08-29（方向 3 Publication Critic 三期在 Plan 097 双 backend 工程闭环后正式进入质量重构路线；后续固定串行为
+最后更新：2026-08-29（方向 3 Publication Critic 三期在 Plan 097 双 backend 工程闭环后正式进入质量重构路线；原定串行为
 “任务合同重构 → v8 后继数据改造与有限扩充 → 一次主方案训练 → 模型资格验收与横评”。Plan 098 已为前两个工作包建立同一两阶段
 ExecPlan；Plan 098 的任务合同、v9/v10/qualification、formal decoder、pair-aware margin selection 与 direct-dependency identity 已全部
 通过最终复验并冻结完成。工作包三 Plan 099 已完成阶段 B：commissioning 通过，clean formal 固定完成 16 次 update 和
 2/4/8/12/16 五点评价，step 8 经 fresh process 恢复复现；有效轨迹未达到预冻结开发准入门，终态冻结为 `VALID_FORMAL_NO_GO`，
 没有候选。任务 compute Pod 已全部删除并复核 `$0/h`，既有网络卷扩至 100GB 后保留完整 checkpoint/cache；Plan 099 外部动作授权已关闭，
-当前只进行最终文档整改复验。
+最终文档整改复验已通过，Plan 099 以“验收通过 / 任务目标失败”完整收口，工作包四未解锁。
 Plan 097 的 `M3_D_DUAL_BACKEND_ENGINEERING_PASS / FINAL_REVIEW_ACCEPTED / INTEGRATED / PUSHED`、Plan 096 的
 `CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH`、Plan 095 最终验收、Plan 094 有效负向研究终态和 Plan 093 Linux 全 workspace 正确性基线
 均保持有效；新路线不自动解锁产品质量、默认启用或生产）
@@ -29,7 +29,7 @@ Plan 097 的 `M3_D_DUAL_BACKEND_ENGINEERING_PASS / FINAL_REVIEW_ACCEPTED / INTEG
 | 0：量化测评基准 | 既有设施与首次 schema v7 正式 canary 已完成，当前无 active campaign | 保留设施；历史结果见 COMPLETED，新 campaign 须重新立项与授权 |
 | 1：Harness 优化 | **正式收口；当前无 active 工作包** | 当前不继续新增观测或内核/热路径优化；既有实现、设施与历史结果保留。未来可由用户另行决定是否重新立项，本次收口不作永久禁止 |
 | 2：本地审批模型 | **已收口，今后不再开启** | 最终结论为“保留为实验”；不改生产默认，不再规划后续工作包 |
-| 3：RONDO Multi | 第一、二期、第四期已完成；三期 Plan 099 有效 `NO-GO`、最终文档整改复验中 | 工程链与双 backend 可替换性 GO；v2/v9/v10/qualification、formal decoder、pair-aware selector 与 direct-dependency identity 已冻结。Plan 099 唯一主方案形成有效训练 `NO-GO`，没有开发候选，故工作包四未解锁；`NO_FURTHER_COMPUTE`，不读冻结测试、不改产品默认、不授予质量、产品价值或生产资格 |
+| 3：RONDO Multi | 第一、二期、第四期已完成；三期 Plan 099 有效 `NO-GO`并通过最终验收 | 工程链与双 backend 可替换性 GO；v2/v9/v10/qualification、formal decoder、pair-aware selector 与 direct-dependency identity 已冻结。Plan 099 唯一主方案形成有效训练 `NO-GO`，没有开发候选，故工作包四未解锁；`NO_FURTHER_COMPUTE`，不读冻结测试、不改产品默认、不授予质量、产品价值或生产资格 |
 
 方向 3 当前 Linux 正确性基线由 Plan 093 建立：default features、standard local Nextest、checksum-verified V8 的完整 workspace
 为 `14660/14660` passed、0 failure/error/timeout，另有 1/1 setup passed；24 个 skip 不计 passed。正式证据和精确边界见
@@ -44,16 +44,16 @@ Plan 097 的 `M3_D_DUAL_BACKEND_ENGINEERING_PASS / FINAL_REVIEW_ACCEPTED / INTEG
 
 ## 2. 下一工作包与顺序
 
-方向 3 三期的现行后续路线如下，四个工作包严格串行；前一包的冻结交付物与宏观验收是后一包的前置，不并行修改任务语义、数据合同或训练候选：
+方向 3 三期原定路线如下；前三个工作包已串行完成，Plan 099 没有形成候选，因此本轮在工作包三停止，工作包四未解锁：
 
 ```text
 工作包一：任务合同重构
         ↓
 工作包二：v8 后继数据改造与有限扩充
         ↓
-工作包三：一次主方案训练（Plan 099 阶段 A → 审查者按用户委托批准后的阶段 B）
-        ↓
-工作包四：模型资格验收与横评
+工作包三：一次主方案训练（Plan 099；`VALID_FORMAL_NO_GO`）
+        ╳
+工作包四：模型资格验收与横评（未解锁）
 ```
 
 - **工作包一 / Plan 098 阶段一已完成并冻结**：既有 `rondo-publication-critic-task@v2` 五头、non-compensating gate 与
@@ -78,7 +78,7 @@ Plan 097 的 `M3_D_DUAL_BACKEND_ENGINEERING_PASS / FINAL_REVIEW_ACCEPTED / INTEG
   的 Boundary Q+/Q-、非目标不变性与 soft invariance 报告必须全部闭合才可进入原单一 bounded margin grid 的确定性排序。v10/qualification
   只更新必要 identity 后从空目录机械重建并逐字节复现，数据正文和已接受 review 未重做。本轮 dependency identity 窄修同样只机械更新
   design/config/manifest/release identity 并完成独立字节复现。
-- **工作包三 / Plan 099 阶段 B 执行完成、最终文档整改复验中**：唯一方案为 exact Skywork Reward V2 Qwen3 1.7B 冻结 BF16 backbone 加五个
+- **工作包三 / Plan 099 有效 `NO-GO`、最终验收通过**：唯一方案为 exact Skywork Reward V2 Qwen3 1.7B 冻结 BF16 backbone 加五个
   FP32 linear heads，只训练 22,528 个参数。commissioning 闭合一次非零更新、checkpoint-first 评价、新进程恢复和小型回传；clean formal
   从 exact base 与空 namespace 完成固定 16 次 update，在 2/4/8/12/16 评价，step 8 由 fresh process 恢复并复现。有效轨迹未形成 decision
   config，按预冻结门冻结为 `NO-GO`，没有最佳 checkpoint 或 inference-ready 候选；完整 step 8/16 checkpoint 与大型环境资产留在 100GB
@@ -88,10 +88,9 @@ Plan 097 的 `M3_D_DUAL_BACKEND_ENGINEERING_PASS / FINAL_REVIEW_ACCEPTED / INTEG
 
 各工作包的详细目标、边界、宏观验收与授权门以 `doc/WBS/multi-agent-trusted-evidence.md` 为准。工作包一与二由
 `plan/098-publication-critic-contract-and-v8-successor-execplan.md` 冻结完成；工作包三由
-`plan/099-publication-critic-five-head-training-and-candidate-freeze-execplan.md` 规划为严格串行的非付费/付费阶段；工作包四仍在候选冻结后另立任务级
-ExecPlan 与授权。
+`plan/099-publication-critic-five-head-training-and-candidate-freeze-execplan.md` 已完成并冻结；工作包四未解锁，任何后续路线须另立任务和授权。
 
-方向 3 是当前唯一仍在推进的产品线。Plan 081 已取得 `LOCAL_TRAINING_READINESS_PASS`；三期 Plan 082 已获用户付费批准并完成
+方向 3 仍是未来可另行规划的产品线，但当前没有 active 工作包。Plan 081 已取得 `LOCAL_TRAINING_READINESS_PASS`；三期 Plan 082 已获用户付费批准并完成
 真实 commissioning、正式 freeze、干净 formal 和新进程恢复，终态为 `VALID_NO_IMPROVEMENT`。保留 Pod 的 GPU 专项验收已经通过，
 唯一训练 Pod 已释放并确认持续 compute 费率为 0；保留卷所在 `US-TX-3` 不提供 S3 API，故按用户一次性授权使用单个 transfer Pod
 只读回传冻结 39 对象。全部对象完成本地 bytes/SHA-256 校验后 transfer Pod 已删除；最终验收通过。用户本人随后明确决定继续保留
