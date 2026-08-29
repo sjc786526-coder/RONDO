@@ -13,7 +13,12 @@ from typing import Any
 
 MAX_INPUT_BYTES = 1024 * 1024
 MAX_RENDER_BYTES = 256 * 1024
-METHOD = "deepseek_v4_official_tokenizer_chat_template_v1"
+METHOD = "deepseek_v4_official_tokenizer_plus_b1_chat_envelope_v2"
+# The provider reports a fixed 21-token chat envelope above the official rendered messages.
+# B1 observed the same delta on all nine usage-present A/B/C synthetic/public calls, while every
+# completion recount matched exactly. This is request framing, not a content- or task-dependent
+# adjustment.
+PROVIDER_CHAT_ENVELOPE_TOKENS = 21
 TASK_ARGUMENT = {"A": "scalar", "B": "direct-gate", "C": "five-dimension"}
 BEGIN = "<｜begin▁of▁sentence｜>"
 USER = "<｜User｜>"
@@ -125,7 +130,10 @@ def recount(
         raise TokenRecountError("recount_tokenizer_config_invalid")
     messages = _render_messages(request, renderer=renderer, descriptor=descriptor)
     prompt = f"{BEGIN}{messages['system']}{USER}{messages['user']}{ASSISTANT}"
-    prompt_tokens = len(tokenizer.encode(prompt, add_special_tokens=False).ids)
+    prompt_tokens = (
+        len(tokenizer.encode(prompt, add_special_tokens=False).ids)
+        + PROVIDER_CHAT_ENVELOPE_TOKENS
+    )
     completion_tokens = len(
         tokenizer.encode(response_text, add_special_tokens=False).ids
     )

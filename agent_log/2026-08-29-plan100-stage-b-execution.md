@@ -17,4 +17,11 @@
   完全一致、renderer 零 provider 请求，且 thinking 只在 Plan 100 diagnostic 中关闭。
 - 官方 tokenizer + 更新后 Rust binary 的 A/B/C 离线复算自检通过，只输出 token 数，未调用 API。
 
-当前状态：`STAGE_A_ACCEPTED / STAGE_B1_PREFLIGHT_READY / NO_QUALITY_CONCLUSION`。
+## B1 commissioning
+
+- 首轮真实 commissioning 为 9/9 strict success、0 retry、0 parse/technical failure，全部 provider usage-present，实际结算 `0.0069217 RMB`；因
+  recounter prompt 与 provider usage 固定相差 21 tokens，binding 按合同未生成，既有 receipt/费用保留。
+- 只读核对九项 usage/recount：A/B/C、synthetic/public 的 prompt delta 全部精确为 `+21`，completion delta 全部为 `0`。据此冻结 provider chat
+  envelope 21 tokens 并绑定 recounter source hash；不修改 provider usage、prompt、schema、packet 或质量语义。下一步从新 clean commit 重跑 B1。
+
+当前状态：`STAGE_A_ACCEPTED / STAGE_B1_RECOUNT_CALIBRATED_PENDING_CLEAN_RERUN / NO_QUALITY_CONCLUSION`。

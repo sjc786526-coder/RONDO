@@ -69,7 +69,7 @@
     },
     "environment_candidate": {
       "path": "eval/locks/publication-critic-plan100-recount-environment-v1.json",
-      "sha256": "efca618c1c585e1bf3f27970d58e3646008d6b6fa5213e238ab4b6c14002d296"
+      "sha256": "974629277eab274171e48c3bb444d3cd235cd463998e60d5bbb3394aaebfd9b6"
     },
     "prompt_candidate": {
       "source_path": "multidev/codex-rs/publication-critic/src/cloud_diagnostic.rs",
@@ -311,6 +311,8 @@
     "recount": {
       "adapter": "bounded_offline_command",
       "identity": "command_executable_sha256_plus_arguments_bound_in_run_freeze",
+      "provider_chat_envelope_tokens": 21,
+      "b1_calibration": "nine_of_nine_prompt_delta_21_and_completion_delta_0",
       "cache_unknown": "charge_all_input_as_cache_miss",
       "commissioning_requirement": "calibrate_against_usage_present_attempt_before_clean_formal"
     }

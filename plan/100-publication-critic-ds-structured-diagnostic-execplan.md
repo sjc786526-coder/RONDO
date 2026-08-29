@@ -232,10 +232,13 @@ Plan 100 不属于原工作包四，不读取 qualification 或 v9 test 正文�
   off-peak；官方 V4 tokenizer 下载到 task-owned ignored namespace 并冻结 hash。live 文档同时确认 V4 默认开启 thinking、会忽略 temperature 且
   reasoning token 无法从最终 JSON 独立复算；按 B1 provider 兼容授权对三臂统一显式关闭 thinking，并增加复用同一 Rust prompt renderer 的离线
   token recounter，不改 rubric、packet、输出 schema、labels、metrics 或路线阈值。Plan 100 Python 21 项与 Rust 69 项定向门禁通过。
+- 2026-08-29：首轮 B1 为 9/9 strict success、0 retry/parse/technical failure，实际结算 `0.0069217 RMB`；binding 因 recount calibration
+  fail-closed。九项只读核对均为 provider prompt 比官方 rendered tokenizer 固定多 21 tokens、completion 完全相等，故按 B1 校准职责冻结
+  21-token provider chat envelope；不修改原始 usage、prompt/schema/packet 或质量语义，准备新 clean source 重跑 B1。
 
 ### 当前工作
 
-- `STAGE_A_ACCEPTED / STAGE_B1_PREFLIGHT_READY`。
+- `STAGE_A_ACCEPTED / STAGE_B1_RECOUNT_CALIBRATED_PENDING_CLEAN_RERUN`。
 
 ### 本任务剩余步骤
 

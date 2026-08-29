@@ -364,7 +364,8 @@ class Plan100CostAndArchiveTest(unittest.TestCase):
         self.assertEqual(
             result,
             {
-                "prompt_tokens": len(expected_prompt),
+                "prompt_tokens": len(expected_prompt)
+                + diagnostic_recounter.PROVIDER_CHAT_ENVELOPE_TOKENS,
                 "completion_tokens": len(request["response_text"]),
                 "method": diagnostic_recounter.METHOD,
             },
