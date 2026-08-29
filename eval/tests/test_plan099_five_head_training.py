@@ -37,7 +37,9 @@ from rondo_eval.publication_critic.full_model_training.plan099_contract import (
     authorize_pod_lifecycle,
     create_budget_snapshot,
     load_freeze,
+    plan099_runtime_control_root,
     validate_budget_snapshot,
+    validate_current_pod_runtime_control_chain,
     validate_live_resource_receipt,
     validate_pod_lifecycle_authorization,
     validate_runtime_control_chain,
@@ -573,7 +575,14 @@ def test_plan099_bootstrap_reuses_exact_image_torch_and_guard_is_host_armed(
     )
     python = venv / "bin/python"
     worker_condition = 'if [ ! -x "$python" ] || [ -L "$python" ]; then exit 2; fi'
-    assert worker_condition in worker.read_text(encoding="utf-8")
+    worker_source = worker.read_text(encoding="utf-8")
+    assert worker_condition in worker_source
+    runtime_root = "/run/rondo-plan099-z1z3m7n90nz4xr/runtime-control"
+    assert f'runtime_root="{runtime_root}"' in worker_source
+    assert 'case "$resource" in "$runtime_root/live-resource/"*.json)' in worker_source
+    assert 'case "$lifecycle" in "$runtime_root/lifecycle/"*.json)' in worker_source
+    assert 'case "$segment" in "$runtime_root/segment/"*.json)' in worker_source
+    assert 'case "$resource" in "$task_root"/*)' not in worker_source
     subprocess.run(
         [
             "bash",
@@ -607,8 +616,10 @@ def test_runtime_control_allowlist_accepts_only_exact_canonical_chain(
     tmp_path: Path,
 ) -> None:
     now = datetime(2026, 8, 28, 12, 0, tzinfo=UTC)
-    task_root = tmp_path / "rondo-plan099-test"
-    task_root.mkdir()
+    pod_root = tmp_path / "rondo-plan099-z1z3m7n90nz4xr"
+    pod_root.mkdir(mode=0o700)
+    runtime_root = pod_root / "runtime-control"
+    runtime_root.mkdir(mode=0o700)
     resource = _resource_receipt()
     lifecycle = authorize_pod_lifecycle(
         _budget_snapshot(), resource, maximum_lifecycle_seconds=7200, now=now
@@ -623,59 +634,95 @@ def test_runtime_control_allowlist_accepts_only_exact_canonical_chain(
     }
     paths: dict[str, Path] = {}
     for role, value in values.items():
-        directory = task_root / "runtime-control" / role
-        directory.mkdir(parents=True)
+        directory = runtime_root / role
+        directory.mkdir(mode=0o700)
         path = directory / f"{value['content_sha256']}.json"
         path.write_bytes(pretty_json_bytes(value))
         path.chmod(0o600)
         paths[role] = path
-        assert validate_runtime_control_file(role, path, task_root) == value
-    assert validate_runtime_control_chain(resource, lifecycle, segment) == {
-        "resource": resource,
-        "lifecycle": lifecycle,
-        "segment": segment,
-    }
+    with patch(
+        "rondo_eval.publication_critic.full_model_training.plan099_contract."
+        "RUNTIME_CONTROL_ROOT",
+        runtime_root,
+    ):
+        assert plan099_runtime_control_root("z1z3m7n90nz4xr") == runtime_root
+        for role, value in values.items():
+            assert (
+                validate_runtime_control_file(role, paths[role], runtime_root) == value
+            )
+        assert validate_runtime_control_chain(resource, lifecycle, segment) == {
+            "resource": resource,
+            "lifecycle": lifecycle,
+            "segment": segment,
+        }
 
-    wrong_path = task_root / "runtime-control" / "live-resource" / ("0" * 64 + ".json")
-    wrong_path.write_bytes(pretty_json_bytes(resource))
-    wrong_path.chmod(0o600)
-    with pytest.raises(FullModelTrainingError, match="plan099_runtime_control_invalid"):
-        validate_runtime_control_file("live-resource", wrong_path, task_root)
+        wrong_path = runtime_root / "live-resource" / ("0" * 64 + ".json")
+        wrong_path.write_bytes(pretty_json_bytes(resource))
+        wrong_path.chmod(0o600)
+        with pytest.raises(
+            FullModelTrainingError, match="plan099_runtime_control_invalid"
+        ):
+            validate_runtime_control_file("live-resource", wrong_path, runtime_root)
 
-    noncanonical = paths["segment"]
-    noncanonical.write_bytes(json.dumps(segment, sort_keys=True).encode("utf-8"))
-    with pytest.raises(FullModelTrainingError, match="plan099_runtime_control_invalid"):
-        validate_runtime_control_file("segment", noncanonical, task_root)
+        noncanonical = paths["segment"]
+        noncanonical.write_bytes(json.dumps(segment, sort_keys=True).encode("utf-8"))
+        with pytest.raises(
+            FullModelTrainingError, match="plan099_runtime_control_invalid"
+        ):
+            validate_runtime_control_file("segment", noncanonical, runtime_root)
+        noncanonical.write_bytes(pretty_json_bytes(segment))
 
-    paths["live-resource"].chmod(0o644)
-    with pytest.raises(FullModelTrainingError, match="plan099_runtime_control_invalid"):
-        validate_runtime_control_file(
-            "live-resource", paths["live-resource"], task_root
+        paths["live-resource"].chmod(0o644)
+        with pytest.raises(
+            FullModelTrainingError, match="plan099_runtime_control_invalid"
+        ):
+            validate_runtime_control_file(
+                "live-resource", paths["live-resource"], runtime_root
+            )
+        paths["live-resource"].chmod(0o600)
+
+        oversized = (
+            runtime_root / "live-resource" / f"{resource['content_sha256']}.json"
         )
-    paths["live-resource"].chmod(0o600)
+        original = oversized.read_bytes()
+        oversized.write_bytes(b" " * (16 * 1024 + 1))
+        oversized.chmod(0o600)
+        with pytest.raises(FullModelTrainingError, match="regular_file_too_large"):
+            validate_runtime_control_file("live-resource", oversized, runtime_root)
+        oversized.write_bytes(original)
+        oversized.chmod(0o600)
 
-    oversized_root = tmp_path / "rondo-plan099-oversized"
-    oversized = (
-        oversized_root
-        / "runtime-control/live-resource"
-        / f"{resource['content_sha256']}.json"
-    )
-    oversized.parent.mkdir(parents=True)
-    oversized.write_bytes(b" " * (16 * 1024 + 1))
-    oversized.chmod(0o600)
-    with pytest.raises(FullModelTrainingError, match="regular_file_too_large"):
-        validate_runtime_control_file("live-resource", oversized, oversized_root)
+        symlink = runtime_root / "live-resource" / ("1" * 64 + ".json")
+        symlink.symlink_to(paths["live-resource"])
+        with pytest.raises(FullModelTrainingError, match="regular_file_required"):
+            validate_runtime_control_file("live-resource", symlink, runtime_root)
 
-    symlink_root = tmp_path / "rondo-plan099-symlink"
-    symlink = (
-        symlink_root
-        / "runtime-control/live-resource"
-        / f"{resource['content_sha256']}.json"
-    )
-    symlink.parent.mkdir(parents=True)
-    symlink.symlink_to(paths["live-resource"])
-    with pytest.raises(FullModelTrainingError, match="regular_file_required"):
-        validate_runtime_control_file("live-resource", symlink, symlink_root)
+        workspace_copy = tmp_path / "workspace-runtime-control.json"
+        workspace_copy.write_bytes(pretty_json_bytes(resource))
+        workspace_copy.chmod(0o666)
+        with pytest.raises(
+            FullModelTrainingError, match="plan099_runtime_control_invalid"
+        ):
+            validate_runtime_control_file("live-resource", workspace_copy, runtime_root)
+
+        other_run_root = tmp_path / "other-run" / "runtime-control"
+        (other_run_root / "live-resource").mkdir(parents=True, mode=0o700)
+        other_run_root.parent.chmod(0o700)
+        other_run_root.chmod(0o700)
+        other_path = other_run_root / "live-resource" / paths["live-resource"].name
+        other_path.write_bytes(paths["live-resource"].read_bytes())
+        other_path.chmod(0o600)
+        with pytest.raises(
+            FullModelTrainingError, match="plan099_runtime_control_invalid"
+        ):
+            validate_runtime_control_file("live-resource", other_path, other_run_root)
+
+        (runtime_root / "lifecycle").chmod(0o755)
+        with pytest.raises(
+            FullModelTrainingError, match="plan099_runtime_control_invalid"
+        ):
+            validate_runtime_control_file("lifecycle", paths["lifecycle"], runtime_root)
+        (runtime_root / "lifecycle").chmod(0o700)
 
     other_resource = _resource_receipt(prior_wall_seconds=1)
     other_lifecycle = authorize_pod_lifecycle(
@@ -693,6 +740,31 @@ def test_runtime_control_allowlist_accepts_only_exact_canonical_chain(
         validate_runtime_control_chain(resource, other_lifecycle, other_segment)
 
     assert os.stat(paths["live-resource"]).st_mode & 0o777 == 0o600
+    with pytest.raises(
+        FullModelTrainingError, match="plan099_runtime_control_pod_not_approved"
+    ):
+        plan099_runtime_control_root("replacement-pod")
+
+    exact_resource = _resource_receipt(
+        pod_id="z1z3m7n90nz4xr",
+        pod_name="rondo-plan099-20260829-stageb01",
+    )
+    exact_lifecycle = authorize_pod_lifecycle(
+        _budget_snapshot(), exact_resource, maximum_lifecycle_seconds=7200, now=now
+    )
+    exact_segment = authorize_paid_segment(
+        _budget_snapshot(), exact_lifecycle, maximum_seconds=3600, now=now
+    )
+    assert (
+        validate_current_pod_runtime_control_chain(
+            exact_resource, exact_lifecycle, exact_segment
+        )["resource"]["pod_id"]
+        == "z1z3m7n90nz4xr"
+    )
+    with pytest.raises(
+        FullModelTrainingError, match="plan099_runtime_control_pod_not_approved"
+    ):
+        validate_current_pod_runtime_control_chain(resource, lifecycle, segment)
 
 
 def test_fake_formal_checkpoint_first_recovery_selection_and_retention(
@@ -1164,7 +1236,11 @@ def _budget_snapshot() -> dict[str, Any]:
 
 
 def _resource_receipt(
-    *, prior_wall_seconds: int = 0, cumulative_pods: int = 1
+    *,
+    prior_wall_seconds: int = 0,
+    cumulative_pods: int = 1,
+    pod_id: str = "pod099",
+    pod_name: str = "rondo-plan099-test",
 ) -> dict[str, Any]:
     core = {
         "schema": "rondo-publication-critic-plan099-live-resource-receipt-v1",
@@ -1172,8 +1248,8 @@ def _resource_receipt(
         "provider": "RunPod",
         "cloud_type": "SECURE",
         "data_center_id": "US-TX-3",
-        "pod_id": "pod099",
-        "pod_name": "rondo-plan099-test",
+        "pod_id": pod_id,
+        "pod_name": pod_name,
         "pod_started_at": "2026-08-28T12:00:00Z",
         "account_task_pod_count": 1,
         "task_cumulative_pods_created": cumulative_pods,

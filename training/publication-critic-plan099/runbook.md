@@ -33,12 +33,16 @@ GPU 或付费步骤；每次启动仍须核对该批准及本轮预算和资源 
 再加载模型。不得上传 `.env.local`，不得把密钥当 shell 文件 source。
 
 Pod 独立核验后，host→Pod 运行时控制 JSON 只允许三类：live-resource receipt、Pod lifecycle authorization、
-paid-segment authorization。每份必须是不超过 16 KiB、权限 `0600` 的 canonical JSON，并放在当前 task root 的
-`runtime-control/{live-resource|lifecycle|segment}/{content_sha256}.json`；文件名必须等于经对应 schema 校验后的
+paid-segment authorization。仅当前 exact Pod `z1z3m7n90nz4xr` 使用易失控制根
+`/run/rondo-plan099-z1z3m7n90nz4xr/runtime-control`；该根、父目录及三个 role 目录必须是普通非 symlink 目录且权限
+`0700`。每份文件必须是普通非 symlink 文件、不超过 16 KiB、权限 `0600`，并放在
+`{runtime_root}/{live-resource|lifecycle|segment}/{content_sha256}.json`；文件名必须等于经对应 schema 校验后的
 content SHA-256。三类文件只由冻结 CLI 生成并逐字节复制，禁止手工编辑或重算：content SHA 基于 core 的 canonical
 JSON，实际文件则是确定性的 `pretty_json_bytes_v1`。worker 在启动任何 CLI 动作前逐文件校验路径、权限、文件字节、schema、content SHA 与
 三者交叉绑定。budget snapshot、guard/release receipt、环境或训练状态、provider 原始响应、任意第四类 JSON、
-模型、日志及密钥均不在此运行时上传边界内。
+模型、日志及密钥均不在此运行时上传边界内。容器或进程环境重建、恢复或进入新 segment 前，都从 host 权威文件
+重新逐字节复制并完整验证，不依赖 `/run` 持久化。首次使用及每次环境重建时必须在当前 Pod 内 exclusive 新建上述
+普通目录；若 exact task-owned 易失根已存在，先精确清空并重建，禁止复用其内容。该例外不自动沿用到 replacement Pod。
 
 Pod 创建后，训练前独立核验实际 provider、Secure Cloud、`US-TX-3`、L40S 数量/显存、单价、镜像、20GB
 container disk 和卷 `mwemzrn33y` 的挂载；任一项不符立即释放，不进入 commissioning。创建响应不确定时先按
@@ -54,7 +58,8 @@ segment 必须逐哈希绑定 budget、resource、lifecycle、exact Pod id/name�
 trigger、60 秒 kill grace 与 360 秒终态确认预留；worker 的 `RONDO_PLAN099_MAX_SECONDS` 必须与 segment 完全相等。
 所有云端 snapshot、artifact、state 和输出路径都必须在当前 `/workspace/rondo-plan099-*` task root 内；宿主 lifecycle
 authorization 与 guard receipt 留在主物理根 Plan 099 ignored host namespace；按上述三类 runtime-control allowlist
-把 resource、immutable lifecycle 和每段新生成的 segment 文件复制进云端 task root，供 bootstrap/worker 逐哈希绑定。
+把 resource、immutable lifecycle 和每段新生成的 segment 文件复制进 exact `/run` 控制根，供 bootstrap/worker
+逐哈希绑定。网络卷内因 FUSE 呈现 `0666` 的旧 runtime-control 副本不得消费，并精确清理；`/run` 不得存放其他资产。
 
 Pod 创建并独立核验后，必须先在主物理根 Plan 099 ignored host namespace 生成 lifecycle authorization，并在授权后
 60 秒内用 `nohup setsid` 启动冻结的宿主 guard；armed receipt 中的 PID 必须仍存活且 exact Pod id/name、绝对 trigger

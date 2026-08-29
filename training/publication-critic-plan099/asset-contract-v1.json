@@ -13,8 +13,13 @@
     "content_sha256_basis": "canonical_json_core_v1",
     "file_bytes": "pretty_json_bytes_v1",
     "file_mode": "0600",
+    "directory_mode": "0700",
+    "ephemeral": true,
+    "fresh_create_on_environment_rebuild": true,
+    "pod_id": "z1z3m7n90nz4xr",
+    "pod_name": "rondo-plan099-20260829-stageb01",
     "maximum_file_bytes": 16384,
-    "path_template": "runtime-control/{role}/{content_sha256}.json",
+    "path_template": "/run/rondo-plan099-z1z3m7n90nz4xr/runtime-control/{role}/{content_sha256}.json",
     "roles": [
       {
         "role": "live-resource",

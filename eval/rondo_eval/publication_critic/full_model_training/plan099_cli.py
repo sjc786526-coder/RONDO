@@ -39,9 +39,10 @@ from .plan099_contract import (
     create_live_resource_receipt,
     freeze_sha256,
     load_freeze,
+    plan099_runtime_control_root,
     validate_budget_snapshot,
+    validate_current_pod_runtime_control_chain,
     validate_namespace,
-    validate_runtime_control_chain,
     validate_runtime_control_file,
     validate_source_identity,
 )
@@ -584,23 +585,20 @@ def _require_stage_b(args: argparse.Namespace) -> dict[str, Any]:
         or args.reviewer_approval_phrase != STAGE_B_APPROVAL_PHRASE
     ):
         raise FullModelTrainingError("plan099_stage_b_approval_required")
-    task_root = _task_root()
-    for path in (
-        args.resource_receipt,
-        args.lifecycle_authorization,
-        args.segment_authorization,
-    ):
-        _scoped_path(path, task_root, require_existing=True)
+    _task_root()
+    runtime_root = plan099_runtime_control_root("z1z3m7n90nz4xr")
     resource = validate_runtime_control_file(
-        "live-resource", args.resource_receipt, task_root
+        "live-resource", args.resource_receipt, runtime_root
     )
     lifecycle = validate_runtime_control_file(
-        "lifecycle", args.lifecycle_authorization, task_root
+        "lifecycle", args.lifecycle_authorization, runtime_root
     )
     segment = validate_runtime_control_file(
-        "segment", args.segment_authorization, task_root
+        "segment", args.segment_authorization, runtime_root
     )
-    authorization = validate_runtime_control_chain(resource, lifecycle, segment)
+    authorization = validate_current_pod_runtime_control_chain(
+        resource, lifecycle, segment
+    )
     now = datetime.now(timezone.utc)
     authorized = datetime.fromisoformat(segment["authorized_at"].replace("Z", "+00:00"))
     termination = datetime.fromisoformat(

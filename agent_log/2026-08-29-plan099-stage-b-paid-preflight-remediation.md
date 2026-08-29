@@ -10,3 +10,14 @@
 定向结果：Plan 099、Plan 094 lifecycle 与 Plan 087 terminal 组合 `24 passed`；freeze CLI、Ruff、compileall、shell syntax 和 diff-check 通过，freeze SHA-256 为 `13eb7ad169432d515fd282f98435cff0ec7884e28fabcf265f18e384209d98c0`。独立只读复核提出的 bootstrap segment timeout 已闭合；未发现其余 High/Medium finding。
 
 本轮尚未创建 RunPod、上传资产、下载或加载真实模型，也未读取 v9 test、qualification sealed 或旧 unseen 正文。
+
+## 当前 Pod runtime-control 窄例外
+
+创建并独立核验 exact Pod 后，网络卷 FUSE 将 task-owned 控制 JSON 固定呈现为 `0666`，bootstrap 因而在模型下载前 fail-closed。
+经审查者明确批准，仅当前 Pod 的三类控制 JSON 改用 exact `/run/rondo-plan099-z1z3m7n90nz4xr/runtime-control`：父目录、根和 role
+目录均须普通非 symlink `0700`，文件须普通非 symlink `0600`、不超过 16 KiB、content-addressed 且绑定 exact Pod id/name。
+validator、worker、资产合同、runbook 与拒绝路径测试已同步；易失控制面每次环境重建或新 segment 都由 host 权威文件重新复制并完整验签，
+不承载任何其他任务资产，也不延伸至 replacement Pod。
+
+定向结果：相同组合 `24 passed`；freeze CLI、Ruff、compileall、shell syntax 和 diff-check 通过，freeze SHA-256 为
+`5b045e4c00a706244e097e94cf4710abc255c107b1a83f8a67c089ca9633f71d`。独立只读审查 findings 已全部闭合。

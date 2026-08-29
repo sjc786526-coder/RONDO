@@ -3,7 +3,9 @@
 import hashlib
 import json
 import math
+import os
 import re
+import stat
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timedelta, timezone
 from fractions import Fraction
@@ -60,6 +62,9 @@ MAXIMUM_RUNTIME_CONTROL_BYTES = 16 * 1024
 # The exact GPU identity remains mandatory; this lower bound only avoids treating
 # a real L40S as if it had to expose 48 GiB of addressable memory.
 MINIMUM_L40S_VISIBLE_MEMORY_BYTES = 44 * 1024**3
+RUNTIME_CONTROL_POD_ID = "z1z3m7n90nz4xr"
+RUNTIME_CONTROL_POD_NAME = "rondo-plan099-20260829-stageb01"
+RUNTIME_CONTROL_ROOT = Path("/run/rondo-plan099-z1z3m7n90nz4xr/runtime-control")
 RUNTIME_CONTROL_ROLES = {
     "live-resource": LIVE_RESOURCE_SCHEMA,
     "lifecycle": LIFECYCLE_SCHEMA,
@@ -826,13 +831,37 @@ def validate_paid_segment_authorization(value: Any) -> dict[str, Any]:
 def validate_runtime_control_file(
     role: str,
     path: Path | str,
-    task_root: Path | str,
+    runtime_root: Path | str,
 ) -> dict[str, Any]:
     """Validate one of the three exact host-to-Pod runtime JSON controls."""
 
     if role not in RUNTIME_CONTROL_ROLES:
         raise FullModelTrainingError("plan099_runtime_control_invalid")
-    root = Path(task_root).resolve(strict=True)
+    requested_root = Path(runtime_root)
+    if requested_root != plan099_runtime_control_root(RUNTIME_CONTROL_POD_ID):
+        raise FullModelTrainingError("plan099_runtime_control_invalid")
+    role_directory = requested_root / role
+    try:
+        root_info = os.lstat(requested_root)
+        role_info = os.lstat(role_directory)
+        parent_info = os.lstat(requested_root.parent)
+    except OSError as exc:
+        raise FullModelTrainingError("plan099_runtime_control_invalid") from exc
+    if (
+        not stat.S_ISDIR(parent_info.st_mode)
+        or stat.S_ISLNK(parent_info.st_mode)
+        or (parent_info.st_mode & 0o777) != 0o700
+        or not stat.S_ISDIR(root_info.st_mode)
+        or stat.S_ISLNK(root_info.st_mode)
+        or (root_info.st_mode & 0o777) != 0o700
+        or not stat.S_ISDIR(role_info.st_mode)
+        or stat.S_ISLNK(role_info.st_mode)
+        or (role_info.st_mode & 0o777) != 0o700
+    ):
+        raise FullModelTrainingError("plan099_runtime_control_invalid")
+    root = requested_root.resolve(strict=True)
+    if requested_root.absolute() != root:
+        raise FullModelTrainingError("plan099_runtime_control_invalid")
     candidate = Path(path)
     file_path = regular_file(candidate, maximum_bytes=MAXIMUM_RUNTIME_CONTROL_BYTES)
     resolved = file_path.resolve(strict=True)
@@ -851,7 +880,7 @@ def validate_runtime_control_file(
         "segment": validate_paid_segment_authorization,
     }
     validated = validators[role](value)
-    expected = Path("runtime-control") / role / (f"{validated['content_sha256']}.json")
+    expected = Path(role) / (f"{validated['content_sha256']}.json")
     if (
         relative != expected
         or candidate.absolute() != root / expected
@@ -860,6 +889,14 @@ def validate_runtime_control_file(
     ):
         raise FullModelTrainingError("plan099_runtime_control_invalid")
     return validated
+
+
+def plan099_runtime_control_root(pod_id: str) -> Path:
+    """Return the one reviewer-approved ephemeral control root for this Pod."""
+
+    if pod_id != RUNTIME_CONTROL_POD_ID:
+        raise FullModelTrainingError("plan099_runtime_control_pod_not_approved")
+    return RUNTIME_CONTROL_ROOT
 
 
 def validate_runtime_control_chain(
@@ -902,6 +939,22 @@ def validate_runtime_control_chain(
         "lifecycle": checked_lifecycle,
         "segment": checked_segment,
     }
+
+
+def validate_current_pod_runtime_control_chain(
+    resource: Any,
+    lifecycle: Any,
+    segment: Any,
+) -> dict[str, dict[str, Any]]:
+    """Validate the chain and bind it to the one approved exception Pod."""
+
+    authorization = validate_runtime_control_chain(resource, lifecycle, segment)
+    if (
+        authorization["resource"]["pod_id"] != RUNTIME_CONTROL_POD_ID
+        or authorization["resource"]["pod_name"] != RUNTIME_CONTROL_POD_NAME
+    ):
+        raise FullModelTrainingError("plan099_runtime_control_pod_not_approved")
+    return authorization
 
 
 def _require_budget_capacity(
@@ -1166,8 +1219,16 @@ def _validate_asset_contract(value: Any) -> dict[str, Any]:
             "content_sha256_basis": "canonical_json_core_v1",
             "file_bytes": "pretty_json_bytes_v1",
             "file_mode": "0600",
+            "directory_mode": "0700",
+            "ephemeral": True,
+            "fresh_create_on_environment_rebuild": True,
+            "pod_id": RUNTIME_CONTROL_POD_ID,
+            "pod_name": RUNTIME_CONTROL_POD_NAME,
             "maximum_file_bytes": MAXIMUM_RUNTIME_CONTROL_BYTES,
-            "path_template": ("runtime-control/{role}/{content_sha256}.json"),
+            "path_template": (
+                "/run/rondo-plan099-z1z3m7n90nz4xr/runtime-control/"
+                "{role}/{content_sha256}.json"
+            ),
             "roles": [
                 {"role": role, "schema": schema}
                 for role, schema in RUNTIME_CONTROL_ROLES.items()
@@ -1369,6 +1430,9 @@ __all__ = [
     "MODEL_WEIGHT_SHA256",
     "REPO_ROOT",
     "RUNTIME_CONTROL_ROLES",
+    "RUNTIME_CONTROL_POD_ID",
+    "RUNTIME_CONTROL_POD_NAME",
+    "RUNTIME_CONTROL_ROOT",
     "SEGMENT_SCHEMA",
     "V10_MANIFEST_SHA256",
     "assess_development_checkpoint",
@@ -1380,7 +1444,9 @@ __all__ = [
     "decision_margin_grid",
     "freeze_sha256",
     "load_freeze",
+    "plan099_runtime_control_root",
     "validate_budget_snapshot",
+    "validate_current_pod_runtime_control_chain",
     "validate_live_resource_receipt",
     "validate_namespace",
     "validate_paid_segment_authorization",

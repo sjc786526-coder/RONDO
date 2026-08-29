@@ -17,11 +17,12 @@ source_root="$(realpath -e -- "$RONDO_PLAN099_SOURCE_ROOT")"
 segment="$(realpath -e -- "$RONDO_PLAN099_SEGMENT_AUTHORIZATION")"
 resource="$(realpath -e -- "$RONDO_PLAN099_RESOURCE_RECEIPT")"
 lifecycle="$(realpath -e -- "$RONDO_PLAN099_LIFECYCLE_AUTHORIZATION")"
+runtime_root="/run/rondo-plan099-z1z3m7n90nz4xr/runtime-control"
 case "$task_root" in /workspace/rondo-plan099-*) ;; *) exit 2 ;; esac
 case "$source_root" in "$task_root"/*) ;; *) exit 2 ;; esac
-case "$segment" in "$task_root"/*) ;; *) exit 2 ;; esac
-case "$resource" in "$task_root"/*) ;; *) exit 2 ;; esac
-case "$lifecycle" in "$task_root"/*) ;; *) exit 2 ;; esac
+case "$segment" in "$runtime_root/segment/"*.json) ;; *) exit 2 ;; esac
+case "$resource" in "$runtime_root/live-resource/"*.json) ;; *) exit 2 ;; esac
+case "$lifecycle" in "$runtime_root/lifecycle/"*.json) ;; *) exit 2 ;; esac
 case "$RONDO_PLAN099_MAX_SECONDS" in ''|*[!0-9]*) exit 2 ;; esac
 if [ "$RONDO_PLAN099_MAX_SECONDS" -le 0 ] || [ "$RONDO_PLAN099_MAX_SECONDS" -gt 10380 ]; then
   exit 2
