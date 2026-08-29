@@ -16,6 +16,13 @@
   fallback 不改变 metrics、不伪造 concentrated blocker、不证明数据缺陷或 backbone 原因，也不直接支持付费解冻训练。
 - 修正 DeepSeek 价档为北京时间周一至周五 09:00–12:00、14:00–18:00 peak，周末全天 off-peak；价卡 identity/合同/边界测试同步更新，首次
   真实请求前仍必须 live refresh/freeze。
+- 阶段 A 准入复核后固定主物理根唯一 Plan 100 task root：B1 可首次创建唯一账本，B2 必须复用 existing 账本、读取该 root 内实际 B1 binding，
+  并在每次 provider-capable 运行前重新验证 clean HEAD、contract、environment、executable、descriptor 与 recounter。B1 已结算记录必须逐项保留。
+- authority 成为 task-wide provider 封口；独立 recompute 只读打开既有账本且验证 authority 的 run/freeze/result hash。formal transient technical
+  receipt 只在显式同 freeze resume 时追加失败 logical 的下一 ordinal，已完成 terminal 不重放；无 response 且无 usage 的 attempt 禁止伪 recount，
+  按 0.1 RMB 末级 fallback 结算。
+- 新增 bounded detailed projection，交付 A/B/C candidate error、各臂 12 pair rows、A 完整 operating curve 和 C target/invariance，不含 packet、
+  response 或 credential；aggregate tracked summary 保持不变。
 
 ## 边界与事件
 
@@ -26,8 +33,8 @@
 
 ## 验证
 
-- `PYTHONPATH=eval python -m unittest -v eval.tests.test_publication_critic_plan100_structured_diagnostic`：15 tests 通过。
-- 隔离 uv pytest：`15 passed, 24 subtests passed`。
+- `PYTHONPATH=eval python -m unittest -v eval.tests.test_publication_critic_plan100_structured_diagnostic`：20 tests 通过。
+- 隔离 uv pytest：`20 passed, 24 subtests passed`。
 - Plan 100 Python 文件定向 `ruff check`：通过；JSON 合同/descriptor 解析与 `git diff --check`：通过。
 - `just fmt`：通过。
 - 正式 build-lock/shared `rondo-multi` target 下 `just test -p codex-publication-critic`：`68 passed, 0 skipped`。

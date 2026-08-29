@@ -14,7 +14,11 @@ from typing import Any
 from ...config import RepoPaths, load_allowlisted_secret_values
 from ..identity import canonical_json_bytes, sha256_bytes
 from .archive import DiagnosticArchive
-from .cost import Plan100BudgetLedger
+from .cost import (
+    DiagnosticCostError,
+    Plan100BudgetLedger,
+    validate_task_budget_extension,
+)
 from .freeze import build_freeze, validate_commissioning_binding, validate_freeze
 from .release import load_commissioning_public_items, load_validation_release
 from .runner import (
@@ -22,10 +26,16 @@ from .runner import (
     DiagnosticRunnerError,
     RustSubprocessEvaluator,
     build_commissioning_binding,
+    detailed_projection,
     recompute_commissioning,
     recompute_formal,
     run_batch,
     tracked_projection,
+)
+
+_TASK_ROOT_RELATIVE = Path("eval-data/publication-critic/plan100")
+_CONTRACT_RELATIVE = Path(
+    "eval/templates/publication-critic/plan100-diagnostic-contract-v1.json"
 )
 
 
@@ -108,9 +118,110 @@ def _recount_identity(executable: Path, arguments: Sequence[str]) -> str:
     )
 
 
-def _archive(args: argparse.Namespace, freeze: dict[str, Any]) -> DiagnosticArchive:
-    archive = DiagnosticArchive(args.runs_root, freeze["run_id"], freeze["mode"])
-    return archive.resume(freeze) if args.resume else archive.start(freeze)
+def _repo_paths(repo: Path) -> RepoPaths:
+    paths = RepoPaths.discover(repo)
+    if repo.resolve(strict=True) != paths.worktree_root:
+        raise DiagnosticRunnerError("cli_repo_is_not_current_worktree_root")
+    return paths
+
+
+def _task_paths(paths: RepoPaths) -> tuple[Path, Path, Path]:
+    task_root = paths.common_root / _TASK_ROOT_RELATIVE
+    return task_root, task_root / "runs", task_root / "budget-ledger.json"
+
+
+def _require_task_paths(
+    args: argparse.Namespace, paths: RepoPaths
+) -> tuple[Path, Path]:
+    _, expected_runs, expected_ledger = _task_paths(paths)
+    if (
+        not args.runs_root.is_absolute()
+        or args.runs_root != expected_runs
+        or not args.ledger.is_absolute()
+        or args.ledger != expected_ledger
+    ):
+        raise DiagnosticRunnerError("cli_task_wide_budget_path_invalid")
+    return expected_runs, expected_ledger
+
+
+def _actual_commissioning_binding(
+    path: Path | None,
+    value: Any,
+    paths: RepoPaths,
+) -> None:
+    if path is None or not isinstance(value, dict):
+        raise DiagnosticRunnerError("cli_commissioning_binding_required")
+    run_id = value.get("run_id")
+    expected = _task_paths(paths)[1] / str(run_id) / "commissioning-binding.json"
+    try:
+        actual = path.resolve(strict=True)
+        expected_resolved = expected.resolve(strict=True)
+    except OSError as exc:
+        raise DiagnosticRunnerError("cli_commissioning_binding_not_archived") from exc
+    if path.is_symlink() or actual != expected_resolved:
+        raise DiagnosticRunnerError("cli_commissioning_binding_not_archived")
+
+
+def _validate_runtime_identities(
+    args: argparse.Namespace,
+    freeze: dict[str, Any],
+    paths: RepoPaths,
+    ledger: Plan100BudgetLedger | None,
+) -> None:
+    source = freeze["source"]
+    if _clean_commit(args.repo) != source["git_commit"]:
+        raise DiagnosticRunnerError("cli_git_identity_drifted")
+    expected_contract = paths.worktree_root / _CONTRACT_RELATIVE
+    try:
+        contract = args.contract.resolve(strict=True)
+        expected_contract = expected_contract.resolve(strict=True)
+    except OSError as exc:
+        raise DiagnosticRunnerError("cli_contract_identity_unavailable") from exc
+    if contract != expected_contract:
+        raise DiagnosticRunnerError("cli_contract_path_invalid")
+    checks = (
+        (args.contract, "diagnostic_contract_sha256", "cli_contract_identity_drifted"),
+        (args.environment_lock, "environment_lock_sha256", "cli_environment_drifted"),
+        (
+            args.executable,
+            "diagnostic_executable_sha256",
+            "cli_executable_identity_drifted",
+        ),
+        (args.descriptor, "descriptor_sha256", "cli_descriptor_identity_drifted"),
+    )
+    for path, field, code in checks:
+        if _sha_file(path) != source[field]:
+            raise DiagnosticRunnerError(code)
+    recount_arguments = tuple(args.recount_arg or ())
+    if (
+        _recount_identity(args.recount_executable, recount_arguments)
+        != source["token_recounter_sha256"]
+    ):
+        raise DiagnosticRunnerError("cli_recounter_identity_drifted")
+    if freeze["mode"] == "commissioning":
+        if args.commissioning_binding is not None:
+            raise DiagnosticRunnerError("cli_commissioning_binding_unexpected")
+        return
+    if args.commissioning_binding is None:
+        raise DiagnosticRunnerError("cli_commissioning_binding_required")
+    binding = _load(args.commissioning_binding)
+    _actual_commissioning_binding(
+        args.commissioning_binding,
+        binding,
+        paths,
+    )
+    if _sha_file(args.commissioning_binding) != freeze["commissioning_binding_sha256"]:
+        raise DiagnosticRunnerError("cli_commissioning_binding_hash_drifted")
+    validated = validate_commissioning_binding(binding, freeze)
+    if ledger is None:
+        raise DiagnosticRunnerError("cli_formal_ledger_missing")
+    try:
+        validate_task_budget_extension(
+            ledger.snapshot(),
+            validated["commissioning_result"]["task_budget"],
+        )
+    except DiagnosticCostError as exc:
+        raise DiagnosticRunnerError("cli_task_ledger_missing_commissioning") from exc
 
 
 def _evaluator(
@@ -165,19 +276,25 @@ def build_parser() -> argparse.ArgumentParser:
 
     for name in ("run-commissioning", "run-formal"):
         run = commands.add_parser(name)
+        run.add_argument("--repo", type=Path, required=True)
         run.add_argument("--freeze", type=Path, required=True)
         run.add_argument("--runs-root", type=Path, required=True)
         run.add_argument("--ledger", type=Path, required=True)
+        run.add_argument("--contract", type=Path, required=True)
+        run.add_argument("--environment-lock", type=Path, required=True)
         run.add_argument("--executable", type=Path, required=True)
         run.add_argument("--descriptor", type=Path, required=True)
         run.add_argument("--recount-executable", type=Path, required=True)
         run.add_argument("--recount-arg", action="append")
+        run.add_argument("--commissioning-binding", type=Path)
         run.add_argument("--resume", action="store_true")
 
     recompute = commands.add_parser("recompute")
     recompute.add_argument("--freeze", type=Path, required=True)
     recompute.add_argument("--runs-root", type=Path, required=True)
-    recompute.add_argument("--tracked", action="store_true")
+    projection = recompute.add_mutually_exclusive_group()
+    projection.add_argument("--tracked", action="store_true")
+    projection.add_argument("--detailed", action="store_true")
     return parser
 
 
@@ -187,6 +304,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         _print(validate_freeze(_load(args.freeze)))
         return 0
     if args.command == "prepare-freeze":
+        paths = _repo_paths(args.repo)
         recount_arguments = tuple(args.recount_arg or ())
         commissioning_value = (
             None
@@ -198,6 +316,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             if commissioning_value is None
             else _sha_file(args.commissioning_binding)
         )
+        if args.mode == "formal":
+            _actual_commissioning_binding(
+                args.commissioning_binding,
+                commissioning_value,
+                paths,
+            )
         freeze = build_freeze(
             mode=args.mode,
             run_id=args.run_id,
@@ -219,22 +343,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         return 0
     if args.command in {"run-commissioning", "run-formal"}:
+        paths = _repo_paths(args.repo)
         freeze = validate_freeze(_load(args.freeze))
-        expected_ledger = args.runs_root.parent / "budget-ledger.json"
-        if (
-            not args.runs_root.is_absolute()
-            or args.runs_root.name != "runs"
-            or not args.ledger.is_absolute()
-            or args.ledger != expected_ledger
-        ):
-            raise DiagnosticRunnerError("cli_task_wide_budget_path_invalid")
+        _require_task_paths(args, paths)
         expected_mode = (
             "commissioning" if args.command == "run-commissioning" else "formal"
         )
         if freeze["mode"] != expected_mode:
             raise DiagnosticRunnerError("cli_run_mode_mismatch")
-        archive = _archive(args, freeze)
-        ledger = Plan100BudgetLedger(args.ledger)
+        archive = DiagnosticArchive(args.runs_root, freeze["run_id"], freeze["mode"])
+        archive.require_formal_unclaimed()
+        if expected_mode == "commissioning":
+            _validate_runtime_identities(args, freeze, paths, None)
+            ledger = Plan100BudgetLedger(args.ledger)
+        else:
+            ledger = Plan100BudgetLedger(args.ledger, must_exist=True)
+            _validate_runtime_identities(args, freeze, paths, ledger)
+        archive = archive.resume(freeze) if args.resume else archive.start(freeze)
         evaluator = _evaluator(args, freeze)
         release = load_validation_release()
         items = (
@@ -248,6 +373,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             archive=archive,
             ledger=ledger,
             evaluator=evaluator,
+            allow_technical_retry=args.resume,
         )
         if expected_mode == "commissioning":
             result = recompute_commissioning(
@@ -272,19 +398,30 @@ def main(argv: Sequence[str] | None = None) -> int:
                 archive.claim_formal_result(freeze, result)
             _print(result)
         return 0
+    paths = RepoPaths.discover(Path.cwd())
     freeze = validate_freeze(_load(args.freeze))
+    _, expected_runs, expected_ledger = _task_paths(paths)
     if (
         not args.runs_root.is_absolute()
-        or args.runs_root.name != "runs"
+        or args.runs_root != expected_runs
         or freeze["mode"] != "formal"
     ):
         raise DiagnosticRunnerError("cli_recompute_path_or_mode_invalid")
     archive = DiagnosticArchive(
         args.runs_root, freeze["run_id"], freeze["mode"]
     ).reopen_read_only(freeze)
-    ledger = Plan100BudgetLedger(args.runs_root.parent / "budget-ledger.json")
+    ledger = Plan100BudgetLedger(
+        expected_ledger,
+        must_exist=True,
+        read_only=True,
+    )
     result = recompute_formal(freeze, load_validation_release(), archive, ledger)
-    _print(tracked_projection(result) if args.tracked else result)
+    archive.verify_authority(freeze, result)
+    if args.tracked:
+        result = tracked_projection(result)
+    elif args.detailed:
+        result = detailed_projection(result)
+    _print(result)
     return 0
 
 

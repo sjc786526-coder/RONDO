@@ -166,20 +166,25 @@
     "success_gate": "nine_of_nine_strict_output_contract_success",
     "output_contract_failure_unlocks_formal": false,
     "usage_recount_calibration": "all_usage_present_success_attempts_exact_prompt_and_completion_match_with_at_least_one_attempt",
-    "formal_binding": "embed_and_validate_commissioning_freeze_and_result_then_require_exact_final_source_provider_request_release_comparison_and_price_identity"
+    "formal_binding": "embed_and_validate_commissioning_freeze_and_result_then_require_exact_final_source_provider_request_release_comparison_and_price_identity",
+    "runtime_revalidation": "both_provider_modes_require_current_clean_HEAD_contract_environment_executable_descriptor_and_recounter_identity",
+    "archived_binding_location": "main_physical_root_eval_data_publication_critic_plan100_runs_run_id_commissioning_binding_json"
   },
   "formal": {
     "candidate_rows_per_arm": 27,
     "arms": 3,
     "terminal_observations": 81,
-    "namespace": "new_empty_write_once_after_three_arm_commissioning",
+    "namespace": "main_physical_root_eval_data_publication_critic_plan100_runs_new_empty_write_once_after_three_arm_commissioning",
     "run_freeze_schema": "rondo-publication-critic-plan100-run-freeze@v1",
     "receipt_before_settlement_before_terminal": true,
     "ambiguous_reservation_without_receipt": "stop_without_repeat",
-    "technical_receipt": "formal_invalid_commissioning_may_resume_with_new_logical_attempt",
+    "technical_receipt": "settled_without_terminal_stops_then_explicit_same_freeze_resume_appends_next_ordinal_only_for_that_logical_item",
     "output_contract_failure": "terminal_quality_observation_no_retry",
     "first_complete_valid_formal_stops_new_api_consumption": true,
     "post_authority_recompute": "read_only_reopen_allowed_while_provider_run_resume_remains_locked",
+    "authority_scope": "first_complete_valid_formal_blocks_all_later_provider_capable_commissioning_and_formal_modes_task_wide",
+    "recompute_authority_binding": "existing_read_only_ledger_and_exact_authority_run_freeze_result_hashes_required",
+    "detailed_projection": "candidate_error_slices_twelve_pair_rows_A_full_curve_and_C_target_invariance_without_packet_response_or_credential",
     "residual_route_marker": "complete_valid_unmatched_quality_predicates_use_constraint_or_data_issue_with_residual_mixed_signal_true"
   },
   "metrics": {
@@ -274,6 +279,8 @@
     "worst_case_reservation_per_logical_call": 0.2,
     "planned_logical_calls": 90,
     "planned_worst_case_reservation": 18.0,
+    "task_root": "main_physical_root/eval-data/publication-critic/plan100",
+    "ledger_lifecycle": "B1_may_create_unique_ledger_B2_requires_existing_ledger_with_exact_B1_settlements_recompute_existing_read_only",
     "price_card": {
       "identity": "deepseek-v4-flash-live-2026-08-29-weekday-v2",
       "source": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/",
@@ -294,7 +301,7 @@
       },
       "refresh_and_freeze_before_first_real_request": true
     },
-    "missing_usage": "recompute_token_classes_first_then_actual_price_tier_and_only_use_0.1_rmb_when_still_unquantifiable",
+    "missing_usage": "recount_only_with_complete_response_then_actual_price_tier_otherwise_0.1_rmb_unquantifiable_fallback_unless_provider_usage_or_explicit_unbilled_evidence_exists",
     "final_task_wide_evidence": "validated_budget_ledger_snapshot_and_body_free_aggregate_cover_commissioning_formal_retries_recovery_and_technical_runs",
     "recount": {
       "adapter": "bounded_offline_command",

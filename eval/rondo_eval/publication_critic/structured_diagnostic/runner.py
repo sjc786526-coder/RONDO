@@ -54,6 +54,7 @@ from .release import PublicItem, ValidationRelease
 RESULT_SCHEMA = "rondo-publication-critic-plan100-diagnostic-result@v1"
 COMMISSIONING_SCHEMA = COMMISSIONING_RESULT_SCHEMA
 TRACKED_RESULT_SCHEMA = "rondo-publication-critic-plan100-diagnostic-summary@v1"
+DETAILED_RESULT_SCHEMA = "rondo-publication-critic-plan100-diagnostic-detail@v1"
 _MAX_STDOUT_BYTES = 64 * 1024
 _ATTEMPT_MARKER = re.compile(
     rb"publication_critic_cloud_attempt attempt=([0-9]+) requested_at_unix_ms=([0-9]+)(?:\s|$)"
@@ -513,13 +514,14 @@ def _settlement_attempts(
     attempts = []
     for index, instant in enumerate(requested_at, start=1):
         usage = final_usage if index == len(requested_at) else None
+        attempt_response = response_text if index == len(requested_at) else None
         recount = (
             None
-            if usage is not None
+            if usage is not None or attempt_response is None
             else recounter.recount(
                 task,
                 packet,
-                response_text if index == len(requested_at) else None,
+                attempt_response,
             )
         )
         attempts.append(
@@ -551,6 +553,7 @@ def run_batch(
     archive: DiagnosticArchive,
     ledger: Plan100BudgetLedger,
     evaluator: DiagnosticEvaluator,
+    allow_technical_retry: bool = False,
 ) -> dict[str, Any]:
     """Run in arm-major order, resuming only durable work and never selecting replacements."""
 
@@ -580,15 +583,16 @@ def run_batch(
                 continue
             receipts = archive.load_receipts(logical_key)
             if receipts:
+                for receipt in receipts:
+                    _validate_receipt(receipt, freeze, item, task)
+                    _settle_or_verify(ledger, receipt)
                 prior = receipts[-1]
-                _validate_receipt(prior, freeze, item, task)
-                _settle_or_verify(ledger, prior)
                 if prior["observation"]["outcome"]["type"] != "technical_failure":
                     terminal = _terminal_from_receipt(prior)
                     archive.write_terminal(logical_key, terminal)
                     completed.append(terminal)
                     continue
-                if archive.mode == "formal":
+                if not allow_technical_retry:
                     stopped = {
                         "reason": "technical_failure",
                         "logical_key": logical_key,
@@ -1268,6 +1272,46 @@ def tracked_projection(result: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def detailed_projection(result: Mapping[str, Any]) -> dict[str, Any]:
+    """Return bounded final-report details without packet, response, or credential data."""
+
+    summary = tracked_projection(result)
+    metrics = result.get("metrics")
+    detail = None
+    if isinstance(metrics, Mapping):
+        selected_a = metrics["A"]["selected_operating_point"]
+        detail = {
+            "A": {
+                "full_operating_curve": [
+                    {
+                        "threshold": point["threshold"],
+                        "binary": _binary_aggregate(point["binary"]),
+                        "pairs": _pair_aggregate(point["pairs"]),
+                    }
+                    for point in metrics["A"]["curve"]
+                ],
+                "selected_candidate_errors": selected_a["binary"]["candidate_errors"],
+                "selected_pair_rows": selected_a["pairs"]["pairs"],
+                "boundary_strict": metrics["A"]["boundary_strict"],
+            },
+            "B": {
+                "candidate_errors": metrics["B"]["binary"]["candidate_errors"],
+                "pair_rows": metrics["B"]["pairs"]["pairs"],
+            },
+            "C": {
+                "candidate_errors": metrics["C"]["binary"]["candidate_errors"],
+                "pair_rows": metrics["C"]["pairs"]["pairs"],
+                "per_dimension": metrics["C"]["per_dimension"],
+                "failed_dimension_floors": metrics["C"]["failed_dimension_floors"],
+            },
+        }
+    return {
+        **summary,
+        "schema": DETAILED_RESULT_SCHEMA,
+        "quality_detail": detail,
+    }
+
+
 def _binary_aggregate(value: Mapping[str, Any]) -> dict[str, Any]:
     return {
         name: value[name]
@@ -1331,6 +1375,7 @@ __all__ = [
     "DiagnosticRunnerError",
     "RustSubprocessEvaluator",
     "TokenRecounter",
+    "detailed_projection",
     "recompute_formal",
     "run_batch",
     "tracked_projection",

@@ -320,9 +320,29 @@ def validate_commissioning_binding(
     ):
         raise DiagnosticFreezeError("commissioning_result_invalid")
     try:
-        validate_task_budget_snapshot(result.get("task_budget"))
+        task_budget = validate_task_budget_snapshot(result.get("task_budget"))
     except DiagnosticCostError as exc:
         raise DiagnosticFreezeError("commissioning_budget_invalid") from exc
+    prefix = f"{commissioning_freeze['run_id']}:"
+    commissioned_logical_keys: set[str] = set()
+    for row in task_budget["reservations"]:
+        key = row["logical_key"]
+        if not key.startswith(prefix):
+            continue
+        logical_key, separator, ordinal = key[len(prefix) :].rpartition(":")
+        if (
+            row["state"] != "settled"
+            or not separator
+            or not ordinal.isdigit()
+            or not logical_key.startswith(("A:", "B:", "C:"))
+        ):
+            raise DiagnosticFreezeError("commissioning_budget_invalid")
+        commissioned_logical_keys.add(logical_key)
+    if (
+        task_budget["outstanding_reserved_rmb"] != "0"
+        or len(commissioned_logical_keys) != 9
+    ):
+        raise DiagnosticFreezeError("commissioning_budget_invalid")
     for name in (
         "source",
         "provider",

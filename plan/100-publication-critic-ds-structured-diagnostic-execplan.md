@@ -223,10 +223,15 @@ Plan 100 不属于原工作包四，不读取 qualification 或 v9 test 正文�
   `residual_mixed_signal=true`，不修改 metrics、不伪造 concentrated blocker 或数据/backbone 归因；A-only 完整 81-row formal 与 A/B/mixed
   路由回归通过。同时修正价卡为北京时间周一至周五双峰窗、周末全天 off-peak，保留首次真实请求前 live refresh/freeze。Python 定向门禁为
   `15 passed, 24 subtests passed`。
+- 2026-08-29：阶段 A 准入验收发现付费入口、task-wide authority/ledger、formal technical resume、无 response recount 与详细报告五处缺口；已
+  固定主物理根唯一 `eval-data/publication-critic/plan100`，B1 只可在此创建账本，B2 运行时重新验证实际归档 B1 binding、clean HEAD 及全套
+  source identity 并要求账本保留精确 B1 settlements，recompute 改为 existing/read-only 并校验 authority freeze/result hash。首个 authority
+  现在封锁全部 commissioning/formal provider 入口；显式同 freeze resume 只追加 technical logical 下一 ordinal；无 response/usage 的 attempt 走
+  0.1 RMB fallback；新增 body-free detailed projection。Python 定向回归增至 20 项。
 
 ### 当前工作
 
-- `STAGE_A_REMEDIATED_PENDING_ACCEPTANCE / STAGE_B_LOCKED_PENDING_STAGE_A_REVIEW`。
+- `STAGE_A_REMEDIATED_AFTER_ACCEPTANCE_REJECTION_PENDING_REVIEW / STAGE_B_LOCKED_PENDING_STAGE_A_REVIEW`。
 
 ### 本任务剩余步骤
 

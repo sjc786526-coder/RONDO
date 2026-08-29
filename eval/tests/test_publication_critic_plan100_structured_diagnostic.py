@@ -5,13 +5,22 @@ import unittest
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 EVAL_ROOT = REPO_ROOT / "eval"
 if str(EVAL_ROOT) not in sys.path:
     sys.path.insert(0, str(EVAL_ROOT))
 
+from rondo_eval.config import RepoPaths
 from rondo_eval.publication_critic.identity import canonical_json_bytes
+from rondo_eval.publication_critic.structured_diagnostic import (
+    __main__ as diagnostic_cli,
+)
+from rondo_eval.publication_critic.structured_diagnostic import (
+    runner as diagnostic_runner,
+)
 from rondo_eval.publication_critic.structured_diagnostic.archive import (
     RECEIPT_SCHEMA,
     TERMINAL_SCHEMA,
@@ -30,10 +39,12 @@ from rondo_eval.publication_critic.structured_diagnostic.cost import (
     PRICE_CARD,
     PRICE_CARD_SHA256,
     DiagnosticBudgetExceeded,
+    DiagnosticCostError,
     Plan100BudgetLedger,
     price_tier_at,
     settle_attempt,
     token_cost_rmb,
+    validate_task_budget_extension,
     worst_case_reservation_rmb,
 )
 from rondo_eval.publication_critic.structured_diagnostic.freeze import (
@@ -56,6 +67,7 @@ from rondo_eval.publication_critic.structured_diagnostic.runner import (
     AmbiguousAttemptError,
     DiagnosticRunnerError,
     build_commissioning_binding,
+    detailed_projection,
     recompute_commissioning,
     recompute_formal,
     run_batch,
@@ -93,13 +105,18 @@ def _attempt() -> dict:
 
 
 class _FakeEvaluator:
-    def __init__(self, *, first: str = "success") -> None:
+    def __init__(
+        self, *, first: str = "success", technical_at: int | None = None
+    ) -> None:
         self.first = first
+        self.technical_at = technical_at
         self.calls: list[tuple[DiagnosticTask, bytes]] = []
 
     def evaluate(self, task: DiagnosticTask, packet: dict) -> dict:
         self.calls.append((task, canonical_json_bytes(dict(packet))))
-        if len(self.calls) == 1 and self.first == "technical":
+        if (len(self.calls) == 1 and self.first == "technical") or len(
+            self.calls
+        ) == self.technical_at:
             response = None
             outcome = {
                 "type": "technical_failure",
@@ -267,6 +284,37 @@ class Plan100CostAndArchiveTest(unittest.TestCase):
         )
         self.assertEqual(fallback["charge_rmb"], "0.1")
 
+    def test_missing_usage_requires_complete_response_before_recount(self) -> None:
+        recounter = _FakeRecounter()
+        instant = datetime(2026, 8, 29, 4, 0, tzinfo=timezone.utc)
+        packet = {"request": "public"}
+        unavailable = diagnostic_runner._settlement_attempts(
+            DiagnosticTask.SCALAR,
+            packet,
+            recounter,
+            [instant],
+            None,
+            None,
+        )
+        self.assertIsNone(unavailable[0]["recount"])
+        self.assertEqual(
+            settle_attempt(unavailable[0])["settlement_method"],
+            "actual_attempt_unquantifiable_fallback",
+        )
+        complete = diagnostic_runner._settlement_attempts(
+            DiagnosticTask.SCALAR,
+            packet,
+            recounter,
+            [instant],
+            None,
+            '{"quality":0.5}',
+        )
+        self.assertIsNotNone(complete[0]["recount"])
+        self.assertEqual(
+            settle_attempt(complete[0])["settlement_method"],
+            "recount_cache_miss_conservative",
+        )
+
     def test_ledger_counts_settled_and_outstanding_before_next_action(self) -> None:
         reserve = worst_case_reservation_rmb(
             max_attempts=2,
@@ -302,6 +350,28 @@ class Plan100CostAndArchiveTest(unittest.TestCase):
             self.assertEqual(snapshot["settled_rmb"], "0.000137")
             self.assertEqual(snapshot["outstanding_reserved_rmb"], "0.2")
             self.assertEqual(Path(path).stat().st_mode & 0o777, 0o600)
+
+    def test_existing_read_only_ledger_never_creates_or_mutates_state(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "budget-ledger.json"
+            with self.assertRaisesRegex(DiagnosticCostError, "ledger_file_missing"):
+                Plan100BudgetLedger(path, must_exist=True, read_only=True)
+            self.assertFalse(path.exists())
+            ledger = Plan100BudgetLedger(path)
+            ledger.reserve("plan100-commissioning:test:A:item:1", Decimal("0.2"))
+            ledger.settle("plan100-commissioning:test:A:item:1", [_attempt()])
+            before = path.read_bytes()
+            read_only = Plan100BudgetLedger(
+                path,
+                must_exist=True,
+                read_only=True,
+            )
+            snapshot = read_only.snapshot()
+            self.assertEqual(path.read_bytes(), before)
+            self.assertEqual(snapshot["settled_rmb"], "0.000137")
+            with self.assertRaisesRegex(DiagnosticCostError, "ledger_is_read_only"):
+                read_only.reserve("forbidden", Decimal("0.2"))
+            validate_task_budget_extension(snapshot, snapshot)
 
     def test_write_once_receipt_terminal_resume_and_authority(self) -> None:
         freeze = {"schema": "fake-plan100-freeze", "identity": "frozen"}
@@ -358,6 +428,13 @@ class Plan100CostAndArchiveTest(unittest.TestCase):
                 "formal",
             ).reopen_read_only(freeze)
             self.assertEqual(reopened.load_terminal(logical_key), terminal)
+            self.assertEqual(
+                reopened.verify_authority(freeze, result)["run_id"], reopened.run_id
+            )
+            with self.assertRaisesRegex(
+                DiagnosticArchiveError, "formal_authority_binding_invalid"
+            ):
+                reopened.verify_authority(freeze, result | {"complete": False})
             with self.assertRaisesRegex(
                 DiagnosticArchiveError, "formal_result_already_authoritative"
             ):
@@ -365,6 +442,14 @@ class Plan100CostAndArchiveTest(unittest.TestCase):
                     runs,
                     "plan100-formal-20260829T130000Z-second",
                     "formal",
+                ).start(freeze)
+            with self.assertRaisesRegex(
+                DiagnosticArchiveError, "formal_result_already_authoritative"
+            ):
+                DiagnosticArchive(
+                    runs,
+                    "plan100-commissioning-20260829T130000Z-after-authority",
+                    "commissioning",
                 ).start(freeze)
 
 
@@ -456,6 +541,138 @@ class Plan100ContractAndReleaseTest(unittest.TestCase):
         )
 
 
+class Plan100CliGateTest(unittest.TestCase):
+    def test_only_main_physical_plan100_task_paths_are_accepted(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            common = Path(directory) / "main"
+            worktree = Path(directory) / "worktree"
+            common.mkdir()
+            worktree.mkdir()
+            paths = RepoPaths(common, worktree)
+            _, runs, ledger = diagnostic_cli._task_paths(paths)
+            args = SimpleNamespace(runs_root=runs, ledger=ledger)
+            self.assertEqual(
+                diagnostic_cli._require_task_paths(args, paths), (runs, ledger)
+            )
+            args.runs_root = common / "second-plan100" / "runs"
+            args.ledger = args.runs_root.parent / "budget-ledger.json"
+            with self.assertRaisesRegex(
+                DiagnosticRunnerError, "cli_task_wide_budget_path_invalid"
+            ):
+                diagnostic_cli._require_task_paths(args, paths)
+
+    def test_formal_runtime_revalidates_archived_b1_source_and_task_ledger(
+        self,
+    ) -> None:
+        items = load_commissioning_public_items(REPO_ROOT)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            common = root / "main"
+            worktree = root / "worktree"
+            common.mkdir()
+            worktree.mkdir()
+            paths = RepoPaths(common, worktree)
+            contract = worktree / diagnostic_cli._CONTRACT_RELATIVE
+            contract.parent.mkdir(parents=True)
+            contract.write_text("contract", encoding="utf-8")
+            environment = root / "environment.lock"
+            executable = root / "diagnostic"
+            descriptor = root / "descriptor.json"
+            recounter_executable = root / "recount"
+            for path, body in (
+                (environment, "environment"),
+                (executable, "executable"),
+                (descriptor, "descriptor"),
+                (recounter_executable, "recounter"),
+            ):
+                path.write_text(body, encoding="utf-8")
+            recount_identity = diagnostic_cli._recount_identity(
+                recounter_executable, ()
+            )
+            source = {
+                "git_commit": "1" * 40,
+                "diagnostic_contract_sha256": diagnostic_cli._sha_file(contract),
+                "executable_sha256": diagnostic_cli._sha_file(executable),
+                "descriptor_sha256": diagnostic_cli._sha_file(descriptor),
+                "environment_lock_sha256": diagnostic_cli._sha_file(environment),
+                "token_recounter_sha256": recount_identity,
+            }
+            commissioning = build_freeze(
+                mode="commissioning",
+                run_id="plan100-commissioning-20260829T120000Z-cli-gate",
+                commissioning_binding_sha256=None,
+                **source,
+            )
+            _, runs, ledger_path = diagnostic_cli._task_paths(paths)
+            archive = DiagnosticArchive(
+                runs, commissioning["run_id"], "commissioning"
+            ).start(commissioning)
+            ledger = Plan100BudgetLedger(ledger_path)
+            execution = run_batch(
+                commissioning,
+                items,
+                archive=archive,
+                ledger=ledger,
+                evaluator=_FakeEvaluator(),
+            )
+            self.assertTrue(execution["complete"])
+            commissioning_result = recompute_commissioning(
+                commissioning,
+                items,
+                archive,
+                ledger,
+                _FakeRecounter(identity=recount_identity),
+            )
+            binding = build_commissioning_binding(commissioning, commissioning_result)
+            archive.bind_json("commissioning-result.json", commissioning_result)
+            binding_path = archive.bind_json("commissioning-binding.json", binding)
+            formal = build_freeze(
+                mode="formal",
+                run_id="plan100-formal-20260829T130000Z-cli-gate",
+                commissioning_binding_sha256=diagnostic_cli._sha_file(binding_path),
+                **source,
+            )
+            args = SimpleNamespace(
+                repo=worktree,
+                contract=contract,
+                environment_lock=environment,
+                executable=executable,
+                descriptor=descriptor,
+                recount_executable=recounter_executable,
+                recount_arg=None,
+                commissioning_binding=binding_path,
+            )
+            with mock.patch.object(
+                diagnostic_cli, "_clean_commit", return_value="1" * 40
+            ):
+                diagnostic_cli._validate_runtime_identities(args, formal, paths, ledger)
+                copied = root / "copied-binding.json"
+                copied.write_bytes(binding_path.read_bytes())
+                args.commissioning_binding = copied
+                with self.assertRaisesRegex(
+                    DiagnosticRunnerError, "cli_commissioning_binding_not_archived"
+                ):
+                    diagnostic_cli._validate_runtime_identities(
+                        args, formal, paths, ledger
+                    )
+                args.commissioning_binding = binding_path
+                empty_ledger = Plan100BudgetLedger(root / "empty-ledger.json")
+                with self.assertRaisesRegex(
+                    DiagnosticRunnerError,
+                    "cli_task_ledger_missing_commissioning",
+                ):
+                    diagnostic_cli._validate_runtime_identities(
+                        args, formal, paths, empty_ledger
+                    )
+                contract.write_text("drifted", encoding="utf-8")
+                with self.assertRaisesRegex(
+                    DiagnosticRunnerError, "cli_contract_identity_drifted"
+                ):
+                    diagnostic_cli._validate_runtime_identities(
+                        args, formal, paths, ledger
+                    )
+
+
 class Plan100RunnerLifecycleTest(unittest.TestCase):
     def test_complete_a_only_formal_uses_explicit_residual_quality_route(self) -> None:
         release = load_validation_release(REPO_ROOT)
@@ -537,6 +754,24 @@ class Plan100RunnerLifecycleTest(unittest.TestCase):
             self.assertNotIn("response_text", tracked_text)
             self.assertNotIn("candidate_id", tracked_text)
             self.assertNotIn(release.public_items[0].candidate_id, tracked_text)
+            detailed = detailed_projection(result)
+            detailed_text = json.dumps(detailed, sort_keys=True)
+            self.assertNotIn("response_text", detailed_text)
+            self.assertNotIn("packet", detailed_text)
+            self.assertNotIn("credential", detailed_text)
+            self.assertEqual(
+                len(detailed["quality_detail"]["A"]["full_operating_curve"]),
+                len(result["metrics"]["A"]["curve"]),
+            )
+            self.assertEqual(len(detailed["quality_detail"]["B"]["pair_rows"]), 12)
+            self.assertEqual(len(detailed["quality_detail"]["C"]["pair_rows"]), 12)
+            self.assertIn(
+                "target_closed", detailed["quality_detail"]["C"]["pair_rows"][0]
+            )
+            self.assertIn(
+                "non_target_invariant",
+                detailed["quality_detail"]["C"]["pair_rows"][0],
+            )
 
             second = _FakeEvaluator()
             resumed = run_batch(
@@ -552,12 +787,20 @@ class Plan100RunnerLifecycleTest(unittest.TestCase):
             reopened = DiagnosticArchive(
                 root / "runs", freeze["run_id"], "formal"
             ).reopen_read_only(freeze)
+            ledger_path = root / "ledger.json"
+            ledger_before = ledger_path.read_bytes()
+            read_only_ledger = Plan100BudgetLedger(
+                ledger_path,
+                must_exist=True,
+                read_only=True,
+            )
+            recomputed = recompute_formal(freeze, release, reopened, read_only_ledger)
             self.assertEqual(
-                canonical_json_bytes(
-                    recompute_formal(freeze, release, reopened, ledger)
-                ),
+                canonical_json_bytes(recomputed),
                 canonical_json_bytes(result),
             )
+            reopened.verify_authority(freeze, recomputed)
+            self.assertEqual(ledger_path.read_bytes(), ledger_before)
             with self.assertRaisesRegex(
                 DiagnosticArchiveError, "formal_result_already_authoritative"
             ):
@@ -597,6 +840,64 @@ class Plan100RunnerLifecycleTest(unittest.TestCase):
             )
             self.assertEqual(second.calls, [])
 
+    def test_formal_explicit_resume_retries_only_settled_technical_logical(
+        self,
+    ) -> None:
+        release = load_validation_release(REPO_ROOT)
+        freeze = _freeze("formal", "plan100-formal-20260829T120000Z-technical")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            archive = DiagnosticArchive(
+                root / "runs", freeze["run_id"], "formal"
+            ).start(freeze)
+            ledger = Plan100BudgetLedger(root / "ledger.json")
+            first = _FakeEvaluator(technical_at=3)
+            stopped = run_batch(
+                freeze,
+                release.public_items,
+                archive=archive,
+                ledger=ledger,
+                evaluator=first,
+            )
+            self.assertFalse(stopped["complete"])
+            self.assertEqual(stopped["terminal_observation_count"], 2)
+            first_two = [
+                archive.load_terminal(f"A:{item.candidate_id}")
+                for item in release.public_items[:2]
+            ]
+
+            not_explicit = _FakeEvaluator()
+            still_stopped = run_batch(
+                freeze,
+                release.public_items,
+                archive=archive,
+                ledger=ledger,
+                evaluator=not_explicit,
+            )
+            self.assertFalse(still_stopped["complete"])
+            self.assertEqual(not_explicit.calls, [])
+
+            resumed_evaluator = _FakeEvaluator()
+            resumed = run_batch(
+                freeze,
+                release.public_items,
+                archive=archive,
+                ledger=ledger,
+                evaluator=resumed_evaluator,
+                allow_technical_retry=True,
+            )
+            self.assertTrue(resumed["complete"])
+            self.assertEqual(len(resumed_evaluator.calls), 79)
+            self.assertEqual(
+                first_two,
+                [
+                    archive.load_terminal(f"A:{item.candidate_id}")
+                    for item in release.public_items[:2]
+                ],
+            )
+            failed_key = f"A:{release.public_items[2].candidate_id}"
+            self.assertEqual(len(archive.load_receipts(failed_key)), 2)
+
     def test_commissioning_technical_receipt_resumes_only_failed_logical_item(
         self,
     ) -> None:
@@ -628,6 +929,7 @@ class Plan100RunnerLifecycleTest(unittest.TestCase):
                 archive=archive,
                 ledger=ledger,
                 evaluator=resumed_evaluator,
+                allow_technical_retry=True,
             )
             self.assertTrue(resumed["complete"])
             self.assertEqual(len(resumed_evaluator.calls), 9)

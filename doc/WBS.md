@@ -29,7 +29,7 @@ Plan 097 的 `M3_D_DUAL_BACKEND_ENGINEERING_PASS / FINAL_REVIEW_ACCEPTED / INTEG
 | 0：量化测评基准 | 既有设施与首次 schema v7 正式 canary 已完成，当前无 active campaign | 保留设施；历史结果见 COMPLETED，新 campaign 须重新立项与授权 |
 | 1：Harness 优化 | **正式收口；当前无 active 工作包** | 当前不继续新增观测或内核/热路径优化；既有实现、设施与历史结果保留。未来可由用户另行决定是否重新立项，本次收口不作永久禁止 |
 | 2：本地审批模型 | **已收口，今后不再开启** | 最终结论为“保留为实验”；不改生产默认，不再规划后续工作包 |
-| 3：RONDO Multi | 第一、二期、第四期已完成；三期 Plan 099 有效 `NO-GO`；Plan 100 阶段 A 待验收 | 工作包四仍未解锁。Plan 100 的技术审查缺口、穷尽路线和工作日价档已整改并通过定向门禁；阶段 B 在审查者明确批准前保持锁定。不读冻结测试、不训练、不改产品默认，不授予质量、产品价值或生产资格 |
+| 3：RONDO Multi | 第一、二期、第四期已完成；三期 Plan 099 有效 `NO-GO`；Plan 100 阶段 A 再整改待复验 | 工作包四仍未解锁。Plan 100 的实际 B1/B2 准入、唯一 task-wide 账本/authority、technical resume、费用 fallback 与详细报告缺口已整改并通过定向门禁；阶段 B 在审查者明确批准前保持锁定。不读冻结测试、不训练、不改产品默认，不授予质量、产品价值或生产资格 |
 
 方向 3 当前 Linux 正确性基线由 Plan 093 建立：default features、standard local Nextest、checksum-verified V8 的完整 workspace
 为 `14660/14660` passed、0 failure/error/timeout，另有 1/1 setup passed；24 个 skip 不计 passed。正式证据和精确边界见
@@ -89,7 +89,7 @@ Plan 097 的 `M3_D_DUAL_BACKEND_ENGINEERING_PASS / FINAL_REVIEW_ACCEPTED / INTEG
 - **工作包四保持锁定**：Plan 099 没有形成候选，不读取 qualification 或 v9 test 正文，不启动资格与横评；若用户以后改变路线，须另立任务和授权。
 - **Plan 100 独立诊断已立项**：只消费 Plan 098 冻结的 task v2 与 v10 development validation 27 candidates / 12 pairs，以同一
   `deepseek-v4-flash`、packet、rubric 和本地监督口径比较 scalar、直接 `PASS/REWRITE` 与五维 hard decision + 本地 non-compensating gate，
-  交付一轮可复算正式结果和路线裁决。阶段 A 本地实现、技术审查整改、穷尽路线和工作日价档回归已完成，正等待独立准入验收；阶段 B 在明确批准前保持锁定。它不是
+  交付一轮可复算正式结果和路线裁决。阶段 A 本地实现及三轮准入整改已完成，唯一 task root、runtime identity、authority、恢复与报告回归正等待独立复验；阶段 B 在明确批准前保持锁定。它不是
   qualification 或训练任务；任何后续部分解冻训练仍须由新的独立任务承接。
 
 各工作包的详细目标、边界、宏观验收与授权门以 `doc/WBS/multi-agent-trusted-evidence.md` 为准。工作包一与二由

@@ -251,22 +251,42 @@ def worst_case_reservation_rmb(
 class Plan100BudgetLedger:
     """Small cross-process ledger: settled + outstanding + next reserve never exceed cap."""
 
-    def __init__(self, path: Path, *, cap_rmb: Decimal = BUDGET_CAP_RMB) -> None:
+    def __init__(
+        self,
+        path: Path,
+        *,
+        cap_rmb: Decimal = BUDGET_CAP_RMB,
+        must_exist: bool = False,
+        read_only: bool = False,
+    ) -> None:
         if not path.is_absolute():
             raise DiagnosticCostError("ledger_path_must_be_absolute")
         if not cap_rmb.is_finite() or cap_rmb <= 0 or cap_rmb > BUDGET_CAP_RMB:
             raise DiagnosticCostError("ledger_cap_invalid")
+        if read_only and not must_exist:
+            raise DiagnosticCostError("read_only_ledger_must_exist")
         self.path = path
         self.cap_rmb = cap_rmb
+        self.must_exist = must_exist
+        self.read_only = read_only
         self._thread_lock = threading.Lock()
         self._lock_path = path.with_name(f".{path.name}.lock")
-        self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if must_exist:
+            if self.path.parent.is_symlink() or not self.path.parent.is_dir():
+                raise DiagnosticCostError("ledger_parent_unsafe")
+        else:
+            self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         if self.path.parent.is_symlink() or not self.path.parent.is_dir():
             raise DiagnosticCostError("ledger_parent_unsafe")
-        with self._locked_document():
-            pass
+        if read_only:
+            self._read_existing()
+        else:
+            with self._locked_document():
+                pass
 
     def reserve(self, logical_key: str, amount: Decimal) -> dict[str, Any]:
+        if self.read_only:
+            raise DiagnosticCostError("ledger_is_read_only")
         if (
             not isinstance(logical_key, str)
             or not logical_key
@@ -297,6 +317,8 @@ class Plan100BudgetLedger:
     def settle(
         self, logical_key: str, attempts_value: Sequence[Mapping[str, Any]]
     ) -> dict[str, Any]:
+        if self.read_only:
+            raise DiagnosticCostError("ledger_is_read_only")
         if not attempts_value:
             raise DiagnosticCostError("settlement_attempts_empty")
         attempts = [settle_attempt(value) for value in attempts_value]
@@ -321,9 +343,14 @@ class Plan100BudgetLedger:
             return copy.deepcopy(row)
 
     def snapshot(self) -> dict[str, Any]:
-        with self._locked_document() as document:
+        if self.read_only:
+            document = self._read_existing()
             reservations = copy.deepcopy(document["reservations"])
             settled, outstanding = _totals(reservations)
+        else:
+            with self._locked_document() as document:
+                reservations = copy.deepcopy(document["reservations"])
+                settled, outstanding = _totals(reservations)
         return {
             **document,
             "reservations": reservations,
@@ -336,6 +363,8 @@ class Plan100BudgetLedger:
 
     @contextmanager
     def _locked_document(self):
+        if self.read_only:
+            raise DiagnosticCostError("ledger_is_read_only")
         with self._thread_lock:
             flags = os.O_CREAT | os.O_RDWR | os.O_CLOEXEC
             if hasattr(os, "O_NOFOLLOW"):
@@ -364,20 +393,9 @@ class Plan100BudgetLedger:
 
     def _load_or_create(self) -> dict[str, Any]:
         if self.path.exists() or self.path.is_symlink():
-            metadata = self.path.lstat()
-            if (
-                self.path.is_symlink()
-                or not self.path.is_file()
-                or stat.S_IMODE(metadata.st_mode) != 0o600
-                or not 0 < metadata.st_size <= _MAX_LEDGER_BYTES
-            ):
-                raise DiagnosticCostError("ledger_file_unsafe")
-            try:
-                document = json.loads(self.path.read_text(encoding="utf-8"))
-            except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-                raise DiagnosticCostError("ledger_file_invalid") from exc
-            _validate_document(document, self.cap_rmb)
-            return document
+            return self._read_existing()
+        if self.must_exist:
+            raise DiagnosticCostError("ledger_file_missing")
         document = {
             "schema": LEDGER_SCHEMA,
             "cap_rmb": decimal_text(self.cap_rmb),
@@ -386,6 +404,24 @@ class Plan100BudgetLedger:
         }
         self._persist(document)
         return document
+
+    def _read_existing(self) -> dict[str, Any]:
+        if not self.path.exists() and not self.path.is_symlink():
+            raise DiagnosticCostError("ledger_file_missing")
+        metadata = self.path.lstat()
+        if (
+            self.path.is_symlink()
+            or not self.path.is_file()
+            or stat.S_IMODE(metadata.st_mode) != 0o600
+            or not 0 < metadata.st_size <= _MAX_LEDGER_BYTES
+        ):
+            raise DiagnosticCostError("ledger_file_unsafe")
+        try:
+            document = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            raise DiagnosticCostError("ledger_file_invalid") from exc
+        _validate_document(document, self.cap_rmb)
+        return dict(document)
 
     def _persist(self, document: dict[str, Any]) -> None:
         _validate_document(document, self.cap_rmb)
@@ -440,6 +476,22 @@ def validate_task_budget_snapshot(value: Any) -> dict[str, Any]:
     ):
         raise DiagnosticCostError("ledger_snapshot_totals_invalid")
     return copy.deepcopy(dict(value))
+
+
+def validate_task_budget_extension(current: Any, required: Any) -> dict[str, Any]:
+    """Require the live task ledger to preserve every settled B1 reservation exactly."""
+
+    current_snapshot = validate_task_budget_snapshot(current)
+    required_snapshot = validate_task_budget_snapshot(required)
+    if required_snapshot["outstanding_reserved_rmb"] != "0":
+        raise DiagnosticCostError("required_ledger_has_outstanding_reservation")
+    current_by_key = {
+        row["logical_key"]: row for row in current_snapshot["reservations"]
+    }
+    for row in required_snapshot["reservations"]:
+        if row["state"] != "settled" or current_by_key.get(row["logical_key"]) != row:
+            raise DiagnosticCostError("task_ledger_does_not_preserve_commissioning")
+    return current_snapshot
 
 
 def task_budget_summary(value: Any) -> dict[str, Any]:
@@ -607,5 +659,7 @@ __all__ = [
     "settle_attempt",
     "token_cost_rmb",
     "usage_cost_rmb",
+    "validate_task_budget_extension",
+    "validate_task_budget_snapshot",
     "worst_case_reservation_rmb",
 ]

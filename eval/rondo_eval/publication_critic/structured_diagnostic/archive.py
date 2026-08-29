@@ -80,8 +80,7 @@ class DiagnosticArchive:
         return self.runs_root / "formal-authority.json"
 
     def start(self, freeze: Mapping[str, Any]) -> "DiagnosticArchive":
-        if self.mode == "formal":
-            self.require_formal_unclaimed()
+        self.require_formal_unclaimed()
         try:
             self._namespace.create()
         except WriteOnceError as exc:
@@ -90,8 +89,7 @@ class DiagnosticArchive:
         return self
 
     def resume(self, freeze: Mapping[str, Any]) -> "DiagnosticArchive":
-        if self.mode == "formal":
-            self.require_formal_unclaimed()
+        self.require_formal_unclaimed()
         if (
             self.runs_root.is_symlink()
             or not self.runs_root.is_dir()
@@ -253,8 +251,25 @@ class DiagnosticArchive:
         return value
 
     def require_formal_unclaimed(self) -> None:
-        if self.mode == "formal" and self.load_authority() is not None:
+        if self.load_authority() is not None:
             raise DiagnosticArchiveError("formal_result_already_authoritative")
+
+    def verify_authority(
+        self, freeze: Mapping[str, Any], result: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        """Bind a read-only recomputation to the unique task authority exactly."""
+
+        authority = self.load_authority()
+        expected = {
+            "schema": AUTHORITY_SCHEMA,
+            "run_id": self.run_id,
+            "freeze_sha256": _sha(freeze),
+            "result_sha256": _sha(result),
+            "route_terminal": result.get("route_terminal"),
+        }
+        if authority is None or authority != expected:
+            raise DiagnosticArchiveError("formal_authority_binding_invalid")
+        return authority
 
     def claim_formal_result(
         self, freeze: Mapping[str, Any], result: Mapping[str, Any]
