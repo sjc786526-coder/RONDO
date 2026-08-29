@@ -32,7 +32,8 @@ validation config 选择、资格评价或未来产品 projection。`formal-deci
 
 - `rondo-publication-critic-task@v2` 权威内容 SHA-256；
 - 本 decision contract 的版本与内容 SHA-256；
-- formal decision projection、decision decoder、config projection 与 qualification metrics 的固定组件列表和组合 SHA-256；
+- formal decision projection、decision decoder、该 decoder 直接调用的 accepted-task runtime/raw output schema、config projection 与
+  qualification metrics 的固定组件列表和组合 SHA-256；
 - 单个 model artifact SHA-256；
 - 单个 development data revision、manifest SHA-256、validation candidate bytes SHA-256 与 validation pair bytes SHA-256；
 - 五个逐 head margin；

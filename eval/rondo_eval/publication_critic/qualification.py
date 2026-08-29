@@ -41,6 +41,8 @@ FORMAL_DECISION_PROJECTION = Path(
 DECISION_IMPLEMENTATION_COMPONENT_PATHS = (
     DECISION_CONTRACT_AUTHORITY.as_posix(),
     "eval/rondo_eval/publication_critic/qualification.py",
+    "eval/rondo_eval/publication_critic/successor_task.py",
+    "eval/templates/publication-critic/successor-output-schema-v1.json",
     "eval/templates/publication-critic/decision-config-contract-v1.json",
     FORMAL_DECISION_PROJECTION.as_posix(),
     "eval/templates/publication-critic/qualification-metrics-contract-v1.json",

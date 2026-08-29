@@ -152,6 +152,41 @@ class PublicationCriticQualificationTests(unittest.TestCase):
             ):
                 validate_decision_config(config, repo_root=root)
 
+    def test_formal_decode_rejects_direct_task_dependency_drift(self) -> None:
+        direct_dependencies = (
+            "eval/rondo_eval/publication_critic/successor_task.py",
+            "eval/templates/publication-critic/successor-output-schema-v1.json",
+        )
+        self.assertTrue(
+            set(direct_dependencies).issubset(DECISION_IMPLEMENTATION_COMPONENT_PATHS)
+        )
+        for drifted_path in direct_dependencies:
+            with self.subTest(drifted_path=drifted_path):
+                with tempfile.TemporaryDirectory() as temporary:
+                    root = Path(temporary)
+                    paths = {
+                        TASK_AUTHORITY.as_posix(),
+                        DECISION_IMPLEMENTATION_LOCK.as_posix(),
+                        *DECISION_IMPLEMENTATION_COMPONENT_PATHS,
+                    }
+                    for relative in paths:
+                        source = REPO_ROOT / relative
+                        destination = root / relative
+                        destination.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(source, destination)
+                    config = self._config(repo_root=root)
+                    with (root / drifted_path).open("ab") as handle:
+                        handle.write(b"\n")
+                    with self.assertRaisesRegex(
+                        QualificationError,
+                        "decision implementation component",
+                    ):
+                        decode_with_decision_config(
+                            self._structured_output(batch_size=1),
+                            config,
+                            repo_root=root,
+                        )
+
     def test_decoder_is_per_head_fail_closed_and_conservative_for_na(self) -> None:
         output = self._structured_output(batch_size=6)
         for dimension in BINARY_DIMENSIONS:
