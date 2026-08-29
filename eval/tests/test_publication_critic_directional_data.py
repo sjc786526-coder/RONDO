@@ -108,9 +108,7 @@ class PublicationCriticDirectionalDataTests(unittest.TestCase):
             config["development_data"],
             {
                 "revision": release.manifest["dataset_revision"],
-                "manifest_sha256": sha256_file(
-                    self.development_root / "manifest.json"
-                ),
+                "manifest_sha256": sha256_file(self.development_root / "manifest.json"),
                 "validation_candidates_sha256": release.manifest["splits"][
                     "validation"
                 ]["candidates"]["sha256"],

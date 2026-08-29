@@ -3,8 +3,8 @@
 最后更新：2026-08-28 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
 状态：**第一期、第二期、第四期已完成；Publication Critic 三期 Plan 097 已完成并闭合双 backend 工程 E2E 与可替换接缝，现正式进入
 质量重构路线。后续严格串行为“任务合同重构 → v8 后继数据改造与有限扩充 → 一次主方案训练 → 模型资格验收与横评”。Plan 098 已把
-前两个工作包规划为严格串行的两个阶段；Plan 098 验收后方向性整改的 v9/v10/qualification 主体保留，最终复验发现 continuity
-fail-closed、validation selection binding 和一项 reviewer 身份仍需窄修，工作包三继续锁定。Plan 097 的
+前两个工作包规划为严格串行的两个阶段；Plan 098 验收后方向性整改的 v9/v10/qualification 主体保留，最终复验所列 continuity
+fail-closed、validation selection binding 和 reviewer 身份三个窄边界均已闭合并等待复验，工作包三继续锁定。Plan 097 的
 `M3_D_DUAL_BACKEND_ENGINEERING_PASS / FINAL_REVIEW_ACCEPTED / INTEGRATED / NOT_PUSHED`、Plan 096 的
 `CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH / FINAL_REVIEW_ACCEPTED / INTEGRATED / PUSHED`、Plan 094 的有效负向终态和 Plan 095 的
 最终验收均保持有效；新路线完成资格前，本地/云端质量、产品价值、Publication Critic 默认与生产启用继续锁定**
@@ -178,7 +178,8 @@ commit 为 `55342bdb11b09c11b589fd398717f7712fca012c`，合同 SHA-256 为
 `3eb0539b16403ebe20e74ce1b1ea5114d2383c6118f61fef56c9c91426e6a560`。冻结 v8、旧 scalar validator/render 与产品 typed seam 保持不变。
 验收后方向性整改保持上述 v2 identity 不变，并在下游 `rondo-publication-critic-decision@v1` 显式冻结逐头 margin、保守 continuity N/A、
 validation-only decision config 和固定逐维 confusion/failure recall；decision config 同时绑定 decoder/metrics implementation bundle。五头和
-non-compensating gate 不重开，方向性实现尚待独立最终复验。
+non-compensating gate 不重开。continuity 弱 N/A 最高和 margin 边界现 fail-closed；标准 selector 只通过已验证的 `DevelopmentRelease`
+机械派生 v10 manifest/candidate/labels identity 并核对行序。directional design 另绑定 implementation commit 与 bundle，窄修尚待最终复验。
 
 #### 工作包二：v8 后继数据改造与有限扩充（Plan 098 阶段二；主体保留，方向性整改待复验）
 
@@ -217,9 +218,10 @@ coverage、exact/cross-group near duplicate、明显捷径、train-only smoke �
 development-only `publication-critic-v10`：原三个模块负责人定向交付 42 个 replacements，一一对应盲审均以 0 finding 接受，scope 长度 AUC、
 honest cue 反例、旁白和重复诊断闭合。v9 test 降格为 metadata-only 同分布辅助 holdout。全新 test-only 负责人和独立盲审员已以 0 finding
 接受 50-group / 200-candidate / 100-pair 的 family-isolated `publication-critic-qualification-v1`；正文仍封存到工作包四，当前只完成机械
-冻结。方向性 finalizer/runtime、design、config、release identity 绑定精确实现 identity 并可字节复现。最终复验发现 continuity 的弱 N/A
-最高类可回退为 PASS、reference selector 未机械核对 validation 来源，且 continuity-context reviewer role 与 v9 原 reviewer 不同；只需在这些
-边界窄修，v9/v10/qualification 主体均保留。复验通过前工作包三继续锁定。
+冻结。v9 原 `continuity-context` 盲审员已对同一 11 个 replacements 窄复验为 0 finding 并绑定 review SHA
+`9c6c01ae78f7bee5238e77b1635b5c6c2107e66b11f7e8d2448dc9e6c49dd9f6`。方向性 finalizer/runtime、design、config、release identity
+绑定精确实现 identity，正式 v10/qualification 已从空目录机械重建并逐字节复现；v9/v10/qualification 主体与其他 review 均未重做。
+窄修最终复验通过前工作包三继续锁定。
 
 #### 工作包三：一次主方案训练
 

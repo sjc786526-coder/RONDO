@@ -9,38 +9,38 @@
     "accepted_implementation_bundle_sha256": "b0124de561f52fb464c223989d003af1e9f2a8a24eccd9ca349a4d769e3488d5"
   },
   "decision_implementation": {
-    "commit": "9d281cf56d1b66140b24a765cfced12db78af9c1",
+    "commit": "a9a856ad8f742f62474ba8bf473769d2fca1c571",
     "algorithm": "sha256-canonical-component-list-v1",
     "components": [
       {
         "path": "doc/rondo-multi-publication-critic-decision-contract-v1.md",
-        "sha256": "663164e4bed8c2df90dcdc3c40c7bb0198aa10f15b0052413e179c83431c6794"
+        "sha256": "bd42731081e01c435c0138536c3375e1d8f14220d446c7b2e4252a69fcc29cd0"
       },
       {
         "path": "eval/rondo_eval/publication_critic/qualification.py",
-        "sha256": "e2e77af54bdcda92d19c38183a4edecf422cdaa7434c46de596def3b104d8a5b"
+        "sha256": "5ceee8c5bd7c67c3bd2b975a15f6e00c2a8e6fb0ef5cf481a3968de2990cb4a8"
       },
       {
         "path": "eval/templates/publication-critic/decision-config-contract-v1.json",
-        "sha256": "2c1e8b0392f126a35fb718fcdbacfa1f0066a040b7c2245c20a673840ecee141"
+        "sha256": "3a651e1a9373e382dffdec085ec06d259627c1c5ca9c9d97611b144d2a0f512a"
       },
       {
         "path": "eval/templates/publication-critic/qualification-metrics-contract-v1.json",
         "sha256": "1a9aadb2bf46fffa94f8a25f7bc428fb286daf54513d2b96dffbee29a42551ec"
       }
     ],
-    "bundle_sha256": "ebddb382d8fd166b69763665bf4efcdae20fd187d390954c322f80fefbadb824"
+    "bundle_sha256": "00700f45afb6c5f7bb97cc90ecd3f859c82f1cc604e5c242abcd9590284d6201"
   },
   "remediation_implementation": {
-    "commit": "d925bd7cee4fcbc3f15f0296e58676df4f2e5d1f",
+    "commit": "535bfbe9ba31b3110c243b3af15230a2ff5c382b",
     "algorithm": "sha256-canonical-component-list-v1",
     "components": [
       {
         "path": "eval/rondo_eval/publication_critic/directional_data.py",
-        "sha256": "375c6a4d0aba45c0a223d3c3f83308d88f5310c43442f59eb93efa05f96e3852"
+        "sha256": "1d68f86291a64f10697f96e8dc35a8a8210631fcccff92fbf4f3296a62f25212"
       }
     ],
-    "bundle_sha256": "cb133cd067722fd615bc37e49dbd3234c43f0b86e755df415d4278a1e2deb211"
+    "bundle_sha256": "b1706139a755b857d8dc8f909490c31a42c2ace3e6123012f78679dc1dd1e869"
   },
   "base_release": {
     "revision": "publication-critic-v9",
@@ -70,7 +70,7 @@
     "module_ids": ["hard-boundaries", "continuity-context", "soft-combinations"],
     "reviewer_roles": {
       "hard-boundaries": "plan098-blind-reviewer-hard-boundaries",
-      "continuity-context": "plan098-continuity-context-directional-blind-reviewer",
+      "continuity-context": "plan098-blind-reviewer-continuity-context",
       "soft-combinations": "plan098-blind-reviewer-soft-combinations"
     },
     "allowed_counterexample_tags": [

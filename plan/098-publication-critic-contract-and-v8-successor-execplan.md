@@ -152,32 +152,32 @@
 - 工作包二最终验收整改已把工作包一的 13 个必要语义组件冻结为组合 SHA-256 `b0124de561f52fb464c223989d003af1e9f2a8a24eccd9ca349a4d769e3488d5`；finalizer 在写出前核验实际组件字节，design、generation config 与 release identity 绑定同一 identity。权威 Markdown 不变而任一其他组件漂移的 focused regression 与定向旧回归均通过，v9 数据正文和 manifest 未变化。
 - 最终整改复验确认首轮 High 闭合、无新增 finding，接受工作包二 implementation `7ee479beb1f34677a54b815faf42284c0d8968e4`；报告见 `agent_log/2026-08-28-122011-plan098-final-review-remediation-recheck.md`。Plan 098 两个工作包均已冻结。
 - 用户要求的验收后方向性复审确认四项窄缺口：逐头/N/A operating config 未显式冻结，逐维 failure recall/confusion 不足，train/validation 存在 honest 词汇与 scope 长度/旁白捷径，现有 test 只能作为同分布 holdout 且不足以独立承担最终资格。主体结论保留，最终接受暂停；报告见 `agent_log/2026-08-28-183143-plan098-post-acceptance-directional-review.md`。
-- 方向性合同已形成下游 `rondo-publication-critic-decision@v1`：逐头 margin、validation-only decision config、固定逐维 confusion/failure recall 和 non-compensating verdict 的主体已闭合。每份 config 绑定 decoder/metrics implementation bundle `ebddb382d8fd166b69763665bf4efcdae20fd187d390954c322f80fefbadb824`，directional design 另绑定 implementation commit `9d281cf56d1b66140b24a765cfced12db78af9c1`；原 v2 accepted identity 不变。
+- 方向性合同已形成下游 `rondo-publication-critic-decision@v1`：逐头 margin、validation-only decision config、固定逐维 confusion/failure recall 和 non-compensating verdict 已闭合。每份 config 绑定 decoder/metrics implementation bundle `00700f45afb6c5f7bb97cc90ecd3f859c82f1cc604e5c242abcd9590284d6201`，directional design 另绑定 implementation commit `a9a856ad8f742f62474ba8bf473769d2fca1c571` 与同一 bundle；原 v2 accepted identity 不变。
 - 原三个模块负责人只整改 v9 train/validation 并交付 42 个 replacements（hard 19、continuity 11、soft 12），三个一一对应盲审结果均为 0 finding；v9 test 正文未读取、未改写。机械整合冻结 development-only `publication-critic-v10`，只含 162 train / 27 validation candidates，scope 长度 AUC、honest cue 反例、旁白和重复诊断闭合。
 - 全新 test-only 负责人和独立盲审员在不接触 v9 test、旧 unseen 或开发数据正文的边界内，以 0 finding 接受 family-isolated `publication-critic-qualification-v1`：50 groups / 200 candidates / 100 pairs，逐维至少 20 个 failure 支持、每维 10 个 boundary targets，template/scenario family 与开发集近重复均为 0。总执行者只执行 schema/coverage/identity 的机械冻结，未读取资格正文。
 - 方向性 finalizer/runtime 已绑定精确 implementation identity，runtime 漂移、decoder/metrics 漂移、review/source identity 和 qualification 行数/路径漂移均 fail-closed。正式 v10 与 qualification release 从空目录一次生成，并在临时目录完成逐字节复现；directional/qualification/successor 33/33、旧 contract/training-data/identity/v7 43/43，合计 76/76 定向回归通过，v8/v9 tree identity 不变。
 - 方向性整改最终复验确认上述数据与指标主体成立，但发现 continuity 弱 N/A 最高类仍可回退为 PASS、reference selector 未机械核对所绑定 validation 来源，且 continuity-context reviewer role 与 v9 原 reviewer 不一致；本轮不接受，报告见 `agent_log/2026-08-28-195321-plan098-directional-remediation-final-review.md`。
+- 最终复验三个窄 finding 已闭合：continuity 只有决定性 N/A 才排除，弱 N/A 最高、N/A margin 相等、平局或未达 PASS 边界均 fail-closed；公开 reference selector 只通过 `DevelopmentRelease` 机械派生并核对实际 v10 revision、manifest、candidate bytes、labels、行序和 batch size；v9 原 continuity 盲审员对同一 11 个 replacements 以新 review SHA `9c6c01ae78f7bee5238e77b1635b5c6c2107e66b11f7e8d2448dc9e6c49dd9f6` 窄复验为 0 finding。v10/qualification 从空目录重建并完成一次逐字节复现，76/76 定向回归通过。
 
 ### 当前工作
 
-- `POST_ACCEPTANCE_DIRECTIONAL_REMEDIATION_REVIEW_FAILED / NARROW_REMEDIATION_REQUIRED`：保留 v9/v10/qualification 主体，只整改最终复验三个边界，工作包三继续锁定。
+- `POST_ACCEPTANCE_DIRECTIONAL_NARROW_REMEDIATION_IMPLEMENTED / FINAL_REVIEW_PENDING`：最终复验三个窄边界已闭合并完成验证，工作包三继续锁定。
 
 ### 本任务剩余步骤
 
-1. 修复 continuity fail-closed 解码、validation typed selection binding 和 continuity 原 reviewer 身份闭合，修正相应实时陈述；不重做数据或扩大审计设施。
-2. 只重跑受影响 focused tests、76 项定向回归及一次轻量正式复现，再由指定审查者最终复验。
-3. 仅在独立复验明确通过后恢复 Plan 098 完成态；工作包三仍须另立 ExecPlan 和重新授权。
+1. 由指定审查者对三个窄 finding 的整改完成最终复验；若仍有 finding，只在对应边界内整改、复测和重新提交。
+2. 仅在独立复验明确通过后恢复 Plan 098 完成态；工作包三仍须另立 ExecPlan 和重新授权。
 
 ### 阻塞项
 
-- 方向性整改最终复验未通过，三个窄边界待修；真实模型、付费训练、资格正文释放和工作包三继续禁止。
+- 三个窄边界整改尚待独立最终复验；真实模型、付费训练、资格正文释放和工作包三继续禁止。
 
 ### 当前验收状态
 
-- 规划：`NARROW_REMEDIATION_REQUIRED`。
-- 工作包一：`DIRECTIONAL_REMEDIATION_REVIEW_FAILED / REMEDIATION_REQUIRED`。
-- 工作包二：`DIRECTIONAL_REMEDIATION_REVIEW_FAILED / REMEDIATION_REQUIRED`。
-- 完整任务：`IN_PROGRESS / FINAL_REVIEW_FAILED`。
+- 规划：`FINAL_REVIEW_PENDING`。
+- 工作包一：`DIRECTIONAL_NARROW_REMEDIATION_IMPLEMENTED / PENDING_REVIEW`。
+- 工作包二：`DIRECTIONAL_NARROW_REMEDIATION_IMPLEMENTED / PENDING_REVIEW`。
+- 完整任务：`IN_PROGRESS / FINAL_REVIEW_PENDING`。
 
 ### 交接边界
 
@@ -213,10 +213,11 @@
 | 017 | 后继 revision 冻结为 `publication-critic-v9`，由三个 24-group 模块组成；旧 v8 安全投影只用于判断可复用性且直接复用为零 | v1 scalar 监督不足以无歧义投影完整五头标签；新合同原生数据以 216 candidates / 96 pairs 有界覆盖 Boundary、invariance、自然组合与三类 public context | 数据、split、消费 | 已采纳 |
 | 018 | 工作包二首轮最终验收不接受“accepted implementation commit 仅作为常量自洽写入”；对工作包一 13 个必要语义组件执行轻量字节/组合 SHA 漂移门，并绑定 design、generation config 与 release identity | 权威 Markdown 不变时，renderer/schema/loss/consumer 等实现仍可能漂移；固定组件序列的 canonical SHA 足以让阶段一 accepted identity 成为可执行前置，无需建设通用审计体系 | finalizer、身份、验收 | 已采纳 |
 | 019 | 最终整改复验接受工作包二 implementation `7ee479beb1f34677a54b815faf42284c0d8968e4`，Plan 098 完成；工作包三只作为 WBS 下一工作包，不继承本计划执行授权 | 首轮 High 已闭合，47/47 定向回归与独立身份/字节复核无新增 finding；训练、云资源和产品动作仍需单独规划授权 | 验收、交接 | 历史接受，终态由 020 暂停 |
-| 020 | 用户要求的验收后方向性复审暂停 019 的终态，只窄补逐头 decision config、逐维资格 metrics、honest/scope 反例与 family-isolated 独立资格确认集 | unique argmax 可接受 calibrated decision logits，故不推翻五头 decoder；但当前隐含 operating seam、开发集表面捷径和小型同作者 test 不足以支撑付费训练后的资格 GO/NO-GO | 任务、数据、资格前置 | 整改实现完成，待复验 |
+| 020 | 用户要求的验收后方向性复审暂停 019 的终态，只窄补逐头 decision config、逐维资格 metrics、honest/scope 反例与 family-isolated 独立资格确认集 | unique argmax 可接受 calibrated decision logits，故不推翻五头 decoder；但当前隐含 operating seam、开发集表面捷径和小型同作者 test 不足以支撑付费训练后的资格 GO/NO-GO | 任务、数据、资格前置 | 窄修实现完成，待复验 |
 | 021 | 不重开 accepted v2 task contract，新增下游 `rondo-publication-critic-decision@v1`；每份 decision config 同时绑定 decoder、metrics 与固定 projection 的 implementation identity | operating point 是训练后资格决策层语义，独立版本既保持工作包一 accepted identity，又使 N/A、margin 和指标可冻结、可测试、漂移 fail-closed | 判定、metrics、身份 | 已采纳 |
 | 022 | 保留 v9 且不读取或改写其 test；train/validation 定向整改机械冻结为 development-only v10，资格确认另由全新 test-only 负责人/盲审员形成独立 sealed release | 避免开发整改污染既有 holdout，并用 family isolation 与充分逐维支持承担最终资格；训练方和当前执行者都没有资格正文读取入口 | 数据、split、资格隔离 | 已采纳 |
 | 023 | 方向性 finalizer 只核对本任务必要的 decision/runtime/design/config/source/review identity，并将精确 runtime component/bundle 写入 design 与 release；不扩成通用审计平台 | 轻量字节门足以阻止当前语义实现静默漂移，保持职责窄且可复现 | finalizer、runtime、维护 | 已采纳 |
+| 024 | continuity 采用“决定性 N/A 才排除；PASS 必须同时高于 N/A 且超过 FAIL margin；其余 FAIL”的保守三路规则；标准 selector 只暴露 release-bound typed 入口 | 直接封闭 weak-N/A False PASS，并让 config identity、labels 与 logits 行序来自真实 v10 validation bytes，而非调用者自报 | decoder、selection、回归 | 已采纳 |
 
 ## 7. 给执行者的启动提示词
 

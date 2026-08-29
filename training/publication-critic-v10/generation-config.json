@@ -2,7 +2,7 @@
   "schema": "rondo-publication-critic-directional-remediation-config@v1",
   "design_lock": {
     "path": "eval/templates/publication-critic/directional-remediation-design-v1.json",
-    "sha256": "be259651812726163665e0894f3b5d6e7e1924e375754e6faf7fa1ae7bb1f68f"
+    "sha256": "414241ff0e9c41d7f606b1acbf3200baccc8f220a3478f3c49697fa0317ecd7b"
   },
   "ignored_root": "/home/sjc/desktop/RONDO/eval-data/publication-critic/plan098",
   "development_patches": [
