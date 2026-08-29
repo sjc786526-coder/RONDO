@@ -1,0 +1,28 @@
+{
+  "kind": "rondo-contract-projection",
+  "name": "rondo-publication-critic-qualification-metrics",
+  "version": "v1",
+  "authority": "doc/rondo-multi-publication-critic-decision-contract-v1.md",
+  "runtime": "eval/rondo_eval/publication_critic/qualification.py#evaluate_qualification_predictions",
+  "confusion": {
+    "binary_heads": ["PASS", "FAIL"],
+    "conditional_continuity": ["PASS", "FAIL", "N/A"],
+    "orientation": "gold row then predicted column",
+    "all_cells_required": true
+  },
+  "per_head_required": [
+    "gold_pass",
+    "gold_fail",
+    "fail_detected",
+    "fail_to_pass",
+    "fail_to_na",
+    "pass_to_fail",
+    "pass_to_na",
+    "failure_recall"
+  ],
+  "zero_failure_denominator": {
+    "status": "unavailable",
+    "value": null
+  },
+  "gate_required": ["total", "correct", "false_pass", "false_rewrite"]
+}

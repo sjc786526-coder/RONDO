@@ -1,0 +1,37 @@
+{
+  "kind": "rondo-contract-projection",
+  "name": "rondo-publication-critic-decision-config",
+  "version": "v1",
+  "authority": "doc/rondo-multi-publication-critic-decision-contract-v1.md",
+  "runtime_validator": "eval/rondo_eval/publication_critic/qualification.py#validate_decision_config",
+  "runtime_decoder": "eval/rondo_eval/publication_critic/qualification.py#decode_with_decision_config",
+  "required_identity": [
+    "task",
+    "decision_contract",
+    "model",
+    "development_data",
+    "selection"
+  ],
+  "selection": {
+    "split": "validation",
+    "test_access": "forbidden",
+    "frozen": true
+  },
+  "binary_head": {
+    "required": ["pass_over_fail_margin"],
+    "margin": "finite number greater than or equal to zero",
+    "decision": "PASS only when PASS minus FAIL is strictly greater than margin; otherwise FAIL"
+  },
+  "conditional_continuity": {
+    "required": ["pass_over_fail_margin", "na_over_applicable_margin"],
+    "na_margin": "finite number strictly greater than zero",
+    "decision": "N/A only when N/A minus max(PASS, FAIL) strictly exceeds na margin; otherwise apply binary PASS/FAIL rule"
+  },
+  "forbidden": [
+    "global threshold",
+    "cross-head score or compensation",
+    "soft preference",
+    "sixth qualification head",
+    "test-selected config"
+  ]
+}
