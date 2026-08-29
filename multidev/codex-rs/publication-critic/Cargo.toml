@@ -26,6 +26,10 @@ name = "codex-publication-critic-cloud-eval"
 path = "src/bin/codex-publication-critic-cloud-eval.rs"
 
 [[bin]]
+name = "codex-publication-critic-cloud-diagnostic"
+path = "src/bin/codex-publication-critic-cloud-diagnostic.rs"
+
+[[bin]]
 name = "codex-publication-critic-probe"
 path = "src/bin/codex-publication-critic-probe.rs"
 

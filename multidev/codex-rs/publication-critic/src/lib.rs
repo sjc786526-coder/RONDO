@@ -1,6 +1,7 @@
 mod backend;
 mod client;
 mod cloud_config;
+mod cloud_diagnostic;
 mod cloud_scorer;
 mod cloud_template;
 #[cfg(test)]
@@ -24,6 +25,16 @@ pub use cloud_config::CloudScorerConfigError;
 pub use cloud_config::CloudScorerDescriptor;
 pub use cloud_config::cloud_reference_scoring_identity;
 pub use cloud_config::provider_managed_model_identity;
+pub use cloud_diagnostic::CloudContinuityDecision;
+pub use cloud_diagnostic::CloudDiagnosticFailureKind;
+pub use cloud_diagnostic::CloudDiagnosticObservation;
+pub use cloud_diagnostic::CloudDiagnosticOutcome;
+pub use cloud_diagnostic::CloudDiagnosticOutput;
+pub use cloud_diagnostic::CloudDiagnosticTask;
+pub use cloud_diagnostic::CloudDiagnosticTaskParseError;
+pub use cloud_diagnostic::CloudDiagnosticVerdict;
+pub use cloud_diagnostic::CloudFiveDimensionDecisions;
+pub use cloud_diagnostic::CloudHardDecision;
 pub use cloud_scorer::CloudEvaluationFailureKind;
 pub use cloud_scorer::CloudEvaluationInputError;
 pub use cloud_scorer::CloudEvaluationObservation;

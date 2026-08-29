@@ -1,0 +1,28 @@
+{
+  "actor_role": "member",
+  "candidate": {
+    "handoff": "",
+    "summary": "Completed the bounded synthetic diagnostic setup and verified that its only artifact is this public packet."
+  },
+  "continuity": {
+    "state": "not_applicable"
+  },
+  "evidence_v1": {
+    "candidate_window": "not_frozen_before_commit",
+    "semantic_entailment": "not_evaluated"
+  },
+  "local_scope": {
+    "title": "Plan 100 synthetic commissioning"
+  },
+  "qualification": {
+    "packet_schema": {
+      "name": "rondo-publication-packet",
+      "revision": "v1"
+    },
+    "rubric": {
+      "name": "rondo-publication-qualification",
+      "revision": "v2"
+    }
+  },
+  "target_kind": "new_event"
+}

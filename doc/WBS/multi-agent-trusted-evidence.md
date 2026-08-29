@@ -7,7 +7,7 @@
 decoder 唯一入口、pair-aware margin selection 和 frozen decision direct-dependency identity 均已通过最终复验，Plan 098 完成并冻结。
 工作包三 Plan 099 已完成唯一主方案 commissioning 与 clean formal，终态为 `VALID_FORMAL_NO_GO / FINAL_REVIEW_ACCEPTED`；没有候选，
 工作包四未解锁，Plan 099 外部动作授权已关闭。Plan 100 已作为独立 development-validation 诊断立项，在同一 v10/task v2/rubric v2 下
-比较 DeepSeek V4 Flash 的 scalar、直接 gate 与五维 hard decision；当前处于阶段 A 本地非付费准备待执行，不属于工作包四，也不自动解锁
+比较 DeepSeek V4 Flash 的 scalar、直接 gate 与五维 hard decision；当前处于阶段 A 技术审查整改后的路线语义裁决门，不属于工作包四，也不自动解锁
 qualification、训练或产品启用。Plan 097 的
 `M3_D_DUAL_BACKEND_ENGINEERING_PASS / FINAL_REVIEW_ACCEPTED / INTEGRATED / PUSHED`、Plan 096 的
 `CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH / FINAL_REVIEW_ACCEPTED / INTEGRATED / PUSHED`、Plan 094 的有效负向终态和 Plan 095 的
@@ -272,6 +272,10 @@ rubric、产品 scorer/default 或发布语义，不运行训练、真实本地�
 **阶段与授权**：阶段 A 先完成本地非付费合同、fake/dry-run、恢复/归档/费用/复算和定向测试；独立审查通过后，用户委托审查者可批准阶段 B。
 阶段 B 串行完成真实 B1 commissioning、全链通过后冻结和空 namespace B2 clean formal，只使用 `deepseek-v4-flash`，共用独立 20 RMB 硬上限，
 不充值。只允许外发 bounded public v10 packet、必要无监督 synthetic commissioning packet 与冻结指令。
+
+**当前状态**：阶段 A 专用三臂接缝、validation-only loader、strict parser、本地 gate/metrics、20 RMB 总账、恢复/archive/authority 后只读复算和
+fake formal 已实现并通过聚焦门禁；独立审查发现的 commissioning 与费用证据缺口已整改。五类路线的原文字面条件不穷尽所有完整有效结果组合，
+且此类结果不能归为技术型 `INCONCLUSIVE`；当前等待审查者冻结残余组合的穷尽语义，阶段 B 仍锁定。
 
 **路线交接**：完整有效 formal 按预冻结规则形成“五维结构强支持 / 离散判定支持但五维增益未确认 / 约束或数据问题 / 任务可执行性不足”之一；
 技术或预算未闭合只报 `INCONCLUSIVE`。只有“五维结构强支持”可以建议未来另立部分解冻后层的五头训练任务，该任务仍需用户决定、新 ExecPlan 与

@@ -207,28 +207,41 @@ Plan 100 不属于原工作包四，不读取 qualification 或 v9 test 正文�
   未读取 qualification、v9 test 或其它 unseen 正文。
 - 2026-08-29：建立本 ExecPlan 并把 Plan 100 最小登记到根 WBS 和方向 3 子 WBS；本规划阶段未调用 API、构建/测试、GPU、RunPod、Docker、
   本地模型、训练、上传或产品动作。
+- 2026-08-29：阶段 A 初始检索发生 qualification 正文意外输出；执行者立即停止并主动报告，审查提交 `387702e9` 以
+  `ACCEPTED_WITH_CONTAINMENT` 允许从 clean 状态继续。后续全部读取、搜索、测试和子任务改用显式 allowlist；该上下文永久退出未来
+  qualification/test 释放、阈值返调和最终资格裁决。
+- 2026-08-29：完成 Plan 100 专用 A/B/C Rust 接缝、v10 validation-only loader、严格双层 parser、本地 C AND、统一 metrics/route、
+  task-wide 20 RMB reservation/按 attempt 价档结算、token recount 后 0.1 RMB 末级 fallback、write-once receipt/terminal/authority、
+  commissioning/formal runner、恢复和独立复算；tracked 合同冻结 27/12 身份、1 synthetic + 2 public commissioning 与 formal 准入候选。
+- 2026-08-29：聚焦门禁通过：Plan 100 Python `13 passed, 9 subtests passed`；正式 build-lock/shared target 下
+  `just test -p codex-publication-critic` 为 `68 passed, 0 skipped`；tracked DeepSeek descriptor + synthetic packet 在显式移除 credential 后
+  离线验证到 `invalid_configuration`，确认配置/packet 校验通过且未发出请求。
+- 2026-08-29：独立代码审查发现 commissioning 成功门、authority 后只读复算与 task-wide 费用证据三处实现缺口；已改为 9/9 strict success +
+  usage-present recount 全量校准才生成自包含 B1 binding，formal freeze 必须与该 B1 的 source/provider/request/release/comparison/price identity
+  完全一致，authority 后只允许只读重开，formal 结果与 tracked projection 绑定覆盖 commissioning/retry/技术轮的总账。定向 Python 回归增至 14 项。
 
 ### 当前工作
 
-- `PLANNING_COMPLETE / STAGE_A_AUTHORIZED_NOT_STARTED / STAGE_B_LOCKED_PENDING_REVIEW`。
+- `STAGE_A_REMEDIATION_PENDING_ROUTE_SEMANTIC_DECISION / STAGE_B_LOCKED_PENDING_STAGE_A_REVIEW`。
 
 ### 本任务剩余步骤
 
-- 执行阶段 A 本地非付费准备，提交并通过指定 queue 申请独立验收。
+- 取得审查者对完整有效 formal 残余组合的穷尽路线语义裁决，冻结实现与测试后完成阶段 A 整改、提交任务分支并申请准入验收。
 - 审查者若验收通过，明确批准阶段 B；执行 B1 commissioning、冻结、B2 clean formal、独立复算和唯一路线裁决。
 - 完成相称门禁、文档/结果/费用/ignored 状态收口、任务分支提交和最终独立验收。
 
 ### 阻塞项
 
-- 阶段 A 无阻塞。
+- 五类路线的硬合同不逻辑穷尽所有完整有效 formal：例如 A 达门而 B/C 不达基本门时，四个质量终态均不满足，但硬边界又禁止把完整有效 formal
+  归为技术型 `INCONCLUSIVE`。该矛盾涉及质量语义而非普通实现策略，已准备通过指定 queue 请求审查者冻结穷尽规则；收到裁决前不进入阶段 B。
 - 阶段 B 的审查者明确批准是设计内硬闸门；在批准前保持锁定，不视为阶段 A 阻塞。
 
 ### 当前验收状态
 
-- 规划：`COMPLETE / PENDING_USER_HANDOFF_TO_EXECUTOR`。
-- 阶段 A：`AUTHORIZED / NOT_STARTED`。
+- 规划：`COMPLETE / EXECUTION_ACTIVE`。
+- 阶段 A：`REMEDIATION_IN_PROGRESS / BLOCKED_ON_ROUTE_SEMANTIC_DECISION`。
 - 阶段 B：`AUTHORIZED_CONDITIONALLY / LOCKED_PENDING_STAGE_A_REVIEW`。
-- 完整任务：`NOT_STARTED`。
+- 完整任务：`IN_PROGRESS / NO_QUALITY_CONCLUSION`。
 
 ### 交接边界
 

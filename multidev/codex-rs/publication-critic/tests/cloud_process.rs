@@ -476,6 +476,40 @@ async fn run_cloud_eval(fixture: &Fixture, input: &[u8]) -> TestResult<CapturedP
     })
 }
 
+async fn run_cloud_diagnostic(
+    fixture: &Fixture,
+    task: &str,
+    input: &[u8],
+) -> TestResult<CapturedProbe> {
+    let mut command = Command::new(cargo_bin("codex-publication-critic-cloud-diagnostic")?);
+    command
+        .arg("--descriptor")
+        .arg(&fixture.descriptor_path)
+        .arg("--task")
+        .arg(task)
+        .env(API_KEY_ENV, API_KEY)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    let mut child = command.spawn()?;
+    let mut stdin = child
+        .stdin
+        .take()
+        .ok_or("cloud diagnostic stdin was not piped")?;
+    stdin.write_all(input).await?;
+    stdin.shutdown().await?;
+    drop(stdin);
+    let output = timeout(PROCESS_TIMEOUT, child.wait_with_output())
+        .await
+        .map_err(|_| "cloud diagnostic process timed out")??;
+    Ok(CapturedProbe {
+        status: output.status,
+        stdout: String::from_utf8(output.stdout)?,
+        stderr: String::from_utf8(output.stderr)?,
+    })
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn cloud_backend_reaches_ready_and_produces_both_verdicts() -> TestResult {
     let provider = FakeProvider::start().await;
@@ -603,6 +637,105 @@ async fn eval_entry_point_preserves_scalar_model_and_cache_usage_without_reasoni
             "outcome": {"type": "success"},
         })
     );
+    Ok(())
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn diagnostic_entry_point_keeps_only_output_contract_variable_and_never_retries_parse_failure()
+-> TestResult {
+    let cases = [
+        ("scalar", r#"{"quality":0.83}"#, 2, false),
+        ("direct-gate", r#"{"verdict":"PASS"}"#, 1, false),
+        (
+            "five-dimension",
+            r#"{"useful_state_transfer":"PASS","honest_uncertainty":"PASS","conditional_continuity":"N/A","scope_and_signal":"PASS","internal_consistency":"PASS"}"#,
+            1,
+            true,
+        ),
+    ];
+    let mut normalized_request = None;
+    for (task, content, expected_attempts, has_local_verdict) in cases {
+        let provider = FakeProvider::start().await;
+        let terminal = ResponseTemplate::new(200).set_body_json(detailed_completion(
+            PROVIDER_MODEL,
+            Some(content),
+            Some("stop"),
+        ));
+        if expected_attempts == 2 {
+            provider
+                .mount_sequence(ResponseTemplate::new(429), terminal)
+                .await;
+        } else {
+            provider.mount(terminal).await;
+        }
+        let fixture = Fixture::new(&provider.base_url(), DescriptorOptions::default())?;
+        let input = std::fs::read(&fixture.packet_path)?;
+        let output = run_cloud_diagnostic(&fixture, task, &input).await?;
+        assert!(
+            output.status.success(),
+            "diagnostic failed: {}",
+            output.stderr
+        );
+        assert_body_free(&output.stdout, &output.stderr);
+        assert!(!output.stdout.contains(REASONING_SENTINEL));
+        assert!(!output.stderr.contains(REASONING_SENTINEL));
+
+        let observation: Value = serde_json::from_str(output.stdout.trim())?;
+        assert_eq!(observation["response_text"], json!(content));
+        assert!(!observation["output"].is_null());
+        assert_eq!(observation["local_verdict"].is_string(), has_local_verdict);
+        assert_eq!(observation["outcome"], json!({"type": "success"}));
+        assert_eq!(observation["attempts"], json!(expected_attempts));
+        assert_eq!(observation["usage"]["prompt_tokens"], json!(512));
+        let requested_at = observation["attempt_requested_at_unix_ms"]
+            .as_array()
+            .ok_or("attempt timestamps must be an array")?;
+        assert_eq!(requested_at.len(), expected_attempts);
+        assert!(requested_at[0].as_u64().is_some_and(|value| value > 0));
+
+        let requests = provider.requests().await;
+        assert_eq!(requests.len(), expected_attempts);
+        let mut body = serde_json::from_slice::<Value>(&requests[0].body)?;
+        let system = body["messages"][0]["content"]
+            .as_str()
+            .ok_or("system message must be a string")?;
+        let (common, contract) = system
+            .split_once("# Output contract\n\n")
+            .ok_or("diagnostic prompt lacks output contract boundary")?;
+        assert!(!common.is_empty() && !contract.is_empty());
+        body["messages"][0]["content"] = json!(common);
+        if let Some(expected) = &normalized_request {
+            assert_eq!(&body, expected);
+        } else {
+            normalized_request = Some(body);
+        }
+    }
+
+    let provider = FakeProvider::start().await;
+    let invalid = r#"{"useful_state_transfer":"PASS","honest_uncertainty":"PASS","conditional_continuity":"N/A","scope_and_signal":"PASS","internal_consistency":"PASS","gate":"PASS"}"#;
+    provider
+        .mount(
+            ResponseTemplate::new(200).set_body_json(detailed_completion(
+                PROVIDER_MODEL,
+                Some(invalid),
+                Some("stop"),
+            )),
+        )
+        .await;
+    let fixture = Fixture::new(&provider.base_url(), DescriptorOptions::default())?;
+    let input = std::fs::read(&fixture.packet_path)?;
+    let output = run_cloud_diagnostic(&fixture, "five-dimension", &input).await?;
+    assert!(
+        output.status.success(),
+        "diagnostic failed: {}",
+        output.stderr
+    );
+    assert_body_free(&output.stdout, &output.stderr);
+    let observation: Value = serde_json::from_str(output.stdout.trim())?;
+    assert_eq!(observation["attempts"], json!(1));
+    assert_eq!(observation["response_text"], json!(invalid));
+    assert_eq!(observation["outcome"]["kind"], "output_contract_violation");
+    assert_eq!(provider.requests().await.len(), 1);
     Ok(())
 }
 
