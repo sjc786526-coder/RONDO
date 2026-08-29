@@ -23,7 +23,7 @@ case "$segment" in "$task_root"/*) ;; *) exit 2 ;; esac
 case "$resource" in "$task_root"/*) ;; *) exit 2 ;; esac
 case "$lifecycle" in "$task_root"/*) ;; *) exit 2 ;; esac
 case "$RONDO_PLAN099_MAX_SECONDS" in ''|*[!0-9]*) exit 2 ;; esac
-if [ "$RONDO_PLAN099_MAX_SECONDS" -le 0 ] || [ "$RONDO_PLAN099_MAX_SECONDS" -gt 10800 ]; then
+if [ "$RONDO_PLAN099_MAX_SECONDS" -le 0 ] || [ "$RONDO_PLAN099_MAX_SECONDS" -gt 10380 ]; then
   exit 2
 fi
 

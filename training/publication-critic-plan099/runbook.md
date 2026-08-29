@@ -14,21 +14,30 @@ GPU 或付费步骤都不得执行。
   `runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404`、20GB container disk。
 - 复用网络卷 `mwemzrn33y`，预计初始 70GB、上限 100GB；不新建卷，不删除该卷；任务 root 必须匹配
   `/workspace/rondo-plan099-*`，历史 root 只读。
-- 同时最多 1 个计费 Pod，累计最多 2 个；累计墙钟最多 10,800 秒。第二个 Pod 只允许在首个已确认不存在且
-  属于技术恢复时创建。库存紧张只使用根目录 `scripts/create-runpod-when-ready.py` 抢卡。
+- 同时最多 1 个计费 Pod，累计最多 2 个；所有任务 Pod 的累计计费墙钟硬上限为 10,800 秒，其中每个 Pod
+  按 `prior + maximum_lifecycle + 60 秒 worker kill grace + 360 秒终态确认` 计入。第二个 Pod 只允许在首个
+  已确认不存在且属于技术恢复时创建。库存紧张只使用根目录 `scripts/create-runpod-when-ready.py` 抢卡。
 - 动态预算为批准时实时可用余额减已知未结/延迟费用，再减现有网络卷 6 小时实时保留费后取非负值；不得充值。
   每段运行前刷新预算快照，并确认 commissioning、formal、候选回传、预释放审查等待及 stop/delete 收口均可覆盖。
 
 ## 资产和环境
 
-阶段 A 只生成并允许上传四个文件：`phase-a/source-bundle.tar`、`source-bundle-receipt.json`、
+阶段 A 静态资产只生成并允许上传四个文件：`phase-a/source-bundle.tar`、`source-bundle-receipt.json`、
 `data-bundle.tar`、`data-bundle-receipt.json`。data bundle 的物理成员只来自
 `training/publication-critic-v10/`，含 train/validation，无 v9 test、qualification sealed 或旧 unseen 正文。
 上传后先逐个校验 receipt 中的 archive SHA-256；`runpod-bootstrap.sh` 只用 source bundle 建立临时引导树，随后
 由 `assemble-execution-root` 分别安全解包、逐树验签 source/data，合并至一个全新的 task-owned source root，最后
-重新执行 freeze 校验。训练不得直接在临时引导树中运行。
+重新执行 freeze 校验。bootstrap 必须以 `venv --copies --system-site-packages` 生成 task-owned 实体 Python；该路径
+通过 worker 的 executable/non-symlink 判定后才复用 exact image Torch。训练不得直接在临时引导树中运行。
 远端公共下载只允许 `asset-contract-v1.json` 中 exact repository/revision/file 列表；先校验全部 SHA-256，
 再加载模型。不得上传 `.env.local`，不得把密钥当 shell 文件 source。
+
+Pod 独立核验后，host→Pod 运行时控制 JSON 只允许三类：live-resource receipt、Pod lifecycle authorization、
+paid-segment authorization。每份必须是不超过 16 KiB、权限 `0600` 的 canonical JSON，并放在当前 task root 的
+`runtime-control/{live-resource|lifecycle|segment}/{content_sha256}.json`；文件名必须等于经对应 schema 校验后的
+content SHA-256。worker 在启动任何 CLI 动作前逐文件校验路径、权限、canonical bytes、schema、content SHA 与
+三者交叉绑定。budget snapshot、guard/release receipt、环境或训练状态、provider 原始响应、任意第四类 JSON、
+模型、日志及密钥均不在此运行时上传边界内。
 
 Pod 创建后，训练前独立核验实际 provider、Secure Cloud、`US-TX-3`、L40S 数量/显存、单价、镜像、20GB
 container disk 和卷 `mwemzrn33y` 的挂载；任一项不符立即释放，不进入 commissioning。创建响应不确定时先按
@@ -36,12 +45,14 @@ exact name 对账，不得重复创建。将核验结果、source/data receipt�
 快照写入任务 root 的小型 JSON evidence。
 
 每次付费动作紧邻执行前按以下唯一链路重新授权：先生成带 canonical content SHA-256 的 live-resource receipt 和
-不超过 Pod 累计 10,800 秒的 lifecycle authorization，再刷新 budget snapshot，最后生成 paid-segment authorization。
+lifecycle authorization，再刷新 budget snapshot，最后生成 paid-segment authorization。若已结束任务 Pod 的累计
+保守墙钟为 `P`、本 Pod 主体窗口为 `L`，则必须满足 `P + L + 60 + 360 <= 10800`；绝对 termination trigger 固定为
+`pod_started_at + L + 60`，确认 deadline 固定为 trigger 后 360 秒，因而最晚 0-Pod 确认不会越过累计硬上限。
 segment 必须逐哈希绑定 budget、resource、lifecycle、exact Pod id/name、实际 compute/container 单价、termination
 trigger、60 秒 kill grace 与 360 秒终态确认预留；worker 的 `RONDO_PLAN099_MAX_SECONDS` 必须与 segment 完全相等。
 所有云端 snapshot、artifact、state 和输出路径都必须在当前 `/workspace/rondo-plan099-*` task root 内；宿主 lifecycle
-authorization 与 guard receipt 留在主物理根 Plan 099 ignored host namespace，并把 immutable authorization 复制进
-云端 task root 供 segment/worker 逐哈希绑定。
+authorization 与 guard receipt 留在主物理根 Plan 099 ignored host namespace；按上述三类 runtime-control allowlist
+把 resource、immutable lifecycle 和每段新生成的 segment 文件复制进云端 task root，供 worker 逐哈希绑定。
 
 Pod 创建并独立核验后，必须先在主物理根 Plan 099 ignored host namespace 生成 lifecycle authorization，并在授权后
 60 秒内用 `nohup setsid` 启动冻结的宿主 guard；armed receipt 中的 PID 必须仍存活且 exact Pod id/name、绝对 trigger
@@ -104,8 +115,9 @@ assessment、recovery receipt、controller state 及外层逐文件 bytes/SHA-25
 `verify-candidate`，不得信任传输前的摘要。
 
 核心训练、fresh-process 恢复、正式评价、候选/`NO-GO` 冻结和回传完成后先提交 tracked 变动，通过指定 queue
-申请“Plan 099 阶段 B 核心任务与 Pod 预释放准备”审查并停止。收到审查者明确回复“确认不再需要 Pod，批准立即
-释放”前不得 stop/delete。收到后立即 stop/delete 所有任务 Pod并实时复核任务 Pod 为 0、compute 为 `$0/h`；
+申请“Plan 099 阶段 B 核心任务与 Pod 预释放准备”审查并停止。正常提前释放须先收到审查者明确回复“确认不再需要
+Pod，批准立即释放”；不可移动 absolute trigger 先到是唯一无需 queue receipt 的例外，由已武装 guard 自动释放。
+收到正常释放批准后立即 stop/delete 所有任务 Pod并实时复核任务 Pod 为 0、compute 为 `$0/h`；
 保留既有网络卷。批准释放后不得因文档整理重建 Pod。
 释放必须把审查队列原文写成带 canonical content SHA-256 的 approval receipt，并通过冻结的
 `runpod-release.py` 调用 exact-Pod terminal helper；wrapper 固定审查 thread、批准短语和 `rondo-plan099-` 名称前缀，

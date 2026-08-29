@@ -2,12 +2,33 @@
   "schema": "rondo-publication-critic-plan099-asset-contract-v1",
   "local_namespace": "eval-data/publication-critic/plan099",
   "remote_namespace_prefix": "/workspace/rondo-plan099-",
+  "upload_allowlist_scope": "phase_a_static_only",
   "upload_allowlist": [
     "phase-a/source-bundle.tar",
     "phase-a/source-bundle-receipt.json",
     "phase-a/data-bundle.tar",
     "phase-a/data-bundle-receipt.json"
   ],
+  "runtime_control_upload_allowlist": {
+    "canonical_json_required": true,
+    "file_mode": "0600",
+    "maximum_file_bytes": 16384,
+    "path_template": "runtime-control/{role}/{content_sha256}.json",
+    "roles": [
+      {
+        "role": "live-resource",
+        "schema": "rondo-publication-critic-plan099-live-resource-receipt-v1"
+      },
+      {
+        "role": "lifecycle",
+        "schema": "rondo-publication-critic-plan099-pod-lifecycle-authorization-v1"
+      },
+      {
+        "role": "segment",
+        "schema": "rondo-publication-critic-plan099-paid-segment-authorization-v1"
+      }
+    ]
+  },
   "remote_public_download_allowlist": {
     "repository": "Skywork/Skywork-Reward-V2-Qwen3-1.7B",
     "revision": "e51ea3e08fb81326c3b812a7ff0cb9cee83e59cc",

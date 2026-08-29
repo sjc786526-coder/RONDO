@@ -3,7 +3,9 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import os
 import subprocess
+import sys
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -11,7 +13,6 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
-
 from rondo_eval.publication_critic.full_model_training.contract import (
     FullModelTrainingError,
     canonical_json_bytes,
@@ -32,6 +33,8 @@ from rondo_eval.publication_critic.full_model_training.plan099_contract import (
     load_freeze,
     validate_budget_snapshot,
     validate_pod_lifecycle_authorization,
+    validate_runtime_control_chain,
+    validate_runtime_control_file,
 )
 from rondo_eval.publication_critic.full_model_training.plan099_data import (
     commissioning_dataset,
@@ -82,6 +85,11 @@ def test_freeze_and_v10_entrypoints_expose_only_development_splits() -> None:
         "e51ea3e08fb81326c3b812a7ff0cb9cee83e59cc"
     )
     assert freeze["recipe"]["scope"]["trainable_parameter_elements"] == 22_528
+    assert freeze["resource"]["pods"]["maximum_lifecycle_seconds"] == 10_380
+    assert {
+        row["role"]
+        for row in freeze["assets"]["runtime_control_upload_allowlist"]["roles"]
+    } == {"live-resource", "lifecycle", "segment"}
     assert (len(train.candidates), len(train.pairs)) == (162, 72)
     assert (len(validation.candidates), len(validation.pairs)) == (27, 12)
     assert len(commissioning.pairs) == 6
@@ -159,6 +167,8 @@ def test_dynamic_budget_reserves_existing_volume_and_closure() -> None:
     lifecycle = authorize_pod_lifecycle(
         snapshot, resource, maximum_lifecycle_seconds=7200, now=now
     )
+    assert lifecycle["billable_seconds_upper_bound"] == 7620
+    assert lifecycle["cumulative_billable_seconds_upper_bound"] == 7620
     segment = authorize_paid_segment(
         snapshot,
         lifecycle,
@@ -209,7 +219,7 @@ def test_plan099_guard_consumes_absolute_trigger_and_closes_exact_pod() -> None:
         (
             "pod099",
             "rondo-plan099-test",
-            now + timedelta(seconds=120),
+            now + timedelta(seconds=180),
             360.0,
         )
     ]
@@ -248,28 +258,127 @@ def test_plan099_guard_consumes_absolute_trigger_and_closes_exact_pod() -> None:
         == (authorization["pod_started_at"])
     )
 
-    authorize_pod_lifecycle(
+    late_clock = [now]
+
+    def late_sleeper(seconds: float) -> None:
+        late_clock[0] += timedelta(seconds=seconds)
+
+    def late_terminator(
+        receipt: Mapping[str, Any], captured: datetime, timeout: float
+    ) -> Mapping[str, Any]:
+        del captured, timeout
+        late_clock[0] += timedelta(seconds=361)
+        return {
+            "deleted_pod": {"id": receipt["pod_id"], "name": receipt["pod_name"]},
+            "pod_count": 0,
+            "compute_rate_usd_per_hour": 0.0,
+        }
+
+    with pytest.raises(
+        guard.LifecycleGuardError, match="terminal_confirmation_deadline_exceeded"
+    ):
+        guard.enforce_lifecycle(
+            authorization,
+            terminator=late_terminator,
+            validator=validate_pod_lifecycle_authorization,
+            result_schema=guard.PLAN099_RESULT_SCHEMA,
+            now=lambda: late_clock[0],
+            sleeper=late_sleeper,
+        )
+
+    boundary = authorize_pod_lifecycle(
         _budget_snapshot(),
-        _resource_receipt(prior_wall_seconds=4_000, cumulative_pods=2),
-        maximum_lifecycle_seconds=6_800,
+        _resource_receipt(),
+        maximum_lifecycle_seconds=10_380,
         now=now,
     )
+    assert boundary["billable_seconds_upper_bound"] == 10_800
+    assert boundary["cumulative_billable_seconds_upper_bound"] == 10_800
+    assert boundary["termination_trigger_at"] == "2026-08-28T14:54:00Z"
+    assert (
+        authorize_paid_segment(
+            _budget_snapshot(), boundary, maximum_seconds=10_380, now=now
+        )["maximum_seconds"]
+        == 10_380
+    )
+    with pytest.raises(
+        FullModelTrainingError, match="plan099_segment_duration_invalid"
+    ):
+        authorize_paid_segment(
+            _budget_snapshot(), boundary, maximum_seconds=10_381, now=now
+        )
+    with pytest.raises(FullModelTrainingError, match="plan099_lifecycle_invalid"):
+        authorize_pod_lifecycle(
+            _budget_snapshot(),
+            _resource_receipt(),
+            maximum_lifecycle_seconds=10_381,
+            now=now,
+        )
+
+    replacement = authorize_pod_lifecycle(
+        _budget_snapshot(),
+        _resource_receipt(prior_wall_seconds=4_000, cumulative_pods=2),
+        maximum_lifecycle_seconds=6_380,
+        now=now,
+    )
+    assert replacement["billable_seconds_upper_bound"] == 6_800
+    assert replacement["cumulative_billable_seconds_upper_bound"] == 10_800
     with pytest.raises(FullModelTrainingError, match="plan099_lifecycle_invalid"):
         authorize_pod_lifecycle(
             _budget_snapshot(),
             _resource_receipt(prior_wall_seconds=4_000, cumulative_pods=2),
-            maximum_lifecycle_seconds=6_801,
+            maximum_lifecycle_seconds=6_381,
             now=now,
         )
 
+    tampered = dict(replacement)
+    tampered["cumulative_billable_seconds_upper_bound"] -= 1
+    core = {key: value for key, value in tampered.items() if key != "content_sha256"}
+    tampered["content_sha256"] = hashlib.sha256(canonical_json_bytes(core)).hexdigest()
+    with pytest.raises(FullModelTrainingError, match="plan099_lifecycle_invalid"):
+        validate_pod_lifecycle_authorization(tampered)
 
-def test_plan099_bootstrap_reuses_exact_image_torch_and_guard_is_host_armed() -> None:
+
+def test_plan099_bootstrap_reuses_exact_image_torch_and_guard_is_host_armed(
+    tmp_path: Path,
+) -> None:
     bootstrap = REPO_ROOT / "training/publication-critic-plan099/runpod-bootstrap.sh"
+    worker = REPO_ROOT / "training/publication-critic-plan099/runpod-worker.sh"
     subprocess.run(["bash", "-n", str(bootstrap)], check=True, timeout=10)
+    subprocess.run(["bash", "-n", str(worker)], check=True, timeout=10)
     source = bootstrap.read_text(encoding="utf-8")
-    assert 'python3 -m venv --system-site-packages "$task_root/venv"' in source
+    assert 'python3 -m venv --copies --system-site-packages "$task_root/venv"' in source
     assert source.count('torch.__version__ == "2.8.0+cu128"') == 2
     assert source.count('torch.version.cuda == "12.8"') == 2
+    venv = tmp_path / "worker-venv"
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "venv",
+            "--copies",
+            "--system-site-packages",
+            str(venv),
+        ],
+        check=True,
+        timeout=30,
+    )
+    python = venv / "bin/python"
+    worker_condition = 'if [ ! -x "$python" ] || [ -L "$python" ]; then exit 2; fi'
+    assert worker_condition in worker.read_text(encoding="utf-8")
+    subprocess.run(
+        [
+            "bash",
+            "-c",
+            f'python="$1"; {worker_condition}',
+            "plan099-worker-check",
+            str(python),
+        ],
+        check=True,
+        timeout=10,
+    )
+    assert python.is_file()
+    assert not python.is_symlink()
     dependencies = (
         REPO_ROOT / "training/publication-critic-plan099/dependencies-v1.txt"
     ).read_text(encoding="utf-8")
@@ -284,6 +393,98 @@ def test_plan099_bootstrap_reuses_exact_image_torch_and_guard_is_host_armed() ->
     assert "nohup setsid env RONDO_PLAN099_STAGE_B_APPROVED=1" in runbook
     assert "--profile plan099" in runbook
     assert "正常提前释放仍只接受指定 queue" in runbook
+
+
+def test_runtime_control_allowlist_accepts_only_exact_canonical_chain(
+    tmp_path: Path,
+) -> None:
+    now = datetime(2026, 8, 28, 12, 0, tzinfo=UTC)
+    task_root = tmp_path / "rondo-plan099-test"
+    task_root.mkdir()
+    resource = _resource_receipt()
+    lifecycle = authorize_pod_lifecycle(
+        _budget_snapshot(), resource, maximum_lifecycle_seconds=7200, now=now
+    )
+    segment = authorize_paid_segment(
+        _budget_snapshot(), lifecycle, maximum_seconds=3600, now=now
+    )
+    values = {
+        "live-resource": resource,
+        "lifecycle": lifecycle,
+        "segment": segment,
+    }
+    paths: dict[str, Path] = {}
+    for role, value in values.items():
+        directory = task_root / "runtime-control" / role
+        directory.mkdir(parents=True)
+        path = directory / f"{value['content_sha256']}.json"
+        path.write_bytes(pretty_json_bytes(value))
+        path.chmod(0o600)
+        paths[role] = path
+        assert validate_runtime_control_file(role, path, task_root) == value
+    assert validate_runtime_control_chain(resource, lifecycle, segment) == {
+        "resource": resource,
+        "lifecycle": lifecycle,
+        "segment": segment,
+    }
+
+    wrong_path = task_root / "runtime-control" / "live-resource" / ("0" * 64 + ".json")
+    wrong_path.write_bytes(pretty_json_bytes(resource))
+    wrong_path.chmod(0o600)
+    with pytest.raises(FullModelTrainingError, match="plan099_runtime_control_invalid"):
+        validate_runtime_control_file("live-resource", wrong_path, task_root)
+
+    noncanonical = paths["segment"]
+    noncanonical.write_bytes(json.dumps(segment, sort_keys=True).encode("utf-8"))
+    with pytest.raises(FullModelTrainingError, match="plan099_runtime_control_invalid"):
+        validate_runtime_control_file("segment", noncanonical, task_root)
+
+    paths["live-resource"].chmod(0o644)
+    with pytest.raises(FullModelTrainingError, match="plan099_runtime_control_invalid"):
+        validate_runtime_control_file(
+            "live-resource", paths["live-resource"], task_root
+        )
+    paths["live-resource"].chmod(0o600)
+
+    oversized_root = tmp_path / "rondo-plan099-oversized"
+    oversized = (
+        oversized_root
+        / "runtime-control/live-resource"
+        / f"{resource['content_sha256']}.json"
+    )
+    oversized.parent.mkdir(parents=True)
+    oversized.write_bytes(b" " * (16 * 1024 + 1))
+    oversized.chmod(0o600)
+    with pytest.raises(FullModelTrainingError, match="regular_file_too_large"):
+        validate_runtime_control_file("live-resource", oversized, oversized_root)
+
+    symlink_root = tmp_path / "rondo-plan099-symlink"
+    symlink = (
+        symlink_root
+        / "runtime-control/live-resource"
+        / f"{resource['content_sha256']}.json"
+    )
+    symlink.parent.mkdir(parents=True)
+    symlink.symlink_to(paths["live-resource"])
+    with pytest.raises(FullModelTrainingError, match="regular_file_required"):
+        validate_runtime_control_file("live-resource", symlink, symlink_root)
+
+    other_resource = _resource_receipt(prior_wall_seconds=1)
+    other_lifecycle = authorize_pod_lifecycle(
+        _budget_snapshot(),
+        other_resource,
+        maximum_lifecycle_seconds=7199,
+        now=now,
+    )
+    other_segment = authorize_paid_segment(
+        _budget_snapshot(), other_lifecycle, maximum_seconds=3600, now=now
+    )
+    with pytest.raises(
+        FullModelTrainingError, match="plan099_runtime_control_chain_invalid"
+    ):
+        validate_runtime_control_chain(resource, other_lifecycle, other_segment)
+
+    assert os.stat(paths["live-resource"]).st_mode & 0o777 == 0o600
 
 
 def test_fake_formal_checkpoint_first_recovery_selection_and_retention(

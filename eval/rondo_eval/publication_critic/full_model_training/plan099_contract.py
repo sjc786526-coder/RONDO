@@ -15,7 +15,9 @@ from ..successor_task import DIMENSION_CLASSES, HARD_DIMENSIONS
 from .contract import (
     FullModelTrainingError,
     canonical_json_bytes,
+    pretty_json_bytes,
     read_json,
+    regular_file,
     sha256_file,
 )
 
@@ -52,6 +54,13 @@ LIFECYCLE_SCHEMA = "rondo-publication-critic-plan099-pod-lifecycle-authorization
 ASSESSMENT_SCHEMA = "rondo-publication-critic-plan099-development-assessment-v1"
 WORKER_KILL_GRACE_SECONDS = 60
 TERMINAL_CONFIRMATION_SECONDS = 360
+MAXIMUM_TASK_POD_WALL_SECONDS = 10800
+MAXIMUM_RUNTIME_CONTROL_BYTES = 16 * 1024
+RUNTIME_CONTROL_ROLES = {
+    "live-resource": LIVE_RESOURCE_SCHEMA,
+    "lifecycle": LIFECYCLE_SCHEMA,
+    "segment": SEGMENT_SCHEMA,
+}
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 _COMMIT = re.compile(r"[0-9a-f]{40}\Z")
 _IDENTIFIER = re.compile(r"[a-z0-9][a-z0-9._-]{0,127}\Z")
@@ -450,8 +459,6 @@ def authorize_pod_lifecycle(
         not isinstance(maximum_lifecycle_seconds, int)
         or isinstance(maximum_lifecycle_seconds, bool)
         or maximum_lifecycle_seconds <= 0
-        or maximum_lifecycle_seconds > 10800
-        or resource["task_prior_pod_wall_seconds"] + maximum_lifecycle_seconds > 10800
         or not -30.0 <= (observed - captured).total_seconds() <= 300.0
         or not -30.0 <= (observed - resource_captured).total_seconds() <= 300.0
         or not -30.0 <= (observed - started).total_seconds() <= 300.0
@@ -462,6 +469,11 @@ def authorize_pod_lifecycle(
         + WORKER_KILL_GRACE_SECONDS
         + TERMINAL_CONFIRMATION_SECONDS
     )
+    cumulative_billable_seconds = (
+        resource["task_prior_pod_wall_seconds"] + billable_seconds
+    )
+    if cumulative_billable_seconds > MAXIMUM_TASK_POD_WALL_SECONDS:
+        raise FullModelTrainingError("plan099_lifecycle_invalid")
     rate = float(resource["compute_rate_usd_per_hour"]) + float(
         resource["container_rate_usd_per_hour"]
     )
@@ -472,7 +484,9 @@ def authorize_pod_lifecycle(
         + float(budget["closure_reserve_usd"])
     )
     _require_budget_capacity(budget, lifecycle_cost, upper_bound)
-    trigger = started + timedelta(seconds=maximum_lifecycle_seconds)
+    trigger = started + timedelta(
+        seconds=maximum_lifecycle_seconds + WORKER_KILL_GRACE_SECONDS
+    )
     core = {
         "schema": LIFECYCLE_SCHEMA,
         "authorized_at": observed.isoformat().replace("+00:00", "Z"),
@@ -481,11 +495,13 @@ def authorize_pod_lifecycle(
         "pod_id": resource["pod_id"],
         "pod_name": resource["pod_name"],
         "pod_started_at": resource["pod_started_at"],
+        "task_prior_pod_wall_seconds": resource["task_prior_pod_wall_seconds"],
         "maximum_lifecycle_seconds": maximum_lifecycle_seconds,
         "termination_trigger_at": trigger.isoformat().replace("+00:00", "Z"),
         "worker_kill_grace_seconds": WORKER_KILL_GRACE_SECONDS,
         "terminal_confirmation_seconds": TERMINAL_CONFIRMATION_SECONDS,
         "billable_seconds_upper_bound": billable_seconds,
+        "cumulative_billable_seconds_upper_bound": cumulative_billable_seconds,
         "compute_rate_usd_per_hour": float(resource["compute_rate_usd_per_hour"]),
         "container_rate_usd_per_hour": float(resource["container_rate_usd_per_hour"]),
         "lifecycle_cost_upper_bound_usd": lifecycle_cost,
@@ -507,11 +523,13 @@ def validate_pod_lifecycle_authorization(value: Any) -> dict[str, Any]:
         "pod_id",
         "pod_name",
         "pod_started_at",
+        "task_prior_pod_wall_seconds",
         "maximum_lifecycle_seconds",
         "termination_trigger_at",
         "worker_kill_grace_seconds",
         "terminal_confirmation_seconds",
         "billable_seconds_upper_bound",
+        "cumulative_billable_seconds_upper_bound",
         "compute_rate_usd_per_hour",
         "container_rate_usd_per_hour",
         "lifecycle_cost_upper_bound_usd",
@@ -528,9 +546,16 @@ def validate_pod_lifecycle_authorization(value: Any) -> dict[str, Any]:
     )
     _timestamp(value.get("authorized_at"), "plan099_lifecycle_invalid")
     maximum = value.get("maximum_lifecycle_seconds")
-    if not isinstance(maximum, int) or isinstance(maximum, bool):
+    prior_wall = value.get("task_prior_pod_wall_seconds")
+    if (
+        not isinstance(maximum, int)
+        or isinstance(maximum, bool)
+        or not isinstance(prior_wall, int)
+        or isinstance(prior_wall, bool)
+    ):
         raise FullModelTrainingError("plan099_lifecycle_invalid")
     billable = maximum + WORKER_KILL_GRACE_SECONDS + TERMINAL_CONFIRMATION_SECONDS
+    cumulative_billable = prior_wall + billable
     compute = _nonnegative(
         value.get("compute_rate_usd_per_hour"), "plan099_lifecycle_invalid"
     )
@@ -547,11 +572,13 @@ def validate_pod_lifecycle_authorization(value: Any) -> dict[str, Any]:
         or not isinstance(value.get("pod_name"), str)
         or not value["pod_name"].startswith("rondo-plan099-")
         or maximum <= 0
-        or maximum > 10800
-        or trigger != started + timedelta(seconds=maximum)
+        or prior_wall < 0
+        or cumulative_billable > MAXIMUM_TASK_POD_WALL_SECONDS
+        or trigger != started + timedelta(seconds=maximum + WORKER_KILL_GRACE_SECONDS)
         or value.get("worker_kill_grace_seconds") != WORKER_KILL_GRACE_SECONDS
         or value.get("terminal_confirmation_seconds") != TERMINAL_CONFIRMATION_SECONDS
         or value.get("billable_seconds_upper_bound") != billable
+        or value.get("cumulative_billable_seconds_upper_bound") != cumulative_billable
         or not math.isclose(
             float(value.get("lifecycle_cost_upper_bound_usd", -1)),
             expected_cost,
@@ -695,6 +722,87 @@ def validate_paid_segment_authorization(value: Any) -> dict[str, Any]:
     ):
         _nonnegative(value.get(key), "plan099_segment_authorization_invalid")
     return json.loads(json.dumps(value))
+
+
+def validate_runtime_control_file(
+    role: str,
+    path: Path | str,
+    task_root: Path | str,
+) -> dict[str, Any]:
+    """Validate one of the three exact host-to-Pod runtime JSON controls."""
+
+    if role not in RUNTIME_CONTROL_ROLES:
+        raise FullModelTrainingError("plan099_runtime_control_invalid")
+    root = Path(task_root).resolve(strict=True)
+    candidate = Path(path)
+    file_path = regular_file(candidate, maximum_bytes=MAXIMUM_RUNTIME_CONTROL_BYTES)
+    resolved = file_path.resolve(strict=True)
+    try:
+        relative = resolved.relative_to(root)
+    except ValueError as exc:
+        raise FullModelTrainingError("plan099_runtime_control_invalid") from exc
+    raw = file_path.read_bytes()
+    try:
+        value = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise FullModelTrainingError("plan099_runtime_control_invalid") from exc
+    validators = {
+        "live-resource": validate_live_resource_receipt,
+        "lifecycle": validate_pod_lifecycle_authorization,
+        "segment": validate_paid_segment_authorization,
+    }
+    validated = validators[role](value)
+    expected = Path("runtime-control") / role / (f"{validated['content_sha256']}.json")
+    if (
+        relative != expected
+        or candidate.absolute() != root / expected
+        or raw != pretty_json_bytes(validated)
+        or (file_path.stat().st_mode & 0o777) != 0o600
+    ):
+        raise FullModelTrainingError("plan099_runtime_control_invalid")
+    return validated
+
+
+def validate_runtime_control_chain(
+    resource: Any,
+    lifecycle: Any,
+    segment: Any,
+) -> dict[str, dict[str, Any]]:
+    """Validate the cross-hashes and immutable resource values for a worker call."""
+
+    checked_resource = validate_live_resource_receipt(resource)
+    checked_lifecycle = validate_pod_lifecycle_authorization(lifecycle)
+    checked_segment = validate_paid_segment_authorization(segment)
+    if (
+        checked_lifecycle["live_resource_receipt_sha256"]
+        != checked_resource["content_sha256"]
+        or checked_lifecycle["pod_id"] != checked_resource["pod_id"]
+        or checked_lifecycle["pod_name"] != checked_resource["pod_name"]
+        or checked_lifecycle["task_prior_pod_wall_seconds"]
+        != checked_resource["task_prior_pod_wall_seconds"]
+        or checked_lifecycle["compute_rate_usd_per_hour"]
+        != checked_resource["compute_rate_usd_per_hour"]
+        or checked_lifecycle["container_rate_usd_per_hour"]
+        != checked_resource["container_rate_usd_per_hour"]
+        or checked_segment["pod_lifecycle_authorization_sha256"]
+        != checked_lifecycle["content_sha256"]
+        or checked_segment["pod_id"] != checked_lifecycle["pod_id"]
+        or checked_segment["pod_name"] != checked_lifecycle["pod_name"]
+        or checked_segment["termination_trigger_at"]
+        != checked_lifecycle["termination_trigger_at"]
+        or checked_segment["compute_rate_usd_per_hour"]
+        != checked_lifecycle["compute_rate_usd_per_hour"]
+        or checked_segment["container_rate_usd_per_hour"]
+        != checked_lifecycle["container_rate_usd_per_hour"]
+        or checked_lifecycle["cumulative_billable_seconds_upper_bound"]
+        > MAXIMUM_TASK_POD_WALL_SECONDS
+    ):
+        raise FullModelTrainingError("plan099_runtime_control_chain_invalid")
+    return {
+        "resource": checked_resource,
+        "lifecycle": checked_lifecycle,
+        "segment": checked_segment,
+    }
 
 
 def _require_budget_capacity(
@@ -906,6 +1014,11 @@ def _validate_resource_contract(value: Any) -> dict[str, Any]:
         or value["network_volume"].get("id") != "mwemzrn33y"
         or value["pods"].get("maximum_simultaneous_billing") != 1
         or value["pods"].get("maximum_total_wall_seconds") != 10800
+        or value["pods"].get("maximum_lifecycle_seconds") != 10380
+        or value["pods"].get("maximum_total_wall_formula")
+        != "prior+maximum_lifecycle+worker_kill_grace+terminal_confirmation"
+        or value["pods"].get("task_prior_pod_wall_seconds_definition")
+        != "conservative_sum_from_provider_start_to_zero_pod_confirmation"
         or value["pods"].get("maximum_cumulative_created") != 2
         or value["network_volume"].get("maximum_new_volumes") != 0
         or value["budget"].get("recharge_allowed") is not False
@@ -914,7 +1027,10 @@ def _validate_resource_contract(value: Any) -> dict[str, Any]:
             "profile": "plan099",
             "arm_within_authorization_seconds": 60,
             "termination_trigger_basis": (
-                "pod_started_at_plus_maximum_lifecycle_seconds"
+                "pod_started_at_plus_maximum_lifecycle_seconds_plus_worker_kill_grace_seconds"
+            ),
+            "confirmation_deadline_basis": (
+                "termination_trigger_at_plus_terminal_confirmation_seconds"
             ),
             "reviewer_approval_required_at_trigger": False,
             "normal_early_release_still_reviewer_gated": True,
@@ -938,6 +1054,7 @@ def _validate_asset_contract(value: Any) -> dict[str, Any]:
         or remote.get("revision") != MODEL_REVISION
         or "model.safetensors" not in remote.get("files", ())
         or value.get("local_namespace") != "eval-data/publication-critic/plan099"
+        or value.get("upload_allowlist_scope") != "phase_a_static_only"
         or value.get("upload_allowlist")
         != [
             "phase-a/source-bundle.tar",
@@ -945,6 +1062,17 @@ def _validate_asset_contract(value: Any) -> dict[str, Any]:
             "phase-a/data-bundle.tar",
             "phase-a/data-bundle-receipt.json",
         ]
+        or value.get("runtime_control_upload_allowlist")
+        != {
+            "canonical_json_required": True,
+            "file_mode": "0600",
+            "maximum_file_bytes": MAXIMUM_RUNTIME_CONTROL_BYTES,
+            "path_template": ("runtime-control/{role}/{content_sha256}.json"),
+            "roles": [
+                {"role": role, "schema": schema}
+                for role, schema in RUNTIME_CONTROL_ROLES.items()
+            ],
+        }
         or ".env.local" not in value.get("forbidden", ())
     ):
         raise FullModelTrainingError("plan099_asset_contract_invalid")
@@ -1133,10 +1261,13 @@ def validate_namespace(value: str, *, run_kind: str) -> str:
 __all__ = [
     "ASSESSMENT_SCHEMA",
     "BUDGET_SCHEMA",
+    "MAXIMUM_RUNTIME_CONTROL_BYTES",
+    "MAXIMUM_TASK_POD_WALL_SECONDS",
     "MODEL_REPOSITORY",
     "MODEL_REVISION",
     "MODEL_WEIGHT_SHA256",
     "REPO_ROOT",
+    "RUNTIME_CONTROL_ROLES",
     "SEGMENT_SCHEMA",
     "V10_MANIFEST_SHA256",
     "assess_development_checkpoint",
@@ -1151,5 +1282,7 @@ __all__ = [
     "validate_namespace",
     "validate_paid_segment_authorization",
     "validate_pod_lifecycle_authorization",
+    "validate_runtime_control_chain",
+    "validate_runtime_control_file",
     "validate_source_identity",
 ]

@@ -31,8 +31,8 @@ development-only `publication-critic-v10`，只形成一套本地可运行的五
   代替用户作出本阶段准入决定。只有审查者完成独立审查、记录决定，并通过指定队列明确回复批准及最终冻结的 provider、区域/硬件、时间、
   动态预算、Pod/卷数量、资产传输、commissioning、技术恢复/重跑和收口边界后，本阶段授权才生效；不需要再等待一次用户回复。
   未收到该明确批准时，任何真实模型、RunPod、上传下载、训练、卷变更或费用动作都不得开始。阶段 B 内另设 Pod 预释放审查门：核心训练、恢复、
-  候选冻结和必要回传完成后先提交并停止等待审查；审查者确认不再需要 GPU/Pod 后明确批准释放，执行者立即 stop/delete Pod并确认 compute
-  `$0/h`，随后只在本地完成文档、结果和任务收口。
+  候选冻结和必要回传完成后先提交并停止等待审查；正常提前释放须由审查者确认不再需要 GPU/Pod 后明确批准，执行者立即 stop/delete Pod并确认
+  compute `$0/h`，随后只在本地完成文档、结果和任务收口。不可移动 absolute trigger 先到时是唯一无需 queue receipt 的自动 exact-Pod 止费例外。
 
 ### 完成/验收标准
 
@@ -58,8 +58,9 @@ development-only `publication-critic-v10`，只形成一套本地可运行的五
       若未形成候选，保留足以解释有效负向结论的同口径证据，不把 validation 表述为 qualification。
 - [ ] 若形成候选，工作包四所需的完整 inference-ready 模型工件（包含全部学生/五头推理权重及必要 config/tokenizer/input identity）已下载至本地
       Plan 099 ignored namespace 并完成 exact-tree/bytes/SHA-256 校验；除验收必需小型证据外，完整训练 checkpoint 等大型资产留在网络卷。
-- [ ] 阶段 B 核心任务完成后，执行者先提交 Pod 预释放审查；审查者确认权重回传、云端保留和后续资格前置充分且不再需要 Pod 后，明确批准释放。
-      执行者随即 stop/delete 全部任务 compute Pod并实时确认 compute `$0/h`，之后才在本地整理最终文档与完成记录。
+- [ ] 阶段 B 核心任务完成后，执行者先提交 Pod 预释放审查；正常提前释放须待审查者确认权重回传、云端保留和后续资格前置充分且不再需要 Pod 后，
+      明确批准释放。执行者随即 stop/delete 全部任务 compute Pod并实时确认 compute `$0/h`，之后才在本地整理最终文档与完成记录；不可移动
+      absolute trigger 是唯一无需 queue receipt 的自动 exact-Pod 止费例外。
 - [ ] 费用完整结算；卷、缓存和大型资产终态清楚；Pod 释放后的本地收口不为整理文档继续占用计费 compute。
 - [ ] 最终独立审查分别给出“验收通过/不通过”和“任务目标完成/失败”，并明确终态是候选冻结、有效训练 `NO-GO` 或真正未闭合的 `INCONCLUSIVE`。
 
@@ -156,9 +157,13 @@ trainable scope、精确训练强度或普通调试顺序，这些由执行者�
 
     该余额是不可突破上限，不是花费目标，也不授权充值。Pod、容器盘、任务期间卷费、模型/数据传输、commissioning、formal、恢复、回传和止费
     都计入同一总账；启动任何长步骤前必须确认剩余预算足够完成该步骤、候选权重完整回传、Pod 预释放审查等待和安全止费，否则不启动或立即止费。
+    所有任务 Pod 的累计计费墙钟硬上限为 10,800 秒；对当前 Pod 必须机械满足
+    `prior wall + maximum lifecycle + 60 秒 worker kill grace + 360 秒终态确认 <= 10800`。
 11. **资源与抢卡。** 阶段 A 的付费申请必须冻结 RunPod 区域、单卡硬件、最长墙钟、同时/累计 Pod 与卷数量、exact image/environment、上传下载
     allowlist、现有 `mwemzrn33y` 的复用资格或新建/扩容/删除策略，以及最终保留/删除动作。历史 Plan 082/087/090/094 roots 保持只读；若复用
-    `mwemzrn33y`，只写 Plan 099 独立 root。库存紧张时必须使用 `scripts/create-runpod-when-ready.py`；创建后由执行者独立核验实际价格、硬件、
+    `mwemzrn33y`，只写 Plan 099 独立 root。静态上传只含两份 bundle 及两份 receipt；Pod 创建核验后的 runtime host→Pod 上传只含
+    live-resource、lifecycle、paid-segment 三类 canonical content-addressed JSON，不开放任意 JSON 或其他资产。库存紧张时必须使用
+    `scripts/create-runpod-when-ready.py`；创建后由执行者独立核验实际价格、硬件、
     机房和卷挂载，不符则立即释放，不能让创建脚本承担这些职责。
 12. **候选回传与 Pod 预释放门。** 候选模型、decision config、tokenizer/input、recipe、开发结果与恢复证据须形成校验和一致的冻结集合。
     若形成候选，必须在 Pod 预释放审查前把工作包四所需的完整 inference-ready 模型工件（全部学生/五头推理权重及必要 config/tokenizer/input）
@@ -167,7 +172,8 @@ trainable scope、精确训练强度或普通调试顺序，这些由执行者�
 13. **先审查、再释放 Pod、后本地收口。** 阶段 B 核心训练、fresh-process 恢复、正式评价、候选/`NO-GO` 冻结、必要模型/证据回传和仍依赖 GPU
     的验证全部完成后，执行者先提交 tracked 变动、保持 worktree clean，通过 §7 队列申请 Pod 预释放审查并停止。审查者确认不再需要 Pod 后，
     通过队列明确批准释放；执行者立即 stop/delete 全部任务 compute Pod并实时确认 0 Pod / compute `$0/h`，随后在无 Pod 状态下整理最终结果、
-    WBS、COMPLETED 和日志。审查未通过时只做审查者要求的必要 GPU 整改，不提前删除 Pod；批准释放后不得仅为文档整理重建 Pod。
+    WBS、COMPLETED 和日志。审查未通过时只做审查者要求的必要 GPU 整改，不正常提前删除 Pod；不可移动 absolute trigger 先到时由已武装 guard
+    无需 queue receipt 自动 exact stop/delete 并确认 0 Pod / compute `$0/h`，这是守住 10,800 秒硬上限的唯一例外。批准释放后不得仅为文档整理重建 Pod。
 14. **测试与诚实口径。** 只运行受影响模块必要的 pure/fake/focused 门禁和相称格式/静态检查；若改 Rust，遵循共享 target/build-lock 规则，
     不默认扩大全 workspace。fake、dry-run、commissioning、formal、skip 和未运行必须分开记录，不以弱化测试、安全门或审批逻辑换取绿色结果。
 15. **提交与下游边界。** 阶段 A、Pod 预释放、整改和最终交付都先提交 099 分支再向审查者报告；不合并、不推送。工作包四的冻结测试、横评、最终产品 GO/NO-GO
@@ -206,11 +212,14 @@ trainable scope、精确训练强度或普通调试顺序，这些由执行者�
   生成并完成独立解包、合并与 freeze 复验；阶段 A 未运行真实模型、GPU/RunPod/Docker/付费 API，未上传资产或读取禁止正文。
 - 2026-08-29：首轮独立验收确认五项付费前阻断；阶段 A 已整改 checkpoint 裁剪后五点评价复核、无 config 终态、step 12 续训、checkpoint/retention
   崩溃重入、isolated venv 复用 exact image Torch，并以 Plan 094 guard 的固定 Plan 099 profile 补齐 10,800 秒绝对截止自动止费。Plan 099、
-  Plan 094 guard 与 Plan 087 terminal focused 合计 `22/22` 通过，等待重建 commit-bound bundle 后申请复验。
+  Plan 094 guard 与 Plan 087 terminal focused 合计 `22/22` 通过。
+- 2026-08-29：整改复验确认 venv symlink、累计墙钟口径及 runtime control 上传边界三项剩余阻断；已改用 copied venv 并真实复用 worker 判定，
+  冻结 `prior + lifecycle + 60 + 360 <= 10800` 与 absolute-trigger 唯一自动释放例外，并只开放三类 canonical/content-addressed runtime JSON。
+  Plan 099 focused `14/14`、Plan 094/087 回归 `9/9`、freeze/Ruff/compile/shell/diff 门通过，等待绑定最终整改提交的四份 bundle/receipt 后申请复验。
 
 ### 当前工作
 
-- `PHASE_A_REMEDIATED_AWAITING_REREVIEW / PHASE_B_REVIEWER_GATED`。
+- `PHASE_A_SECOND_REMEDIATED_AWAITING_REREVIEW / PHASE_B_REVIEWER_GATED`。
 
 ### 本任务剩余步骤
 
@@ -222,14 +231,14 @@ trainable scope、精确训练强度或普通调试顺序，这些由执行者�
 
 ### 阻塞项
 
-- 阶段 A 首轮 findings 已在既有授权内整改，正在等待新提交与 bundle 绑定完成后的独立复验。
+- 阶段 A 整改复验 findings 已在既有授权内窄修，正在等待新提交与 bundle 绑定完成后的再次独立复验。
 - 阶段 B 在审查者完成阶段 A 独立验收并通过指定队列明确批准前保持锁定。
 - 阶段 B 核心任务完成后，Pod 删除由 Pod 预释放审查门控制；当前尚未进入该门。
 
 ### 当前验收状态
 
 - 规划：`COMPLETED / COMMITTED`。
-- 阶段 A：`REMEDIATED / AWAITING_INDEPENDENT_REREVIEW`。
+- 阶段 A：`SECOND_REMEDIATION_COMPLETE / AWAITING_INDEPENDENT_REREVIEW`。
 - 阶段 B：`REVIEWER_GATED / NOT_AUTHORIZED_YET`。
 - 完整任务：`IN_PROGRESS / PHASE_B_NOT_STARTED`。
 
@@ -261,6 +270,7 @@ trainable scope、精确训练强度或普通调试顺序，这些由执行者�
 | 012 | 开发准入固定使用 12 项 bounded margin grid、全 pair 闭合、五头非塌缩、gate FP≤3/FR≤4/BA≥0.75、逐头 failure recall 与 macro recall 下限，并要求相对 step zero 严格改善或新获准入 | 在正式结果出现前把风险门和 tie-break 固定，validation 只承担开发选择 | 开发评价、NO-GO | 已采纳 |
 | 013 | 五点评价作为 write-once 小型证据全部保留，完整 checkpoint 仍只留 best/latest/step 8；候选只要求最佳完整 checkpoint 在线，并允许早期无 decision config 的点不参与排名 | 同时满足五点轨迹复核、三 checkpoint 体积上限与早期不可判定语义，不把评价证据误当完整权重 | 候选、保留、NO-GO | 已采纳 |
 | 014 | 正常提前释放仍由 reviewer receipt 解锁；不可移动绝对 trigger 由 Plan 094 guard 的固定 Plan 099 profile 自动 exact stop/delete 并确认 0 Pod、compute `$0/h` | queue 等待不能突破累计墙钟和动态预算，deadline 安全终止不应依赖人工及时响应 | 生命周期、费用、审批 | 已采纳 |
+| 015 | `maximum_lifecycle_seconds` 是 Pod 主体窗口；累计计费上限机械包含 60 秒 kill grace 与 360 秒确认。runtime host→Pod 只开放 resource/lifecycle/segment 三类 16 KiB canonical content-addressed JSON | 使 10,800 秒硬上限覆盖最坏收口，同时只传 worker 必需控制面，不扩大任意上传能力 | 生命周期、资产传输 | 已采纳 |
 
 ## 7. 给执行者的启动提示词
 
@@ -289,8 +299,9 @@ provider/区域/硬件/时限、Pod/卷数量、动态预算、上传下载 allo
 阶段 B 核心训练、fresh-process 恢复、正式评价、候选/`NO-GO` 冻结、必要 GPU 验证和回传完成后，不要先花时间整理全部文档。若形成候选，必须先把
 完整 inference-ready 学生/五头模型权重及必要 config/tokenizer/input identity 下载到主物理根 Plan 099 ignored namespace，完成 exact-tree、bytes、
 SHA-256 校验；完整训练 checkpoint、optimizer state 和其他大型资产留在网络卷，只回传验收必需的小型证据。然后提交当前 tracked 变动、保持
-worktree clean，通过同一队列以“Plan 099 阶段 B 核心任务与 Pod 预释放准备”申请审查并停止。只有审查者明确确认不再需要 Pod、批准释放后，
-才立即 stop/delete 全部任务 Pod并实时确认 0 Pod / compute `$0/h`；之后在无 Pod 状态下慢慢整理本地结果、WBS、COMPLETED 和日志，再提交并申请
+worktree clean，通过同一队列以“Plan 099 阶段 B 核心任务与 Pod 预释放准备”申请审查并停止。正常提前释放只有在审查者明确确认不再需要 Pod、
+批准释放后才执行；不可移动 absolute trigger 先到是唯一无需 queue receipt 的自动 exact-Pod 止费例外。释放后实时确认 0 Pod / compute `$0/h`；
+之后在无 Pod 状态下慢慢整理本地结果、WBS、COMPLETED 和日志，再提交并申请
 最终验收。Pod 预释放审查未通过时，只完成审查者要求的必要 GPU 整改；批准释放后不得为文档整理重建 Pod。
 
 联系审查者，需要照如下的指定方法，使用 Codex 的跨会话队列，不要通过文件、终端输出或人工提醒传递消息。执行：
@@ -324,5 +335,6 @@ XXX用以下内容代替：
 
 上述原文中的“如果验收通过，他不会再通知你”只适用于最终完整任务验收。阶段 A 通过后，审查者必须通过同一 Codex queue 明确通知执行者，
 写明“Plan 099 阶段 A 验收通过，批准进入阶段 B”及完整外部边界；执行者在收到该消息前保持停止，不自行轮询或进入阶段 B。
-阶段 B 核心任务完成后的 Pod 预释放审查同样必须由审查者通过队列明确回复“确认不再需要 Pod，批准立即释放”；执行者收到后先释放并复核 0 Pod，
-再继续无 Pod 的本地收口。该中间审查也使用上面的阶段性任务模板，`<阶段性任务>` 填写“Plan 099 阶段 B 核心任务与 Pod 预释放准备”。
+阶段 B 核心任务完成后的正常提前释放同样必须由审查者通过队列明确回复“确认不再需要 Pod，批准立即释放”；执行者收到后先释放并复核 0 Pod，
+再继续无 Pod 的本地收口。不可移动 absolute trigger 先到时由 guard 自动止费，无需等待该回复。该中间审查也使用上面的阶段性任务模板，
+`<阶段性任务>` 填写“Plan 099 阶段 B 核心任务与 Pod 预释放准备”。

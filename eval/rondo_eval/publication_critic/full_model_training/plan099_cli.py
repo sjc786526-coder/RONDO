@@ -36,10 +36,9 @@ from .plan099_contract import (
     freeze_sha256,
     load_freeze,
     validate_budget_snapshot,
-    validate_live_resource_receipt,
     validate_namespace,
-    validate_paid_segment_authorization,
-    validate_pod_lifecycle_authorization,
+    validate_runtime_control_chain,
+    validate_runtime_control_file,
     validate_source_identity,
 )
 from .plan099_data import (
@@ -463,30 +462,28 @@ def _require_stage_b(args: argparse.Namespace) -> dict[str, Any]:
         args.segment_authorization,
     ):
         _scoped_path(path, task_root, require_existing=True)
-    resource = validate_live_resource_receipt(read_json(args.resource_receipt))
-    lifecycle = validate_pod_lifecycle_authorization(
-        read_json(args.lifecycle_authorization)
+    resource = validate_runtime_control_file(
+        "live-resource", args.resource_receipt, task_root
     )
-    segment = validate_paid_segment_authorization(read_json(args.segment_authorization))
+    lifecycle = validate_runtime_control_file(
+        "lifecycle", args.lifecycle_authorization, task_root
+    )
+    segment = validate_runtime_control_file(
+        "segment", args.segment_authorization, task_root
+    )
+    authorization = validate_runtime_control_chain(resource, lifecycle, segment)
     now = datetime.now(timezone.utc)
     authorized = datetime.fromisoformat(segment["authorized_at"].replace("Z", "+00:00"))
     termination = datetime.fromisoformat(
         segment["termination_trigger_at"].replace("Z", "+00:00")
     )
     if (
-        lifecycle["live_resource_receipt_sha256"] != resource["content_sha256"]
-        or resource["task_prior_pod_wall_seconds"]
-        + lifecycle["maximum_lifecycle_seconds"]
-        > 10800
-        or segment["pod_lifecycle_authorization_sha256"] != lifecycle["content_sha256"]
-        or segment["pod_id"] != resource["pod_id"]
-        or segment["pod_name"] != resource["pod_name"]
-        or os.getenv("RONDO_PLAN099_MAX_SECONDS") != str(segment["maximum_seconds"])
+        os.getenv("RONDO_PLAN099_MAX_SECONDS") != str(segment["maximum_seconds"])
         or not -30.0 <= (now - authorized).total_seconds() <= 300.0
         or now >= termination
     ):
         raise FullModelTrainingError("plan099_stage_b_authorization_mismatch")
-    return {"resource": resource, "lifecycle": lifecycle, "segment": segment}
+    return authorization
 
 
 def verify_candidate_handoff(root: Path) -> dict[str, Any]:

@@ -24,6 +24,9 @@
     "maximum_cumulative_created": 2,
     "replacement_only_after_exact_absence": true,
     "maximum_total_wall_seconds": 10800,
+    "maximum_lifecycle_seconds": 10380,
+    "maximum_total_wall_formula": "prior+maximum_lifecycle+worker_kill_grace+terminal_confirmation",
+    "task_prior_pod_wall_seconds_definition": "conservative_sum_from_provider_start_to_zero_pod_confirmation",
     "automatic_create_script": "scripts/create-runpod-when-ready.py"
   },
   "budget": {
@@ -35,7 +38,8 @@
     "absolute_deadline_guard": {
       "profile": "plan099",
       "arm_within_authorization_seconds": 60,
-      "termination_trigger_basis": "pod_started_at_plus_maximum_lifecycle_seconds",
+      "termination_trigger_basis": "pod_started_at_plus_maximum_lifecycle_seconds_plus_worker_kill_grace_seconds",
+      "confirmation_deadline_basis": "termination_trigger_at_plus_terminal_confirmation_seconds",
       "reviewer_approval_required_at_trigger": false,
       "normal_early_release_still_reviewer_gated": true
     }

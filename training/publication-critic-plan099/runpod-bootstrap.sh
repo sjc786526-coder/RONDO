@@ -35,7 +35,7 @@ PYTHONPATH="$bootstrap_source/eval" python3 -B -P -m \
   --data-sha256 "$RONDO_PLAN099_DATA_SHA256" --commit "$RONDO_PLAN099_SOURCE_COMMIT" \
   --output "$source_root"
 
-python3 -m venv --system-site-packages "$task_root/venv"
+python3 -m venv --copies --system-site-packages "$task_root/venv"
 "$task_root/venv/bin/python" -B -P -c \
   'import torch; assert torch.__version__ == "2.8.0+cu128"; assert torch.version.cuda == "12.8"'
 "$task_root/venv/bin/python" -m pip install --disable-pip-version-check \
