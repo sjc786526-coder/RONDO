@@ -27,6 +27,7 @@ SOURCE_BUNDLE_SCHEMA = "rondo-publication-critic-plan099-source-bundle-v1"
 DATA_BUNDLE_SCHEMA = "rondo-publication-critic-plan099-data-bundle-v1"
 SOURCE_PATHS = (
     "doc/rondo-multi-publication-critic-task-contract-v2.md",
+    "doc/rondo-multi-publication-critic-product-contract.md",
     "doc/rondo-multi-publication-critic-decision-contract-v1.md",
     "eval/model-locks/publication-critic/skywork-reward-v2-qwen3-1.7b-e51ea3e0.json",
     "eval/pyproject.toml",
@@ -57,6 +58,7 @@ DATA_PATHS = (
     "training/publication-critic-v10/splits/validation/pairs.jsonl",
 )
 REQUIRED_SOURCE_MEMBERS = {
+    "doc/rondo-multi-publication-critic-product-contract.md",
     "eval/rondo_eval/publication_critic/full_model_training/plan099_artifacts.py",
     "eval/rondo_eval/publication_critic/full_model_training/plan099_bundle.py",
     "eval/rondo_eval/publication_critic/full_model_training/plan099_cli.py",

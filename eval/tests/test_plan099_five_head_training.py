@@ -21,6 +21,10 @@ from rondo_eval.publication_critic.full_model_training.contract import (
 from rondo_eval.publication_critic.full_model_training.plan099_artifacts import (
     Plan099ArtifactStore,
 )
+from rondo_eval.publication_critic.full_model_training.plan099_bundle import (
+    REQUIRED_SOURCE_MEMBERS,
+    SOURCE_PATHS,
+)
 from rondo_eval.publication_critic.full_model_training.plan099_cli import (
     _export_candidate,
     _resume_checkpoint,
@@ -66,6 +70,9 @@ from rondo_eval.publication_critic.full_model_training.plan099_training import (
 from rondo_eval.publication_critic.qualification import (
     evaluate_qualification_predictions,
 )
+from rondo_eval.publication_critic.successor_build import (
+    ACCEPTED_IMPLEMENTATION_COMPONENT_PATHS,
+)
 from rondo_eval.publication_critic.successor_task import (
     DIMENSION_CLASSES,
     HARD_DIMENSIONS,
@@ -82,6 +89,18 @@ GUARD_SPEC = importlib.util.spec_from_file_location(
 assert GUARD_SPEC is not None and GUARD_SPEC.loader is not None
 guard = importlib.util.module_from_spec(GUARD_SPEC)
 GUARD_SPEC.loader.exec_module(guard)
+
+
+def test_source_bundle_closes_development_release_contract_dependencies() -> None:
+    for relative in ACCEPTED_IMPLEMENTATION_COMPONENT_PATHS:
+        assert any(
+            relative == allowed or relative.startswith(f"{allowed}/")
+            for allowed in SOURCE_PATHS
+        ), relative
+    assert (
+        "doc/rondo-multi-publication-critic-product-contract.md"
+        in REQUIRED_SOURCE_MEMBERS
+    )
 
 
 def test_freeze_and_v10_entrypoints_expose_only_development_splits() -> None:

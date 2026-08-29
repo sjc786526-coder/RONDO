@@ -1,6 +1,6 @@
 {
   "algorithm": "sha256-canonical-component-list-v1",
-  "bundle_sha256": "81c2fbc3d22a18929154a994f1b6b5293d56f59e12eceb6a4a8c918ba4e15f15",
+  "bundle_sha256": "e5cdb8cc7537b4693c717091802bf4558e6ef8d393f2ba6701558a74725473eb",
   "components": [
     {"path": "training/publication-critic-plan099/model-contract-v1.json", "sha256": "6571a12b0f357b8bc93130f7ed48b74bedaaa08e133bae287a9873346a8231c4"},
     {"path": "training/publication-critic-plan099/recipe-v1.json", "sha256": "6f62fd65a48ba99cf2675c39215fbf7f7da99d5884171964c81908862d8b8d56"},
@@ -26,7 +26,7 @@
     {"path": "eval/rondo_eval/publication_critic/qualification.py", "sha256": "258a20771179c973965e83c732cad229d631c4ac7f879729d74bc7c2f94d0bfe"},
     {"path": "eval/rondo_eval/publication_critic/directional_data.py", "sha256": "7871dd36b38d48cb4162b10a29e601162869fd94126a24f4028432e39c5fa6ea"},
     {"path": "eval/rondo_eval/publication_critic/full_model_training/plan099_artifacts.py", "sha256": "0b805dff970706baf5346b12505c9dae21d07f18c8ed52901619df6d4cb5e3f0"},
-    {"path": "eval/rondo_eval/publication_critic/full_model_training/plan099_bundle.py", "sha256": "26dc6553aa5e5dbfc9cef47b5ed34e5eb9f1845b55994b5e2e8c2dd770404542"},
+    {"path": "eval/rondo_eval/publication_critic/full_model_training/plan099_bundle.py", "sha256": "f164697e46bfb27979daf665bbdae3212db7fdb9fea6db6a804ca1bbc64a51df"},
     {"path": "eval/rondo_eval/publication_critic/full_model_training/plan099_cli.py", "sha256": "292f626d4c3c4270647e4091102e6e6a549f411acce9728514c9f5eb192bcb26"},
     {"path": "eval/rondo_eval/publication_critic/full_model_training/plan099_contract.py", "sha256": "f5cf185d70772f8bfe9217e6644392e2c1aca722a29c9fc26f6632d52786d677"},
     {"path": "eval/rondo_eval/publication_critic/full_model_training/plan099_data.py", "sha256": "99725ab5ce44e24778b73fe9e1886d1d79d834ca3145b70ad86e2daca69b5a14"},
