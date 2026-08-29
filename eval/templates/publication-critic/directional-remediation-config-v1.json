@@ -1,0 +1,30 @@
+{
+  "schema": "rondo-publication-critic-directional-remediation-config@v1",
+  "design_lock": {
+    "path": "eval/templates/publication-critic/directional-remediation-design-v1.json",
+    "sha256": "be259651812726163665e0894f3b5d6e7e1924e375754e6faf7fa1ae7bb1f68f"
+  },
+  "ignored_root": "/home/sjc/desktop/RONDO/eval-data/publication-critic/plan098",
+  "development_patches": [
+    {
+      "module_id": "hard-boundaries",
+      "source": "directional-remediation/patches/hard-boundaries.json",
+      "review": "directional-remediation/reviews/hard-boundaries.json"
+    },
+    {
+      "module_id": "continuity-context",
+      "source": "directional-remediation/patches/continuity-context.json",
+      "review": "directional-remediation/reviews/continuity-context.json"
+    },
+    {
+      "module_id": "soft-combinations",
+      "source": "directional-remediation/patches/soft-combinations.json",
+      "review": "directional-remediation/reviews/soft-combinations.json"
+    }
+  ],
+  "qualification_source": "qualification-set/source.json",
+  "qualification_review": "qualification-set/review.json",
+  "development_output": "training/publication-critic-v10",
+  "qualification_output": "training/publication-critic-qualification-v1",
+  "runtime": "eval/rondo_eval/publication_critic/directional_data.py"
+}

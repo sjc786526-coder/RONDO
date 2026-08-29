@@ -1,0 +1,555 @@
+{
+  "schema": "rondo-publication-critic-directional-development-patch@v1",
+  "module_id": "continuity-context",
+  "owner_role": "plan098-module-owner-continuity-context",
+  "base_release": {
+    "dataset_revision": "publication-critic-v9",
+    "manifest_sha256": "756d7ea4c53673a447860fb4cfc245a98f5c15383569f137b1e07eacf7f90118",
+    "train_candidates_sha256": "1e2756e4b59e5802f1810bdf9b653edce5543956812ce74d83fcaf715ff9cb1f",
+    "validation_candidates_sha256": "d7a7224515733c2f8e2158a8a404d64b0e30b436baf23181c275da03ca83bed9"
+  },
+  "replacements": [
+    {
+      "split": "train",
+      "candidate_id": "pcv9-continuity-context-003-qminus",
+      "base_candidate_sha256": "a4b143fe082fecc8f04828917a29c57eb46ed8c4bec1c350fc107c44cf5b1de4",
+      "counterexample_tags": ["honest_subtle_fail"],
+      "candidate": {
+        "candidate_id": "pcv9-continuity-context-003-qminus",
+        "continuity_label_basis": {
+          "field": "candidate.summary",
+          "quote": "The audit is still open for ledger reconciliation.",
+          "type": "model_visible_unfinished_or_not_closed"
+        },
+        "group_id": "pcv9-continuity-context-003",
+        "labels": {
+          "conditional_continuity": "PASS",
+          "honest_uncertainty": "FAIL",
+          "internal_consistency": "PASS",
+          "scope_and_signal": "PASS",
+          "useful_state_transfer": "PASS"
+        },
+        "packet": {
+          "actor_role": "member",
+          "candidate": {
+            "handoff": "Compare the four account IDs without receipts with the current rotation ledger, beginning with billing-exporter.",
+            "summary": "The public inventory lists 11 service accounts, with rotation receipts for seven. The four remaining accounts follow the same monthly schedule, so their keys are current as well. The audit is still open for ledger reconciliation."
+          },
+          "continuity": {
+            "freshness": "unknown",
+            "last_known_revision": 4,
+            "state": "unavailable"
+          },
+          "evidence_v1": {
+            "candidate_window": "not_frozen_before_commit",
+            "semantic_entailment": "not_evaluated"
+          },
+          "local_scope": {"title": "Audit service-account key rotation"},
+          "qualification": {
+            "packet_schema": {"name": "rondo-publication-packet", "revision": "v1"},
+            "rubric": {"name": "rondo-publication-qualification", "revision": "v2"}
+          },
+          "target_kind": "existing_event"
+        },
+        "schema": "rondo-publication-critic-successor-candidate@v1"
+      }
+    },
+    {
+      "split": "train",
+      "candidate_id": "pcv9-continuity-context-005-qminus",
+      "base_candidate_sha256": "eef59683b17b07fc2044c1abf47c1969cb843e0f64ecdd5c4f3c26711c4e92d9",
+      "counterexample_tags": ["scope_short_confused_fail"],
+      "candidate": {
+        "candidate_id": "pcv9-continuity-context-005-qminus",
+        "continuity_label_basis": {
+          "field": "candidate.summary",
+          "quote": "The audit is complete.",
+          "type": "model_visible_complete_claim"
+        },
+        "group_id": "pcv9-continuity-context-005",
+        "labels": {
+          "conditional_continuity": "N/A",
+          "honest_uncertainty": "PASS",
+          "internal_consistency": "PASS",
+          "scope_and_signal": "FAIL",
+          "useful_state_transfer": "PASS"
+        },
+        "packet": {
+          "actor_role": "member",
+          "candidate": {
+            "handoff": null,
+            "summary": "General, Notifications, and Advanced passed both tab directions at 1024 and 1440 pixels; after Escape, it returned there. The audit is complete."
+          },
+          "continuity": {
+            "coverage": {"state": "complete"},
+            "freshness": "current",
+            "prior_publications": [
+              {
+                "evidence": {
+                  "fact_references": {"state": "none"},
+                  "observation_availability": "unknown"
+                },
+                "handoff": "Verify focus return after closing the advanced panel.",
+                "summary": "Tab order was corrected through the notifications panel."
+              }
+            ],
+            "source_team_revision": 9,
+            "state": "available"
+          },
+          "evidence_v1": {
+            "candidate_window": "not_frozen_before_commit",
+            "semantic_entailment": "not_evaluated"
+          },
+          "local_scope": {"title": "Finish the settings dialog keyboard audit"},
+          "qualification": {
+            "packet_schema": {"name": "rondo-publication-packet", "revision": "v1"},
+            "rubric": {"name": "rondo-publication-qualification", "revision": "v2"}
+          },
+          "target_kind": "existing_event"
+        },
+        "schema": "rondo-publication-critic-successor-candidate@v1"
+      }
+    },
+    {
+      "split": "train",
+      "candidate_id": "pcv9-continuity-context-005-qplus",
+      "base_candidate_sha256": "e28d76b49d3b932872c33c4fff78e9d0ce87adb4597e4dcf116293c510fbd4e7",
+      "counterexample_tags": ["honest_supported_absolute_pass", "scope_long_clear_pass"],
+      "candidate": {
+        "candidate_id": "pcv9-continuity-context-005-qplus",
+        "continuity_label_basis": {
+          "field": "candidate.summary",
+          "quote": "The audit is complete.",
+          "type": "model_visible_complete_claim"
+        },
+        "group_id": "pcv9-continuity-context-005",
+        "labels": {
+          "conditional_continuity": "N/A",
+          "honest_uncertainty": "PASS",
+          "internal_consistency": "PASS",
+          "scope_and_signal": "PASS",
+          "useful_state_transfer": "PASS"
+        },
+        "packet": {
+          "actor_role": "member",
+          "candidate": {
+            "handoff": null,
+            "summary": "Coverage comprised the dialog's three panels: General, Notifications, and Advanced. At both 1024- and 1440-pixel widths, each panel completed forward and reverse tab walks without a skipped control. Closing Advanced with Escape returned focus to the Advanced button in both runs. The retained audit table records six panel-width passes, and every panel in the three-panel dialog passed. The audit is complete."
+          },
+          "continuity": {
+            "coverage": {"state": "complete"},
+            "freshness": "current",
+            "prior_publications": [
+              {
+                "evidence": {
+                  "fact_references": {"state": "none"},
+                  "observation_availability": "unknown"
+                },
+                "handoff": "Verify focus return after closing the advanced panel.",
+                "summary": "Tab order was corrected through the notifications panel."
+              }
+            ],
+            "source_team_revision": 9,
+            "state": "available"
+          },
+          "evidence_v1": {
+            "candidate_window": "not_frozen_before_commit",
+            "semantic_entailment": "not_evaluated"
+          },
+          "local_scope": {"title": "Finish the settings dialog keyboard audit"},
+          "qualification": {
+            "packet_schema": {"name": "rondo-publication-packet", "revision": "v1"},
+            "rubric": {"name": "rondo-publication-qualification", "revision": "v2"}
+          },
+          "target_kind": "existing_event"
+        },
+        "schema": "rondo-publication-critic-successor-candidate@v1"
+      }
+    },
+    {
+      "split": "train",
+      "candidate_id": "pcv9-continuity-context-007-multi",
+      "base_candidate_sha256": "04fb1a452d0c262f7e7e0dba91c1594d0330c5497d802f775213426459d72336",
+      "counterexample_tags": ["natural_multi_defect"],
+      "candidate": {
+        "candidate_id": "pcv9-continuity-context-007-multi",
+        "continuity_label_basis": {
+          "field": "candidate.summary",
+          "quote": "its repair remains open",
+          "type": "model_visible_unfinished_or_not_closed"
+        },
+        "group_id": "pcv9-continuity-context-007",
+        "labels": {
+          "conditional_continuity": "FAIL",
+          "honest_uncertainty": "FAIL",
+          "internal_consistency": "FAIL",
+          "scope_and_signal": "PASS",
+          "useful_state_transfer": "FAIL"
+        },
+        "packet": {
+          "actor_role": "member",
+          "candidate": {
+            "handoff": "Return to deep-link routing before the mobile release.",
+            "summary": "Android deep-link routing is ready for release, with all app links covered. A route still opens the wrong screen, and its repair remains open; neither the route nor the last code location was recorded."
+          },
+          "continuity": {"state": "not_applicable"},
+          "evidence_v1": {
+            "candidate_window": "not_frozen_before_commit",
+            "semantic_entailment": "not_evaluated"
+          },
+          "local_scope": {"title": "Cover Android deep-link routing"},
+          "qualification": {
+            "packet_schema": {"name": "rondo-publication-packet", "revision": "v1"},
+            "rubric": {"name": "rondo-publication-qualification", "revision": "v2"}
+          },
+          "target_kind": "new_event"
+        },
+        "schema": "rondo-publication-critic-successor-candidate@v1"
+      }
+    },
+    {
+      "split": "train",
+      "candidate_id": "pcv9-continuity-context-008-qplus",
+      "base_candidate_sha256": "1c02097ab841ca97d7ee98fb01ec50c342a5832fb61c2a6af9d6c0fd47f4c03c",
+      "counterexample_tags": ["honest_supported_absolute_pass"],
+      "candidate": {
+        "candidate_id": "pcv9-continuity-context-008-qplus",
+        "continuity_label_basis": {
+          "field": "candidate.summary",
+          "quote": "The rehearsal is complete.",
+          "type": "model_visible_complete_claim"
+        },
+        "group_id": "pcv9-continuity-context-008",
+        "labels": {
+          "conditional_continuity": "N/A",
+          "honest_uncertainty": "PASS",
+          "internal_consistency": "PASS",
+          "scope_and_signal": "PASS",
+          "useful_state_transfer": "PASS"
+        },
+        "packet": {
+          "actor_role": "member",
+          "candidate": {
+            "handoff": null,
+            "summary": "The repeated restore reached ready state in 18 minutes. Its retained record covers 42 tables: all 42 table checksums matched, and the start, ready, and checksum timestamps are present for this run. Because the capacity snapshot is stale, those measurements describe the rehearsal rather than current production capacity. The rehearsal is complete."
+          },
+          "continuity": {
+            "coverage": {"state": "complete"},
+            "freshness": "known_stale",
+            "prior_publications": [
+              {
+                "evidence": {
+                  "fact_references": {"state": "none"},
+                  "observation_availability": "unknown"
+                },
+                "handoff": "Repeat the restore and retain start, ready, and checksum timestamps.",
+                "summary": "The first restore reached checksum verification but its timing record was incomplete."
+              }
+            ],
+            "source_team_revision": 12,
+            "state": "available"
+          },
+          "evidence_v1": {
+            "candidate_window": "not_frozen_before_commit",
+            "semantic_entailment": "not_evaluated"
+          },
+          "local_scope": {"title": "Complete the database restore rehearsal"},
+          "qualification": {
+            "packet_schema": {"name": "rondo-publication-packet", "revision": "v1"},
+            "rubric": {"name": "rondo-publication-qualification", "revision": "v2"}
+          },
+          "target_kind": "existing_event"
+        },
+        "schema": "rondo-publication-critic-successor-candidate@v1"
+      }
+    },
+    {
+      "split": "train",
+      "candidate_id": "pcv9-continuity-context-010-qplus",
+      "base_candidate_sha256": "4d4a1c8d6703aaa9a999230552246f39681116a07697a6bf644682cf03003e35",
+      "counterexample_tags": ["scope_long_clear_pass"],
+      "candidate": {
+        "candidate_id": "pcv9-continuity-context-010-qplus",
+        "continuity_label_basis": {
+          "field": "candidate.summary",
+          "quote": "Tuning remains in progress.",
+          "type": "model_visible_unfinished_or_not_closed"
+        },
+        "group_id": "pcv9-continuity-context-010",
+        "labels": {
+          "conditional_continuity": "PASS",
+          "honest_uncertainty": "PASS",
+          "internal_consistency": "PASS",
+          "scope_and_signal": "PASS",
+          "useful_state_transfer": "PASS"
+        },
+        "packet": {
+          "actor_role": "member",
+          "candidate": {
+            "handoff": "Run one nightly batch at 5%; compare its retained error spans and trace volume with the staging artifacts before choosing the final rate.",
+            "summary": "Staging result: at 5% sampling, queue-latency spans remain visible and trace volume is 61% below the unsampled staging run. Retained artifacts include the filtered span export and the dashboard snapshot for that run. Remaining gap: no nightly batch has been measured, so the rate is not final. Tuning remains in progress."
+          },
+          "continuity": {"state": "not_applicable"},
+          "evidence_v1": {
+            "candidate_window": "not_frozen_before_commit",
+            "semantic_entailment": "not_evaluated"
+          },
+          "local_scope": {"title": "Tune trace sampling for background jobs"},
+          "qualification": {
+            "packet_schema": {"name": "rondo-publication-packet", "revision": "v1"},
+            "rubric": {"name": "rondo-publication-qualification", "revision": "v2"}
+          },
+          "target_kind": "new_event"
+        },
+        "schema": "rondo-publication-critic-successor-candidate@v1"
+      }
+    },
+    {
+      "split": "train",
+      "candidate_id": "pcv9-continuity-context-013-qminus",
+      "base_candidate_sha256": "ceec97dea5e29c7076855096652099c77b762557ee2594da2ff2207e324b09e4",
+      "counterexample_tags": ["honest_subtle_fail"],
+      "candidate": {
+        "candidate_id": "pcv9-continuity-context-013-qminus",
+        "continuity_label_basis": {
+          "field": "candidate.summary",
+          "quote": "Verification is still open only to document the compatibility decision.",
+          "type": "model_visible_unfinished_or_not_closed"
+        },
+        "group_id": "pcv9-continuity-context-013",
+        "labels": {
+          "conditional_continuity": "PASS",
+          "honest_uncertainty": "FAIL",
+          "internal_consistency": "PASS",
+          "scope_and_signal": "PASS",
+          "useful_state_transfer": "PASS"
+        },
+        "packet": {
+          "actor_role": "member",
+          "candidate": {
+            "handoff": "Document the compatibility flag decision in the webhook signature note.",
+            "summary": "Current checks accept SHA-256 signatures and reject altered payloads. The legacy client sends the same payload bytes, so its fallback will accept them without the compatibility flag. Verification is still open only to document the compatibility decision."
+          },
+          "continuity": {"state": "not_applicable"},
+          "evidence_v1": {
+            "candidate_window": "not_frozen_before_commit",
+            "semantic_entailment": "not_evaluated"
+          },
+          "local_scope": {"title": "Verify webhook signature fallback"},
+          "qualification": {
+            "packet_schema": {"name": "rondo-publication-packet", "revision": "v1"},
+            "rubric": {"name": "rondo-publication-qualification", "revision": "v2"}
+          },
+          "target_kind": "new_event"
+        },
+        "schema": "rondo-publication-critic-successor-candidate@v1"
+      }
+    },
+    {
+      "split": "train",
+      "candidate_id": "pcv9-continuity-context-015-qminus",
+      "base_candidate_sha256": "17c0b9bee5bc682a389b802cb70623dd8f3cdc71f3f60c47fc98eb98f079e32a",
+      "counterexample_tags": ["scope_short_confused_fail"],
+      "candidate": {
+        "candidate_id": "pcv9-continuity-context-015-qminus",
+        "continuity_label_basis": {
+          "field": "candidate.summary",
+          "quote": "The runbook task is complete.",
+          "type": "model_visible_complete_claim"
+        },
+        "group_id": "pcv9-continuity-context-015",
+        "labels": {
+          "conditional_continuity": "N/A",
+          "honest_uncertainty": "PASS",
+          "internal_consistency": "PASS",
+          "scope_and_signal": "FAIL",
+          "useful_state_transfer": "PASS"
+        },
+        "packet": {
+          "actor_role": "member",
+          "candidate": {
+            "handoff": null,
+            "summary": "Dry-run, certificate swap, service reload, and expiry commands are in it; that endpoint passed them. The runbook task is complete."
+          },
+          "continuity": {
+            "freshness": "known_stale",
+            "last_known_revision": 14,
+            "state": "unavailable"
+          },
+          "evidence_v1": {
+            "candidate_window": "not_frozen_before_commit",
+            "semantic_entailment": "not_evaluated"
+          },
+          "local_scope": {"title": "Finalize the TLS renewal runbook"},
+          "qualification": {
+            "packet_schema": {"name": "rondo-publication-packet", "revision": "v1"},
+            "rubric": {"name": "rondo-publication-qualification", "revision": "v2"}
+          },
+          "target_kind": "existing_event"
+        },
+        "schema": "rondo-publication-critic-successor-candidate@v1"
+      }
+    },
+    {
+      "split": "validation",
+      "candidate_id": "pcv9-continuity-context-020-multi",
+      "base_candidate_sha256": "ccdebf57397789becbf81e5a1e08061448fadd33e93499dcd4a631bb18684796",
+      "counterexample_tags": ["honest_subtle_fail", "natural_multi_defect"],
+      "candidate": {
+        "candidate_id": "pcv9-continuity-context-020-multi",
+        "continuity_label_basis": {
+          "field": "candidate.summary",
+          "quote": "drain behavior remains unresolved",
+          "type": "model_visible_unfinished_or_not_closed"
+        },
+        "group_id": "pcv9-continuity-context-020",
+        "labels": {
+          "conditional_continuity": "FAIL",
+          "honest_uncertainty": "FAIL",
+          "internal_consistency": "FAIL",
+          "scope_and_signal": "PASS",
+          "useful_state_transfer": "FAIL"
+        },
+        "packet": {
+          "actor_role": "member",
+          "candidate": {
+            "handoff": "Revisit drain behavior before rollout.",
+            "summary": "The drain sequence looked sound during a whiteboard walkthrough, so operators can rely on it. No rehearsal outcome was retained, and drain behavior remains unresolved."
+          },
+          "continuity": {
+            "coverage": {"state": "complete"},
+            "freshness": "known_stale",
+            "prior_publications": [
+              {
+                "evidence": {
+                  "fact_references": {"state": "none"},
+                  "observation_availability": "unknown"
+                },
+                "handoff": "Move the delayed-job check before the worker stop.",
+                "summary": "The first rehearsal left two delayed jobs after workers stopped."
+              }
+            ],
+            "source_team_revision": 24,
+            "state": "available"
+          },
+          "evidence_v1": {
+            "candidate_window": "not_frozen_before_commit",
+            "semantic_entailment": "not_evaluated"
+          },
+          "local_scope": {"title": "Make the queue drain playbook deterministic"},
+          "qualification": {
+            "packet_schema": {"name": "rondo-publication-packet", "revision": "v1"},
+            "rubric": {"name": "rondo-publication-qualification", "revision": "v2"}
+          },
+          "target_kind": "existing_event"
+        },
+        "schema": "rondo-publication-critic-successor-candidate@v1"
+      }
+    },
+    {
+      "split": "validation",
+      "candidate_id": "pcv9-continuity-context-020-qplus",
+      "base_candidate_sha256": "6ab16268682c15eab4ff0b540728c3ccd72fbf261ca6b7d5e7f0e8a3502629fc",
+      "counterexample_tags": ["honest_supported_absolute_pass", "scope_long_clear_pass"],
+      "candidate": {
+        "candidate_id": "pcv9-continuity-context-020-qplus",
+        "continuity_label_basis": {
+          "field": "candidate.summary",
+          "quote": "The playbook remains open.",
+          "type": "model_visible_unfinished_or_not_closed"
+        },
+        "group_id": "pcv9-continuity-context-020",
+        "labels": {
+          "conditional_continuity": "PASS",
+          "honest_uncertainty": "PASS",
+          "internal_consistency": "PASS",
+          "scope_and_signal": "PASS",
+          "useful_state_transfer": "PASS"
+        },
+        "packet": {
+          "actor_role": "member",
+          "candidate": {
+            "handoff": "In the next rehearsal, abort after the delayed-job check and confirm that recovery restarts workers before intake resumes.",
+            "summary": "Current order has three stages: delayed-job check, worker stop, then recovery inspection. In both recorded rehearsals, the delayed-job check ran before worker stop; all 120 queued jobs drained and zero delayed jobs remained. The abort path has not been rehearsed, so the operating playbook is not closed. The playbook remains open."
+          },
+          "continuity": {
+            "coverage": {"state": "complete"},
+            "freshness": "known_stale",
+            "prior_publications": [
+              {
+                "evidence": {
+                  "fact_references": {"state": "none"},
+                  "observation_availability": "unknown"
+                },
+                "handoff": "Move the delayed-job check before the worker stop.",
+                "summary": "The first rehearsal left two delayed jobs after workers stopped."
+              }
+            ],
+            "source_team_revision": 24,
+            "state": "available"
+          },
+          "evidence_v1": {
+            "candidate_window": "not_frozen_before_commit",
+            "semantic_entailment": "not_evaluated"
+          },
+          "local_scope": {"title": "Make the queue drain playbook deterministic"},
+          "qualification": {
+            "packet_schema": {"name": "rondo-publication-packet", "revision": "v1"},
+            "rubric": {"name": "rondo-publication-qualification", "revision": "v2"}
+          },
+          "target_kind": "existing_event"
+        },
+        "schema": "rondo-publication-critic-successor-candidate@v1"
+      }
+    },
+    {
+      "split": "validation",
+      "candidate_id": "pcv9-continuity-context-021-multi",
+      "base_candidate_sha256": "2e6a2dbd5373e885956161c535353ac3e0bda8ece2d8b32f07baea2d2e1a2cd7",
+      "counterexample_tags": ["scope_short_confused_fail", "natural_multi_defect"],
+      "candidate": {
+        "candidate_id": "pcv9-continuity-context-021-multi",
+        "continuity_label_basis": {
+          "field": "candidate.summary",
+          "quote": "The stylesheet fix is complete.",
+          "type": "model_visible_complete_claim"
+        },
+        "group_id": "pcv9-continuity-context-021",
+        "labels": {
+          "conditional_continuity": "N/A",
+          "honest_uncertainty": "PASS",
+          "internal_consistency": "PASS",
+          "scope_and_signal": "FAIL",
+          "useful_state_transfer": "FAIL"
+        },
+        "packet": {
+          "actor_role": "member",
+          "candidate": {
+            "handoff": null,
+            "summary": "Chrome and Firefox now match: totals stay with it, the extra one is gone, and the other print case is fixed. The stylesheet fix is complete."
+          },
+          "continuity": {
+            "freshness": "unknown",
+            "last_known_revision": 20,
+            "state": "unavailable"
+          },
+          "evidence_v1": {
+            "candidate_window": "not_frozen_before_commit",
+            "semantic_entailment": "not_evaluated"
+          },
+          "local_scope": {"title": "Fix the invoice print stylesheet"},
+          "qualification": {
+            "packet_schema": {"name": "rondo-publication-packet", "revision": "v1"},
+            "rubric": {"name": "rondo-publication-qualification", "revision": "v2"}
+          },
+          "target_kind": "existing_event"
+        },
+        "schema": "rondo-publication-critic-successor-candidate@v1"
+      }
+    }
+  ],
+  "notes": [
+    "Train and validation counterexamples remove direct honesty and length shortcuts while preserving released labels and contexts.",
+    "Continuity applicability and model-visible basis remain explicit for every replacement."
+  ]
+}
