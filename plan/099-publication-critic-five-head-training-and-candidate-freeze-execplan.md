@@ -204,10 +204,13 @@ trainable scope、精确训练强度或普通调试顺序，这些由执行者�
 - 2026-08-29：阶段 A 冻结 exact Skywork 1.7B base、五头 linear-probe recipe、开发准入门、checkpoint-first 恢复、候选 exact-tree、动态预算与
   RunPod 生命周期设施；pure/fake/focused `6/6`、freeze CLI、Ruff、compile、shell/diff 门通过。source/data bundle 已在提交后从 exact commit
   生成并完成独立解包、合并与 freeze 复验；阶段 A 未运行真实模型、GPU/RunPod/Docker/付费 API，未上传资产或读取禁止正文。
+- 2026-08-29：首轮独立验收确认五项付费前阻断；阶段 A 已整改 checkpoint 裁剪后五点评价复核、无 config 终态、step 12 续训、checkpoint/retention
+  崩溃重入、isolated venv 复用 exact image Torch，并以 Plan 094 guard 的固定 Plan 099 profile 补齐 10,800 秒绝对截止自动止费。Plan 099、
+  Plan 094 guard 与 Plan 087 terminal focused 合计 `22/22` 通过，等待重建 commit-bound bundle 后申请复验。
 
 ### 当前工作
 
-- `PHASE_A_IMPLEMENTED_COMMITTED_AWAITING_REVIEW / PHASE_B_REVIEWER_GATED`。
+- `PHASE_A_REMEDIATED_AWAITING_REREVIEW / PHASE_B_REVIEWER_GATED`。
 
 ### 本任务剩余步骤
 
@@ -219,14 +222,14 @@ trainable scope、精确训练强度或普通调试顺序，这些由执行者�
 
 ### 阻塞项
 
-- 阶段 A 实现已提交，正在等待指定队列的独立验收。
+- 阶段 A 首轮 findings 已在既有授权内整改，正在等待新提交与 bundle 绑定完成后的独立复验。
 - 阶段 B 在审查者完成阶段 A 独立验收并通过指定队列明确批准前保持锁定。
 - 阶段 B 核心任务完成后，Pod 删除由 Pod 预释放审查门控制；当前尚未进入该门。
 
 ### 当前验收状态
 
 - 规划：`COMPLETED / COMMITTED`。
-- 阶段 A：`IMPLEMENTED / COMMITTED / AWAITING_INDEPENDENT_REVIEW`。
+- 阶段 A：`REMEDIATED / AWAITING_INDEPENDENT_REREVIEW`。
 - 阶段 B：`REVIEWER_GATED / NOT_AUTHORIZED_YET`。
 - 完整任务：`IN_PROGRESS / PHASE_B_NOT_STARTED`。
 
@@ -256,6 +259,8 @@ trainable scope、精确训练强度或普通调试顺序，这些由执行者�
 | 010 | 唯一主方案冻结为 exact Skywork Reward V2 Qwen3 1.7B BF16 backbone，加五个独立 FP32 无 bias linear heads；只训练 22,528 个 head 参数，16 次 full-cohort update | 与既有本地运行目标、48GB L40S、v2 五头语义和有限预算直接匹配，不引入第二路线或 adapter-only 交付 | 模型、scope、recipe | 已采纳 |
 | 011 | 正式点固定为 2/4/8/12/16，step 8 与最终最佳点都须新进程复现；任何进程中断只从 checkpoint-first 外部状态恢复 | 同时证明中程继续训练与最终候选本体可恢复，避免可编辑 controller state 冒充 checkpoint 证据 | checkpoint、恢复、候选 | 已采纳 |
 | 012 | 开发准入固定使用 12 项 bounded margin grid、全 pair 闭合、五头非塌缩、gate FP≤3/FR≤4/BA≥0.75、逐头 failure recall 与 macro recall 下限，并要求相对 step zero 严格改善或新获准入 | 在正式结果出现前把风险门和 tie-break 固定，validation 只承担开发选择 | 开发评价、NO-GO | 已采纳 |
+| 013 | 五点评价作为 write-once 小型证据全部保留，完整 checkpoint 仍只留 best/latest/step 8；候选只要求最佳完整 checkpoint 在线，并允许早期无 decision config 的点不参与排名 | 同时满足五点轨迹复核、三 checkpoint 体积上限与早期不可判定语义，不把评价证据误当完整权重 | 候选、保留、NO-GO | 已采纳 |
+| 014 | 正常提前释放仍由 reviewer receipt 解锁；不可移动绝对 trigger 由 Plan 094 guard 的固定 Plan 099 profile 自动 exact stop/delete 并确认 0 Pod、compute `$0/h` | queue 等待不能突破累计墙钟和动态预算，deadline 安全终止不应依赖人工及时响应 | 生命周期、费用、审批 | 已采纳 |
 
 ## 7. 给执行者的启动提示词
 

@@ -11,13 +11,13 @@ from pathlib import Path
 from typing import Any
 
 from ..qualification import decision_implementation_identity
-from ..successor_task import DIMENSION_CLASSES
-from ..successor_task import HARD_DIMENSIONS
-from .contract import FullModelTrainingError
-from .contract import canonical_json_bytes
-from .contract import read_json
-from .contract import sha256_file
-
+from ..successor_task import DIMENSION_CLASSES, HARD_DIMENSIONS
+from .contract import (
+    FullModelTrainingError,
+    canonical_json_bytes,
+    read_json,
+    sha256_file,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 PLAN_ROOT = Path("training/publication-critic-plan099")
@@ -93,6 +93,8 @@ def load_freeze(repo_root: Path | str = REPO_ROOT) -> dict[str, Any]:
         "training/publication-critic-plan099/runpod-bootstrap.sh",
         "training/publication-critic-plan099/runpod-release.py",
         "training/publication-critic-plan099/runpod-worker.sh",
+        "training/publication-critic-plan094/runpod-lifecycle-guard.py",
+        "training/publication-critic-plan087/runpod-terminal.py",
         "eval/model-locks/publication-critic/skywork-reward-v2-qwen3-1.7b-e51ea3e0.json",
         "doc/rondo-multi-publication-critic-task-contract-v2.md",
         "doc/rondo-multi-publication-critic-decision-contract-v1.md",
@@ -318,7 +320,7 @@ def validate_budget_snapshot(value: Any) -> dict[str, Any]:
     numbers = {
         key: _nonnegative(value.get(key), "plan099_budget_value_invalid")
         for key in required
-        if key.endswith("_usd") or key.endswith("_usd_per_hour")
+        if key.endswith(("_usd", "_usd_per_hour"))
     }
     expected_budget = max(
         numbers["stage_b_baseline_available_balance_usd"]
@@ -907,6 +909,18 @@ def _validate_resource_contract(value: Any) -> dict[str, Any]:
         or value["pods"].get("maximum_cumulative_created") != 2
         or value["network_volume"].get("maximum_new_volumes") != 0
         or value["budget"].get("recharge_allowed") is not False
+        or value["budget"].get("absolute_deadline_guard")
+        != {
+            "profile": "plan099",
+            "arm_within_authorization_seconds": 60,
+            "termination_trigger_basis": (
+                "pod_started_at_plus_maximum_lifecycle_seconds"
+            ),
+            "reviewer_approval_required_at_trigger": False,
+            "normal_early_release_still_reviewer_gated": True,
+        }
+        or value.get("resource_end_state", {}).get("absolute_deadline_exception")
+        != "automatic_exact_pod_stop_delete_and_zero_compute_confirmation"
     ):
         raise FullModelTrainingError("plan099_resource_contract_invalid")
     return json.loads(json.dumps(value))
@@ -1133,9 +1147,9 @@ __all__ = [
     "freeze_sha256",
     "load_freeze",
     "validate_budget_snapshot",
+    "validate_live_resource_receipt",
     "validate_namespace",
     "validate_paid_segment_authorization",
-    "validate_live_resource_receipt",
     "validate_pod_lifecycle_authorization",
     "validate_source_identity",
 ]

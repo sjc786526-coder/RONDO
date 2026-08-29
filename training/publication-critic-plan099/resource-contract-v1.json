@@ -31,12 +31,20 @@
     "recharge_allowed": false,
     "must_cover": ["commissioning", "formal", "recovery", "candidate_download", "pod_prerelease_review_wait", "pod_stop_delete_confirmation"],
     "worker_kill_grace_seconds": 60,
-    "terminal_confirmation_seconds": 360
+    "terminal_confirmation_seconds": 360,
+    "absolute_deadline_guard": {
+      "profile": "plan099",
+      "arm_within_authorization_seconds": 60,
+      "termination_trigger_basis": "pod_started_at_plus_maximum_lifecycle_seconds",
+      "reviewer_approval_required_at_trigger": false,
+      "normal_early_release_still_reviewer_gated": true
+    }
   },
   "resource_end_state": {
     "task_pods": 0,
     "compute_rate_usd_per_hour": 0.0,
     "network_volume": "retain_existing_with_plan099_large_checkpoints",
-    "pod_release_requires_reviewer_message": "确认不再需要 Pod，批准立即释放"
+    "pod_release_requires_reviewer_message": "确认不再需要 Pod，批准立即释放",
+    "absolute_deadline_exception": "automatic_exact_pod_stop_delete_and_zero_compute_confirmation"
   }
 }

@@ -1,21 +1,17 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
-from datetime import datetime, timezone
+import subprocess
+from collections.abc import Mapping
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
+from unittest.mock import patch
 
 import pytest
 
-from rondo_eval.publication_critic.qualification import (
-    evaluate_qualification_predictions,
-)
-from rondo_eval.publication_critic.successor_task import (
-    DIMENSION_CLASSES,
-    HARD_DIMENSIONS,
-    evaluate_pair_predictions,
-)
 from rondo_eval.publication_critic.full_model_training.contract import (
     FullModelTrainingError,
     canonical_json_bytes,
@@ -24,12 +20,18 @@ from rondo_eval.publication_critic.full_model_training.contract import (
 from rondo_eval.publication_critic.full_model_training.plan099_artifacts import (
     Plan099ArtifactStore,
 )
+from rondo_eval.publication_critic.full_model_training.plan099_cli import (
+    _export_candidate,
+    _resume_checkpoint,
+    verify_candidate_handoff,
+)
 from rondo_eval.publication_critic.full_model_training.plan099_contract import (
     assess_development_checkpoint,
     authorize_paid_segment,
     authorize_pod_lifecycle,
     load_freeze,
     validate_budget_snapshot,
+    validate_pod_lifecycle_authorization,
 )
 from rondo_eval.publication_critic.full_model_training.plan099_data import (
     commissioning_dataset,
@@ -47,10 +49,27 @@ from rondo_eval.publication_critic.full_model_training.plan099_objective import 
 )
 from rondo_eval.publication_critic.full_model_training.plan099_training import (
     Plan099TrainingController,
+    validate_terminal_candidate,
+)
+from rondo_eval.publication_critic.qualification import (
+    evaluate_qualification_predictions,
+)
+from rondo_eval.publication_critic.successor_task import (
+    DIMENSION_CLASSES,
+    HARD_DIMENSIONS,
+    evaluate_pair_predictions,
 )
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
+LIFECYCLE_GUARD = (
+    REPO_ROOT / "training/publication-critic-plan094/runpod-lifecycle-guard.py"
+)
+GUARD_SPEC = importlib.util.spec_from_file_location(
+    "plan099_lifecycle_guard_profile", LIFECYCLE_GUARD
+)
+assert GUARD_SPEC is not None and GUARD_SPEC.loader is not None
+guard = importlib.util.module_from_spec(GUARD_SPEC)
+GUARD_SPEC.loader.exec_module(guard)
 
 
 def test_freeze_and_v10_entrypoints_expose_only_development_splits() -> None:
@@ -133,51 +152,10 @@ def test_development_gate_accepts_exact_gold_and_fails_closed_on_collapse() -> N
 
 
 def test_dynamic_budget_reserves_existing_volume_and_closure() -> None:
-    snapshot = {
-        "schema": "rondo-publication-critic-plan099-budget-snapshot-v1",
-        "captured_at": "2026-08-28T12:00:00Z",
-        "stage_b_baseline_available_balance_usd": 10.0,
-        "stage_b_baseline_known_unsettled_usd": 1.0,
-        "stage_b_baseline_volume_rate_usd_per_hour": 0.1,
-        "stage_b_dynamic_budget_usd": 8.4,
-        "current_available_balance_usd": 10.0,
-        "current_known_unsettled_usd": 1.0,
-        "current_volume_rate_usd_per_hour": 0.1,
-        "conservative_task_cost_usd": 4.0,
-        "closure_reserve_usd": 1.0,
-        "next_action": "commissioning",
-    }
+    snapshot = _budget_snapshot()
     assert validate_budget_snapshot(snapshot)["stage_b_dynamic_budget_usd"] == 8.4
-    resource_core = {
-        "schema": "rondo-publication-critic-plan099-live-resource-receipt-v1",
-        "captured_at": "2026-08-28T12:00:00Z",
-        "provider": "RunPod",
-        "cloud_type": "SECURE",
-        "data_center_id": "US-TX-3",
-        "pod_id": "pod099",
-        "pod_name": "rondo-plan099-test",
-        "pod_started_at": "2026-08-28T12:00:00Z",
-        "account_task_pod_count": 1,
-        "task_cumulative_pods_created": 1,
-        "task_prior_pod_wall_seconds": 0,
-        "gpu_name": "NVIDIA L40S",
-        "gpu_count": 1,
-        "gpu_total_memory_bytes": 48 * 1024**3,
-        "compute_rate_usd_per_hour": 0.5,
-        "container_rate_usd_per_hour": 0.1,
-        "container_disk_gb": 20,
-        "image_identity": "runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404",
-        "volume_id": "mwemzrn33y",
-        "volume_mount_path": "/workspace",
-        "volume_size_gb": 70,
-    }
-    resource = {
-        **resource_core,
-        "content_sha256": hashlib.sha256(
-            canonical_json_bytes(resource_core)
-        ).hexdigest(),
-    }
-    now = datetime(2026, 8, 28, 12, 0, tzinfo=timezone.utc)
+    resource = _resource_receipt()
+    now = datetime(2026, 8, 28, 12, 0, tzinfo=UTC)
     lifecycle = authorize_pod_lifecycle(
         snapshot, resource, maximum_lifecycle_seconds=7200, now=now
     )
@@ -194,6 +172,120 @@ def test_dynamic_budget_reserves_existing_volume_and_closure() -> None:
         validate_budget_snapshot(exhausted)
 
 
+def test_plan099_guard_consumes_absolute_trigger_and_closes_exact_pod() -> None:
+    now = datetime(2026, 8, 28, 12, 0, tzinfo=UTC)
+    authorization = authorize_pod_lifecycle(
+        _budget_snapshot(),
+        _resource_receipt(),
+        maximum_lifecycle_seconds=120,
+        now=now,
+    )
+    clock = [now]
+    calls: list[tuple[str, str, datetime, float]] = []
+
+    def sleeper(seconds: float) -> None:
+        clock[0] += timedelta(seconds=seconds)
+
+    def terminate(receipt: Mapping[str, Any], captured: datetime, timeout: float):
+        calls.append((receipt["pod_id"], receipt["pod_name"], captured, timeout))
+        return {
+            "deleted_pod": {
+                "id": receipt["pod_id"],
+                "name": receipt["pod_name"],
+            },
+            "pod_count": 0,
+            "compute_rate_usd_per_hour": 0.0,
+        }
+
+    result = guard.enforce_lifecycle(
+        authorization,
+        terminator=terminate,
+        validator=validate_pod_lifecycle_authorization,
+        result_schema=guard.PLAN099_RESULT_SCHEMA,
+        now=lambda: clock[0],
+        sleeper=sleeper,
+    )
+    assert calls == [
+        (
+            "pod099",
+            "rondo-plan099-test",
+            now + timedelta(seconds=120),
+            360.0,
+        )
+    ]
+    assert result["schema"] == guard.PLAN099_RESULT_SCHEMA
+    assert result["status"] == "pod_absent_confirmed"
+    assert guard.PROFILES["plan099"]["task_prefix"] == "rondo-plan099-"
+    assert guard.PROFILES["plan099"]["started_at_field"] == "pod_started_at"
+    terminal = {
+        "deleted_pod": {"id": "pod099", "name": "rondo-plan099-test"},
+        "pod_count": 0,
+        "compute_rate_usd_per_hour": 0.0,
+    }
+    with patch.object(
+        guard.subprocess,
+        "run",
+        return_value=subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=json.dumps(terminal), stderr=""
+        ),
+    ) as run_terminal:
+        assert (
+            guard._run_terminal(
+                Path("terminal-helper.py"),
+                "runpodctl",
+                authorization,
+                now,
+                360.0,
+                task_prefix="rondo-plan099-",
+                started_at_field="pod_started_at",
+            )
+            == terminal
+        )
+    command = run_terminal.call_args.args[0]
+    assert command[command.index("--task-pod-name-prefix") + 1] == "rondo-plan099-"
+    assert (
+        command[command.index("--task-started-at") + 1]
+        == (authorization["pod_started_at"])
+    )
+
+    authorize_pod_lifecycle(
+        _budget_snapshot(),
+        _resource_receipt(prior_wall_seconds=4_000, cumulative_pods=2),
+        maximum_lifecycle_seconds=6_800,
+        now=now,
+    )
+    with pytest.raises(FullModelTrainingError, match="plan099_lifecycle_invalid"):
+        authorize_pod_lifecycle(
+            _budget_snapshot(),
+            _resource_receipt(prior_wall_seconds=4_000, cumulative_pods=2),
+            maximum_lifecycle_seconds=6_801,
+            now=now,
+        )
+
+
+def test_plan099_bootstrap_reuses_exact_image_torch_and_guard_is_host_armed() -> None:
+    bootstrap = REPO_ROOT / "training/publication-critic-plan099/runpod-bootstrap.sh"
+    subprocess.run(["bash", "-n", str(bootstrap)], check=True, timeout=10)
+    source = bootstrap.read_text(encoding="utf-8")
+    assert 'python3 -m venv --system-site-packages "$task_root/venv"' in source
+    assert source.count('torch.__version__ == "2.8.0+cu128"') == 2
+    assert source.count('torch.version.cuda == "12.8"') == 2
+    dependencies = (
+        REPO_ROOT / "training/publication-critic-plan099/dependencies-v1.txt"
+    ).read_text(encoding="utf-8")
+    assert not any(
+        line.strip().lower().startswith("torch")
+        for line in dependencies.splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    )
+    runbook = (REPO_ROOT / "training/publication-critic-plan099/runbook.md").read_text(
+        encoding="utf-8"
+    )
+    assert "nohup setsid env RONDO_PLAN099_STAGE_B_APPROVED=1" in runbook
+    assert "--profile plan099" in runbook
+    assert "正常提前释放仍只接受指定 queue" in runbook
+
+
 def test_fake_formal_checkpoint_first_recovery_selection_and_retention(
     tmp_path: Path,
 ) -> None:
@@ -201,11 +293,7 @@ def test_fake_formal_checkpoint_first_recovery_selection_and_retention(
     train = load_train_dataset(REPO_ROOT)
     validation = load_validation_dataset(REPO_ROOT)
     store = Plan099ArtifactStore(tmp_path / "artifacts")
-    source_identity = {
-        "commit": "a" * 40,
-        "source_archive_sha256": "b" * 64,
-        "freeze_sha256": "c" * 64,
-    }
+    source_identity = _source_identity(freeze)
     first = _FakeAdapter(validation)
     controller = Plan099TrainingController(
         freeze=freeze,
@@ -256,6 +344,192 @@ def test_fake_formal_checkpoint_first_recovery_selection_and_retention(
         "checkpoint-attempt-0-step-000016",
     ]
     assert len(list((store.root / "recovery-checkpoints").iterdir())) == 3
+    assert len(store.evaluation_result_ids()) == 5
+    assert validate_terminal_candidate(terminal, store)["checkpoint_id"] == (
+        "checkpoint-attempt-0-step-000002"
+    )
+    candidate = tmp_path / "candidate"
+    _export_candidate(terminal, store.root, candidate)
+    assert verify_candidate_handoff(candidate)["status"] == "verified"
+
+    before_terminal = json.loads(json.dumps(terminal))
+    before_terminal["status"] = "paused"
+    before_terminal["terminal"] = None
+    reentered = Plan099TrainingController.from_state(
+        freeze=freeze, artifact_store=store, value=before_terminal
+    )
+    reentered._finish()
+    assert reentered.state["terminal"]["disposition"] == "CANDIDATE"
+
+
+def test_early_missing_decision_config_can_still_form_candidate(
+    tmp_path: Path,
+) -> None:
+    freeze = load_freeze(REPO_ROOT)
+    train = load_train_dataset(REPO_ROOT)
+    validation = load_validation_dataset(REPO_ROOT)
+    store = Plan099ArtifactStore(tmp_path / "artifacts")
+    controller = _new_formal_controller(freeze, store, "early-none")
+    first = _FakeAdapter(validation, gold_from_step=8)
+    controller.initialize(first, validation)
+    controller.run(first, training=train, validation=validation)
+    assert [
+        store.read_evaluation_result(checkpoint_id)["assessment"]
+        for checkpoint_id in (
+            "checkpoint-attempt-0-step-000002",
+            "checkpoint-attempt-0-step-000004",
+        )
+    ] == [None, None]
+    second = _FakeAdapter(validation, gold_from_step=8)
+    controller.resume_fresh_process(
+        second,
+        checkpoint_id="checkpoint-attempt-0-step-000008",
+        validation=validation,
+        process_nonce="early-none-second",
+    )
+    terminal = controller.run(second, training=train, validation=validation)
+    assert terminal["terminal"]["disposition"] == "CANDIDATE"
+    candidate = tmp_path / "candidate"
+    _export_candidate(terminal, store.root, candidate)
+    verify_candidate_handoff(candidate)
+
+
+def test_all_missing_decision_configs_finish_as_valid_no_go(tmp_path: Path) -> None:
+    freeze = load_freeze(REPO_ROOT)
+    train = load_train_dataset(REPO_ROOT)
+    validation = load_validation_dataset(REPO_ROOT)
+    store = Plan099ArtifactStore(tmp_path / "artifacts")
+    controller = _new_formal_controller(freeze, store, "all-none")
+    first = _FakeAdapter(validation, gold_from_step=None)
+    controller.initialize(first, validation)
+    controller.run(first, training=train, validation=validation)
+    second = _FakeAdapter(validation, gold_from_step=None)
+    controller.resume_fresh_process(
+        second,
+        checkpoint_id="checkpoint-attempt-0-step-000008",
+        validation=validation,
+        process_nonce="all-none-second",
+    )
+    terminal = controller.run(second, training=train, validation=validation)
+    assert terminal["status"] == "terminal"
+    assert terminal["terminal"]["disposition"] == "NO-GO"
+    assert terminal["terminal"]["best_checkpoint_id"] is None
+    assert terminal["terminal"]["retention"]["kept_checkpoints"] == [
+        "checkpoint-attempt-0-step-000008",
+        "checkpoint-attempt-0-step-000016",
+    ]
+
+
+def test_step12_continuation_ignores_stale_recovery_pointer(tmp_path: Path) -> None:
+    freeze = load_freeze(REPO_ROOT)
+    train = load_train_dataset(REPO_ROOT)
+    validation = load_validation_dataset(REPO_ROOT)
+    store = Plan099ArtifactStore(tmp_path / "artifacts")
+    controller = _new_formal_controller(freeze, store, "step12")
+    first = _FakeAdapter(validation)
+    controller.initialize(first, validation)
+    controller.run(first, training=train, validation=validation)
+    second = _FakeAdapter(validation)
+    controller.resume_fresh_process(
+        second,
+        checkpoint_id="checkpoint-attempt-0-step-000008",
+        validation=validation,
+        process_nonce="step12-second",
+    )
+    paused = controller.run(
+        second, training=train, validation=validation, stop_after=12
+    )
+    assert paused["status"] == "paused"
+    assert paused["recovery_checkpoint_id"] is None
+    stale = json.loads(json.dumps(paused))
+    stale["recovery_checkpoint_id"] = "checkpoint-attempt-0-step-000008"
+    assert _resume_checkpoint(stale, store) == (
+        "checkpoint-attempt-0-step-000012",
+        False,
+    )
+    resumed = Plan099TrainingController.from_state(
+        freeze=freeze, artifact_store=store, value=paused
+    )
+    resumed.recover_latest_for_continuation(
+        _FakeAdapter(validation),
+        checkpoint_id="checkpoint-attempt-0-step-000012",
+        validation=validation,
+        process_nonce="step12-third",
+    )
+    assert resumed.state["current_step"] == 12
+
+
+def test_orphan_checkpoint_is_adopted_only_from_exact_predecessor(
+    tmp_path: Path,
+) -> None:
+    freeze = load_freeze(REPO_ROOT)
+    train = load_train_dataset(REPO_ROOT)
+    validation = load_validation_dataset(REPO_ROOT)
+    store = _InterruptAfterCheckpointStore(tmp_path / "artifacts")
+    published: list[dict[str, Any]] = []
+    controller = Plan099TrainingController(
+        freeze=freeze,
+        run_kind="formal",
+        namespace="rondo-plan099-formal-orphan",
+        source_identity=_source_identity(freeze),
+        artifact_store=store,
+        process_nonce="orphan-first",
+        state_publisher=lambda value: published.append(json.loads(json.dumps(value))),
+    )
+    first = _FakeAdapter(validation)
+    controller.initialize(first, validation)
+    with pytest.raises(RuntimeError, match="checkpoint-published-process-loss"):
+        controller.run(first, training=train, validation=validation, stop_after=2)
+    durable = published[-1]
+    assert durable["current_step"] == 0
+    assert _resume_checkpoint(durable, store) == (
+        "checkpoint-attempt-0-step-000002",
+        True,
+    )
+    resumed = Plan099TrainingController.from_state(
+        freeze=freeze, artifact_store=store, value=durable
+    )
+    result = resumed.adopt_orphan_checkpoint(
+        _FakeAdapter(validation),
+        checkpoint_id="checkpoint-attempt-0-step-000002",
+        validation=validation,
+        process_nonce="orphan-second",
+    )
+    assert result["status"] == "paused"
+    assert result["current_step"] == 2
+    assert store.has_evaluation_result("checkpoint-attempt-0-step-000002")
+
+
+def test_terminal_retention_marker_publish_is_reentrant(tmp_path: Path) -> None:
+    freeze = load_freeze(REPO_ROOT)
+    train = load_train_dataset(REPO_ROOT)
+    validation = load_validation_dataset(REPO_ROOT)
+    store = _InterruptAfterRetentionStore(tmp_path / "artifacts")
+    controller = _new_formal_controller(freeze, store, "retention-reentry")
+    first = _FakeAdapter(validation)
+    controller.initialize(first, validation)
+    controller.run(first, training=train, validation=validation)
+    second = _FakeAdapter(validation)
+    controller.resume_fresh_process(
+        second,
+        checkpoint_id="checkpoint-attempt-0-step-000008",
+        validation=validation,
+        process_nonce="retention-second",
+    )
+    controller.run(second, training=train, validation=validation)
+    third = _FakeAdapter(validation)
+    store.interrupt = True
+    with pytest.raises(RuntimeError, match="retention-published-process-loss"):
+        controller.resume_fresh_process(
+            third,
+            checkpoint_id="checkpoint-attempt-0-step-000002",
+            validation=validation,
+            process_nonce="retention-third",
+        )
+    assert controller.state["status"] == "paused"
+    store.interrupt = False
+    controller._finish()
+    assert controller.state["terminal"]["disposition"] == "CANDIDATE"
 
 
 def test_checkpoint_state_survives_process_loss_before_evaluation(
@@ -307,9 +581,10 @@ def test_checkpoint_state_survives_process_loss_before_evaluation(
 class _FakeAdapter:
     training_state_codec = "plan099-fake-state-v1"
 
-    def __init__(self, validation: Any) -> None:
+    def __init__(self, validation: Any, *, gold_from_step: int | None = 1) -> None:
         self.validation = validation
         self.global_step = 0
+        self.gold_from_step = gold_from_step
 
     def current_model_artifact_sha256(self) -> str:
         return hashlib.sha256(f"fake-model-{self.global_step}".encode()).hexdigest()
@@ -333,7 +608,8 @@ class _FakeAdapter:
     def evaluate(self, dataset: Any) -> dict[str, Any]:
         rows = (
             _gold_logits(dataset.candidates)
-            if self.global_step > 0
+            if self.gold_from_step is not None
+            and self.global_step >= self.gold_from_step
             else _all_pass_logits(len(dataset.candidates))
         )
         return {
@@ -412,6 +688,102 @@ class _FakeAdapter:
     def restore(self, model_root: Path, state: Mapping[str, Any]) -> None:
         verify_inference_ready(model_root)
         self.global_step = int(state["global_step"])
+
+
+class _InterruptAfterCheckpointStore(Plan099ArtifactStore):
+    def __init__(self, root: Path) -> None:
+        super().__init__(root)
+        self.interrupt = True
+
+    def save_checkpoint(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        receipt = super().save_checkpoint(*args, **kwargs)
+        if self.interrupt:
+            self.interrupt = False
+            raise RuntimeError("checkpoint-published-process-loss")
+        return receipt
+
+
+class _InterruptAfterRetentionStore(Plan099ArtifactStore):
+    def __init__(self, root: Path) -> None:
+        super().__init__(root)
+        self.interrupt = False
+
+    def mark_retention_complete(self, checkpoint_id: str) -> dict[str, Any]:
+        receipt = super().mark_retention_complete(checkpoint_id)
+        if self.interrupt:
+            self.interrupt = False
+            raise RuntimeError("retention-published-process-loss")
+        return receipt
+
+
+def _new_formal_controller(
+    freeze: Mapping[str, Any], store: Plan099ArtifactStore, suffix: str
+) -> Plan099TrainingController:
+    return Plan099TrainingController(
+        freeze=freeze,
+        run_kind="formal",
+        namespace=f"rondo-plan099-formal-{suffix}",
+        source_identity=_source_identity(freeze),
+        artifact_store=store,
+        process_nonce=f"{suffix}-first",
+    )
+
+
+def _source_identity(freeze: Mapping[str, Any]) -> dict[str, str]:
+    return {
+        "commit": "a" * 40,
+        "source_archive_sha256": "b" * 64,
+        "freeze_sha256": hashlib.sha256(canonical_json_bytes(freeze)).hexdigest(),
+    }
+
+
+def _budget_snapshot() -> dict[str, Any]:
+    return {
+        "schema": "rondo-publication-critic-plan099-budget-snapshot-v1",
+        "captured_at": "2026-08-28T12:00:00Z",
+        "stage_b_baseline_available_balance_usd": 10.0,
+        "stage_b_baseline_known_unsettled_usd": 1.0,
+        "stage_b_baseline_volume_rate_usd_per_hour": 0.1,
+        "stage_b_dynamic_budget_usd": 8.4,
+        "current_available_balance_usd": 10.0,
+        "current_known_unsettled_usd": 1.0,
+        "current_volume_rate_usd_per_hour": 0.1,
+        "conservative_task_cost_usd": 4.0,
+        "closure_reserve_usd": 1.0,
+        "next_action": "commissioning",
+    }
+
+
+def _resource_receipt(
+    *, prior_wall_seconds: int = 0, cumulative_pods: int = 1
+) -> dict[str, Any]:
+    core = {
+        "schema": "rondo-publication-critic-plan099-live-resource-receipt-v1",
+        "captured_at": "2026-08-28T12:00:00Z",
+        "provider": "RunPod",
+        "cloud_type": "SECURE",
+        "data_center_id": "US-TX-3",
+        "pod_id": "pod099",
+        "pod_name": "rondo-plan099-test",
+        "pod_started_at": "2026-08-28T12:00:00Z",
+        "account_task_pod_count": 1,
+        "task_cumulative_pods_created": cumulative_pods,
+        "task_prior_pod_wall_seconds": prior_wall_seconds,
+        "gpu_name": "NVIDIA L40S",
+        "gpu_count": 1,
+        "gpu_total_memory_bytes": 48 * 1024**3,
+        "compute_rate_usd_per_hour": 0.5,
+        "container_rate_usd_per_hour": 0.1,
+        "container_disk_gb": 20,
+        "image_identity": "runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404",
+        "volume_id": "mwemzrn33y",
+        "volume_mount_path": "/workspace",
+        "volume_size_gb": 70,
+    }
+    return {
+        **core,
+        "content_sha256": hashlib.sha256(canonical_json_bytes(core)).hexdigest(),
+    }
 
 
 def _gold_logits(candidates: Any) -> tuple[tuple[float, ...], ...]:

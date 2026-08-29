@@ -39,7 +39,28 @@ exact name 对账，不得重复创建。将核验结果、source/data receipt�
 不超过 Pod 累计 10,800 秒的 lifecycle authorization，再刷新 budget snapshot，最后生成 paid-segment authorization。
 segment 必须逐哈希绑定 budget、resource、lifecycle、exact Pod id/name、实际 compute/container 单价、termination
 trigger、60 秒 kill grace 与 360 秒终态确认预留；worker 的 `RONDO_PLAN099_MAX_SECONDS` 必须与 segment 完全相等。
-所有 receipt、snapshot、artifact、state 和输出路径都必须在当前 `/workspace/rondo-plan099-*` task root 内。
+所有云端 snapshot、artifact、state 和输出路径都必须在当前 `/workspace/rondo-plan099-*` task root 内；宿主 lifecycle
+authorization 与 guard receipt 留在主物理根 Plan 099 ignored host namespace，并把 immutable authorization 复制进
+云端 task root 供 segment/worker 逐哈希绑定。
+
+Pod 创建并独立核验后，必须先在主物理根 Plan 099 ignored host namespace 生成 lifecycle authorization，并在授权后
+60 秒内用 `nohup setsid` 启动冻结的宿主 guard；armed receipt 中的 PID 必须仍存活且 exact Pod id/name、绝对 trigger
+与 authorization 一致。未成功武装不得上传、bootstrap 或使用 Pod。固定调用轮廓如下（变量值均来自本轮已核验 receipt）：
+
+```bash
+nohup setsid env RONDO_PLAN099_STAGE_B_APPROVED=1 PYTHONPATH=eval \
+  python3 -B -P training/publication-critic-plan094/runpod-lifecycle-guard.py \
+  --profile plan099 --authorization "$PLAN099_LIFECYCLE_AUTHORIZATION" \
+  --terminal-helper training/publication-critic-plan087/runpod-terminal.py \
+  --task-root "$PLAN099_HOST_TASK_ROOT" --armed-output "$PLAN099_GUARD_ARMED" \
+  --result "$PLAN099_GUARD_RESULT" > "$PLAN099_GUARD_LOG" 2>&1 </dev/null &
+```
+
+正常提前释放仍只接受指定 queue 的批准 receipt 并走 `runpod-release.py`。Pod 预释放审查等待与绝对 trigger 取先到者：
+若批准先到，立即走 gated release；若绝对 trigger 先到，guard 无需 queue receipt，直接调用 exact-Pod helper 自动
+stop/delete，并在 360 秒窗口内确认 0 Pod、compute `$0/h`。guard 不得取消，也不触碰网络卷；提前释放后它到点仅对
+已不存在的 exact Pod作幂等零费用确认。此绝对截止例外只守住累计 10,800 秒硬上限，不授权提前释放、延后 trigger
+或改变训练路线。
 
 ## Commissioning
 

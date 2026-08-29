@@ -36,9 +36,9 @@ from .plan099_contract import (
     freeze_sha256,
     load_freeze,
     validate_budget_snapshot,
+    validate_live_resource_receipt,
     validate_namespace,
     validate_paid_segment_authorization,
-    validate_live_resource_receipt,
     validate_pod_lifecycle_authorization,
     validate_source_identity,
 )
@@ -54,7 +54,6 @@ from .plan099_training import (
     Plan099TrainingController,
     validate_terminal_candidate,
 )
-
 
 STAGE_B_APPROVAL_PHRASE = "Plan 099 阶段 A 验收通过，批准进入阶段 B"
 CANDIDATE_MANIFEST_SCHEMA = "rondo-publication-critic-plan099-candidate-manifest-v1"
@@ -304,12 +303,7 @@ def _dispatch(args: argparse.Namespace) -> Any:
             value=state,
             state_publisher=lambda value: _write_state(args.state_output, value),
         )
-        checkpoint_id = str(
-            state.get("pending_checkpoint_id")
-            or state.get("recovery_checkpoint_id")
-            or state.get("latest_checkpoint_id")
-            or ""
-        )
+        checkpoint_id, orphan = _resume_checkpoint(state, store)
         model_root = (
             args.artifact_root / "recovery-checkpoints" / checkpoint_id / "payload"
         )
@@ -322,7 +316,13 @@ def _dispatch(args: argparse.Namespace) -> Any:
             train_dataset=train_dataset,
             validation_dataset=validation_dataset,
         )
-        if state["status"] == "evaluation_pending":
+        if orphan:
+            controller.adopt_orphan_checkpoint(
+                adapter,
+                checkpoint_id=checkpoint_id,
+                validation=validation_dataset,
+            )
+        elif state["status"] == "evaluation_pending":
             controller.recover_pending_evaluation(
                 adapter, validation=validation_dataset
             )
@@ -369,6 +369,33 @@ def _dispatch(args: argparse.Namespace) -> Any:
     if args.command == "verify-candidate":
         return verify_candidate_handoff(args.root)
     raise AssertionError(args.command)
+
+
+def _resume_checkpoint(
+    state: Mapping[str, Any], store: Plan099ArtifactStore
+) -> tuple[str, bool]:
+    """Select exactly the checkpoint justified by durable controller state."""
+
+    status = state.get("status")
+    if status == "paused":
+        current_step = int(state.get("current_step", -1))
+        later = [
+            checkpoint_id
+            for checkpoint_id in store.verified_checkpoint_ids()
+            if int(checkpoint_id.rsplit("-", 1)[1]) > current_step
+        ]
+        if later:
+            return later[-1], True
+        checkpoint_id = state.get("latest_checkpoint_id")
+    elif status == "evaluation_pending":
+        checkpoint_id = state.get("pending_checkpoint_id")
+    elif status == "recovery_required":
+        checkpoint_id = state.get("recovery_checkpoint_id")
+    else:
+        raise FullModelTrainingError("plan099_controller_not_resumable")
+    if not isinstance(checkpoint_id, str) or not checkpoint_id:
+        raise FullModelTrainingError("plan099_resume_checkpoint_missing")
+    return checkpoint_id, False
 
 
 def _export_candidate(

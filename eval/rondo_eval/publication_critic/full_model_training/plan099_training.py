@@ -8,9 +8,9 @@ import json
 import math
 import random
 import secrets
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from ..qualification import (
     QualificationError,
@@ -57,7 +57,6 @@ from .plan099_objective import (
     structured_output_from_flat,
     torch_objective,
 )
-
 
 CONTROLLER_SCHEMA = "rondo-publication-critic-plan099-controller-state-v1"
 UPDATE_SCHEMA = "rondo-publication-critic-plan099-update-receipt-v1"
@@ -124,7 +123,7 @@ class Plan099TorchAdapter:
         train: TokenizedDataset,
         validation: TokenizedDataset,
         repo_root: Path | str = REPO_ROOT,
-    ) -> "Plan099TorchAdapter":
+    ) -> Plan099TorchAdapter:
         """Load the exact base only during an authorized real-model phase."""
 
         torch = importlib.import_module("torch")
@@ -205,7 +204,7 @@ class Plan099TorchAdapter:
         source_commit: str,
         train_dataset: Plan099Dataset,
         validation_dataset: Plan099Dataset,
-    ) -> "Plan099TorchAdapter":
+    ) -> Plan099TorchAdapter:
         """Create a fresh-process adapter from the checkpoint, not the exact base."""
 
         torch = importlib.import_module("torch")
@@ -574,6 +573,7 @@ class Plan099TrainingController:
             "selection": {"best_checkpoint_id": None, "best_key": None},
             "fresh_process_recoveries": {},
             "pending_checkpoint_id": None,
+            "recovery_checkpoint_id": None,
             "latest_checkpoint_id": None,
             "terminal": None,
         }
@@ -586,7 +586,7 @@ class Plan099TrainingController:
         artifact_store: Plan099ArtifactStore,
         value: Mapping[str, Any],
         state_publisher: Callable[[Mapping[str, Any]], None] | None = None,
-    ) -> "Plan099TrainingController":
+    ) -> Plan099TrainingController:
         if (
             not isinstance(value, Mapping)
             or value.get("schema") != CONTROLLER_SCHEMA
@@ -706,6 +706,84 @@ class Plan099TrainingController:
             raise FullModelTrainingError("plan099_recovery_evaluation_mismatch")
         self.state["process_nonce"] = nonce
         self._publish_state()
+        return self.summary()
+
+    def adopt_orphan_checkpoint(
+        self,
+        adapter: Any,
+        *,
+        checkpoint_id: str,
+        validation: Plan099Dataset,
+        process_nonce: str | None = None,
+    ) -> dict[str, Any]:
+        """Adopt a complete checkpoint published before its controller state."""
+
+        if self.state["status"] != "paused":
+            raise FullModelTrainingError("plan099_orphan_checkpoint_not_adoptable")
+        checkpoint = self.store.verify_checkpoint(checkpoint_id)
+        stored, training_state, model_root = self.store.read_checkpoint(
+            checkpoint_id, state_reader=adapter.read_training_state
+        )
+        step = int(checkpoint_id.rsplit("-", 1)[1])
+        prior = json.loads(json.dumps(self.state))
+        checkpoint_steps = (
+            (1,)
+            if self.run_kind == "commissioning"
+            else tuple(self.freeze["recipe"]["control"]["checkpoint_steps"])
+        )
+        next_step = next(
+            (
+                int(candidate)
+                for candidate in checkpoint_steps
+                if int(candidate) > int(prior["current_step"])
+            ),
+            None,
+        )
+        if (
+            stored.get("status") != "evaluation_pending"
+            or stored.get("pending_checkpoint_id") != checkpoint_id
+            or int(stored.get("current_step", -1)) != step
+            or step != next_step
+            or step <= int(self.state["current_step"])
+            or len(stored.get("updates", [])) != step
+            or stored.get("updates", [])[: len(prior["updates"])] != prior["updates"]
+            or [row.get("global_step") for row in stored.get("updates", [])]
+            != list(range(1, step + 1))
+        ):
+            raise FullModelTrainingError("plan099_orphan_checkpoint_not_adoptable")
+        normalized = json.loads(json.dumps(stored))
+        normalized["status"] = prior["status"]
+        normalized["current_step"] = prior["current_step"]
+        normalized["updates"] = normalized["updates"][: len(prior["updates"])]
+        normalized["pending_checkpoint_id"] = prior["pending_checkpoint_id"]
+        if normalized != prior:
+            raise FullModelTrainingError("plan099_orphan_checkpoint_not_adoptable")
+        adapter.restore(model_root, training_state)
+        nonce = process_nonce or secrets.token_hex(16)
+        if nonce == stored.get("process_nonce"):
+            raise FullModelTrainingError("plan099_fresh_process_required")
+        self.state = json.loads(json.dumps(stored))
+        self.state["process_nonce"] = nonce
+        self.state["latest_checkpoint_id"] = checkpoint_id
+        self._publish_state()
+        if self.store.has_evaluation_result(checkpoint_id):
+            expected = self.store.read_evaluation_result(checkpoint_id)
+            replay = evaluate_development(
+                adapter,
+                validation,
+                self.freeze,
+                model_artifact_sha256=expected["checkpoint"]["model_exact_tree_sha256"],
+                checkpoint=expected["checkpoint"],
+            )
+            if sha256_bytes(canonical_json_bytes(replay)) != sha256_bytes(
+                canonical_json_bytes(expected)
+            ):
+                raise FullModelTrainingError("plan099_recovery_evaluation_mismatch")
+            self._adopt_existing_evaluation(checkpoint_id, checkpoint, expected)
+        else:
+            self._evaluate_saved_checkpoint(
+                adapter, validation, checkpoint_id, checkpoint
+            )
         return self.summary()
 
     def _checkpoint_then_evaluate(
@@ -883,6 +961,7 @@ class Plan099TrainingController:
             "runtime_identity": adapter.runtime_identity(),
         }
         self.state["fresh_process_recoveries"][checkpoint_id] = recovery
+        self.state["recovery_checkpoint_id"] = None
         maximum = (
             int(self.freeze["recipe"]["control"]["commissioning_updates"])
             if self.run_kind == "commissioning"
@@ -898,7 +977,10 @@ class Plan099TrainingController:
         if not self.state["fresh_process_recoveries"]:
             raise FullModelTrainingError("plan099_fresh_process_recovery_required")
         best_id = self.state["selection"]["best_checkpoint_id"]
-        if best_id not in self.state["fresh_process_recoveries"]:
+        if (
+            best_id is not None
+            and best_id not in self.state["fresh_process_recoveries"]
+        ):
             self.state["status"] = "recovery_required"
             self.state["recovery_checkpoint_id"] = best_id
             self._publish_state()
@@ -936,7 +1018,10 @@ class Plan099TrainingController:
         retention["kept_checkpoints"] = sorted(keep)
         retention["maximum_full_checkpoints"] = 3
         for checkpoint_id in sorted(keep):
-            self.store.mark_retention_complete(checkpoint_id)
+            if self.store.has_retention_completion(checkpoint_id):
+                self.store.verify_retention_complete(checkpoint_id)
+            else:
+                self.store.mark_retention_complete(checkpoint_id)
         self.state["terminal"] = {
             "schema": FORMAL_RESULT_SCHEMA,
             "run_kind": self.run_kind,
@@ -1097,15 +1182,28 @@ def validate_terminal_candidate(
         if checkpoint_id in seen:
             raise FullModelTrainingError("plan099_candidate_trajectory_invalid")
         seen.add(checkpoint_id)
-        checkpoint = store.verify_checkpoint(checkpoint_id)
+        evaluation_artifact = store.verify_evaluation_result(checkpoint_id)
         evaluation = store.read_evaluation_result(checkpoint_id)
+        checkpoint = evaluation.get("checkpoint")
         if (
-            row.get("content_sha256") != checkpoint["content_sha256"]
+            not isinstance(checkpoint, Mapping)
+            or row.get("content_sha256") != checkpoint.get("content_sha256")
             or row.get("evaluation_sha256")
             != sha256_bytes(canonical_json_bytes(evaluation))
-            or evaluation.get("assessment") is None
+            or evaluation_artifact.get("metadata", {}).get("checkpoint_content_sha256")
+            != checkpoint.get("content_sha256")
         ):
             raise FullModelTrainingError("plan099_candidate_trajectory_invalid")
+        if evaluation.get("assessment") is None:
+            if (
+                evaluation.get("decision_config") is not None
+                or evaluation.get("decision_config_sha256") is not None
+                or not str(evaluation.get("ineligible_reason", "")).startswith(
+                    "decision_config_unavailable:"
+                )
+            ):
+                raise FullModelTrainingError("plan099_candidate_trajectory_invalid")
+            continue
         step = int(checkpoint_id.rsplit("-", 1)[1])
         ranked.append(
             (
@@ -1119,11 +1217,12 @@ def validate_terminal_candidate(
                 evaluation,
             )
         )
-    if len(ranked) != 5:
-        raise FullModelTrainingError("plan099_candidate_trajectory_invalid")
     if seen != {f"checkpoint-attempt-0-step-{step:06d}" for step in (2, 4, 8, 12, 16)}:
         raise FullModelTrainingError("plan099_candidate_trajectory_invalid")
+    if not ranked:
+        raise FullModelTrainingError("plan099_candidate_decision_invalid")
     _key, best_id, best = max(ranked, key=lambda item: item[0])
+    best_checkpoint = store.verify_checkpoint(best_id)
     base = state.get("base_evaluation")
     recoveries = state.get("fresh_process_recoveries")
     if (
@@ -1141,6 +1240,7 @@ def validate_terminal_candidate(
         or recoveries[best_id].get("evaluation_sha256")
         != sha256_bytes(canonical_json_bytes(best))
         or not store.has_retention_completion(best_id)
+        or best_checkpoint["content_sha256"] != best["checkpoint"]["content_sha256"]
     ):
         raise FullModelTrainingError("plan099_candidate_decision_invalid")
     return {

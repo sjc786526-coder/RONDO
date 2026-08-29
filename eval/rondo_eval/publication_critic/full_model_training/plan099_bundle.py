@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import os
-import subprocess
 import shutil
+import subprocess
 import tarfile
 import uuid
 from pathlib import Path, PurePosixPath
@@ -23,7 +23,6 @@ from .plan099_contract import (
     load_freeze,
 )
 
-
 SOURCE_BUNDLE_SCHEMA = "rondo-publication-critic-plan099-source-bundle-v1"
 DATA_BUNDLE_SCHEMA = "rondo-publication-critic-plan099-data-bundle-v1"
 SOURCE_PATHS = (
@@ -35,6 +34,7 @@ SOURCE_PATHS = (
     "eval/rondo_eval",
     "eval/templates/publication-critic",
     "training/publication-critic-plan087/runpod-terminal.py",
+    "training/publication-critic-plan094/runpod-lifecycle-guard.py",
     "training/publication-critic-plan099",
 )
 DATA_PATHS = (
@@ -70,6 +70,7 @@ REQUIRED_SOURCE_MEMBERS = {
     "training/publication-critic-plan099/runpod-bootstrap.sh",
     "training/publication-critic-plan099/runpod-release.py",
     "training/publication-critic-plan099/runpod-worker.sh",
+    "training/publication-critic-plan094/runpod-lifecycle-guard.py",
 }
 
 
@@ -345,9 +346,9 @@ def _git(root: Path, *args: str) -> str:
 
 
 __all__ = [
+    "assemble_execution_root",
     "create_data_archive",
     "create_source_archive",
-    "assemble_execution_root",
     "extract_data_archive",
     "extract_source_archive",
     "verify_data_archive",
