@@ -162,19 +162,25 @@
 - 随后任务规划者复审确认两项 Medium：旧 raw argmax 与 decision v1 margin decoder 同时暴露为 runtime 判定入口；release-bound selector 丢弃 validation pairs，未把 Boundary/invariance 闭合纳入 margin 选择。两项均经审查者复核属实，暂停完成态；报告见 `agent_log/2026-08-28-211445-plan098-post-acceptance-formal-decode-pair-selector-review.md`。
 - 两项 Medium 已窄整改：新增版本化 formal projection，在不改旧 schema 字节和 v9 历史 identity 的前提下把 raw argmax 限为 zero-margin diagnostic/historical reference，正式路径唯一使用 frozen decision config decoder；`DevelopmentRelease` selector 同时消费实际 validation candidates/pairs，pair SHA、行数和逐 pair 报告进入 frozen config，全部 Boundary/soft-only pair 闭合成为原单一 bounded grid 的 hard eligibility。
 - decision implementation 绑定 commit `29eb4a75b5d8abcd7e404747c93012efa6da9e34`、bundle `f86894faabedfa3f8a9d95ba26d2c9d8297e373503c975d332c7c08b631eeacc`；directional runtime 绑定 commit `0ebab613193580c1e8296442fa023dc4ca01e6c8`、bundle `b56d12aa8811642eb7cc9c5c4efea794e457c6828873995be2431308bb75f955`。正式 v10/qualification 只更新必要 identity 后从空目录重建并完成一次逐字节复现，focused 28/28 与既有定向回归 76/76 通过；数据正文、review、v8/v9 未改写。
+- 最终复验确认 formal decoder 唯一入口与 pair-aware selector 两项原 finding 均已闭合，但发现 decision implementation bundle 未覆盖正式 decoder
+  实际调用的 accepted-task runtime/schema 直接依赖；这些依赖漂移后旧 frozen config 仍可能通过 validation。本轮以 1 Medium 不接受，只要求
+  复用既有 accepted-task identity 或补入两个直接组件并增加漂移回归，不重做数据、盲审或通用可信设施；报告见
+  `agent_log/2026-08-28-213723-plan098-formal-decode-pair-selector-final-recheck.md`。
 
 ### 当前工作
 
-- `POST_ACCEPTANCE_FORMAL_DECODE_PAIR_SELECTOR_REMEDIATION_IMPLEMENTED / FINAL_REVIEW_PENDING`：两项窄整改已实现并验证，等待最终复验；工作包三继续锁定。
+- `POST_ACCEPTANCE_FORMAL_DECISION_IDENTITY_REMEDIATION_REQUIRED / FINAL_REVIEW_NOT_ACCEPTED`：原两项 Medium 已确认修对；尚余 1 项正式 decoder
+  直接 runtime/schema identity 缺口，工作包三继续锁定。
 
 ### 本任务剩余步骤
 
-1. 提交整改实现、生成工件、权威状态和实施日志，保持工作树 clean。
-2. 通过指定 Codex queue 申请最终复验并停止会话。
+1. 窄补正式 decoder 的 accepted-task runtime/schema identity 与对应漂移回归，机械更新受影响身份和 release，保持数据正文与历史 v9 不变。
+2. 跑相关 Python 门和必要 release 字节复现，提交实现、权威状态和实施日志。
+3. 通过指定 Codex queue 申请最终复验并停止会话。
 
 ### 阻塞项
 
-- 最终复验待审查者接受；真实模型、付费训练、资格正文释放、工作包三和产品动作继续禁止。
+- 上述 1 项 Medium 待整改和最终复验；真实模型、付费训练、资格正文释放、工作包三和产品动作继续禁止。
 
 ### 当前验收状态
 
@@ -223,9 +229,10 @@
 | 023 | 方向性 finalizer 只核对本任务必要的 decision/runtime/design/config/source/review identity，并将精确 runtime component/bundle 写入 design 与 release；不扩成通用审计平台 | 轻量字节门足以阻止当前语义实现静默漂移，保持职责窄且可复现 | finalizer、runtime、维护 | 已采纳 |
 | 024 | continuity 采用“决定性 N/A 才排除；PASS 必须同时高于 N/A 且超过 FAIL margin；其余 FAIL”的保守三路规则；标准 selector 只暴露 release-bound typed 入口 | 直接封闭 weak-N/A False PASS，并让 config identity、labels 与 logits 行序来自真实 v10 validation bytes，而非调用者自报 | decoder、selection、回归 | 已采纳 |
 | 025 | 最终接受 implementation `bb093ec4023b6ed41445f51793ebfdd2c4a5a646`；Plan 098 完成并冻结，ignored namespace 保留待用户以后按需清理，工作包三另立 ExecPlan 和授权 | 三个最终窄 finding 均闭合，76/76 定向回归、release 独立字节复现、review/identity 和历史保护无新增 finding；本计划不授权训练、资格正文或产品动作 | 验收、归档、交接 | 历史接受，终态由 026 暂停 |
-| 026 | 验收后复审暂停 025，只补 formal decoder 唯一入口与 pair-aware validation selector；pair bytes SHA 进入 frozen selection identity | output schema 仍可把 raw argmax 当 runtime decoder，且 selector 丢弃 validation pairs；二者都会使工作包三采用与冻结资格语义不一致的 operating config | 判定、selector、身份、验收 | 已实现，待最终复验 |
-| 027 | 保持 accepted v9 所绑定的旧 output schema 和 raw helper 字节不变，以新增版本化 formal projection 明确其只作 zero-margin diagnostic/historical reference；所有正式 projection/call path 唯一指向绑定 frozen decision config 的 decision v1 decoder | 直接改写旧 schema 会破坏已接受历史 identity；前向版本化既消除正式入口歧义，又不重开 v2/v9 历史数据和合同 | decoder、projection、历史兼容 | 已实现，待最终复验 |
-| 028 | validation selector 以全部实际 Boundary/soft-only pairs 闭合作为原单一 bounded margin grid 的 hard eligibility，并在 frozen config 绑定 pairs SHA、行数和完整逐 pair 报告 | candidate-level confusion/failure recall 不能证明 Q+/Q-、非目标 head 和 soft invariance；hard eligibility 最保守且不引入多路线 threshold 搜索 | selector、pairs、身份、测试 | 已实现，待最终复验 |
+| 026 | 验收后复审暂停 025，只补 formal decoder 唯一入口与 pair-aware validation selector；pair bytes SHA 进入 frozen selection identity | output schema 仍可把 raw argmax 当 runtime decoder，且 selector 丢弃 validation pairs；二者都会使工作包三采用与冻结资格语义不一致的 operating config | 判定、selector、身份、验收 | 已确认闭合，终态由 029 暂停 |
+| 027 | 保持 accepted v9 所绑定的旧 output schema 和 raw helper 字节不变，以新增版本化 formal projection 明确其只作 zero-margin diagnostic/historical reference；所有正式 projection/call path 唯一指向绑定 frozen decision config 的 decision v1 decoder | 直接改写旧 schema 会破坏已接受历史 identity；前向版本化既消除正式入口歧义，又不重开 v2/v9 历史数据和合同 | decoder、projection、历史兼容 | 已确认闭合 |
+| 028 | validation selector 以全部实际 Boundary/soft-only pairs 闭合作为原单一 bounded margin grid 的 hard eligibility，并在 frozen config 绑定 pairs SHA、行数和完整逐 pair 报告 | candidate-level confusion/failure recall 不能证明 Q+/Q-、非目标 head 和 soft invariance；hard eligibility 最保守且不引入多路线 threshold 搜索 | selector、pairs、身份、测试 | 已确认闭合 |
+| 029 | 最终复验不接受 decision bundle 只绑定 `qualification.py` 而遗漏其直接执行的 accepted-task runtime/schema；只复用现有 accepted identity 或补入两个直接组件和漂移回归 | 正式 decoder 的 class order、validator、gate 与 pair 语义来自该 runtime；依赖漂移后旧 frozen config 仍通过会破坏 operating point 冻结。本修正不扩成递归依赖审计或通用可信体系 | decoder、identity、回归、验收 | 待整改 |
 
 ## 7. 给执行者的启动提示词
 
