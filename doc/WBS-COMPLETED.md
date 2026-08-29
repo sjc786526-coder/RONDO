@@ -2564,7 +2564,7 @@ INTEGRATED / NOT_PUSHED`。clean formal source 为 `0ae9623`，执行者交付�
 
 ## Publication Critic 任务合同与后继数据重构（Plan 098，2026-08-28）
 
-**状态**：`COMPLETED / FINAL_REVIEW_ACCEPTED / GOAL_COMPLETED / INTEGRATED / PUSH_PENDING`。最终执行者 implementation 为
+**状态**：`COMPLETED / FINAL_REVIEW_ACCEPTED / GOAL_COMPLETED / INTEGRATED / PUSHED`。最终执行者 implementation 为
 `056ab91a54157200e887bb03f3ddf45c259a3a2c`。
 
 - 工作包一冻结 `rondo-publication-critic-task@v2`：单 backbone、一次 forward、五个 hard heads、保守 continuity N/A、逐 head operating
@@ -2584,4 +2584,5 @@ INTEGRATED / NOT_PUSHED`。clean formal source 为 `0ae9623`，执行者交付�
 - Plan 098 授权已关闭；未运行真实模型、GPU、Docker、付费 API 或产品动作。工作包三须另立 ExecPlan 和授权，Plan 098 不授予模型质量、产品价值、
   默认启用或生产资格。
 - 最终实现与审查已通过非快进 merge `1a87d6d1f9f4153778621861ecbe2480753446bb` 合入本地 `main`；主线相关回归 `77/77`
-  passed。集成记录见 `agent_log/2026-08-28-222326-plan098-main-integration.md`，当前等待推送确认。
+  passed，并已推送 `origin main`。本地任务分支归档为 `zz-done/worktree-098-publication-critic-contract-data`，未推送任务分支；集成记录见
+  `agent_log/2026-08-28-222326-plan098-main-integration.md`。
