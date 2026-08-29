@@ -1,6 +1,8 @@
 import copy
 import json
+import shutil
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -12,8 +14,11 @@ sys.path.insert(0, str(EVAL_ROOT))
 from rondo_eval.publication_critic.qualification import (  # noqa: E402
     BINARY_DIMENSIONS,
     DECISION_CONFIG_SCHEMA,
+    DECISION_IMPLEMENTATION_COMPONENT_PATHS,
+    DECISION_IMPLEMENTATION_LOCK,
     QualificationError,
     decision_config_sha256,
+    decision_implementation_identity,
     decode_with_decision_config,
     evaluate_qualification_predictions,
     freeze_decision_config,
@@ -24,6 +29,7 @@ from rondo_eval.publication_critic.successor_task import (  # noqa: E402
     DIMENSION_CLASSES,
     HARD_DIMENSIONS,
     STRUCTURED_OUTPUT_SCHEMA,
+    TASK_AUTHORITY,
     derive_verdict,
 )
 
@@ -55,6 +61,10 @@ class PublicationCriticQualificationTests(unittest.TestCase):
         self.assertEqual(config["schema"], DECISION_CONFIG_SCHEMA)
         self.assertEqual(config["selection"]["split"], "validation")
         self.assertEqual(config["selection"]["test_access"], "forbidden")
+        self.assertEqual(
+            config["decision_implementation"],
+            decision_implementation_identity(REPO_ROOT),
+        )
         self.assertRegex(
             decision_config_sha256(config, repo_root=REPO_ROOT),
             r"^[0-9a-f]{64}$",
@@ -70,6 +80,34 @@ class PublicationCriticQualificationTests(unittest.TestCase):
         broken["development_data"]["manifest_sha256"] = "0" * 63
         with self.assertRaisesRegex(QualificationError, "SHA-256"):
             validate_decision_config(broken, repo_root=REPO_ROOT)
+        broken = copy.deepcopy(config)
+        broken["decision_implementation"]["bundle_sha256"] = "0" * 64
+        with self.assertRaisesRegex(QualificationError, "decision_implementation"):
+            validate_decision_config(broken, repo_root=REPO_ROOT)
+
+    def test_decision_config_rejects_decoder_component_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            paths = {
+                TASK_AUTHORITY.as_posix(),
+                DECISION_IMPLEMENTATION_LOCK.as_posix(),
+                *DECISION_IMPLEMENTATION_COMPONENT_PATHS,
+            }
+            for relative in paths:
+                source = REPO_ROOT / relative
+                destination = root / relative
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source, destination)
+            config = self._config(repo_root=root)
+            with (root / "eval/rondo_eval/publication_critic/qualification.py").open(
+                "ab"
+            ) as handle:
+                handle.write(b"\n")
+            with self.assertRaisesRegex(
+                QualificationError,
+                "decision implementation component",
+            ):
+                validate_decision_config(config, repo_root=root)
 
     def test_decoder_is_per_head_fail_closed_and_conservative_for_na(self) -> None:
         output = self._structured_output(batch_size=3)
@@ -134,7 +172,12 @@ class PublicationCriticQualificationTests(unittest.TestCase):
             for expected in ("PASS", "FAIL", "N/A")
             for actual in ("PASS", "FAIL", "N/A")
         ]
-        binary_cells = [("PASS", "PASS"), ("PASS", "FAIL"), ("FAIL", "PASS"), ("FAIL", "FAIL")]
+        binary_cells = [
+            ("PASS", "PASS"),
+            ("PASS", "FAIL"),
+            ("FAIL", "PASS"),
+            ("FAIL", "FAIL"),
+        ]
         for index, (continuity_gold, continuity_predicted) in enumerate(
             continuity_cells
         ):
@@ -210,7 +253,12 @@ class PublicationCriticQualificationTests(unittest.TestCase):
             },
         )
 
-    def _config(self, *, selection_split: str = "validation") -> dict:
+    def _config(
+        self,
+        *,
+        selection_split: str = "validation",
+        repo_root: Path = REPO_ROOT,
+    ) -> dict:
         return freeze_decision_config(
             model_artifact_sha256="1" * 64,
             development_revision="publication-critic-v10",
@@ -220,7 +268,7 @@ class PublicationCriticQualificationTests(unittest.TestCase):
             selection_method="bounded_validation_grid_v1",
             selection_split=selection_split,
             head_margins=self._margins(),
-            repo_root=REPO_ROOT,
+            repo_root=repo_root,
         )
 
     @staticmethod

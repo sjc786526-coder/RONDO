@@ -8,6 +8,7 @@
   "required_identity": [
     "task",
     "decision_contract",
+    "decision_implementation",
     "model",
     "development_data",
     "selection"

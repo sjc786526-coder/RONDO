@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import math
 from pathlib import Path
 import re
@@ -28,10 +29,17 @@ DECISION_CONTRACT_VERSION = "v1"
 DECISION_CONTRACT_AUTHORITY = Path(
     "doc/rondo-multi-publication-critic-decision-contract-v1.md"
 )
+DECISION_IMPLEMENTATION_LOCK = Path(
+    "eval/templates/publication-critic/decision-implementation-lock-v1.json"
+)
+DECISION_IMPLEMENTATION_COMPONENT_PATHS = (
+    DECISION_CONTRACT_AUTHORITY.as_posix(),
+    "eval/rondo_eval/publication_critic/qualification.py",
+    "eval/templates/publication-critic/decision-config-contract-v1.json",
+    "eval/templates/publication-critic/qualification-metrics-contract-v1.json",
+)
 BINARY_DIMENSIONS = tuple(
-    dimension
-    for dimension in HARD_DIMENSIONS
-    if dimension != "conditional_continuity"
+    dimension for dimension in HARD_DIMENSIONS if dimension != "conditional_continuity"
 )
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _IDENTIFIER = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}$")
@@ -50,6 +58,86 @@ def decision_contract_sha256(repo_root: Path | str = REPO_ROOT) -> str:
         Path(repo_root) / DECISION_CONTRACT_AUTHORITY,
         "decision contract authority",
     )
+
+
+def decision_implementation_identity(
+    repo_root: Path | str = REPO_ROOT,
+) -> dict[str, Any]:
+    """Validate and return the frozen decoder/metrics implementation bundle."""
+
+    root = Path(repo_root)
+    lock_path = root / DECISION_IMPLEMENTATION_LOCK
+    if not lock_path.is_file() or lock_path.is_symlink():
+        raise QualificationError("decision implementation lock is missing or unsafe")
+    try:
+        value = json.loads(lock_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise QualificationError("decision implementation lock is invalid") from exc
+    lock = _object(value, "decision implementation lock")
+    _exact_keys(
+        lock,
+        {"schema", "algorithm", "components", "bundle_sha256"},
+        "decision implementation lock",
+    )
+    _literal(
+        lock["schema"],
+        "rondo-publication-critic-decision-implementation-lock@v1",
+        "decision implementation lock.schema",
+    )
+    _literal(
+        lock["algorithm"],
+        "sha256-canonical-component-list-v1",
+        "decision implementation lock.algorithm",
+    )
+    components = lock["components"]
+    if not isinstance(components, list):
+        raise QualificationError("decision implementation lock.components differs")
+    _literal(
+        [component.get("path") for component in components],
+        list(DECISION_IMPLEMENTATION_COMPONENT_PATHS),
+        "decision implementation lock.component paths",
+    )
+    normalized_components: list[dict[str, str]] = []
+    for component_value in components:
+        component = _object(
+            component_value,
+            "decision implementation lock.component",
+        )
+        _exact_keys(
+            component,
+            {"path", "sha256"},
+            "decision implementation lock.component",
+        )
+        path = component["path"]
+        if (
+            not isinstance(path, str)
+            or Path(path).is_absolute()
+            or ".." in Path(path).parts
+        ):
+            raise QualificationError("decision implementation component path is unsafe")
+        expected_sha256 = _file_sha256(
+            root / path,
+            f"decision implementation component {path}",
+        )
+        _literal(
+            component["sha256"],
+            expected_sha256,
+            f"decision implementation component {path}.sha256",
+        )
+        normalized_components.append({"path": path, "sha256": component["sha256"]})
+    bundle_sha256 = hashlib.sha256(
+        canonical_json_bytes(normalized_components)
+    ).hexdigest()
+    _literal(
+        lock["bundle_sha256"],
+        bundle_sha256,
+        "decision implementation lock.bundle_sha256",
+    )
+    return {
+        "algorithm": lock["algorithm"],
+        "components": normalized_components,
+        "bundle_sha256": bundle_sha256,
+    }
 
 
 def freeze_decision_config(
@@ -80,6 +168,7 @@ def freeze_decision_config(
             "authority_path": DECISION_CONTRACT_AUTHORITY.as_posix(),
             "content_sha256": decision_contract_sha256(repo_root),
         },
+        "decision_implementation": decision_implementation_identity(repo_root),
         "model": {"artifact_sha256": model_artifact_sha256},
         "development_data": {
             "revision": development_revision,
@@ -94,8 +183,7 @@ def freeze_decision_config(
             "validation_rows": validation_rows,
         },
         "heads": {
-            dimension: dict(head_margins[dimension])
-            for dimension in HARD_DIMENSIONS
+            dimension: dict(head_margins[dimension]) for dimension in HARD_DIMENSIONS
         },
     }
     validate_decision_config(config, repo_root=repo_root)
@@ -114,6 +202,7 @@ def validate_decision_config(
             "schema",
             "task",
             "decision_contract",
+            "decision_implementation",
             "model",
             "development_data",
             "selection",
@@ -168,6 +257,11 @@ def validate_decision_config(
         contract["content_sha256"],
         decision_contract_sha256(repo_root),
         "decision config.decision_contract.content_sha256",
+    )
+    _literal(
+        config["decision_implementation"],
+        decision_implementation_identity(repo_root),
+        "decision config.decision_implementation",
     )
     model = _object(config["model"], "decision config.model")
     _exact_keys(model, {"artifact_sha256"}, "decision config.model")
@@ -272,9 +366,10 @@ def decode_with_decision_config(
             )
         logits = output["heads"]["conditional_continuity"]["logits"][index]
         continuity = config["heads"]["conditional_continuity"]
-        if float(logits[2]) - max(float(logits[0]), float(logits[1])) > continuity[
-            "na_over_applicable_margin"
-        ]:
+        if (
+            float(logits[2]) - max(float(logits[0]), float(logits[1]))
+            > continuity["na_over_applicable_margin"]
+        ):
             labels["conditional_continuity"] = "N/A"
         else:
             labels["conditional_continuity"] = (
@@ -349,15 +444,16 @@ def evaluate_qualification_predictions(
     """Return fixed confusion/failure-recall metrics for qualification."""
 
     if not gold_rows or len(gold_rows) != len(predicted_rows):
-        raise QualificationError("qualification evaluation requires equal non-empty rows")
+        raise QualificationError(
+            "qualification evaluation requires equal non-empty rows"
+        )
     gold = [validate_labels(row) for row in gold_rows]
     predicted = [validate_labels(row) for row in predicted_rows]
     per_dimension: dict[str, dict[str, Any]] = {}
     for dimension in HARD_DIMENSIONS:
         classes = DIMENSION_CLASSES[dimension]
         confusion = {
-            expected: {actual: 0 for actual in classes}
-            for expected in classes
+            expected: {actual: 0 for actual in classes} for expected in classes
         }
         for expected, actual in zip(gold, predicted, strict=True):
             confusion[expected[dimension]][actual[dimension]] += 1
@@ -474,6 +570,10 @@ def _margin(value: Any, where: str, *, strictly_positive: bool) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise QualificationError(f"{where} is not numeric")
     numeric = float(value)
-    if not math.isfinite(numeric) or numeric < 0 or (strictly_positive and numeric == 0):
+    if (
+        not math.isfinite(numeric)
+        or numeric < 0
+        or (strictly_positive and numeric == 0)
+    ):
         raise QualificationError(f"{where} is outside its conservative range")
     return numeric

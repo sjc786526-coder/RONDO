@@ -26,6 +26,7 @@ all-applicable-heads AND 唯一派生。
 
 - `rondo-publication-critic-task@v2` 权威内容 SHA-256；
 - 本 decision contract 的版本与内容 SHA-256；
+- decision decoder、config projection 与 qualification metrics 的固定组件列表和组合 SHA-256；
 - 单个 model artifact SHA-256；
 - 单个 development data revision、manifest SHA-256 与 validation candidate bytes SHA-256；
 - 五个逐 head margin；
@@ -37,7 +38,8 @@ bytes 确定性破同分；它不提供 test 参数或 test loader。调用者�
 strict validator 并在任何资格集合释放前冻结。
 
 test、现有 v9 同分布辅助 holdout、独立 qualification set 都不得参与 margin 搜索、候选淘汰或 config 修改。model、task、decision
-contract 或 development data 任一身份变化都使已冻结 config 失效，必须重新使用 validation 选择；资格结果不得反向调参。
+contract、decision implementation bundle 或 development data 任一身份变化都使已冻结 config 失效，必须重新使用 validation 选择；
+资格结果不得反向调参。运行时必须先核对固定组件字节，不能只凭 Markdown 或版本字符串接受旧 config。
 
 ## 3. 固定资格指标
 
