@@ -192,6 +192,8 @@ def _run_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--segment-authorization", type=Path, required=True)
     parser.add_argument("--resource-receipt", type=Path, required=True)
     parser.add_argument("--lifecycle-authorization", type=Path, required=True)
+    parser.add_argument("--validated-actual-pod-id", required=True)
+    parser.add_argument("--validated-actual-pod-name", required=True)
     parser.add_argument("--reviewer-approval-phrase", required=True)
 
 
@@ -586,18 +588,31 @@ def _require_stage_b(args: argparse.Namespace) -> dict[str, Any]:
     ):
         raise FullModelTrainingError("plan099_stage_b_approval_required")
     _task_root()
-    runtime_root = plan099_runtime_control_root("z1z3m7n90nz4xr")
+    runtime_root = plan099_runtime_control_root(args.validated_actual_pod_id)
     resource = validate_runtime_control_file(
-        "live-resource", args.resource_receipt, runtime_root
+        "live-resource",
+        args.resource_receipt,
+        runtime_root,
+        args.validated_actual_pod_id,
     )
     lifecycle = validate_runtime_control_file(
-        "lifecycle", args.lifecycle_authorization, runtime_root
+        "lifecycle",
+        args.lifecycle_authorization,
+        runtime_root,
+        args.validated_actual_pod_id,
     )
     segment = validate_runtime_control_file(
-        "segment", args.segment_authorization, runtime_root
+        "segment",
+        args.segment_authorization,
+        runtime_root,
+        args.validated_actual_pod_id,
     )
     authorization = validate_current_pod_runtime_control_chain(
-        resource, lifecycle, segment
+        resource,
+        lifecycle,
+        segment,
+        validated_actual_pod_id=args.validated_actual_pod_id,
+        validated_actual_pod_name=args.validated_actual_pod_name,
     )
     now = datetime.now(timezone.utc)
     authorized = datetime.fromisoformat(segment["authorized_at"].replace("Z", "+00:00"))

@@ -13,6 +13,8 @@ if [ "${RONDO_PLAN099_STAGE_B_APPROVED:-}" != "1" ]; then exit 2; fi
 : "${RONDO_PLAN099_SEGMENT_AUTHORIZATION:?set the paid segment authorization}"
 : "${RONDO_PLAN099_RESOURCE_RECEIPT:?set the live resource receipt}"
 : "${RONDO_PLAN099_LIFECYCLE_AUTHORIZATION:?set the lifecycle authorization}"
+: "${RONDO_PLAN099_VALIDATED_ACTUAL_POD_ID:?set the verified actual Pod id}"
+: "${RONDO_PLAN099_VALIDATED_ACTUAL_POD_NAME:?set the verified actual Pod name}"
 : "${RONDO_PLAN099_IMAGE_IDENTITY:?set the exact image identity}"
 : "${RONDO_PLAN099_MAX_SECONDS:?set the paid segment maximum seconds}"
 : "${RONDO_PLAN099_REVIEWER_APPROVAL_PHRASE:?set the exact reviewer approval phrase}"
@@ -50,6 +52,8 @@ PYTHONPATH="$bootstrap_source/eval" python3 -B -P -m \
   --segment-authorization "$RONDO_PLAN099_SEGMENT_AUTHORIZATION" \
   --resource-receipt "$RONDO_PLAN099_RESOURCE_RECEIPT" \
   --lifecycle-authorization "$RONDO_PLAN099_LIFECYCLE_AUTHORIZATION" \
+  --validated-actual-pod-id "$RONDO_PLAN099_VALIDATED_ACTUAL_POD_ID" \
+  --validated-actual-pod-name "$RONDO_PLAN099_VALIDATED_ACTUAL_POD_NAME" \
   --reviewer-approval-phrase "$RONDO_PLAN099_REVIEWER_APPROVAL_PHRASE"
 runtime_local="$task_root/runtime-local"
 mkdir -m 700 "$runtime_local"

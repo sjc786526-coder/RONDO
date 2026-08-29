@@ -577,8 +577,18 @@ def test_plan099_bootstrap_reuses_exact_image_torch_and_guard_is_host_armed(
     worker_condition = 'if [ ! -x "$python" ] || [ -L "$python" ]; then exit 2; fi'
     worker_source = worker.read_text(encoding="utf-8")
     assert worker_condition in worker_source
-    runtime_root = "/run/rondo-plan099-z1z3m7n90nz4xr/runtime-control"
-    assert f'runtime_root="{runtime_root}"' in worker_source
+    assert (
+        'runtime_root="/run/rondo-plan099-${RONDO_PLAN099_VALIDATED_ACTUAL_POD_ID}/runtime-control"'
+        in worker_source
+    )
+    assert "z1z3m7n90nz4xr) exit 2" in worker_source
+    assert (
+        '--validated-actual-pod-id "$RONDO_PLAN099_VALIDATED_ACTUAL_POD_ID"' in source
+    )
+    assert (
+        '--validated-actual-pod-name "$RONDO_PLAN099_VALIDATED_ACTUAL_POD_NAME"'
+        in source
+    )
     assert 'case "$resource" in "$runtime_root/live-resource/"*.json)' in worker_source
     assert 'case "$lifecycle" in "$runtime_root/lifecycle/"*.json)' in worker_source
     assert 'case "$segment" in "$runtime_root/segment/"*.json)' in worker_source
@@ -607,7 +617,8 @@ def test_plan099_bootstrap_reuses_exact_image_torch_and_guard_is_host_armed(
     runbook = (REPO_ROOT / "training/publication-critic-plan099/runbook.md").read_text(
         encoding="utf-8"
     )
-    assert "nohup setsid env RONDO_PLAN099_STAGE_B_APPROVED=1" in runbook
+    assert "由开发工具持有的长期 exec 会话持续托管" in runbook
+    assert "nohup setsid env RONDO_PLAN099_STAGE_B_APPROVED=1" not in runbook
     assert "--profile plan099" in runbook
     assert "正常提前释放仍只接受指定 queue" in runbook
 
@@ -616,45 +627,71 @@ def test_runtime_control_allowlist_accepts_only_exact_canonical_chain(
     tmp_path: Path,
 ) -> None:
     now = datetime(2026, 8, 28, 12, 0, tzinfo=UTC)
-    pod_root = tmp_path / "rondo-plan099-z1z3m7n90nz4xr"
-    pod_root.mkdir(mode=0o700)
-    runtime_root = pod_root / "runtime-control"
-    runtime_root.mkdir(mode=0o700)
-    resource = _resource_receipt()
-    lifecycle = authorize_pod_lifecycle(
-        _budget_snapshot(), resource, maximum_lifecycle_seconds=7200, now=now
+    run_base = tmp_path / "run"
+    run_base.mkdir(mode=0o700)
+    pod_ids = ("replacement099a", "replacement099b")
+    pod_names = (
+        "rondo-plan099-20260829-stageb02a",
+        "rondo-plan099-20260829-stageb02b",
     )
-    segment = authorize_paid_segment(
-        _budget_snapshot(), lifecycle, maximum_seconds=3600, now=now
-    )
-    values = {
-        "live-resource": resource,
-        "lifecycle": lifecycle,
-        "segment": segment,
-    }
-    paths: dict[str, Path] = {}
-    for role, value in values.items():
-        directory = runtime_root / role
-        directory.mkdir(mode=0o700)
-        path = directory / f"{value['content_sha256']}.json"
-        path.write_bytes(pretty_json_bytes(value))
-        path.chmod(0o600)
-        paths[role] = path
+
+    def create_chain(
+        pod_id: str, pod_name: str
+    ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+        resource = _resource_receipt(pod_id=pod_id, pod_name=pod_name)
+        lifecycle = authorize_pod_lifecycle(
+            _budget_snapshot(), resource, maximum_lifecycle_seconds=7200, now=now
+        )
+        segment = authorize_paid_segment(
+            _budget_snapshot(), lifecycle, maximum_seconds=3600, now=now
+        )
+        return resource, lifecycle, segment
+
     with patch(
         "rondo_eval.publication_critic.full_model_training.plan099_contract."
-        "RUNTIME_CONTROL_ROOT",
-        runtime_root,
+        "RUNTIME_CONTROL_BASE",
+        run_base,
     ):
-        assert plan099_runtime_control_root("z1z3m7n90nz4xr") == runtime_root
-        for role, value in values.items():
-            assert (
-                validate_runtime_control_file(role, paths[role], runtime_root) == value
-            )
-        assert validate_runtime_control_chain(resource, lifecycle, segment) == {
-            "resource": resource,
-            "lifecycle": lifecycle,
-            "segment": segment,
-        }
+        chains = [
+            create_chain(pod_id, pod_name)
+            for pod_id, pod_name in zip(pod_ids, pod_names, strict=True)
+        ]
+        roots: list[Path] = []
+        paths_by_pod: list[dict[str, Path]] = []
+        for pod_id, chain in zip(pod_ids, chains, strict=True):
+            runtime_root = plan099_runtime_control_root(pod_id)
+            runtime_root.parent.mkdir(mode=0o700)
+            runtime_root.mkdir(mode=0o700)
+            roots.append(runtime_root)
+            values = dict(zip(("live-resource", "lifecycle", "segment"), chain))
+            paths: dict[str, Path] = {}
+            for role, value in values.items():
+                directory = runtime_root / role
+                directory.mkdir(mode=0o700)
+                path = directory / f"{value['content_sha256']}.json"
+                path.write_bytes(pretty_json_bytes(value))
+                path.chmod(0o600)
+                paths[role] = path
+                assert (
+                    validate_runtime_control_file(role, path, runtime_root, pod_id)
+                    == value
+                )
+            paths_by_pod.append(paths)
+
+        assert roots[0] != roots[1]
+        resource, lifecycle, segment = chains[0]
+        runtime_root = roots[0]
+        paths = paths_by_pod[0]
+        assert (
+            validate_current_pod_runtime_control_chain(
+                resource,
+                lifecycle,
+                segment,
+                validated_actual_pod_id=pod_ids[0],
+                validated_actual_pod_name=pod_names[0],
+            )["resource"]["pod_id"]
+            == pod_ids[0]
+        )
 
         wrong_path = runtime_root / "live-resource" / ("0" * 64 + ".json")
         wrong_path.write_bytes(pretty_json_bytes(resource))
@@ -662,14 +699,18 @@ def test_runtime_control_allowlist_accepts_only_exact_canonical_chain(
         with pytest.raises(
             FullModelTrainingError, match="plan099_runtime_control_invalid"
         ):
-            validate_runtime_control_file("live-resource", wrong_path, runtime_root)
+            validate_runtime_control_file(
+                "live-resource", wrong_path, runtime_root, pod_ids[0]
+            )
 
         noncanonical = paths["segment"]
         noncanonical.write_bytes(json.dumps(segment, sort_keys=True).encode("utf-8"))
         with pytest.raises(
             FullModelTrainingError, match="plan099_runtime_control_invalid"
         ):
-            validate_runtime_control_file("segment", noncanonical, runtime_root)
+            validate_runtime_control_file(
+                "segment", noncanonical, runtime_root, pod_ids[0]
+            )
         noncanonical.write_bytes(pretty_json_bytes(segment))
 
         paths["live-resource"].chmod(0o644)
@@ -677,7 +718,7 @@ def test_runtime_control_allowlist_accepts_only_exact_canonical_chain(
             FullModelTrainingError, match="plan099_runtime_control_invalid"
         ):
             validate_runtime_control_file(
-                "live-resource", paths["live-resource"], runtime_root
+                "live-resource", paths["live-resource"], runtime_root, pod_ids[0]
             )
         paths["live-resource"].chmod(0o600)
 
@@ -688,14 +729,18 @@ def test_runtime_control_allowlist_accepts_only_exact_canonical_chain(
         oversized.write_bytes(b" " * (16 * 1024 + 1))
         oversized.chmod(0o600)
         with pytest.raises(FullModelTrainingError, match="regular_file_too_large"):
-            validate_runtime_control_file("live-resource", oversized, runtime_root)
+            validate_runtime_control_file(
+                "live-resource", oversized, runtime_root, pod_ids[0]
+            )
         oversized.write_bytes(original)
         oversized.chmod(0o600)
 
         symlink = runtime_root / "live-resource" / ("1" * 64 + ".json")
         symlink.symlink_to(paths["live-resource"])
         with pytest.raises(FullModelTrainingError, match="regular_file_required"):
-            validate_runtime_control_file("live-resource", symlink, runtime_root)
+            validate_runtime_control_file(
+                "live-resource", symlink, runtime_root, pod_ids[0]
+            )
 
         workspace_copy = tmp_path / "workspace-runtime-control.json"
         workspace_copy.write_bytes(pretty_json_bytes(resource))
@@ -703,7 +748,9 @@ def test_runtime_control_allowlist_accepts_only_exact_canonical_chain(
         with pytest.raises(
             FullModelTrainingError, match="plan099_runtime_control_invalid"
         ):
-            validate_runtime_control_file("live-resource", workspace_copy, runtime_root)
+            validate_runtime_control_file(
+                "live-resource", workspace_copy, runtime_root, pod_ids[0]
+            )
 
         other_run_root = tmp_path / "other-run" / "runtime-control"
         (other_run_root / "live-resource").mkdir(parents=True, mode=0o700)
@@ -715,56 +762,61 @@ def test_runtime_control_allowlist_accepts_only_exact_canonical_chain(
         with pytest.raises(
             FullModelTrainingError, match="plan099_runtime_control_invalid"
         ):
-            validate_runtime_control_file("live-resource", other_path, other_run_root)
+            validate_runtime_control_file(
+                "live-resource", other_path, other_run_root, pod_ids[0]
+            )
+
+        with pytest.raises(
+            FullModelTrainingError, match="plan099_runtime_control_invalid"
+        ):
+            validate_runtime_control_file(
+                "live-resource", paths["live-resource"], runtime_root, pod_ids[1]
+            )
 
         (runtime_root / "lifecycle").chmod(0o755)
         with pytest.raises(
             FullModelTrainingError, match="plan099_runtime_control_invalid"
         ):
-            validate_runtime_control_file("lifecycle", paths["lifecycle"], runtime_root)
+            validate_runtime_control_file(
+                "lifecycle", paths["lifecycle"], runtime_root, pod_ids[0]
+            )
         (runtime_root / "lifecycle").chmod(0o700)
 
-    other_resource = _resource_receipt(prior_wall_seconds=1)
-    other_lifecycle = authorize_pod_lifecycle(
-        _budget_snapshot(),
-        other_resource,
-        maximum_lifecycle_seconds=7199,
-        now=now,
-    )
-    other_segment = authorize_paid_segment(
-        _budget_snapshot(), other_lifecycle, maximum_seconds=3600, now=now
-    )
-    with pytest.raises(
-        FullModelTrainingError, match="plan099_runtime_control_chain_invalid"
-    ):
-        validate_runtime_control_chain(resource, other_lifecycle, other_segment)
+        with pytest.raises(
+            FullModelTrainingError, match="plan099_runtime_control_pod_not_approved"
+        ):
+            plan099_runtime_control_root("z1z3m7n90nz4xr")
+        with pytest.raises(
+            FullModelTrainingError, match="plan099_runtime_control_pod_not_approved"
+        ):
+            validate_current_pod_runtime_control_chain(
+                resource,
+                lifecycle,
+                segment,
+                validated_actual_pod_id=pod_ids[1],
+                validated_actual_pod_name=pod_names[1],
+            )
 
-    assert os.stat(paths["live-resource"]).st_mode & 0o777 == 0o600
-    with pytest.raises(
-        FullModelTrainingError, match="plan099_runtime_control_pod_not_approved"
-    ):
-        plan099_runtime_control_root("replacement-pod")
+        other_resource = _resource_receipt(
+            prior_wall_seconds=1,
+            pod_id=pod_ids[0],
+            pod_name=pod_names[0],
+        )
+        other_lifecycle = authorize_pod_lifecycle(
+            _budget_snapshot(),
+            other_resource,
+            maximum_lifecycle_seconds=7199,
+            now=now,
+        )
+        other_segment = authorize_paid_segment(
+            _budget_snapshot(), other_lifecycle, maximum_seconds=3600, now=now
+        )
+        with pytest.raises(
+            FullModelTrainingError, match="plan099_runtime_control_chain_invalid"
+        ):
+            validate_runtime_control_chain(resource, other_lifecycle, other_segment)
 
-    exact_resource = _resource_receipt(
-        pod_id="z1z3m7n90nz4xr",
-        pod_name="rondo-plan099-20260829-stageb01",
-    )
-    exact_lifecycle = authorize_pod_lifecycle(
-        _budget_snapshot(), exact_resource, maximum_lifecycle_seconds=7200, now=now
-    )
-    exact_segment = authorize_paid_segment(
-        _budget_snapshot(), exact_lifecycle, maximum_seconds=3600, now=now
-    )
-    assert (
-        validate_current_pod_runtime_control_chain(
-            exact_resource, exact_lifecycle, exact_segment
-        )["resource"]["pod_id"]
-        == "z1z3m7n90nz4xr"
-    )
-    with pytest.raises(
-        FullModelTrainingError, match="plan099_runtime_control_pod_not_approved"
-    ):
-        validate_current_pod_runtime_control_chain(resource, lifecycle, segment)
+        assert os.stat(paths["live-resource"]).st_mode & 0o777 == 0o600
 
 
 def test_fake_formal_checkpoint_first_recovery_selection_and_retention(

@@ -62,9 +62,8 @@ MAXIMUM_RUNTIME_CONTROL_BYTES = 16 * 1024
 # The exact GPU identity remains mandatory; this lower bound only avoids treating
 # a real L40S as if it had to expose 48 GiB of addressable memory.
 MINIMUM_L40S_VISIBLE_MEMORY_BYTES = 44 * 1024**3
-RUNTIME_CONTROL_POD_ID = "z1z3m7n90nz4xr"
-RUNTIME_CONTROL_POD_NAME = "rondo-plan099-20260829-stageb01"
-RUNTIME_CONTROL_ROOT = Path("/run/rondo-plan099-z1z3m7n90nz4xr/runtime-control")
+RUNTIME_CONTROL_BASE = Path("/run")
+RETIRED_RUNTIME_CONTROL_POD_IDS = frozenset({"z1z3m7n90nz4xr"})
 RUNTIME_CONTROL_ROLES = {
     "live-resource": LIVE_RESOURCE_SCHEMA,
     "lifecycle": LIFECYCLE_SCHEMA,
@@ -832,13 +831,14 @@ def validate_runtime_control_file(
     role: str,
     path: Path | str,
     runtime_root: Path | str,
+    validated_actual_pod_id: str,
 ) -> dict[str, Any]:
     """Validate one of the three exact host-to-Pod runtime JSON controls."""
 
     if role not in RUNTIME_CONTROL_ROLES:
         raise FullModelTrainingError("plan099_runtime_control_invalid")
     requested_root = Path(runtime_root)
-    if requested_root != plan099_runtime_control_root(RUNTIME_CONTROL_POD_ID):
+    if requested_root != plan099_runtime_control_root(validated_actual_pod_id):
         raise FullModelTrainingError("plan099_runtime_control_invalid")
     role_directory = requested_root / role
     try:
@@ -892,11 +892,15 @@ def validate_runtime_control_file(
 
 
 def plan099_runtime_control_root(pod_id: str) -> Path:
-    """Return the one reviewer-approved ephemeral control root for this Pod."""
+    """Derive the approved ephemeral root from one validated replacement Pod id."""
 
-    if pod_id != RUNTIME_CONTROL_POD_ID:
+    if (
+        not isinstance(pod_id, str)
+        or _IDENTIFIER.fullmatch(pod_id) is None
+        or pod_id in RETIRED_RUNTIME_CONTROL_POD_IDS
+    ):
         raise FullModelTrainingError("plan099_runtime_control_pod_not_approved")
-    return RUNTIME_CONTROL_ROOT
+    return RUNTIME_CONTROL_BASE / f"rondo-plan099-{pod_id}" / "runtime-control"
 
 
 def validate_runtime_control_chain(
@@ -945,13 +949,20 @@ def validate_current_pod_runtime_control_chain(
     resource: Any,
     lifecycle: Any,
     segment: Any,
+    *,
+    validated_actual_pod_id: str,
+    validated_actual_pod_name: str,
 ) -> dict[str, dict[str, Any]]:
-    """Validate the chain and bind it to the one approved exception Pod."""
+    """Validate the chain and bind it to the independently verified actual Pod."""
 
+    plan099_runtime_control_root(validated_actual_pod_id)
     authorization = validate_runtime_control_chain(resource, lifecycle, segment)
     if (
-        authorization["resource"]["pod_id"] != RUNTIME_CONTROL_POD_ID
-        or authorization["resource"]["pod_name"] != RUNTIME_CONTROL_POD_NAME
+        not isinstance(validated_actual_pod_name, str)
+        or _IDENTIFIER.fullmatch(validated_actual_pod_name) is None
+        or not validated_actual_pod_name.startswith("rondo-plan099-")
+        or authorization["resource"]["pod_id"] != validated_actual_pod_id
+        or authorization["resource"]["pod_name"] != validated_actual_pod_name
     ):
         raise FullModelTrainingError("plan099_runtime_control_pod_not_approved")
     return authorization
@@ -1222,11 +1233,12 @@ def _validate_asset_contract(value: Any) -> dict[str, Any]:
             "directory_mode": "0700",
             "ephemeral": True,
             "fresh_create_on_environment_rebuild": True,
-            "pod_id": RUNTIME_CONTROL_POD_ID,
-            "pod_name": RUNTIME_CONTROL_POD_NAME,
+            "pod_id_source": "validated_actual_pod_id",
+            "pod_name_binding": "validated_live_resource_receipt",
+            "retired_pod_ids": sorted(RETIRED_RUNTIME_CONTROL_POD_IDS),
             "maximum_file_bytes": MAXIMUM_RUNTIME_CONTROL_BYTES,
             "path_template": (
-                "/run/rondo-plan099-z1z3m7n90nz4xr/runtime-control/"
+                "/run/rondo-plan099-{validated_actual_pod_id}/runtime-control/"
                 "{role}/{content_sha256}.json"
             ),
             "roles": [
@@ -1430,9 +1442,8 @@ __all__ = [
     "MODEL_WEIGHT_SHA256",
     "REPO_ROOT",
     "RUNTIME_CONTROL_ROLES",
-    "RUNTIME_CONTROL_POD_ID",
-    "RUNTIME_CONTROL_POD_NAME",
-    "RUNTIME_CONTROL_ROOT",
+    "RETIRED_RUNTIME_CONTROL_POD_IDS",
+    "RUNTIME_CONTROL_BASE",
     "SEGMENT_SCHEMA",
     "V10_MANIFEST_SHA256",
     "assess_development_checkpoint",

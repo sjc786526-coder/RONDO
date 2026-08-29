@@ -221,28 +221,31 @@ trainable scope、精确训练强度或普通调试顺序，这些由执行者�
   `a84fb5dd` 闭合，定向 `24 passed`，四件 bundle/receipt 已绑定新提交重建。
 - 2026-08-29：进入云端恢复前发现 host guard PID 不存活，按已授权 guard safety failure 止费路径立即 exact delete 首 Pod；实时确认
   `pod_count=0`、compute `$0/h`，未下载/加载模型、未执行 commissioning 或 formal，网络卷保留。
+- 2026-08-29：审查者批准最后一个 replacement Pod、从已核验 actual Pod ID 动态派生的 `/run` 控制根和前台长期 exec guard；本地已移除首 Pod
+  硬编码并显式拒绝其路径，两个不同合法 ID 的实例化及错 ID/workspace/其他 `/run` 拒绝路径进入 focused 门，组合 `24 passed`。
 
 ### 当前工作
 
-- `PHASE_B_TECHNICAL_RECOVERY_AWAITING_REVIEWER_DECISION / ZERO_POD`。
+- `PHASE_B_LAST_TECHNICAL_RECOVERY_PREP / ZERO_POD`。
 
 ### 本任务剩余步骤
 
-1. 通过指定队列取得 replacement Pod 新 exact `/run` 控制路径与稳定 host guard 启动方式批示；未批准则保持 0 Pod。
-2. 在原冻结路线、剩余累计墙钟与动态预算内执行 replacement Pod commissioning、clean formal、恢复复现、候选或 `NO-GO` 冻结与必要回传。
-3. 提交阶段 B 核心交付，使用 §7 队列申请 Pod 预释放审查并停止；审查者确认无需 Pod 并明确批准后，立即 stop/delete Pod、复核 compute `$0/h`。
-4. 在无 Pod 状态下完成本地结果、WBS、COMPLETED 与日志收口；提交最终 tracked 变更，使用 §7 队列申请最终独立验收并停止。
+1. 提交动态 runtime-control 窄修，重建并验签同名四件 bundle/receipt；创建前刷新实时预算与 0 Pod 状态。
+2. 创建并独立核验最后一个 replacement Pod，生成生命周期授权并以前台长期 exec 会话稳定武装 guard。
+3. 在原冻结路线、剩余累计墙钟与动态预算内执行 commissioning、clean formal、恢复复现、候选或 `NO-GO` 冻结与必要回传。
+4. 提交阶段 B 核心交付，使用 §7 队列申请 Pod 预释放审查并停止；审查者确认无需 Pod 并明确批准后，立即 stop/delete Pod、复核 compute `$0/h`。
+5. 在无 Pod 状态下完成本地结果、WBS、COMPLETED 与日志收口；提交最终 tracked 变更，使用 §7 队列申请最终独立验收并停止。
 
 ### 阻塞项
 
-- current-Pod `/run` 例外不自动沿用 replacement Pod；host guard 的原 `nohup setsid` 进程也未持续存活。二者须经审查者批示后才重建第二 Pod。
+- replacement Pod 是最后一个任务 Pod；若资源、预算或前台 guard 再失败，立即安全收口，不得创建第三 Pod。
 - 阶段 B 核心任务完成后，正常 Pod 删除仍由 Pod 预释放审查门控制；安全止费与 absolute trigger 例外保持有效。
 
 ### 当前验收状态
 
 - 规划：`COMPLETED / COMMITTED`。
 - 阶段 A：`REVIEW_ACCEPTED / COMPLETE`。
-- 阶段 B：`AUTHORIZED / TECHNICAL_RECOVERY_REVIEWER_GATED / ZERO_POD`。
+- 阶段 B：`AUTHORIZED / LAST_TECHNICAL_RECOVERY_PREP / ZERO_POD`。
 - 完整任务：`IN_PROGRESS / MODEL_NOT_DOWNLOADED / TRAINING_NOT_STARTED`。
 
 ### 交接边界

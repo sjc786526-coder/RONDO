@@ -25,3 +25,7 @@ validator、worker、资产合同、runbook 与拒绝路径测试已同步；易
 进入云端恢复前复核发现 host guard armed receipt 所记 PID 已不存活且无结果 receipt。该失败触发既有安全止费授权：首 Pod
 `z1z3m7n90nz4xr` 已 exact delete，终态为 `pod_count=0`、compute `$0/h`，账户只剩既有卷费 `$0.007/h`。未下载或加载模型，未执行
 commissioning/formal；replacement Pod 的新 exact `/run` 路径和可持续 guard 启动方式改由指定队列批示。
+
+审查者批准最后一个 replacement Pod、动态 `/run/rondo-plan099-{validated_actual_pod_id}/runtime-control` 模板和前台长期 exec guard。
+实现已移除首 Pod ID/name 硬编码：actual ID/name 由独立核验结果传给 CLI/worker并与三类控制链逐项绑定，首 Pod ID 显式退役；两组不同合法 ID
+可独立实例化，错 ID、旧 Pod、workspace `0666` 与其他 `/run` 路径均拒绝。相同 focused 组合仍为 `24 passed`。

@@ -33,16 +33,18 @@ GPU 或付费步骤；每次启动仍须核对该批准及本轮预算和资源 
 再加载模型。不得上传 `.env.local`，不得把密钥当 shell 文件 source。
 
 Pod 独立核验后，host→Pod 运行时控制 JSON 只允许三类：live-resource receipt、Pod lifecycle authorization、
-paid-segment authorization。仅当前 exact Pod `z1z3m7n90nz4xr` 使用易失控制根
-`/run/rondo-plan099-z1z3m7n90nz4xr/runtime-control`；该根、父目录及三个 role 目录必须是普通非 symlink 目录且权限
+paid-segment authorization。仅本次最后一个 replacement Pod 使用由已核验实际 Pod ID 唯一派生的易失控制根
+`/run/rondo-plan099-{validated_actual_pod_id}/runtime-control`；首 Pod `z1z3m7n90nz4xr` 已退役且必须拒绝。该根、父目录及三个 role 目录必须是
+普通非 symlink 目录且权限
 `0700`。每份文件必须是普通非 symlink 文件、不超过 16 KiB、权限 `0600`，并放在
 `{runtime_root}/{live-resource|lifecycle|segment}/{content_sha256}.json`；文件名必须等于经对应 schema 校验后的
 content SHA-256。三类文件只由冻结 CLI 生成并逐字节复制，禁止手工编辑或重算：content SHA 基于 core 的 canonical
 JSON，实际文件则是确定性的 `pretty_json_bytes_v1`。worker 在启动任何 CLI 动作前逐文件校验路径、权限、文件字节、schema、content SHA 与
 三者交叉绑定。budget snapshot、guard/release receipt、环境或训练状态、provider 原始响应、任意第四类 JSON、
 模型、日志及密钥均不在此运行时上传边界内。容器或进程环境重建、恢复或进入新 segment 前，都从 host 权威文件
-重新逐字节复制并完整验证，不依赖 `/run` 持久化。首次使用及每次环境重建时必须在当前 Pod 内 exclusive 新建上述
-普通目录；若 exact task-owned 易失根已存在，先精确清空并重建，禁止复用其内容。该例外不自动沿用到 replacement Pod。
+重新逐字节复制并完整验证，不依赖 `/run` 持久化。首次使用及每次环境重建时必须在已核验 replacement Pod 内 exclusive 新建上述
+普通目录；若 exact task-owned 易失根已存在，先精确清空并重建，禁止复用其内容。实际 ID/name 必须同时绑定 live-resource、lifecycle、segment
+与 worker 参数；错 ID、其他 `/run` 路径和网络卷副本均 fail-closed。本例外不扩展到第三 Pod。
 
 Pod 创建后，训练前独立核验实际 provider、Secure Cloud、`US-TX-3`、L40S 数量/显存、单价、镜像、20GB
 container disk 和卷 `mwemzrn33y` 的挂载；任一项不符立即释放，不进入 commissioning。创建响应不确定时先按
@@ -62,23 +64,27 @@ authorization 与 guard receipt 留在主物理根 Plan 099 ignored host namespa
 逐哈希绑定。网络卷内因 FUSE 呈现 `0666` 的旧 runtime-control 副本不得消费，并精确清理；`/run` 不得存放其他资产。
 
 Pod 创建并独立核验后，必须先在主物理根 Plan 099 ignored host namespace 生成 lifecycle authorization，并在授权后
-60 秒内用 `nohup setsid` 启动冻结的宿主 guard；armed receipt 中的 PID 必须仍存活且 exact Pod id/name、绝对 trigger
-与 authorization 一致。未成功武装不得上传、bootstrap 或使用 Pod。bootstrap 本身也必须消费一个 fresh segment，
+60 秒内以前台进程启动冻结的宿主 guard，由开发工具持有的长期 exec 会话持续托管；禁止 `nohup`、`setsid`、shell 后台符号、system service 或
+宿主全局修改。取得 exec session id 后，armed receipt 中的 PID 必须仍存活且 exact Pod id/name、绝对 trigger
+与 authorization 一致，并从另一条普通工具调用再次确认进程与 exec session 存活。上述闭合前不得上传、bootstrap 或使用 Pod。
+bootstrap 本身也必须消费一个 fresh segment，
 在 execution assembly、venv 或依赖动作前验证三类控制链；assembly 同时在 Pod 内 exclusive-create `runtime-local/source-identity.json`，
 不从 host 上传第四类 JSON。已验 SHA 的外层只提取小型 bootstrap tree，随后立即以 `timeout --kill-after=60s` 在
 segment `maximum_seconds` 内重新进入脚本；assembly、venv、pip、pip-check 与 freeze 校验全部处于该机械窗口。
 固定 guard 调用轮廓如下（变量值均来自本轮已核验 receipt）：
 
 ```bash
-nohup setsid env RONDO_PLAN099_STAGE_B_APPROVED=1 PYTHONPATH=eval \
+env RONDO_PLAN099_STAGE_B_APPROVED=1 PYTHONPATH=eval \
   python3 -B -P training/publication-critic-plan094/runpod-lifecycle-guard.py \
   --profile plan099 --authorization "$PLAN099_LIFECYCLE_AUTHORIZATION" \
   --terminal-helper training/publication-critic-plan087/runpod-terminal.py \
   --task-root "$PLAN099_HOST_TASK_ROOT" --armed-output "$PLAN099_GUARD_ARMED" \
-  --result "$PLAN099_GUARD_RESULT" > "$PLAN099_GUARD_LOG" 2>&1 </dev/null &
+  --result "$PLAN099_GUARD_RESULT"
 ```
 
 正常提前释放仍只接受指定 queue 的批准 receipt 并走 `runpod-release.py`。Pod 预释放审查等待与绝对 trigger 取先到者：
+guard exec session 必须持续到 trigger，或正常预释放后仍到点完成幂等 0 费用确认。每个付费 segment 前快速复核 session、guard PID、armed
+receipt 与当前时间；任一消失或异常返回且没有成功 result receipt，立即用冻结 terminal helper 删除 replacement Pod 并确认 0 compute。
 若批准先到，立即走 gated release；若绝对 trigger 先到，guard 无需 queue receipt，直接调用 exact-Pod helper 自动
 stop/delete，并在 360 秒窗口内确认 0 Pod、compute `$0/h`。guard 不得取消，也不触碰网络卷；提前释放后它到点仅对
 已不存在的 exact Pod作幂等零费用确认。此绝对截止例外只守住累计 10,800 秒硬上限，不授权提前释放、延后 trigger
