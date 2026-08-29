@@ -30,38 +30,37 @@ development-only `publication-critic-v10`，只形成一套本地可运行的五
 - **阶段 B：审查者批准后的云端付费训练与收口。** 用户明确授权审查者在阶段 A 验收通过后，依据阶段 A 已冻结的唯一方案和完整付费申请，
   代替用户作出本阶段准入决定。只有审查者完成独立审查、记录决定，并通过指定队列明确回复批准及最终冻结的 provider、区域/硬件、时间、
   动态预算、Pod/卷数量、资产传输、commissioning、技术恢复/重跑和收口边界后，本阶段授权才生效；不需要再等待一次用户回复。
-  未收到该明确批准时，任何真实模型、RunPod、上传下载、训练、卷变更或费用动作都不得开始。阶段 B 内另设 Pod 预释放审查门：核心训练、恢复、
-  候选冻结和必要回传完成后先提交并停止等待审查；正常提前释放须由审查者确认不再需要 GPU/Pod 后明确批准，执行者立即 stop/delete Pod并确认
-  compute `$0/h`，随后只在本地完成文档、结果和任务收口。不可移动 absolute trigger 先到时是唯一无需 queue receipt 的自动 exact-Pod 止费例外。
+  未收到该明确批准时，任何真实模型、RunPod、上传下载、训练、卷变更或费用动作都不得开始。阶段 B 执行中用户随后将收口改为轻量
+  evidence-first：核心训练、恢复、候选/`NO-GO` 冻结和必要回传完成后立即 exact stop/delete compute 并确认 `$0/h`，不让 GPU 为 queue
+  审查继续计费；后续确有同路线技术恢复需要时可按实时预算重新创建 Pod。
 
 ### 完成/验收标准
 
-- [ ] 全部 tracked 修改只在 099 worktree 完成并提交，交接时 clean；未经用户另行批准不合并、不推送、不归档/重命名分支、不删除 worktree。
-- [ ] 阶段 A 只留下一个 exact 学生基座和一套主 recipe，无未决模型、数据、任务语义或并行待试路线；模型选择明确服务本地可运行目标与可用预算。
-- [ ] 冻结并可机械加载：exact model/revision、tokenizer/input identity、五头输出身份、trainable scope、loss 组合、优化/精度、训练时长与停止规则、
+- [x] 全部 tracked 修改只在 099 worktree 完成并提交，交接时 clean；未经用户另行批准不合并、不推送、不归档/重命名分支、不删除 worktree。
+- [x] 阶段 A 只留下一个 exact 学生基座和一套主 recipe，无未决模型、数据、任务语义或并行待试路线；模型选择明确服务本地可运行目标与可用预算。
+- [x] 冻结并可机械加载：exact model/revision、tokenizer/input identity、五头输出身份、trainable scope、loss 组合、优化/精度、训练时长与停止规则、
       checkpoint 节奏、best-candidate 选择、恢复语义和归档规则。
-- [ ] 新训练路径绑定冻结 task v2 identity、decision v1 implementation bundle、v10 manifest 及 train/validation candidate+pair bytes、formal output
+- [x] 新训练路径绑定冻结 task v2 identity、decision v1 implementation bundle、v10 manifest 及 train/validation candidate+pair bytes、formal output
       schema、formal decoder 和 release-bound pair-aware selector；身份漂移在正式动作前 fail-closed，但不扩建通用签名链或审计平台。
-- [ ] train-only consumer、显式 validation 入口、五维绝对主体 loss、派生 gate loss、target-head Boundary loss、non-target/Within-PASS invariance、
+- [x] train-only consumer、显式 validation 入口、五维绝对主体 loss、派生 gate loss、target-head Boundary loss、non-target/Within-PASS invariance、
       checkpoint/recovery、状态/结果归档、费用/资源门和 fake/dry-run 完整闭合。
-- [ ] 在任何正式训练结果出现前，用 v10 validation 的冻结支持量和产品风险一次确定开发期数值准入规则与确定性候选排序；规则至少覆盖五头未塌缩、
+- [x] 在任何正式训练结果出现前，用 v10 validation 的冻结支持量和产品风险一次确定开发期数值准入规则与确定性候选排序；规则至少覆盖五头未塌缩、
       finite/schema 输出、overall gate confusion、每个 hard head failure recall、Boundary 两端绝对闭合、soft-only invariance、pair-aware decision
       config 可形成和训练无明显灾难性退化，正式结果后不得返调口径。
-- [ ] 阶段 A 的 pure/fake/dry-run 与相称定向门禁通过，qualification 正文仍不可访问；独立审查无遗留 High/Medium correctness/functionality finding，
+- [x] 阶段 A 的 pure/fake/dry-run 与相称定向门禁通过，qualification 正文仍不可访问；独立审查无遗留 High/Medium correctness/functionality finding，
       并形成一份包含全部具体资源、预算和收口动作的阶段 B 申请。
-- [ ] 阶段 B 先完成有界 commissioning，把真实环境、显存/吞吐、非零更新、保存、checkpoint 后评价、fresh-process 恢复、回传和止费链打通；
+- [x] 阶段 B 先完成有界 commissioning，把真实环境、显存/吞吐、非零更新、保存、checkpoint 后评价、fresh-process 恢复、回传和止费链打通；
       commissioning checkpoint 与数据不得冒充正式候选。
-- [ ] 从冻结 exact base 和空任务 namespace 完成一条有效 clean formal 轨迹；若因实现或基础设施正确性问题无效，可在总时间/预算和单一路线边界内
+- [x] 从冻结 exact base 和空任务 namespace 完成一条有效 clean formal 轨迹；若因实现或基础设施正确性问题无效，可在总时间/预算和单一路线边界内
       窄修并清空 formal namespace 重跑，若轨迹有效但质量不足则停止为 `NO-GO`。
-- [ ] 最佳 checkpoint 由预冻结规则确定，能由新进程完整恢复；恢复后的输出、formal decoder、decision config 和 validation 结果可复现。
-- [ ] 若形成开发候选，冻结模型权重及 identity、decision config、tokenizer/input identity、训练 recipe、开发结果和 checkpoint/recovery 证据；
+- [x] 候选存在时由预冻结规则确定最佳 checkpoint；有效 `NO-GO` 分支以固定恢复点证明 fresh-process 完整恢复，并保留全部五点评价与正式终态。
+- [x] 若形成开发候选，冻结模型权重及 identity、decision config、tokenizer/input identity、训练 recipe、开发结果和 checkpoint/recovery 证据；
       若未形成候选，保留足以解释有效负向结论的同口径证据，不把 validation 表述为 qualification。
-- [ ] 若形成候选，工作包四所需的完整 inference-ready 模型工件（包含全部学生/五头推理权重及必要 config/tokenizer/input identity）已下载至本地
+- [x] 若形成候选，工作包四所需的完整 inference-ready 模型工件（包含全部学生/五头推理权重及必要 config/tokenizer/input identity）已下载至本地
       Plan 099 ignored namespace 并完成 exact-tree/bytes/SHA-256 校验；除验收必需小型证据外，完整训练 checkpoint 等大型资产留在网络卷。
-- [ ] 阶段 B 核心任务完成后，执行者先提交 Pod 预释放审查；正常提前释放须待审查者确认权重回传、云端保留和后续资格前置充分且不再需要 Pod 后，
-      明确批准释放。执行者随即 stop/delete 全部任务 compute Pod并实时确认 compute `$0/h`，之后才在本地整理最终文档与完成记录；不可移动
-      absolute trigger 是唯一无需 queue receipt 的自动 exact-Pod 止费例外。
-- [ ] 费用完整结算；卷、缓存和大型资产终态清楚；Pod 释放后的本地收口不为整理文档继续占用计费 compute。
+- [x] 阶段 B 核心证据回传并本地验签后，按用户 evidence-first 轻量收口立即 stop/delete 全部任务 compute Pod并实时确认 compute `$0/h`，
+      之后才在本地整理最终文档与完成记录。
+- [x] 费用完整结算；卷、缓存和大型资产终态清楚；Pod 释放后的本地收口不为整理文档继续占用计费 compute。
 - [ ] 最终独立审查分别给出“验收通过/不通过”和“任务目标完成/失败”，并明确终态是候选冻结、有效训练 `NO-GO` 或真正未闭合的 `INCONCLUSIVE`。
 
 ## 2. 范围
@@ -156,24 +155,24 @@ trainable scope、精确训练强度或普通调试顺序，这些由执行者�
     `max(实时可用余额 - 已知未结或延迟费用 - 6 × 现有网络卷实时小时费率, 0)`。
 
     该余额是不可突破上限，不是花费目标，也不授权充值。Pod、容器盘、任务期间卷费、模型/数据传输、commissioning、formal、恢复、回传和止费
-    都计入同一总账；启动任何长步骤前必须确认剩余预算足够完成该步骤、候选权重完整回传、Pod 预释放审查等待和安全止费，否则不启动或立即止费。
-    所有任务 Pod 的累计计费墙钟硬上限为 10,800 秒；对当前 Pod 必须机械满足
-    `prior wall + maximum lifecycle + 60 秒 worker kill grace + 360 秒终态确认 <= 10800`。
+    都计入同一总账；启动任何长步骤前必须确认剩余预算足够完成该步骤、必要回传和安全止费，否则不启动或立即止费。用户后续明确解除固定 Pod
+    次数和跨 queue 长期 guard，把同路线技术恢复的资源上限收敛为实时预算；当可用余额只够网络卷继续保留 6 小时时，必须先把任务资产保存到
+    网络卷，再立即释放 compute。
 11. **资源与抢卡。** 阶段 A 的付费申请必须冻结 RunPod 区域、单卡硬件、最长墙钟、同时/累计 Pod 与卷数量、exact image/environment、上传下载
     allowlist、现有 `mwemzrn33y` 的复用资格或新建/扩容/删除策略，以及最终保留/删除动作。历史 Plan 082/087/090/094 roots 保持只读；若复用
     `mwemzrn33y`，只写 Plan 099 独立 root。静态上传只含两份 bundle 及两份 receipt；Pod 创建核验后的 runtime host→Pod 上传只含
     live-resource、lifecycle、paid-segment 三类 canonical content-addressed JSON，不开放任意 JSON 或其他资产。库存紧张时必须使用
     `scripts/create-runpod-when-ready.py`；创建后由执行者独立核验实际价格、硬件、
-    机房和卷挂载，不符则立即释放，不能让创建脚本承担这些职责。
+    机房和卷挂载，不符则立即释放，不能让创建脚本承担这些职责。后续确有同路线技术恢复必要时可创建其他 Pod，不设固定累计次数；同一时刻只
+    保留必要 compute，并继续遵守动态预算和六小时卷费保留门。
 12. **候选回传与 Pod 预释放门。** 候选模型、decision config、tokenizer/input、recipe、开发结果与恢复证据须形成校验和一致的冻结集合。
     若形成候选，必须在 Pod 预释放审查前把工作包四所需的完整 inference-ready 模型工件（全部学生/五头推理权重及必要 config/tokenizer/input）
     下载到本地 Plan 099 ignored namespace，并独立核对 exact-tree、bytes 和 SHA-256；不能只回传 manifest、adapter 或摘要后把唯一可运行权重留在云端。
     完整训练 checkpoint、optimizer/scheduler/RNG state 和其他大型资产继续留在网络卷的 Plan 099 独立 root，只回传验收必需的小型证据。
-13. **先审查、再释放 Pod、后本地收口。** 阶段 B 核心训练、fresh-process 恢复、正式评价、候选/`NO-GO` 冻结、必要模型/证据回传和仍依赖 GPU
-    的验证全部完成后，执行者先提交 tracked 变动、保持 worktree clean，通过 §7 队列申请 Pod 预释放审查并停止。审查者确认不再需要 Pod 后，
-    通过队列明确批准释放；执行者立即 stop/delete 全部任务 compute Pod并实时确认 0 Pod / compute `$0/h`，随后在无 Pod 状态下整理最终结果、
-    WBS、COMPLETED 和日志。审查未通过时只做审查者要求的必要 GPU 整改，不正常提前删除 Pod；不可移动 absolute trigger 先到时由已武装 guard
-    无需 queue receipt 自动 exact stop/delete 并确认 0 Pod / compute `$0/h`，这是守住 10,800 秒硬上限的唯一例外。批准释放后不得仅为文档整理重建 Pod。
+13. **先证据回传、再释放 compute、后本地收口。** 阶段 B 核心训练、fresh-process 恢复、正式评价、候选/`NO-GO` 冻结、必要模型/证据回传和仍
+    依赖 GPU 的验证全部完成后，执行者立即 exact stop/delete 全部任务 compute Pod并实时确认 0 Pod / compute `$0/h`，随后在无 Pod 状态下整理
+    最终结果、WBS、COMPLETED 和日志并申请最终审查。审查若暴露确需 GPU 的同路线技术问题，可在实时预算和六小时卷费保留门内重新抢卡；不得仅为
+    文档或常规审查等待保留、重建 Pod。
 14. **测试与诚实口径。** 只运行受影响模块必要的 pure/fake/focused 门禁和相称格式/静态检查；若改 Rust，遵循共享 target/build-lock 规则，
     不默认扩大全 workspace。fake、dry-run、commissioning、formal、skip 和未运行必须分开记录，不以弱化测试、安全门或审批逻辑换取绿色结果。
 15. **提交与下游边界。** 阶段 A、Pod 预释放、整改和最终交付都先提交 099 分支再向审查者报告；不合并、不推送。工作包四的冻结测试、横评、最终产品 GO/NO-GO
@@ -223,30 +222,36 @@ trainable scope、精确训练强度或普通调试顺序，这些由执行者�
   `pod_count=0`、compute `$0/h`，未下载/加载模型、未执行 commissioning 或 formal，网络卷保留。
 - 2026-08-29：审查者批准最后一个 replacement Pod、从已核验 actual Pod ID 动态派生的 `/run` 控制根和前台长期 exec guard；本地已移除首 Pod
   硬编码并显式拒绝其路径，两个不同合法 ID 的实例化及错 ID/workspace/其他 `/run` 拒绝路径进入 focused 门，组合 `24 passed`。
+- 2026-08-29：replacement Pod `f9o0vn3i3pah7i` 独立核验为 Secure US-TX-3、L40S、exact image 与既有卷；冻结模型 exact revision/12 文件
+  下载并逐文件验签。isolated source assembly 暴露两项缺失依赖，提交 `cbaf710b`、`36f39439` 窄修并以 `16 passed`、Ruff、freeze 与本地独立
+  解包复验闭合；最终四件 bundle/receipt 绑定 `36f39439`。
+- 2026-08-29：commissioning 完成一次非零更新、checkpoint-first 评价、新 OS 进程恢复复现与小型回传 smoke。formal 前两次均在首次 update 前因
+  网络卷 quota 无效退出；独立 traceback 确认 `Disk quota exceeded` 后将同一卷 `mwemzrn33y` 从 70GB 扩至获批 100GB，再从 exact base 和空
+  namespace clean rerun。
+- 2026-08-29：clean formal 固定完成 16 updates 与 2/4/8/12/16 五点评价，step 8 fresh-process 恢复为 `reproduced=true`；有效轨迹未达到
+  预冻结开发准入门，冻结 `NO-GO`，没有 candidate/best checkpoint。step 8/16 完整 checkpoint 与大型环境资产留卷，小型证据回传本地验签。
+  用户改用 evidence-first 轻量收口后立即删除 replacement Pod；终态 0 Pod / compute `$0/h`，100GB 卷保留，保守任务费用 `$1.5345929717`。
 
 ### 当前工作
 
-- `PHASE_B_LAST_TECHNICAL_RECOVERY_PREP / ZERO_POD`。
+- `PHASE_B_EXECUTION_COMPLETE / VALID_FORMAL_NO_GO / FINAL_REVIEW_PENDING / ZERO_POD / VOLUME_RETAINED`。
 
 ### 本任务剩余步骤
 
-1. 提交动态 runtime-control 窄修，重建并验签同名四件 bundle/receipt；创建前刷新实时预算与 0 Pod 状态。
-2. 创建并独立核验最后一个 replacement Pod，生成生命周期授权并以前台长期 exec 会话稳定武装 guard。
-3. 在原冻结路线、剩余累计墙钟与动态预算内执行 commissioning、clean formal、恢复复现、候选或 `NO-GO` 冻结与必要回传。
-4. 提交阶段 B 核心交付，使用 §7 队列申请 Pod 预释放审查并停止；审查者确认无需 Pod 并明确批准后，立即 stop/delete Pod、复核 compute `$0/h`。
-5. 在无 Pod 状态下完成本地结果、WBS、COMPLETED 与日志收口；提交最终 tracked 变更，使用 §7 队列申请最终独立验收并停止。
+1. 提交无 Pod 的最终 WBS、COMPLETED、ExecPlan 与执行日志收口，保持 worktree clean。
+2. 使用 §7 队列申请最终独立验收并停止。
 
 ### 阻塞项
 
-- replacement Pod 是最后一个任务 Pod；若资源、预算或前台 guard 再失败，立即安全收口，不得创建第三 Pod。
-- 阶段 B 核心任务完成后，正常 Pod 删除仍由 Pod 预释放审查门控制；安全止费与 absolute trigger 例外保持有效。
+- 无执行阻塞；当前不需要 GPU，全部 compute 已释放。
+- 若最终审查发现确需 GPU 的同路线技术问题，用户已允许在实时预算和网络卷六小时保留费门内创建其他 Pod；不得为普通审查或文档重建。
 
 ### 当前验收状态
 
 - 规划：`COMPLETED / COMMITTED`。
 - 阶段 A：`REVIEW_ACCEPTED / COMPLETE`。
-- 阶段 B：`AUTHORIZED / LAST_TECHNICAL_RECOVERY_PREP / ZERO_POD`。
-- 完整任务：`IN_PROGRESS / MODEL_NOT_DOWNLOADED / TRAINING_NOT_STARTED`。
+- 阶段 B：`EXECUTION_COMPLETE / VALID_FORMAL_NO_GO / ZERO_POD / VOLUME_RETAINED`。
+- 完整任务：`GOAL_FAILED_AS_QUALITY_OUTCOME / FINAL_REVIEW_PENDING`。
 
 ### 交接边界
 
@@ -270,13 +275,15 @@ trainable scope、精确训练强度或普通调试顺序，这些由执行者�
 | 006 | tracked 变动只在 099 worktree；必要 ignored 工件只用物理根 `eval-data/publication-critic/plan099/` 并单列汇报 | linked worktree 不共享 ignored 数据，又不能污染主工作区 tracked 状态 | Git、资产 | 已采纳 |
 | 007 | 职责契合时复用已有训练设施；复用会扭曲五头语义时允许新建架构契合的专用能力，不建设重复平台 | 兼顾干净复用与任务语义，不因历史 scalar 路线强行耦合 | 架构、维护 | 已采纳 |
 | 008 | 候选完整 inference-ready 权重必须回传本地 ignored namespace；完整训练 checkpoint 等其他大型资产留在云端网络卷 | 工作包四需要直接消费候选模型，同时避免无必要下载所有训练大资产 | 工件、回传、资格前置 | 已采纳 |
-| 009 | 阶段 B 核心交付先做 Pod 预释放审查；审查者确认不再需要 Pod 后立即释放，再做本地文档收口 | 避免为了慢速文档整理继续支付 compute，同时防止过早删 Pod 导致必要 GPU 复验无法完成 | 审查、止费、收口 | 已采纳 |
+| 009 | 阶段 B 核心交付先做 Pod 预释放审查；审查者确认不再需要 Pod 后立即释放，再做本地文档收口 | 避免为了慢速文档整理继续支付 compute，同时防止过早删 Pod 导致必要 GPU 复验无法完成 | 审查、止费、收口 | 已被 016 取代 |
 | 010 | 唯一主方案冻结为 exact Skywork Reward V2 Qwen3 1.7B BF16 backbone，加五个独立 FP32 无 bias linear heads；只训练 22,528 个 head 参数，16 次 full-cohort update | 与既有本地运行目标、48GB L40S、v2 五头语义和有限预算直接匹配，不引入第二路线或 adapter-only 交付 | 模型、scope、recipe | 已采纳 |
 | 011 | 正式点固定为 2/4/8/12/16，step 8 与最终最佳点都须新进程复现；任何进程中断只从 checkpoint-first 外部状态恢复 | 同时证明中程继续训练与最终候选本体可恢复，避免可编辑 controller state 冒充 checkpoint 证据 | checkpoint、恢复、候选 | 已采纳 |
 | 012 | 开发准入固定使用 12 项 bounded margin grid、全 pair 闭合、五头非塌缩、gate FP≤3/FR≤4/BA≥0.75、逐头 failure recall 与 macro recall 下限，并要求相对 step zero 严格改善或新获准入 | 在正式结果出现前把风险门和 tie-break 固定，validation 只承担开发选择 | 开发评价、NO-GO | 已采纳 |
 | 013 | 五点评价作为 write-once 小型证据全部保留，完整 checkpoint 仍只留 best/latest/step 8；候选只要求最佳完整 checkpoint 在线，并允许早期无 decision config 的点不参与排名 | 同时满足五点轨迹复核、三 checkpoint 体积上限与早期不可判定语义，不把评价证据误当完整权重 | 候选、保留、NO-GO | 已采纳 |
-| 014 | 正常提前释放仍由 reviewer receipt 解锁；不可移动绝对 trigger 由 Plan 094 guard 的固定 Plan 099 profile 自动 exact stop/delete 并确认 0 Pod、compute `$0/h` | queue 等待不能突破累计墙钟和动态预算，deadline 安全终止不应依赖人工及时响应 | 生命周期、费用、审批 | 已采纳 |
+| 014 | 正常提前释放仍由 reviewer receipt 解锁；不可移动绝对 trigger 由 Plan 094 guard 的固定 Plan 099 profile 自动 exact stop/delete 并确认 0 Pod、compute `$0/h` | queue 等待不能突破累计墙钟和动态预算，deadline 安全终止不应依赖人工及时响应 | 生命周期、费用、审批 | 已被 016 取代 |
 | 015 | `maximum_lifecycle_seconds` 是 Pod 主体窗口；累计计费上限机械包含 60 秒 kill grace 与 360 秒确认。runtime host→Pod 只开放 resource/lifecycle/segment 三类 16 KiB canonical content-addressed JSON | 使 10,800 秒硬上限覆盖最坏收口，同时只传 worker 必需控制面，不扩大任意上传能力 | 生命周期、资产传输 | 已采纳 |
+| 016 | 用户将核心完成后的资源收口改为 evidence-first：必要证据本地验签后立即释放 compute，不建设或等待跨 queue 长期 guard | queue 自动唤醒且审查通常很快，长期 guard 已实际增加 Pod 失败与重新抢卡风险 | 生命周期、费用、审查 | 已采纳并执行 |
+| 017 | 后续确有同路线技术恢复需要时不设固定 Pod 次数；资源上限只看实时预算并始终预留网络卷 6 小时费用，可用余额仅剩该保留额时先保存资产到卷再释放 compute | 避免机械 Pod 次数阻断必要恢复，同时不突破用户给定的唯一资源约束 | 恢复、预算、资产 | 已采纳 |
 
 ## 7. 给执行者的启动提示词
 

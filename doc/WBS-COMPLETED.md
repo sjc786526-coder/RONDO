@@ -2586,3 +2586,19 @@ INTEGRATED / NOT_PUSHED`。clean formal source 为 `0ae9623`，执行者交付�
 - 最终实现与审查已通过非快进 merge `1a87d6d1f9f4153778621861ecbe2480753446bb` 合入本地 `main`；主线相关回归 `77/77`
   passed，并已推送 `origin main`。本地任务分支归档为 `zz-done/worktree-098-publication-critic-contract-data`，未推送任务分支；集成记录见
   `agent_log/2026-08-28-222326-plan098-main-integration.md`。
+
+## Publication Critic 五头主方案训练（Plan 099，2026-08-29）
+
+**状态**：`EXECUTION_COMPLETED / VALID_FORMAL_NO_GO / FINAL_REVIEW_PENDING / ZERO_POD / VOLUME_RETAINED`。
+
+- 阶段 A 冻结 exact Skywork Reward V2 Qwen3 1.7B BF16 backbone 与五个 FP32 无 bias heads，只训练 22,528 参数；五头 loss、v10
+  train/validation、checkpoint-first、fresh-process 恢复、pair-aware selector 与开发准入门均在真实结果前冻结并通过独立验收。
+- 阶段 B commissioning 闭合一次非零 update、保存后评价、新进程恢复和小型回传。clean formal 从 exact base 与空 namespace 完成固定
+  16 updates，在 2/4/8/12/16 评价；step 8 fresh-process 恢复复现。有效轨迹未达到预冻结开发准入门，诚实冻结 `NO-GO`，没有候选，
+  qualification 与 v9 test 正文未读取，工作包四未解锁。
+- isolated bundle assembly 的两项漏依赖经 `cbaf710b`、`36f39439` 窄修，Plan 099 focused `16 passed`、Ruff、freeze 与独立解包复验通过。
+  formal 前置存储失败确认是卷 quota 后，只将既有 `mwemzrn33y` 从 70GB 扩至授权上限 100GB，并从空 formal namespace clean rerun；模型、
+  v10 正文、loss、scope、recipe 与准入门均未改变。
+- 两个任务 Pod 均已删除并复核 0 Pod / compute `$0/h`；100GB 网络卷保留完整 step 8/16 checkpoint、exact model、venv 与 cache。保守任务费用
+  `$1.5345929717`，compute 删除后余额 `$2.018521311`，卷继续约 `$0.01/h`。本地 ignored namespace 只保留四件 bundle/receipt、必要小型正式证据
+  与生命周期/费用回执；详情见 `agent_log/2026-08-29-plan099-stage-b-execution.md`。
