@@ -173,27 +173,29 @@
   `9ef18b6c04a63fd1b3285e69ccf2616f3c22f2558802f01794573e2e07d7afef`；directional runtime 为 commit
   `3d7797b161aeb926577f70828c850f7827a80864`、bundle `668d16476295da77ae8b0f0cd212233a071da6292e247fbba8c1e2e2d381afb6`。
   v10/qualification 只更新必要 identity 后重建并完成一次独立逐字节复现；相关 34/34 与旧合同 43/43，合计 77/77 回归通过。
+- 最终复验确认 direct-dependency identity Medium 闭合，无 blocking correctness/functionality finding，接受 implementation
+  `056ab91a54157200e887bb03f3ddf45c259a3a2c`。合法 logits drift fixture 未单独固定错误优先级记为非阻塞 Low；当前调用顺序及独立畸形输入
+  探针均确认 identity 在 logits parser 前 fail-closed，不再开启新整改轮次。报告见
+  `agent_log/2026-08-28-215138-plan098-formal-decision-identity-final-recheck.md`。Plan 098 完成并冻结，后续只交接 WBS。
 
 ### 当前工作
 
-- `POST_ACCEPTANCE_FORMAL_DECISION_IDENTITY_REMEDIATION_IMPLEMENTED / FINAL_REVIEW_PENDING`：直接 runtime/schema identity 缺口已窄修并验证；
-  等待最终复验，工作包三继续锁定。
+- `COMPLETED / FINAL_REVIEW_ACCEPTED / FROZEN`：两个工作包及全部验收后窄整改均已完成，当前无 Plan 098 实施步骤。
 
 ### 本任务剩余步骤
 
-1. 提交受影响 identity/release、权威状态和实施日志，保持工作树 clean。
-2. 通过指定 Codex queue 申请最终复验并停止会话。
+无。后续工作包三按 WBS 另立 ExecPlan 与授权，不在本计划继续维护。
 
 ### 阻塞项
 
-- 上述 1 项 Medium 已实现整改、待最终复验；真实模型、付费训练、资格正文释放、工作包三和产品动作继续禁止。
+- Plan 098 无阻塞项。真实模型、付费训练、资格正文释放、工作包三和产品动作不在本计划授权内。
 
 ### 当前验收状态
 
-- 规划：`FORMAL_DECISION_IDENTITY_REMEDIATION_IMPLEMENTED / FINAL_REVIEW_PENDING`。
-- 工作包一：`SUBJECT_PRESERVED / FORMAL_DECISION_IDENTITY_REMEDIATED_PENDING_REVIEW`。
-- 工作包二：`SUBJECT_PRESERVED / RELEASE_IDENTITY_REBUILT_PENDING_REVIEW`。
-- 完整任务：`IN_PROGRESS / FINAL_REVIEW_PENDING`。
+- 规划：`COMPLETED / FINAL_REVIEW_ACCEPTED / FROZEN`。
+- 工作包一：`COMPLETED / FINAL_REVIEW_ACCEPTED / FROZEN`。
+- 工作包二：`COMPLETED / FINAL_REVIEW_ACCEPTED / FROZEN`。
+- 完整任务：`GOAL_COMPLETED / FINAL_REVIEW_ACCEPTED`。
 
 ### 交接边界
 
@@ -201,7 +203,7 @@
 - 工作包一完成汇报、工作包二解锁申请、计划外请示、整改复验和最终完成汇报只通过 §7 指定的 Codex queue；消息发送后主动停止会话，不等待或轮询。
 - 审查者对每轮有意义的验收形成精炼 `agent_log` 报告；若需要代用户作范围内普通决策，给出理由和影响并写入报告。工作包一通过时由审查者通过同一队列明确解锁工作包二；最终通过后不再唤醒执行者。
 - 工作包一接受记录必须包含 exact commit、权威合同版本与内容 SHA-256。工作包二的设计锁、生成配置和最终 manifest 都绑定并核对该身份；任何核心合同变化都使阶段一接受失效并重新锁定工作包二。
-- 本计划完成态因验收后两项 Medium 复审暂停；窄整改已实现但在最终复验前不恢复接受。工作包三/四仍只由 WBS 规划，不在本计划扩写训练路线。
+- 本计划已最终接受并冻结；工作包三/四仍只由 WBS 规划，不在本计划扩写训练路线。
 - 未经用户批准，不合并、不推送、不归档/重命名分支、不删除 worktree。
 
 ## 6. 关键决策记录
@@ -238,8 +240,9 @@
 | 026 | 验收后复审暂停 025，只补 formal decoder 唯一入口与 pair-aware validation selector；pair bytes SHA 进入 frozen selection identity | output schema 仍可把 raw argmax 当 runtime decoder，且 selector 丢弃 validation pairs；二者都会使工作包三采用与冻结资格语义不一致的 operating config | 判定、selector、身份、验收 | 已确认闭合，终态由 029 暂停 |
 | 027 | 保持 accepted v9 所绑定的旧 output schema 和 raw helper 字节不变，以新增版本化 formal projection 明确其只作 zero-margin diagnostic/historical reference；所有正式 projection/call path 唯一指向绑定 frozen decision config 的 decision v1 decoder | 直接改写旧 schema 会破坏已接受历史 identity；前向版本化既消除正式入口歧义，又不重开 v2/v9 历史数据和合同 | decoder、projection、历史兼容 | 已确认闭合 |
 | 028 | validation selector 以全部实际 Boundary/soft-only pairs 闭合作为原单一 bounded margin grid 的 hard eligibility，并在 frozen config 绑定 pairs SHA、行数和完整逐 pair 报告 | candidate-level confusion/failure recall 不能证明 Q+/Q-、非目标 head 和 soft invariance；hard eligibility 最保守且不引入多路线 threshold 搜索 | selector、pairs、身份、测试 | 已确认闭合 |
-| 029 | 最终复验不接受 decision bundle 只绑定 `qualification.py` 而遗漏其直接执行的 accepted-task runtime/schema；只复用现有 accepted identity 或补入两个直接组件和漂移回归 | 正式 decoder 的 class order、validator、gate 与 pair 语义来自该 runtime；依赖漂移后旧 frozen config 仍通过会破坏 operating point 冻结。本修正不扩成递归依赖审计或通用可信体系 | decoder、identity、回归、验收 | 已实现，待最终复验 |
-| 030 | 直接把 `successor_task.py` 与 `successor-output-schema-v1.json` 纳入现有 decision component list，不复用完整 13 组件 accepted-task bundle | 两者是 formal decoder 明确执行/验证的直接依赖；完整 task bundle 还含 renderer、consumer 等非直接组件，会不必要扩大 operating config 耦合。固定两项字节门已等强覆盖本 finding | decoder、identity、维护 | 已实现，待最终复验 |
+| 029 | 最终复验不接受 decision bundle 只绑定 `qualification.py` 而遗漏其直接执行的 accepted-task runtime/schema；只复用现有 accepted identity 或补入两个直接组件和漂移回归 | 正式 decoder 的 class order、validator、gate 与 pair 语义来自该 runtime；依赖漂移后旧 frozen config 仍通过会破坏 operating point 冻结。本修正不扩成递归依赖审计或通用可信体系 | decoder、identity、回归、验收 | 已确认闭合 |
+| 030 | 直接把 `successor_task.py` 与 `successor-output-schema-v1.json` 纳入现有 decision component list，不复用完整 13 组件 accepted-task bundle | 两者是 formal decoder 明确执行/验证的直接依赖；完整 task bundle 还含 renderer、consumer 等非直接组件，会不必要扩大 operating config 耦合。固定两项字节门已等强覆盖本 finding | decoder、identity、维护 | 已确认闭合 |
+| 031 | 最终接受 implementation `056ab91a54157200e887bb03f3ddf45c259a3a2c`；合法 logits drift fixture 的错误优先级覆盖记为非阻塞 Low，不再开启整改轮次 | runtime 调用顺序和独立畸形输入探针均证明 identity 优先 fail-closed；继续为一行测试强化延长 Plan 098 不符合轻量验收原则 | 验收、测试、交接 | 已采纳 |
 
 ## 7. 给执行者的启动提示词
 

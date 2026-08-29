@@ -4,8 +4,8 @@
 状态：**第一期、第二期、第四期已完成；Publication Critic 三期 Plan 097 已完成并闭合双 backend 工程 E2E 与可替换接缝，现正式进入
 质量重构路线。后续严格串行为“任务合同重构 → v8 后继数据改造与有限扩充 → 一次主方案训练 → 模型资格验收与横评”。Plan 098 已把
 前两个工作包规划为严格串行的两个阶段；Plan 098 的 v2/v9/v10/qualification 主体与此前方向性整改保留，formal
-decoder 唯一入口和 pair-aware margin selection 两项窄整改已确认正确；frozen decision identity 的直接 task runtime/schema 依赖缺口已
-用窄组件绑定闭合并待最终复验，工作包三继续锁定。Plan 097 的
+decoder 唯一入口、pair-aware margin selection 和 frozen decision direct-dependency identity 均已通过最终复验，Plan 098 完成并冻结。
+下一工作包为工作包三，但仍须单独 ExecPlan 与授权。Plan 097 的
 `M3_D_DUAL_BACKEND_ENGINEERING_PASS / FINAL_REVIEW_ACCEPTED / INTEGRATED / NOT_PUSHED`、Plan 096 的
 `CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH / FINAL_REVIEW_ACCEPTED / INTEGRATED / PUSHED`、Plan 094 的有效负向终态和 Plan 095 的
 最终验收均保持有效；新路线完成资格前，本地/云端质量、产品价值、Publication Critic 默认与生产启用继续锁定**
@@ -185,7 +185,7 @@ projection 保持旧 output schema 字节和 v9 历史 identity 不变，明确�
 validation、资格与未来产品正式 projection 只能使用绑定 frozen decision config 的 decision v1 decoder。decision bundle 另直接绑定
 `successor_task.py` runtime 和历史 raw output schema 精确字节；两者任一漂移都会在正式 decode 前 fail-closed，未扩为递归依赖审计。
 
-#### 工作包二：v8 后继数据改造与有限扩充（Plan 098 阶段二；主体与 pair selector 已确认正确，decision identity 已窄修待复验）
+#### 工作包二：v8 后继数据改造与有限扩充（Plan 098 阶段二；已完成并冻结）
 
 **目标**：保持 `publication-critic-v8` 原样作为历史证据，从其可复用部分和新增高信息样本形成新的后继 revision。合成数据必须服务工作包一
 冻结的新任务合同，而不是机械扩展旧数据；v8 每个旧条目、类别、pair、配比和模板都只有在新合同下仍有信息价值时才能复用。新数据应完整表达
@@ -228,7 +228,8 @@ honest cue 反例、旁白和重复诊断闭合。v9 test 降格为 metadata-onl
 release-bound selector 现绑定并消费实际 validation pairs，pair bytes SHA、行数和逐 pair 结果进入 frozen config；全部 12 个 Boundary/soft-only
 pair 的绝对标签与 hard/applicability/gate invariance 必须闭合，才可进入原单一 bounded margin grid 的确定性 candidate-level 排序。正式
 v10/qualification 只更新必要 identity 并逐字节复现；数据正文、review 和 qualification set 均未重做。本轮 direct dependency identity
-窄修再次只机械更新 design/config/manifest/release identity，并完成独立字节复现。最终复验通过前，Plan 098 不恢复完成态。
+窄修再次只机械更新 design/config/manifest/release identity，并完成独立字节复现。最终复验接受 implementation
+`056ab91a54157200e887bb03f3ddf45c259a3a2c`，Plan 098 完成并冻结；工作包三仍须单独立项与授权。
 
 #### 工作包三：一次主方案训练
 

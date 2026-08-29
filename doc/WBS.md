@@ -2,9 +2,9 @@
 
 最后更新：2026-08-28（方向 3 Publication Critic 三期在 Plan 097 双 backend 工程闭环后正式进入质量重构路线；后续固定串行为
 “任务合同重构 → v8 后继数据改造与有限扩充 → 一次主方案训练 → 模型资格验收与横评”。Plan 098 已为前两个工作包建立同一两阶段
-ExecPlan；Plan 098 主体、formal decoder 唯一入口和 pair-aware margin selection 均保留；最终复验发现的 frozen decision identity 直接依赖
-缺口已用窄组件绑定闭合并待最终复验；
-工作包三继续锁定。Plan 097 的 `M3_D_DUAL_BACKEND_ENGINEERING_PASS / FINAL_REVIEW_ACCEPTED / INTEGRATED / NOT_PUSHED`、Plan 096 的
+ExecPlan；Plan 098 的任务合同、v9/v10/qualification、formal decoder、pair-aware margin selection 与 direct-dependency identity 已全部
+通过最终复验并冻结完成。下一工作包为工作包三，但仍须单独 ExecPlan 与授权，尚未启动。Plan 097 的
+`M3_D_DUAL_BACKEND_ENGINEERING_PASS / FINAL_REVIEW_ACCEPTED / INTEGRATED / NOT_PUSHED`、Plan 096 的
 `CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH`、Plan 095 最终验收、Plan 094 有效负向研究终态和 Plan 093 Linux 全 workspace 正确性基线
 均保持有效；新路线不自动解锁产品质量、默认启用或生产）
 
@@ -26,7 +26,7 @@ ExecPlan；Plan 098 主体、formal decoder 唯一入口和 pair-aware margin se
 | 0：量化测评基准 | 既有设施与首次 schema v7 正式 canary 已完成，当前无 active campaign | 保留设施；历史结果见 COMPLETED，新 campaign 须重新立项与授权 |
 | 1：Harness 优化 | **正式收口；当前无 active 工作包** | 当前不继续新增观测或内核/热路径优化；既有实现、设施与历史结果保留。未来可由用户另行决定是否重新立项，本次收口不作永久禁止 |
 | 2：本地审批模型 | **已收口，今后不再开启** | 最终结论为“保留为实验”；不改生产默认，不再规划后续工作包 |
-| 3：RONDO Multi | 第一、二期、第四期已完成；三期 Plan 098 decision identity 窄修已实现、待复验 | 工程链与双 backend 可替换性 GO；v2/v9/v10/qualification 主体及 formal decoder / pair-aware selector 均保留。decoder 的直接 task runtime/schema 已纳入 frozen identity；最终复验前工作包三继续锁定，新四包串行路线未完成前不读冻结测试、不改产品默认、不授予质量、产品价值或生产资格 |
+| 3：RONDO Multi | 第一、二期、第四期已完成；三期 Plan 098 最终验收通过，下一工作包为工作包三 | 工程链与双 backend 可替换性 GO；v2/v9/v10/qualification、formal decoder、pair-aware selector 与 direct-dependency identity 已冻结。工作包三须另立 ExecPlan 与授权；新四包串行路线未完成前不读冻结测试、不改产品默认、不授予质量、产品价值或生产资格 |
 
 方向 3 当前 Linux 正确性基线由 Plan 093 建立：default features、standard local Nextest、checksum-verified V8 的完整 workspace
 为 `14660/14660` passed、0 failure/error/timeout，另有 1/1 setup passed；24 个 skip 不计 passed。正式证据和精确边界见
@@ -53,7 +53,7 @@ ExecPlan；Plan 098 主体、formal decoder 唯一入口和 pair-aware margin se
 工作包四：模型资格验收与横评
 ```
 
-- **工作包一 / Plan 098 阶段一主体保留、判定 identity 已窄修待复验**：既有 `rondo-publication-critic-task@v2` 五头、non-compensating gate 与
+- **工作包一 / Plan 098 阶段一已完成并冻结**：既有 `rondo-publication-critic-task@v2` 五头、non-compensating gate 与
   implementation `55342bdb11b09c11b589fd398717f7712fca012c` 保持不变；下游 `rondo-publication-critic-decision@v1` 已定义逐头 margin、
   validation-only 冻结配置及固定逐维 confusion/failure recall，并把 config 绑定到 decoder/metrics implementation bundle；directional design
   另绑定 implementation commit 与 bundle。continuity 现仅在 N/A 决定性胜出时排除，弱 N/A 最高和 margin 边界均 fail-closed；标准 selector
@@ -62,7 +62,7 @@ ExecPlan；Plan 098 主体、formal decoder 唯一入口和 pair-aware margin se
   zero-margin diagnostic/historical reference；训练候选、validation、资格与未来产品正式 projection 只能使用绑定 frozen decision config 的
   decision v1 decoder。frozen decision bundle 现另绑定该 decoder 直接调用的 `successor_task.py` 与历史 raw output schema 精确字节；任一
   漂移都会在正式 decode 前 fail-closed。该绑定没有扩到 accepted-task 的其他非直接组件，不重开 v2 任务语义或 v9 历史 identity。
-- **工作包二 / Plan 098 阶段二主体与 pair selector 已确认正确**：`publication-critic-v9` 已按冻结 v2 合同形成 216 candidates / 96 pairs，物理
+- **工作包二 / Plan 098 阶段二已完成并冻结**：`publication-critic-v9` 已按冻结 v2 合同形成 216 candidates / 96 pairs，物理
   train/validation/test 为 162/27/27 candidates；三个独立负责人模块均经一一对应的干净盲审以 0 finding 接受。正式 manifest、完整五维监督、
   Boundary/invariance、覆盖、重复/捷径门、train-only smoke 与只暴露 train/显式 validation 的 consumer 已闭合；v8 保持不变，安全投影不足以
   无歧义提供五头标签，故正式直接复用为零。finalizer 已在写出前核对 13 个必要语义组件及组合 SHA，并把 accepted implementation
@@ -75,7 +75,7 @@ ExecPlan；Plan 098 主体、formal decoder 唯一入口和 pair-aware margin se
   的 Boundary Q+/Q-、非目标不变性与 soft invariance 报告必须全部闭合才可进入原单一 bounded margin grid 的确定性排序。v10/qualification
   只更新必要 identity 后从空目录机械重建并逐字节复现，数据正文和已接受 review 未重做。本轮 dependency identity 窄修同样只机械更新
   design/config/manifest/release identity 并完成独立字节复现。
-- **工作包三继续锁定、尚未启动**：只训练一套冻结主方案，不恢复同一旧目标上的多路线搜索。Plan 098 decision identity 窄修复验通过后仍须另立 ExecPlan 并重新取得相应授权；
+- **工作包三为下一工作包、尚未启动**：只训练一套冻结主方案，不恢复同一旧目标上的多路线搜索。Plan 098 已通过最终复验，但工作包三仍须另立 ExecPlan 并重新取得相应授权；
   本地非付费阶段先闭合实现、消费、控制、
   测评、恢复和资源门；云端付费阶段必须由用户另行明确批准模型、资源、时间、预算、允许的技术重试和资产收口范围。
 - **工作包四待候选冻结后启动**：使用未参与训练和方案选择的冻结集合完成资格与横评，给出最终模型、判定配置和 GO/NO-GO；不得用

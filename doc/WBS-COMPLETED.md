@@ -2561,3 +2561,25 @@ INTEGRATED / NOT_PUSHED`。clean formal source 为 `0ae9623`，执行者交付�
   `agent_log/2026-08-28-004839-plan097-main-integration.md`。
 - 本任务只完成工程链与双 backend 可替换性 GO。本地模型质量仍为 `NO-GO / 待替换`，云端 scorer 仍为 `NOT QUALIFIED`，M3-D 产品价值仍未验收，
   Publication Critic 默认 `OFF`，生产启用 `NO`。
+
+## Publication Critic 任务合同与后继数据重构（Plan 098，2026-08-28）
+
+**状态**：`COMPLETED / FINAL_REVIEW_ACCEPTED / GOAL_COMPLETED / NOT_MERGED / NOT_PUSHED`。最终执行者 implementation 为
+`056ab91a54157200e887bb03f3ddf45c259a3a2c`。
+
+- 工作包一冻结 `rondo-publication-critic-task@v2`：单 backbone、一次 forward、五个 hard heads、保守 continuity N/A、逐 head operating
+  config 与 all-hard-pass non-compensating gate；scalar 只作派生诊断，soft preference 不参与资格。正式路径唯一使用 frozen decision v1 decoder。
+- 工作包二冻结 `publication-critic-v9` 216 candidates / 96 pairs，以及 development-only v10 162 train / 27 validation candidates；v8 原样保留且
+  正式复用为零。三个模块分别由负责人生成整改并由对应盲审员以 0 finding 接受。
+- 独立 qualification release 由全新 test-only 负责人和盲审员冻结为 50 groups / 200 candidates / 100 pairs；正文保持封存到工作包四。
+  v9 test 降格为 metadata-only 同分布辅助 holdout，未读取或改写。
+- 验收后方向性整改补齐逐 head margin、保守 N/A、逐维 confusion/failure recall、honest/scope 反例和 family isolation；formal raw argmax 仅保留为
+  zero-margin diagnostic/historical reference。validation selector 绑定真实 candidates/pairs，全部 Boundary 和 soft-only pair 闭合后才进入单一
+  bounded grid 的确定性排序。
+- decision canonical identity 最终只增加正式 decoder 的两个直接依赖 `successor_task.py` 与 raw output schema；没有扩成递归依赖审计。
+  decision implementation 为 `391378ee568f6d37b0b1288d6410f5f399fa0771` / bundle
+  `9ef18b6c04a63fd1b3285e69ccf2616f3c22f2558802f01794573e2e07d7afef`。
+- 最终独立复验运行相关回归 `77/77` passed；accepted v2、v8/v9、数据、pairs、reviews 与封存资格正文均未变化。最终报告见
+  `agent_log/2026-08-28-215138-plan098-formal-decision-identity-final-recheck.md`。
+- Plan 098 授权已关闭；未运行真实模型、GPU、Docker、付费 API 或产品动作。工作包三须另立 ExecPlan 和授权，Plan 098 不授予模型质量、产品价值、
+  默认启用或生产资格。
