@@ -34,6 +34,7 @@ SOURCE_PATHS = (
     "eval/uv.lock",
     "eval/rondo_eval",
     "eval/templates/publication-critic",
+    "training/publication-critic-v8/train-only-smoke-bundle.json",
     "training/publication-critic-plan087/runpod-terminal.py",
     "training/publication-critic-plan094/runpod-lifecycle-guard.py",
     "training/publication-critic-plan099",
@@ -59,6 +60,7 @@ DATA_PATHS = (
 )
 REQUIRED_SOURCE_MEMBERS = {
     "doc/rondo-multi-publication-critic-product-contract.md",
+    "training/publication-critic-v8/train-only-smoke-bundle.json",
     "eval/rondo_eval/publication_critic/full_model_training/plan099_artifacts.py",
     "eval/rondo_eval/publication_critic/full_model_training/plan099_bundle.py",
     "eval/rondo_eval/publication_critic/full_model_training/plan099_cli.py",

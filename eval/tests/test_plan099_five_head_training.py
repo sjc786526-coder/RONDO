@@ -101,6 +101,18 @@ def test_source_bundle_closes_development_release_contract_dependencies() -> Non
         "doc/rondo-multi-publication-critic-product-contract.md"
         in REQUIRED_SOURCE_MEMBERS
     )
+    design = json.loads(
+        (
+            REPO_ROOT
+            / "eval/templates/publication-critic/successor-data-design-v1.json"
+        ).read_text(encoding="utf-8")
+    )
+    safe_projection = design["source_policy"]["safe_v8_projection"]["path"]
+    assert any(
+        safe_projection == allowed or safe_projection.startswith(f"{allowed}/")
+        for allowed in SOURCE_PATHS
+    )
+    assert safe_projection in REQUIRED_SOURCE_MEMBERS
 
 
 def test_freeze_and_v10_entrypoints_expose_only_development_splits() -> None:
