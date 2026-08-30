@@ -56,7 +56,8 @@ Plan 097 的 `M3_D_DUAL_BACKEND_ENGINEERING_PASS / FINAL_REVIEW_ACCEPTED / INTEG
 工作包四：模型资格验收与横评（未解锁）
 ```
 
-独立诊断支线：Plan 099 `VALID_FORMAL_NO_GO` → Plan 100 DS-V4-Flash 五维任务合同诊断；该支线不接入或解锁工作包四。
+独立诊断支线：Plan 099 `VALID_FORMAL_NO_GO` → Plan 100 DS-V4-Flash 五维任务合同诊断 → Plan 101 DS 思考开关 × 输出表达对比测评；
+该支线不接入或解锁工作包四。
 
 - **工作包一 / Plan 098 阶段一已完成并冻结**：既有 `rondo-publication-critic-task@v2` 五头、non-compensating gate 与
   implementation `55342bdb11b09c11b589fd398717f7712fca012c` 保持不变；下游 `rondo-publication-critic-decision@v1` 已定义逐头 margin、
@@ -96,9 +97,13 @@ Plan 097 的 `M3_D_DUAL_BACKEND_ENGINEERING_PASS / FINAL_REVIEW_ACCEPTED / INTEG
 各工作包的详细目标、边界、宏观验收与授权门以 `doc/WBS/multi-agent-trusted-evidence.md` 为准。工作包一与二由
 `plan/098-publication-critic-contract-and-v8-successor-execplan.md` 冻结完成；工作包三由
 `plan/099-publication-critic-five-head-training-and-candidate-freeze-execplan.md` 已完成并冻结；Plan 100 合同见
-`plan/100-publication-critic-ds-structured-diagnostic-execplan.md`。工作包四未解锁，任何后续路线须另立任务和授权。
+`plan/100-publication-critic-ds-structured-diagnostic-execplan.md`；Plan 101 合同见
+`plan/101-publication-critic-ds-thinking-comparison-eval-execplan.md`。工作包四未解锁，任何后续路线须另立任务和授权。
 
-方向 3 当前无 active 工作包；Plan 100 的负向诊断不自动启动后续路线。Plan 081 已取得 `LOCAL_TRAINING_READINESS_PASS`；三期 Plan 082 已获用户付费批准并完成
+方向 3 当前 active 工作包为独立诊断支线上的 **Plan 101 DS 思考开关 × 输出表达对比测评**：在同一 v10 development validation
+上测量 `thinking_off / thinking_on` × `A/B/C` 的 `2 × 3` 矩阵，用户已授权真实 `deepseek-v4-flash` 与 `20 RMB` 硬上限。
+它是测评而非资格门，不产出路线终态或通过/不通过结论，不读取 qualification 或 v9 test 正文，不训练，不改变产品默认，
+也不解锁工作包四。Plan 100 的负向诊断本身不自动启动后续路线。Plan 081 已取得 `LOCAL_TRAINING_READINESS_PASS`；三期 Plan 082 已获用户付费批准并完成
 真实 commissioning、正式 freeze、干净 formal 和新进程恢复，终态为 `VALID_NO_IMPROVEMENT`。保留 Pod 的 GPU 专项验收已经通过，
 唯一训练 Pod 已释放并确认持续 compute 费率为 0；保留卷所在 `US-TX-3` 不提供 S3 API，故按用户一次性授权使用单个 transfer Pod
 只读回传冻结 39 对象。全部对象完成本地 bytes/SHA-256 校验后 transfer Pod 已删除；最终验收通过。用户本人随后明确决定继续保留

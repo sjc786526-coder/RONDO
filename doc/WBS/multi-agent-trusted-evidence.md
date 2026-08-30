@@ -147,7 +147,8 @@ M3-B1c 正式分阶段训练与工件回收          │
                        ╳
         工作包四：模型资格验收与横评（未解锁）
 
-独立诊断支线：Plan 099 `VALID_FORMAL_NO_GO` → Plan 100 DS-V4-Flash 五维任务合同诊断（不解锁工作包四）
+独立诊断支线：Plan 099 `VALID_FORMAL_NO_GO` → Plan 100 DS-V4-Flash 五维任务合同诊断 → Plan 101 DS 思考开关 × 输出表达对比测评
+（均不解锁工作包四）
 
 并列 reference 支线：M3-B2a 已有可替换 service → Plan 095 云端参考 scorer backend（已完成）
                                               ↓
@@ -281,6 +282,20 @@ provider usage 结算 `0.0396094 RMB`，余额 `19.9603906 RMB`、outstanding re
 **路线交接**：完整有效 formal 按预冻结规则形成“五维结构强支持 / 离散判定支持但五维增益未确认 / 约束或数据问题 / 任务可执行性不足”之一；
 技术或预算未闭合只报 `INCONCLUSIVE`。只有“五维结构强支持”可以建议未来另立部分解冻后层的五头训练任务，该任务仍需用户决定、新 ExecPlan 与
 独立授权；Plan 100 不自动执行或解锁它。
+
+#### Plan 101：DS 思考开关 × 输出表达对比测评（active）
+
+**定位与依赖**：Plan 101 承接 Plan 100，属同一独立诊断支线，只消费 Plan 098 冻结的 task v2 / rubric v2 与 v10 development
+validation 的 27 candidates / 12 pairs。它是**测评（eval）而非资格门**：不设通过门、不产出路线终态、不授予任何模型或产品资格。
+
+**目标**：在同一 `deepseek-v4-flash` 与同一 packet 上测量 `thinking_off / thinking_on` × `A/B/C` 的 `2 × 3` 矩阵，
+产出可复算、可重复、可在同一 cohort 上连成曲线的差值型测评结果，并修复 Plan 100 已确认的输出示例锚定与单次采样两处测量缺陷。
+
+**授权与边界**：用户已授权真实 `deepseek-v4-flash` 与 task-wide `20 RMB` 硬上限。不读取 qualification 或 v9 test 正文，
+不训练，不使用 GPU/RunPod/Docker/真实本地模型，不上传，不充值，不改变 Publication Critic 产品默认与发布路径。
+
+**当前状态**：`PLANNED / AWAITING_EXECUTOR`。合同见 `plan/101-publication-critic-ds-thinking-comparison-eval-execplan.md`。
+本任务无论数字如何都不解锁工作包四；产品接入、qualification 与训练路线须由用户另行决定并另立任务与授权。
 
 #### 工作包四：模型资格验收与横评（未解锁）
 
