@@ -18,22 +18,25 @@ Plan 100 的执行是干净有效的：81/81 observation 完整、三臂 parse f
 
 但把它读成“任务本身不可执行”会明显超出证据。对原始逐条输出复算后，本报告的判断是：
 
-1. **本次负向结果的最大单一贡献不是任务、数据或模型能力，而是测量配置本身。** 三臂统一关闭 thinking，
-   实测 completion token 为 A `7/7/7`、B `7–8`、C `39–44`——模型在做一个需要多子句交叉核对的判断时，
-   **可用于推理的 token 实际为 0**。同时是 zero-shot、禁止解释、temperature 0、单次采样。
-2. **A 臂的结果几乎完全是 prompt 示例锚定的产物，不是标量表达能力的测量。** 27 个候选中有 20 个原样返回了
+1. **A 臂的结果几乎完全是 prompt 示例锚定的产物，不是标量表达能力的测量。** 27 个候选中有 20 个原样返回了
    output contract 里的示例值 `0.42`，整条曲线只有 `{0.0, 0.42, 0.85}` 三个取值。
    180 个跨类比较中 `105` 个（`58.3%`）是精确并列；在能分辨的 75 个比较里，A 是 `65 胜 / 10 负`（`0.867`）。
    也就是说：**A 一旦真的动，排序是对的；问题是它 27 次里只动了 7 次。** 用这条曲线得出的
    “AUC `0.6528`、无可接受 operating point、Boundary strict `2/9`”，测的是输出退化，不是标量表达。
    C 臂同样有 `13/27` 输出与示例 JSON 逐字节相同。
-3. **准入门不具备跨设定可比性。** 门槛整体来自 Plan 099 的**训练**开发门
+2. **准入门不具备跨设定可比性。** 门槛整体来自 Plan 099 的**训练**开发门
    （[`development-gate-v1.json`](../../training/publication-critic-plan099/development-gate-v1.json)），
    而训练路径被允许在同一 validation 上从 12 个 decision config 中挑选阈值；Plan 100 的 B/C 直接输出硬标签，没有任何等价调节自由度。
    逐维 failure recall 门又落在 `3–6` 条支持度上：一个逐维检出率 `0.8`、零误报的理想裁判，
    仍有 `56%` 概率过不了五维合取门（`q=0.9` 时才 `0.82`）。
-4. **`n=27` 下这些门根本不可分辨。** C 的 balanced accuracy `0.700`，Wilson 区间约 `[0.478, 0.821]`，
+3. **`n=27` 下这些门根本不可分辨。** C 的 balanced accuracy `0.700`，Wilson 区间约 `[0.478, 0.821]`，
    而门槛是 `0.75`——门槛落在噪声区内。本次实验没有能力区分“未达门”与“达门”。
+4. **关闭 thinking 不是测量错误，而是结论适用范围的限制；但它的理由不成立。**
+   本地 Skywork 1.7B scorer 与 Plan 099 五头模型本来就是“一次 backbone forward”，没有任何推理步骤，
+   所以关闭 thinking 恰恰贴近部署目标，不能称为不公平（详见 §3.1）。
+   真正的问题有两个：其一，它使“任务本身难判”与“任务在一次前向内难判”无法区分，而终态的名字 claim 的是前者；
+   其二，**关闭的理由本身站不住**——思考 token 计入 completion usage、账单精确可结算，
+   真正卡住的是一条从未启用的兜底复算自检门（详见 §3.2）。
 5. **标签有一小部分确实不由 rubric 唯一决定，但这是局部问题，不是整体问题。** C 的 9 个漏检里，约 6 个标签扎实、模型确实判错；
    约 3 个（`hb-03-qminus`、`soft-020-hard-fail` 的 `scope_and_signal=FAIL`，`019-qminus` 的 `conditional_continuity=FAIL`）
    依赖生成侧约定而非模型可见 rubric 文本。
@@ -52,8 +55,12 @@ Plan 100 的执行是干净有效的：81/81 observation 完整、三臂 parse f
    占 20 RMB 授权额度的 `0.198%`；“首个完整有效 formal 后立即停止 API”这条防挑结果的规则，
    同时也排除了任何重复采样、方差估计或开启 thinking 的对照。
 
-一句话概括：**Plan 100 得到的不是“这个任务做不了”，而是“在关闭推理、零示范、单次采样、并用一套为可调阈值的训练路径设计的门去卡的条件下，
-三种输出表达都没跨门；其中五维分解表现最好，标量臂的结果基本是示例锚定的伪影”。**
+按贡献强度排序是：**示例锚定 > 门槛不可比且不可分辨 > 五维语义重叠导致的归属错误 > 局部标签不一致 > 真实模型能力缺口**；
+“关闭 thinking”不进入这个排序，它决定的是结论能覆盖多大范围，不是结论本身对不对。
+
+一句话概括：**Plan 100 得到的不是“这个任务做不了”，而是“在零示范、单次采样、示例值被原样抄回、
+并用一套为可调阈值的训练路径设计的门去卡的条件下，一次前向级别的三种输出表达都没跨门；
+其中五维分解表现最好，标量臂的结果基本是示例锚定的伪影”。**
 旧报告 [`2026-08-27`](2026-08-27-publication-critic-model-side-failure-analysis.md) §6.1 提出的核心疑问——
 “任务语义究竟能不能被表达和判别”——**Plan 100 并没有关闭它。**
 
@@ -77,7 +84,11 @@ Plan 100 的执行是干净有效的：81/81 observation 完整、三臂 parse f
 - 受跟踪结果与合同：[`plan100-structured-diagnostic-v1.json/.md`](../../eval/results/publication-critic/)、
   [`plan100-diagnostic-contract-v1.json`](../../eval/templates/publication-critic/plan100-diagnostic-contract-v1.json)、
   [`development-gate-v1.json`](../../training/publication-critic-plan099/development-gate-v1.json)。
-- 模型可见 prompt 的唯一来源：[`cloud_diagnostic.rs`](../../multidev/codex-rs/publication-critic/src/cloud_diagnostic.rs)。
+- 模型可见 prompt 的唯一来源：[`cloud_diagnostic.rs`](../../multidev/codex-rs/publication-critic/src/cloud_diagnostic.rs)；
+  thinking 开关落点 `cloud_scorer.rs:358`；离线复算实现
+  [`token_recounter.py`](../../eval/rondo_eval/publication_critic/structured_diagnostic/token_recounter.py)。
+- 部署侧对照事实：[Plan 099 ExecPlan](../../plan/099-publication-critic-five-head-training-and-candidate-freeze-execplan.md)
+  §3.5 与决策 010（一次 backbone forward / 五个 head），以及 [`2026-08-27` 报告](2026-08-27-publication-critic-model-side-failure-analysis.md) §6.5（last-token 单标量读取）。
 - v10 **development validation** 全部 27 candidates / 12 pairs 正文与标签（Plan 100 本身即合法消费该集合）。
 - 主物理根 ignored 证据 `eval-data/publication-critic/plan100/`：formal run 的 81 条 receipt 与 81 条 terminal（含 exact response text 与 usage），
   以及 Plan 099 的 `evidence/log-tail.txt`、`formal-result.json`。
@@ -102,17 +113,80 @@ Plan 100 的执行是干净有效的：81/81 observation 完整、三臂 parse f
 
 | 共同冻结条件 | 合同/实测依据 | 对被测能力的影响 |
 |---|---|---|
-| thinking 全臂关闭 | 合同 `comparison/thinking`；实测 completion token A=7、B=7–8、C=39–44 | 判断过程可用 token 为 0 |
+| thinking 全臂关闭 | 合同 `comparison/thinking`；实测 completion token A=7、B=7–8、C=39–44 | 判断过程可用 token 为 0；**贴近部署目标，见 §3.1** |
 | zero-shot，无任何示范样本 | `cloud_diagnostic.rs` system message 仅含 rubric + 输出契约 | 无 rubric 语义校准锚 |
 | 禁止输出解释/理由 | 三个 output contract 均写 `Emit no ... explanation` | 无法把中间判断外化 |
 | `temperature = 0`、`max_attempts = 2`、单次逻辑调用 | descriptor lock | 无方差估计、无自洽性投票 |
 | 输出契约含具体示例值 | `{"quality":0.42}` / `{"...":"N/A",...}` | 见 §4.1，实测强锚定 |
 | 首个有效 formal 即停 API | `formal/first_complete_valid_formal_stops_new_api_consumption` | 无重复、无消融、无对照 |
 
-Plan 100 的决策记录 011 说明了关闭 thinking 的理由：V4 默认 thinking 会忽略冻结的 temperature，且 reasoning token 无法从最终 JSON 独立复算，
-影响费用复算与三臂公平性。**这个理由在“可复算性/公平性”维度是成立的**，冻结 temperature 与 token 级结算确实需要它。
-问题在于代价没有被记入结论的解释范围：为了让费用可逐 token 复算（实际支出 3.9 分钱），
-放弃了被测模型在该任务上的主要工作方式，而结论却以“任务可执行性”命名。
+### 3.1 关闭 thinking 本身不构成不公平
+
+必须先把一个容易搞混的点讲清楚：**部署目标本来就没有“思考”这一步。**
+
+- 本地 Skywork 1.7B scorer 是从完整渲染输入的 last non-pad token 读出一个标量
+  （见 [`2026-08-27` 报告](2026-08-27-publication-critic-model-side-failure-analysis.md) §6.5）。
+- Plan 099 的主方案是“一次 backbone forward 只产生 task v2 的五个资格 heads”
+  （[Plan 099 ExecPlan](../../plan/099-publication-critic-five-head-training-and-candidate-freeze-execplan.md) §3.5、决策 010）。
+
+两者都是**零推理步骤的单次前向**。因此关闭 thinking 使 DeepSeek 更接近、而不是更远离部署目标，
+**不能把它算作对被测对象的额外镣铐**，本报告不把它列入根因排序。
+
+但它确实带来一个结论范围问题：**在一次前向条件下的失败，无法区分“任务本身难判”和“任务在一次前向内难判”**，
+而 `TASK_EXECUTABILITY_INSUFFICIENT` 这个名字 claim 的是前者。
+
+而且 Plan 100 自己的数据就显示出一条与“顺序计算量”相关的梯度：
+
+| 对象 | 输出形式 | 实测输出长度 | 结果 |
+|---|---|---:|---|
+| 本地 1.7B / Plan 099 五头 | 一次前向读出标量 / 五个 head | `0` token | 五个评价点全部 `decision_config_unavailable` |
+| Plan 100 **A** | 一个数字 | `7` | 退化（示例锚定），无有效测量 |
+| Plan 100 **B** | 一个标签 | `7–8` | balanced accuracy `0.583` |
+| Plan 100 **C** | 五个标签依次生成 | `39–44` | balanced accuracy `0.700` |
+
+C 的 43 个 token 意味着五个判断是**依次生成、后者可见前者**，已经是一点点结构化的顺序计算。
+A 在结构上最接近本地 scorer，也最退化。这条梯度不构成严格因果证据（A 的退化另有示例锚定的原因），
+但它与“该任务对可用顺序计算量敏感”相容，也正是路线映射无处安放的那类信息。
+
+### 3.2 关闭 thinking 的**理由**不成立：账单算得清，卡住的是一条从未启用的兜底自检
+
+Plan 100 决策记录 011 与阶段 B 日志给出的理由是“V4 默认 thinking 会忽略冻结 temperature，
+且 reasoning token 无法从最终 JSON 独立复算，影响费用复算”。逐条核对后，这三项都不构成硬阻塞：
+
+**1）费用本身完全算得清。** 阶段 B 日志自己写着 V4“把独立 reasoning 计入 completion usage”——
+provider 照常在 `usage` 里报出来，按 usage 结算是精确的。**账单口径与开不开思考无关。**
+
+**2）真正的阻塞来自一条兜底路径的自检门。** 完整因果链是：
+
+- 硬约束 §3.5 规定：响应缺少 `usage` 时**不许**直接按 `0.1 RMB` 兜底，必须用官方 tokenizer 自行分类计数；
+- 要让这个自算方法可信，合同 `commissioning/usage_recount_calibration` 要求 B1 的
+  `all_usage_present_success_attempts_exact_prompt_and_completion_match`——离线复算的 **prompt 与 completion 都必须与 provider 精确相等**；
+- 而离线复算 completion 的实现方式，是把归档的 `response_text` 拿去 tokenize
+  （[`token_recounter.py`](../../eval/rondo_eval/publication_critic/structured_diagnostic/token_recounter.py)）；
+- 一旦开启 thinking，计费 completion = reasoning + 最终 JSON，而 **reasoning 内容不在 `response_text` 里**，
+  离线复算必然系统性偏短 → “completion 精确相等”永远不可能满足 → B1 binding 永远无法生成 → **B2 正式轮根本无法开始**。
+
+所以准确表述不是“费用算不清”，而是：**为了让一条备用计费算法通过自检，被测模型的输出里不能含有任何离线数不到的 token。**
+
+**3）而这条备用路径一次都没有被使用。** 冻结账本记录：
+
+```
+settlement_methods:          {provider_usage: 99}
+recounted_prompt_tokens:     0
+recounted_completion_tokens: 0
+```
+
+99 次调用**全部**按 provider usage 结算，离线复算实际贡献的 token 数为 `0`。
+
+**4）另外两条理由同样不硬。** temperature 被忽略这一点对三臂是**共同**的，被测变量（输出表达）仍然隔离，
+真正受损的是单次采样的确定性——而这本应由重复采样解决，当时预算尚余 `99.8%`。
+“严格短 JSON 合同”也不受影响：reasoning 走独立响应字段，`content` 仍是纯 JSON，严格解析器无需改动。
+
+**这一段的意义超出 Plan 100 本身。** 起点是一条正当的预算安全条款（别让缺 usage 的响应悄悄超支），
+经独立审查加固后变成一道“离线复算必须逐 token 精确相等”的准入门，最终**由这道门反过来决定了实验条件**。
+20 RMB 授权、3.9 分钱实际支出，为一条从未启用的对账路径的精度，换掉了被测模型的工作方式。
+这正是根 `CLAUDE.md` §7 所警示的形态：验证/审计机制自我膨胀并吞掉实验本身。
+关闭作用域本身是干净的——`cloud_scorer.rs:358` 仅对 `ResponseProjection::Diagnostic` 生效，产品 scorer 未受影响。
 
 ## 4. 逐层归因
 
@@ -357,10 +431,14 @@ Plan 100 正是为回答后者而立的。本报告的结论是：
 
 ### 优先级应提高
 
-- **修掉测量配置再谈结论**：至少让被测模型有推理预算（开启 thinking 或允许 rationale-then-verdict），
-  输出契约改用不含合法取值的占位示例，并加入少量 rubric 校准示范。这三项都不改变任务、数据或 rubric 语义。
+- **先修掉示例锚定与单次采样**：输出契约改用不含合法取值的占位示例（或多个取值不同的示例），并对每个 candidate 重复采样以给出方差。
+  这两项都不改变任务、数据、rubric 语义或部署条件，成本与本次同量级。
+- **把 thinking 开关本身做成对照变量，而不是隐含前提**：关闭对应部署目标（一次前向），开启对应任务信息上界。
+  同一批 packet、唯一差别是该开关，就能把“任务本身难判”与“任务在一次前向内难判”一次性分开——
+  这正是旧报告 §6.1 一直没能关闭的问题。开启后按 provider usage 结算即可精确计费；
+  若仍要保留缺失 usage 的兜底路径，其自检应只约束可离线复算的部分（如 prompt），不应反过来限定被测模型的输出形态（见 §3.2）。
 - **门与设定解耦**：为推理路径单独标定准入门，不复用为“可调 decision config 的训练路径”标定的阈值；
-  或者给推理路径一个等价的、预冻结的阈值/聚合自由度。
+  或者给推理路径一个等价的、预冻结的阈值/聚合自由度。诊断性任务也可以只报数字与区间、不设通过门。
 - **报告相对结论的出口**：路线映射需要一个“绝对门未过但相对排序有信息”的合法终态，
   否则以后每次绝对门全灭都会丢掉本次这样的比较信息。
 - **把“漏检”和“归属错误”分开计量**：现有逐维 recall 把两者混同，掩盖了 C 实际“能发现问题但放错抽屉”的形态。
@@ -373,13 +451,20 @@ Plan 100 正是为回答后者而立的。本报告的结论是：
 - 在不改测量配置的前提下换模型重测；那只会重复测到同一个配置伪影。
 - 把 `TASK_EXECUTABILITY_INSUFFICIENT` 当作关闭任务表达路线的依据。
 - 继续在 v10 validation 上叠加观察而不扩充支持度；该集合已被 Plan 098/099/100 与本报告反复查看。
+  若只是做“配置修复前后的同集合对照”，继续使用 v10 是合适的；但其绝对数值不得当作泛化结论。
 - 以“单次干净 formal”为荣而不做任何重复采样；在本任务的样本量下，单次观测的方差是主导误差源。
+  防止挑结果需要的是“预冻结判据 + 所有轮次全部记账并报告”，而不是“只允许跑一轮”。
+- 让计费/对账机制的自检要求反向决定实验条件；对账应服务实验，不应定义实验（§3.2）。
 
 ## 10. 最终判断
 
 - **Plan 100 的执行与验收**：有效。81/81 完整、0 parse failure、费用逐 token 结算、独立复算通过，终态按预冻结规则正确推出。
 - **失败的直接层**：不是基础设施，不是数据整体，也不是“任务不可表达”。
-  按贡献排序是：**测量配置自伤（关闭推理 + 示例锚定 + 单次采样）> 门槛不可比且不可分辨 > 五维语义重叠导致的归属错误 > 局部标签不一致 > 真实模型能力缺口**。
+  按贡献排序是：**示例锚定与单次采样 > 门槛不可比且不可分辨 > 五维语义重叠导致的归属错误 > 局部标签不一致 > 真实模型能力缺口**。
+- **关闭 thinking**：不列入上述排序。部署目标（本地 1.7B scorer、Plan 099 五头）本来就是零推理步骤的单次前向，
+  关闭它贴近而非远离部署条件。它影响的是**结论覆盖范围**——一次前向下的失败无法区分“任务难判”与“一次前向内难判”。
+  但其**冻结理由不成立**：思考 token 计入 completion usage、账单精确可结算，
+  真正的阻塞是一条要求“离线复算 completion 与 provider 精确相等”的自检门，而该兜底路径在 99 次调用中一次未被使用（§3.2）。
 - **A 臂**：结果无效。`20/27` 复述示例值 `0.42`，boundary 门算术上不可达；在能分辨的比较里反而是 `65:10`。
 - **B 臂**：存在一个可命名的偏差——把“先前上下文不可用”当作候选缺陷，与 rubric 明文相反，贡献了它 6 个误报中的 5 个。
 - **C 臂**：三臂中最好，且是唯一不误伤合格候选的表达；continuity 适用性判断 `12/12` 全对。
@@ -387,5 +472,5 @@ Plan 100 正是为回答后者而立的。本报告的结论是：
 - **对旧报告的影响**：[`2026-08-27`](2026-08-27-publication-critic-model-side-failure-analysis.md) §6.1/§6.2 提出的
   “模型—任务—数据匹配”疑问**仍然开放**；Plan 100 原本要回答它，实际主要测到了自己的测量配置。
 - **一句话**：这次的负向结论**记录正确，命名过强，信息量被设计约束压到了很低**——
-  它证明的是“在关闭推理和零示范的条件下，用一把为可调训练路径标定的尺子，三种表达都没跨过去”，
-  而不是“Publication Critic 这个任务判不了”。
+  它证明的是“在零示范、单次采样、示例值被原样抄回的条件下，用一把为可调训练路径标定的尺子，
+  一次前向级别的三种表达都没跨过去”，而不是“Publication Critic 这个任务判不了”。
