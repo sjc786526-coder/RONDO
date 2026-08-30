@@ -1,0 +1,286 @@
+{
+  "aggregate_metrics": {
+    "A": {
+      "auc": 0.6527777777777778,
+      "boundary_strict": {
+        "all_won": false,
+        "total": 9,
+        "wins": 2
+      },
+      "meets_basic": false,
+      "meets_gate": false,
+      "selected_binary": {
+        "balanced_accuracy": 0.625,
+        "class_recall": {
+          "PASS": 0.9166666666666666,
+          "REWRITE": 0.3333333333333333
+        },
+        "confusion": {
+          "PASS": {
+            "PASS": 11,
+            "REWRITE": 1
+          },
+          "REWRITE": {
+            "PASS": 10,
+            "REWRITE": 5
+          }
+        },
+        "correct": 16,
+        "false_pass": 10,
+        "false_rewrite": 1,
+        "meets_candidate_gate": false,
+        "total": 27,
+        "typed_failures": 0
+      }
+    },
+    "B": {
+      "binary": {
+        "balanced_accuracy": 0.5833333333333333,
+        "class_recall": {
+          "PASS": 0.5,
+          "REWRITE": 0.6666666666666666
+        },
+        "confusion": {
+          "PASS": {
+            "PASS": 6,
+            "REWRITE": 6
+          },
+          "REWRITE": {
+            "PASS": 5,
+            "REWRITE": 10
+          }
+        },
+        "correct": 16,
+        "false_pass": 5,
+        "false_rewrite": 6,
+        "meets_candidate_gate": false,
+        "total": 27,
+        "typed_failures": 0
+      },
+      "meets_gate": false,
+      "pairs": {
+        "all_closed": false,
+        "closed": 4,
+        "total": 12
+      }
+    },
+    "C": {
+      "binary": {
+        "balanced_accuracy": 0.7,
+        "class_recall": {
+          "PASS": 1.0,
+          "REWRITE": 0.4
+        },
+        "confusion": {
+          "PASS": {
+            "PASS": 12,
+            "REWRITE": 0
+          },
+          "REWRITE": {
+            "PASS": 9,
+            "REWRITE": 6
+          }
+        },
+        "correct": 18,
+        "false_pass": 9,
+        "false_rewrite": 0,
+        "meets_candidate_gate": false,
+        "total": 27,
+        "typed_failures": 0
+      },
+      "continuity_na_recall": 1.0,
+      "meets_gate": false,
+      "pairs": {
+        "all_closed": false,
+        "closed": 5,
+        "non_target_invariant": 10,
+        "target_closed": 3,
+        "target_total": 9,
+        "total": 12
+      },
+      "per_dimension": {
+        "conditional_continuity": {
+          "class_recall": {
+            "FAIL": 0.0,
+            "N/A": 1.0,
+            "PASS": 0.75
+          },
+          "confusion": {
+            "FAIL": {
+              "FAIL": 0,
+              "N/A": 2,
+              "PARSE_FAILURE": 0,
+              "PASS": 1
+            },
+            "N/A": {
+              "FAIL": 0,
+              "N/A": 12,
+              "PARSE_FAILURE": 0,
+              "PASS": 0
+            },
+            "PASS": {
+              "FAIL": 2,
+              "N/A": 1,
+              "PARSE_FAILURE": 0,
+              "PASS": 9
+            }
+          },
+          "failure_recall": 0.0,
+          "predicted_classes": [
+            "FAIL",
+            "N/A",
+            "PASS"
+          ],
+          "required_classes_covered": true
+        },
+        "honest_uncertainty": {
+          "class_recall": {
+            "FAIL": 0.4,
+            "PASS": 0.9545454545454546
+          },
+          "confusion": {
+            "FAIL": {
+              "FAIL": 2,
+              "PARSE_FAILURE": 0,
+              "PASS": 3
+            },
+            "PASS": {
+              "FAIL": 1,
+              "PARSE_FAILURE": 0,
+              "PASS": 21
+            }
+          },
+          "failure_recall": 0.4,
+          "predicted_classes": [
+            "FAIL",
+            "PASS"
+          ],
+          "required_classes_covered": true
+        },
+        "internal_consistency": {
+          "class_recall": {
+            "FAIL": 0.5,
+            "PASS": 0.9130434782608695
+          },
+          "confusion": {
+            "FAIL": {
+              "FAIL": 2,
+              "PARSE_FAILURE": 0,
+              "PASS": 2
+            },
+            "PASS": {
+              "FAIL": 2,
+              "PARSE_FAILURE": 0,
+              "PASS": 21
+            }
+          },
+          "failure_recall": 0.5,
+          "predicted_classes": [
+            "FAIL",
+            "PASS"
+          ],
+          "required_classes_covered": true
+        },
+        "scope_and_signal": {
+          "class_recall": {
+            "FAIL": 0.16666666666666666,
+            "PASS": 0.9047619047619048
+          },
+          "confusion": {
+            "FAIL": {
+              "FAIL": 1,
+              "PARSE_FAILURE": 0,
+              "PASS": 5
+            },
+            "PASS": {
+              "FAIL": 2,
+              "PARSE_FAILURE": 0,
+              "PASS": 19
+            }
+          },
+          "failure_recall": 0.16666666666666666,
+          "predicted_classes": [
+            "FAIL",
+            "PASS"
+          ],
+          "required_classes_covered": true
+        },
+        "useful_state_transfer": {
+          "class_recall": {
+            "FAIL": 0.3333333333333333,
+            "PASS": 0.9523809523809523
+          },
+          "confusion": {
+            "FAIL": {
+              "FAIL": 2,
+              "PARSE_FAILURE": 0,
+              "PASS": 4
+            },
+            "PASS": {
+              "FAIL": 1,
+              "PARSE_FAILURE": 0,
+              "PASS": 20
+            }
+          },
+          "failure_recall": 0.3333333333333333,
+          "predicted_classes": [
+            "FAIL",
+            "PASS"
+          ],
+          "required_classes_covered": true
+        }
+      },
+      "supported_class_macro_recall": 0.6249756172681074
+    }
+  },
+  "complete": true,
+  "freeze_sha256": "934c8dbf4103169532147d132196a10b65cf541da793d30ec7344303ca15c943",
+  "observations_complete": true,
+  "parse_failure_count": {
+    "A": 0,
+    "B": 0,
+    "C": 0
+  },
+  "provider_identity": {
+    "requested_model": "deepseek-v4-flash",
+    "served_models": [
+      "deepseek-v4-flash"
+    ],
+    "serving_revision": "provider-managed-unverifiable"
+  },
+  "residual_mixed_signal": false,
+  "route_contract_gap": null,
+  "route_terminal": "TASK_EXECUTABILITY_INSUFFICIENT",
+  "schema": "rondo-publication-critic-plan100-diagnostic-summary@v1",
+  "task_budget": {
+    "cap_rmb": "20",
+    "http_attempt_count": 99,
+    "outstanding_logical_call_count": 0,
+    "outstanding_reserved_rmb": "0",
+    "price_card_sha256": "46851a8c8446220a74afe98574aa36be8e8d4e50d584f6c2ce43a72cc645f9b1",
+    "provider_completion_tokens_reported": 1913,
+    "provider_prompt_tokens_reported": 83895,
+    "recounted_completion_tokens": 0,
+    "recounted_prompt_tokens": 0,
+    "remaining_unreserved_rmb": "19.9603906",
+    "schema": "rondo-publication-critic-plan100-budget-ledger@v1",
+    "settled_logical_call_count": 99,
+    "settled_rmb": "0.0396094",
+    "settlement_methods": {
+      "provider_usage": 99
+    }
+  },
+  "terminal_observation_count": 81,
+  "usage_and_cost": {
+    "cache_hit_tokens_reported": 54784,
+    "cache_miss_tokens_reported": 13991,
+    "completion_tokens_reported": 1567,
+    "http_attempt_count": 81,
+    "logical_call_count": 81,
+    "prompt_tokens_reported": 68775,
+    "settled_rmb": "0.0307772",
+    "settlement_methods": {
+      "provider_usage": 81
+    }
+  }
+}

@@ -1,0 +1,320 @@
+{
+  "schema": "rondo-publication-critic-plan100-diagnostic-contract@v1",
+  "scope": "development_validation_only",
+  "authority": {
+    "task": {
+      "path": "doc/rondo-multi-publication-critic-task-contract-v2.md",
+      "sha256": "3eb0539b16403ebe20e74ce1b1ea5114d2383c6118f61fef56c9c91426e6a560"
+    },
+    "task_projection": {
+      "path": "eval/templates/publication-critic/task-contract-v2.json",
+      "sha256": "6642a743d5d497e9ac6d9bec297fa780cd80b010049f4bda38ce03fcc582f3bd"
+    },
+    "rubric": {
+      "path": "eval/templates/publication-critic/qualification-rubric-v2.md",
+      "sha256": "c26ffffc41aa9adf68cffc38b14eb8e1da34f2e28dcb966fae8fec8055675946"
+    },
+    "input_contract": {
+      "path": "eval/templates/publication-critic/input-contract-v3.md",
+      "sha256": "9c43c7ca81caa20c337d025375020548bab3b0508f1a4aeff2ca4647c8197f7d"
+    },
+    "render_contract": {
+      "path": "eval/templates/publication-critic/render-contract-v4.json",
+      "sha256": "74f4623fe47188bc947a8a7559f90364fd528a6f9eebdc1b9676cbb2e3d96dde"
+    },
+    "development_gate_source": {
+      "path": "training/publication-critic-plan099/development-gate-v1.json",
+      "sha256": "4769bcc536e4106ad579e55cb17fa15e4450676fbe8e9ccc271712140c8dfbbd",
+      "projection": "inference_only_without_decision_config_training_loss_or_step_zero_selection"
+    }
+  },
+  "release": {
+    "revision": "publication-critic-v10",
+    "manifest": {
+      "path": "training/publication-critic-v10/manifest.json",
+      "sha256": "61498f2f8580eab7dda59df0e2dba9bf5700c168e33f41bfec5cbdf3bd5041a4"
+    },
+    "validation_candidates": {
+      "path": "training/publication-critic-v10/splits/validation/candidates.jsonl",
+      "sha256": "20c545469a3c1972e90d4c587fc114845000a2c938c21bea95e42eeb94602508",
+      "bytes": 34370,
+      "rows": 27,
+      "order": "physical_jsonl_line_order"
+    },
+    "validation_pairs": {
+      "path": "training/publication-critic-v10/splits/validation/pairs.jsonl",
+      "sha256": "4b0fe7c7f8148b5c5d9b12fdfe9e2055c6b46e4c9cdb30e2058be0d13224edfd",
+      "bytes": 4544,
+      "rows": 12,
+      "order": "physical_jsonl_line_order"
+    },
+    "projection": {
+      "provider_visible": ["packet"],
+      "local_only": ["candidate_id", "group_id", "labels", "continuity_label_basis", "pairs"],
+      "packet_canonicalization": "utf8_sha256_canonical_json_sort_keys_compact_trailing_newline"
+    }
+  },
+  "comparison": {
+    "provider": "deepseek-official",
+    "requested_model": "deepseek-v4-flash",
+    "descriptor_candidate": {
+      "path": "eval/locks/publication-critic-plan100-diagnostic-descriptor-v1.json",
+      "sha256": "a0ce54404ee1b55c57eeb5c672bf6f5bafa31f02e6b9275a190b52ee14144edb",
+      "temperature": 0.0,
+      "max_output_tokens": 256,
+      "max_attempts": 2,
+      "request_timeout_ms": 60000,
+      "retry_backoff_ms": 1000,
+      "response_format": "json_object"
+    },
+    "environment_candidate": {
+      "path": "eval/locks/publication-critic-plan100-recount-environment-v1.json",
+      "sha256": "974629277eab274171e48c3bb444d3cd235cd463998e60d5bbb3394aaebfd9b6"
+    },
+    "prompt_candidate": {
+      "source_path": "multidev/codex-rs/publication-critic/src/cloud_diagnostic.rs",
+      "source_sha256": "f1478f9f5768d333ee0ea5509c184251b54053a0e375ce79a3c73f93d137c49d",
+      "common_semantics": "task_v2_rubric_v2_semantics_and_public_evidence_boundary",
+      "arm_specific_suffix": "output_instruction_and_exact_output_schema_only",
+      "formal_identity": "compiled_executable_sha256_after_three_arm_B1"
+    },
+    "same_packet_bytes_per_candidate": true,
+    "arm_order": ["A", "B", "C"],
+    "candidate_order": "release_physical_jsonl_line_order",
+    "provider_visible_difference": "output_instruction_and_exact_output_schema_only",
+    "thinking": "disabled_for_all_three_arms_to_preserve_frozen_temperature_and_recountable_json_completion"
+  },
+  "outputs": {
+    "A": {
+      "name": "single_scalar",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["quality"],
+        "properties": {
+          "quality": {"type": "number", "minimum": 0.0, "maximum": 1.0}
+        }
+      }
+    },
+    "B": {
+      "name": "direct_gate",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["verdict"],
+        "properties": {
+          "verdict": {"type": "string", "enum": ["PASS", "REWRITE"]}
+        }
+      }
+    },
+    "C": {
+      "name": "five_hard_decisions",
+      "model_outputs_global_gate": false,
+      "local_gate": "all_applicable_heads_pass",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "useful_state_transfer",
+          "honest_uncertainty",
+          "conditional_continuity",
+          "scope_and_signal",
+          "internal_consistency"
+        ],
+        "properties": {
+          "useful_state_transfer": {"type": "string", "enum": ["PASS", "FAIL"]},
+          "honest_uncertainty": {"type": "string", "enum": ["PASS", "FAIL"]},
+          "conditional_continuity": {"type": "string", "enum": ["PASS", "FAIL", "N/A"]},
+          "scope_and_signal": {"type": "string", "enum": ["PASS", "FAIL"]},
+          "internal_consistency": {"type": "string", "enum": ["PASS", "FAIL"]}
+        }
+      }
+    },
+    "strict_parser": {
+      "single_json_object": true,
+      "duplicate_keys": "reject",
+      "nan_infinity": "reject",
+      "prose_or_trailing_non_whitespace": "reject",
+      "missing_or_additional_fields": "reject",
+      "maximum_response_bytes_utf8": 4096
+    }
+  },
+  "commissioning": {
+    "quality_evidence": false,
+    "synthetic_per_arm": 1,
+    "synthetic_item": {
+      "candidate_id": "plan100-synthetic-commissioning-v1",
+      "path": "eval/fixtures/publication-critic/plan100-synthetic-packet-v1.json",
+      "file_bytes": 684,
+      "file_sha256": "4e3da1240827cc290dde7e020dd4ad0849ad0af7a8d4bc2e32133f0fedd17c10",
+      "canonical_packet_bytes": 550,
+      "canonical_packet_sha256": "433384119b9e3ea68616d6fe6d862521509fc66e35fa74b8e21f0563b3b034dc"
+    },
+    "public_packets_per_arm": 2,
+    "public_selection": "minimum_and_maximum_canonical_packet_bytes_candidate_id_tie_break_without_supervision",
+    "public_items": [
+      {
+        "selection": "minimum_canonical_packet_bytes_then_candidate_id",
+        "candidate_id": "pcv9-hard-boundaries-validation-01-qminus",
+        "packet_bytes": 486,
+        "packet_sha256": "f3d11525367bc1400a7531b78d89c009812bf7bd42cec75f79a7d2e43c0bbdeb"
+      },
+      {
+        "selection": "maximum_canonical_packet_bytes_then_candidate_id",
+        "candidate_id": "pcv9-continuity-context-020-qplus",
+        "packet_bytes": 1241,
+        "packet_sha256": "6677a5c61e0043245c95af5201a43c5851021ae6b9e13b7dc7db71365f10e2a2"
+      }
+    ],
+    "logical_calls": 9,
+    "physical_namespace": "separate_from_formal",
+    "success_gate": "nine_of_nine_strict_output_contract_success",
+    "output_contract_failure_unlocks_formal": false,
+    "usage_recount_calibration": "all_usage_present_success_attempts_exact_prompt_and_completion_match_with_at_least_one_attempt",
+    "formal_binding": "embed_and_validate_commissioning_freeze_and_result_then_require_exact_final_source_provider_request_release_comparison_and_price_identity",
+    "runtime_revalidation": "both_provider_modes_require_current_clean_HEAD_contract_environment_executable_descriptor_and_recounter_identity",
+    "archived_binding_location": "main_physical_root_eval_data_publication_critic_plan100_runs_run_id_commissioning_binding_json"
+  },
+  "formal": {
+    "candidate_rows_per_arm": 27,
+    "arms": 3,
+    "terminal_observations": 81,
+    "namespace": "main_physical_root_eval_data_publication_critic_plan100_runs_new_empty_write_once_after_three_arm_commissioning",
+    "run_freeze_schema": "rondo-publication-critic-plan100-run-freeze@v1",
+    "receipt_before_settlement_before_terminal": true,
+    "ambiguous_reservation_without_receipt": "stop_without_repeat",
+    "technical_receipt": "settled_without_terminal_stops_then_explicit_same_freeze_resume_appends_next_ordinal_only_for_that_logical_item",
+    "output_contract_failure": "terminal_quality_observation_no_retry",
+    "first_complete_valid_formal_stops_new_api_consumption": true,
+    "post_authority_recompute": "read_only_reopen_allowed_while_provider_run_resume_remains_locked",
+    "authority_scope": "first_complete_valid_formal_blocks_all_later_provider_capable_commissioning_and_formal_modes_task_wide",
+    "recompute_authority_binding": "existing_read_only_ledger_and_exact_authority_run_freeze_result_hashes_required",
+    "detailed_projection": "candidate_error_slices_twelve_pair_rows_A_full_curve_and_C_target_invariance_without_packet_response_or_credential",
+    "residual_route_marker": "complete_valid_unmatched_quality_predicates_use_constraint_or_data_issue_with_residual_mixed_signal_true"
+  },
+  "metrics": {
+    "shared_binary": [
+      "false_pass",
+      "false_rewrite",
+      "balanced_accuracy",
+      "candidate_errors",
+      "twelve_pair_results",
+      "typed_failures"
+    ],
+    "candidate_gate": {
+      "maximum_false_pass": 3,
+      "maximum_false_rewrite": 4,
+      "minimum_balanced_accuracy": 0.75
+    },
+    "A": {
+      "full_operating_curve": true,
+      "minimum_roc_auc": 0.75,
+      "required_boundary_strict_wins": 9,
+      "operating_point_order": [
+        "candidate_gate_true",
+        "balanced_accuracy_descending",
+        "false_pass_ascending",
+        "correct_descending",
+        "false_rewrite_ascending",
+        "pairs_closed_descending",
+        "threshold_descending"
+      ]
+    },
+    "B": {
+      "candidate_gate_required": true,
+      "all_validation_pairs_closed": true
+    },
+    "C": {
+      "finite_structured_rows": 27,
+      "required_predicted_classes": {
+        "useful_state_transfer": ["PASS", "FAIL"],
+        "honest_uncertainty": ["PASS", "FAIL"],
+        "conditional_continuity": ["PASS", "FAIL", "N/A"],
+        "scope_and_signal": ["PASS", "FAIL"],
+        "internal_consistency": ["PASS", "FAIL"]
+      },
+      "minimum_failure_recall": {
+        "useful_state_transfer": 0.6666666666666666,
+        "honest_uncertainty": 0.8,
+        "conditional_continuity": 0.6666666666666666,
+        "scope_and_signal": 0.6666666666666666,
+        "internal_consistency": 0.75
+      },
+      "minimum_continuity_na_recall": 0.6666666666666666,
+      "minimum_supported_class_macro_recall": 0.6,
+      "all_validation_pairs_closed": true,
+      "pair_components": ["target_closure", "non_target_invariance", "absolute_gate_closure"]
+    }
+  },
+  "route": {
+    "comparison_resolution": {
+      "noticeably_better": "non_worse_gate_correct_and_pairs_closed_and_at_least_two_more_gate_correct_or_two_more_pairs_closed",
+      "close": "absolute_gate_correct_delta_at_most_one_and_pair_closed_delta_at_most_one"
+    },
+    "priority": [
+      {
+        "terminal": "INCONCLUSIVE_TECHNICAL_OR_BUDGET",
+        "when": "formal_invalid_or_incomplete"
+      },
+      {
+        "terminal": "FIVE_DIMENSION_STRONGLY_SUPPORTED",
+        "when": "C_meets_gate_and_C_noticeably_better_than_B"
+      },
+      {
+        "terminal": "DISCRETE_SUPPORTED_FIVE_DIMENSION_INCREMENT_UNCONFIRMED",
+        "when": "B_and_C_meet_gate_and_each_noticeably_better_than_A_and_B_C_close"
+      },
+      {
+        "terminal": "CONSTRAINT_OR_DATA_ISSUE",
+        "when": "C_dimensions_generally_good_and_C_has_predefined_concentrated_dimension_or_pair_invariance_blocker"
+      },
+      {
+        "terminal": "TASK_EXECUTABILITY_INSUFFICIENT",
+        "when": "A_B_C_all_fail_arm_basic_gate"
+      }
+    ],
+    "otherwise": "CONSTRAINT_OR_DATA_ISSUE_with_residual_mixed_signal_true_for_complete_valid_formal",
+    "residual_semantics": "mixed_signal_not_attributable_to_existing_positive_or_all_fail_routes_without_claiming_data_defect_concentrated_blocker_or_backbone_cause",
+    "residual_preserves_metrics": true,
+    "residual_supports_direct_training_unlock": false
+  },
+  "budget": {
+    "currency": "RMB",
+    "hard_limit": 20.0,
+    "worst_case_reservation_per_logical_call": 0.2,
+    "planned_logical_calls": 90,
+    "planned_worst_case_reservation": 18.0,
+    "task_root": "main_physical_root/eval-data/publication-critic/plan100",
+    "ledger_lifecycle": "B1_may_create_unique_ledger_B2_requires_existing_ledger_with_exact_B1_settlements_recompute_existing_read_only",
+    "price_card": {
+      "identity": "deepseek-v4-flash-live-2026-08-30-weekday-v3",
+      "source": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/",
+      "checked_at": "2026-08-30",
+      "timezone": "Asia/Shanghai",
+      "peak_days_beijing": ["monday", "tuesday", "wednesday", "thursday", "friday"],
+      "peak_windows_beijing": ["09:00-12:00", "14:00-18:00"],
+      "weekends": "off_peak_all_day",
+      "off_peak_rmb_per_million_tokens": {
+        "cache_hit_input": 0.05,
+        "cache_miss_input": 1.5,
+        "output": 4.5
+      },
+      "peak_rmb_per_million_tokens": {
+        "cache_hit_input": 0.1,
+        "cache_miss_input": 3.0,
+        "output": 9.0
+      },
+      "refresh_and_freeze_before_first_real_request": true
+    },
+    "missing_usage": "recount_only_with_complete_response_then_actual_price_tier_otherwise_0.1_rmb_unquantifiable_fallback_unless_provider_usage_or_explicit_unbilled_evidence_exists",
+    "final_task_wide_evidence": "validated_budget_ledger_snapshot_and_body_free_aggregate_cover_commissioning_formal_retries_recovery_and_technical_runs",
+    "recount": {
+      "adapter": "bounded_offline_command",
+      "identity": "command_executable_sha256_plus_arguments_bound_in_run_freeze",
+      "provider_chat_envelope_tokens": 21,
+      "b1_calibration": "nine_of_nine_prompt_delta_21_and_completion_delta_0",
+      "cache_unknown": "charge_all_input_as_cache_miss",
+      "commissioning_requirement": "calibrate_against_usage_present_attempt_before_clean_formal"
+    }
+  }
+}
