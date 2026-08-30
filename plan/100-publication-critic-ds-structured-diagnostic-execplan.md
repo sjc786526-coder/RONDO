@@ -243,14 +243,17 @@ Plan 100 不属于原工作包四，不读取 qualification 或 v9 test 正文�
   `TASK_EXECUTABILITY_INSUFFICIENT`；这是完整有效负向质量结果，不是技术 `INCONCLUSIVE`，不解锁训练、qualification 或产品启用。
 - 2026-08-29：最终独立验收复现 authority-bound tracked/detailed 结果与费用，Plan 100 Python 21/21 通过，未发现 High/Medium；任务以
   `FINAL_REVIEW_ACCEPTED / GOAL_COMPLETED / TASK_EXECUTABILITY_INSUFFICIENT` 冻结完成，API 授权关闭且余额不转移。
+- 2026-08-29：用户批准主线集成；最终验收头以非快进 merge `71f42abd185ae12a2dc2138a90b0c7ab8a2036e3` 合入 `main`，主线 Plan 100
+  Python 21/21 与合同 JSON/diff 轻量门禁通过并推送 `origin/main`。任务分支归档为
+  `zz-done/worktree-100-publication-critic-ds-structured-diagnostic`，任务 worktree 与 ignored 证据资产保留。
 
 ### 当前工作
 
-- `STAGE_A_ACCEPTED / STAGE_B_ACCEPTED / FINAL_REVIEW_ACCEPTED / TASK_EXECUTABILITY_INSUFFICIENT`。
+- `STAGE_A_ACCEPTED / STAGE_B_ACCEPTED / FINAL_REVIEW_ACCEPTED / TASK_EXECUTABILITY_INSUFFICIENT / INTEGRATED / PUSHED`。
 
 ### 本任务剩余步骤
 
-- 任务内无剩余实施步骤；合并、推送、分支归档与 worktree 处置继续等待用户明确批准。
+- 无剩余步骤；主线集成、推送和本地分支归档已完成，worktree 按用户要求保留。
 
 ### 阻塞项
 
@@ -268,7 +271,7 @@ Plan 100 不属于原工作包四，不读取 qualification 或 v9 test 正文�
 - 执行者只在 100 worktree/branch 完成 tracked 实现、测试、文档、整改和提交；主物理根 ignored `plan100` 资产单列汇报。
 - 阶段 A、计划外请示和最终验收使用 §7 指定 queue。阶段 A 通过后，审查者必须用同一 queue 明确通知批准阶段 B，执行者才可继续。
 - 任务完成后冻结本计划；部分解冻训练、qualification 或产品启用只链接 WBS，不列入本任务剩余步骤。
-- 最终验收前后都只提交任务分支。合并、推送、分支归档/重命名和 worktree 删除必须等待用户明确批准。
+- 用户已明确批准并完成合并、推送和分支归档；任务 worktree 未删除。
 
 ## 6. 关键决策记录
 

@@ -2612,11 +2612,11 @@ INTEGRATED / NOT_PUSHED`。clean formal source 为 `0ae9623`，执行者交付�
 
 ## Publication Critic DS-V4-Flash 三任务表达诊断（Plan 100，2026-08-29）
 
-**状态**：`COMPLETED / FINAL_REVIEW_ACCEPTED / GOAL_COMPLETED / TASK_EXECUTABILITY_INSUFFICIENT / NOT_INTEGRATED`。
+**状态**：`COMPLETED / FINAL_REVIEW_ACCEPTED / GOAL_COMPLETED / TASK_EXECUTABILITY_INSUFFICIENT / INTEGRATED / PUSHED`。
 
 - 在同一 `deepseek-v4-flash`、v10 development validation 27 candidates / 12 pairs、public packet、task v2 / rubric v2 与本地监督口径下，完成 scalar、直接 gate、五维 hard decision + 本地 non-compensating AND 三臂比较。唯一 clean formal 为 81/81 strict terminal observations，三臂各 27/27，parse failure 为 0。
 - 预冻结指标机械给出 A/B/C balanced accuracy `0.625000 / 0.583333 / 0.700000`，False PASS `10 / 5 / 9`，pair 结果 `2/9 Boundary strict / 4/12 / 5/12`；三臂均未达到 basic/gate，故冻结 `TASK_EXECUTABILITY_INSUFFICIENT`。这是有效负向诊断而非技术 `INCONCLUSIVE`，不支持在本任务内继续付费解冻训练，也不解锁 qualification、工作包四或产品启用。
 - B1 第二轮形成 9/9 strict success 与 9/9 usage recount 精确一致的 binding；正式运行使用官方 V4 tokenizer、同一 Rust message renderer 与经九项 commissioning 一致校准的 21-token chat envelope。Plan 100 三臂统一关闭默认 thinking，产品 scorer 路径不变。
 - task-wide 99 HTTP attempts 全部按 provider usage 结算 `0.0396094 RMB`，outstanding 为 0、剩余 `19.9603906 RMB`。首个 formal authority 后停止 API；最终验收后本任务外部授权关闭，余额不转移。未读取 qualification/v9 test/unseen，未运行训练、真实本地模型、GPU/RunPod/Docker、上传或产品动作。
 - authority-bound tracked 结果与提交 JSON 完全一致，bounded detailed projection、81 receipts/terminals、唯一 authority、B1 binding 与 task-wide ledger 经独立复验闭合；Plan 100 Python 21/21 通过。本任务保持专用薄层并复用既有 provider、费用、write-once、配置和指标设施，没有建设第二套通用体系或额外可信平台。
-- 正式结果见 `eval/results/publication-critic/plan100-structured-diagnostic-v1.{json,md}`，执行见 `agent_log/2026-08-29-plan100-stage-b-execution.md`，最终验收见 `agent_log/2026-08-29-plan100-final-independent-review.md`。任务分支尚未合并或推送，等待用户批准。
+- 正式结果见 `eval/results/publication-critic/plan100-structured-diagnostic-v1.{json,md}`，执行见 `agent_log/2026-08-29-plan100-stage-b-execution.md`，最终验收见 `agent_log/2026-08-29-plan100-final-independent-review.md`。用户批准后，最终验收头 `2b6a1faff8209bd4f2f90c7807ba2e3d98bfcbb9` 以非快进 merge `71f42abd185ae12a2dc2138a90b0c7ab8a2036e3` 合入本地 `main`；主线 Plan 100 Python `21/21` 与合同 JSON/diff 门禁通过并推送 `origin/main`。本地任务分支归档为 `zz-done/worktree-100-publication-critic-ds-structured-diagnostic`，worktree 与 ignored 证据资产保留；集成记录见 `agent_log/2026-08-29-plan100-main-integration.md`。
