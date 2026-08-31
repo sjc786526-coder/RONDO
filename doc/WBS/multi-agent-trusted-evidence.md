@@ -156,7 +156,7 @@ M3-B1c 正式分阶段训练与工件回收          │
                                                                                         ↓
                                               方向固定：五维 hard decision；单标量云端接缝废弃
                                                                                         ↓
-                                              Plan 102 五维云端判官实验性工程接入（next，未授权启动）
+                                              Plan 102 五维云端判官实验性工程接入（next，已授权，ExecPlan 已建立）
 （均不解锁工作包四）
 
 并列 reference 支线：M3-B2a 已有可替换 service → Plan 095 云端参考 scorer backend（已完成）
@@ -324,7 +324,7 @@ validation 的 27 candidates / 12 pairs。它是**测评（eval）而非资格�
 
 本任务不解锁工作包四；qualification 与训练路线须由用户另行决定并另立任务与授权。
 
-#### Plan 102：五维云端判官实验性工程接入（next，未授权启动）
+#### Plan 102：五维云端判官实验性工程接入（next，已授权，ExecPlan 已建立）
 
 **定位与依赖**：承接 Plan 101 的方向决定，把 Plan 095/097 已经打通过的云端 scorer 接缝从单标量改造为
 五维 hard decision + 关闭思考。属工程接入，不属工作包四，不产出质量结论。
@@ -348,7 +348,8 @@ validation 的 27 candidates / 12 pairs。它是**测评（eval）而非资格�
 
 **仍未授权**：训练、GPU/RunPod、真实本地模型加载与推理、上传、充值、产品默认启用与发布、qualification 与 v9 test 正文。
 
-**当前状态**：已授权，未启动。启动时另立 ExecPlan。
+**当前状态**：已授权，ExecPlan 已建立，未启动。合同见
+`plan/102-publication-critic-five-dimension-cloud-judge-execplan.md`。
 
 #### 工作包四：模型资格验收与横评（未解锁）
 

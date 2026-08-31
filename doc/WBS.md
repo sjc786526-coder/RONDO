@@ -59,7 +59,7 @@ Plan 101 对比测评已完成，据此把五维 hard decision 固定为云端�
 ```
 
 独立诊断支线：Plan 099 `VALID_FORMAL_NO_GO` → Plan 100 DS-V4-Flash 五维任务合同诊断 → Plan 101 DS 思考开关 × 输出表达对比测评
-→ 方向固定为五维 hard decision、单标量云端接缝废弃 → Plan 102 五维云端判官实验性工程接入（next，未授权启动）；
+→ 方向固定为五维 hard decision、单标量云端接缝废弃 → Plan 102 五维云端判官实验性工程接入（next，已授权，ExecPlan 已建立）；
 该支线不接入或解锁工作包四。
 
 - **工作包一 / Plan 098 阶段一已完成并冻结**：既有 `rondo-publication-critic-task@v2` 五头、non-compensating gate 与
@@ -112,7 +112,8 @@ Plan 101 对比测评已完成，据此把五维 hard decision 固定为云端�
 五维 hard decision + 关闭思考，本地按非补偿合取派生 typed verdict，产品出口不变。**仅实验性质，不投入生产、不正式发布、
 不改变默认关闭姿态**，不训练、不做资格判定，也不解锁工作包四。已获授权：真实 `deepseek-v4-flash` 上限 `10 RMB`
 （保守兜底 `0.1 RMB/次`，用于证明接缝真通而非 fake 绿，不限重跑轮次）、必要的重型构建与 Docker，
-且必须复用主工作区既有 target `.codex/cargo-target/rondo-multi`。启动时另立 ExecPlan。
+且必须复用主工作区既有 target `.codex/cargo-target/rondo-multi`。合同见
+`plan/102-publication-critic-five-dimension-cloud-judge-execplan.md`。
 Plan 100 的负向诊断本身不自动启动后续路线。Plan 081 已取得 `LOCAL_TRAINING_READINESS_PASS`；三期 Plan 082 已获用户付费批准并完成
 真实 commissioning、正式 freeze、干净 formal 和新进程恢复，终态为 `VALID_NO_IMPROVEMENT`。保留 Pod 的 GPU 专项验收已经通过，
 唯一训练 Pod 已释放并确认持续 compute 费率为 0；保留卷所在 `US-TX-3` 不提供 S3 API，故按用户一次性授权使用单个 transfer Pod
