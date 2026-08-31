@@ -148,7 +148,11 @@ def usage_cost_rmb(usage: Mapping[str, Any], *, tier: str) -> Decimal:
     )
 
 
-def settle_attempt(value: Mapping[str, Any]) -> dict[str, Any]:
+def settle_attempt(
+    value: Mapping[str, Any],
+    *,
+    missing_usage_rmb: Decimal | None = None,
+) -> dict[str, Any]:
     """Settle one actual attempt, using recount before the 0.1 RMB last resort."""
 
     if not isinstance(value, Mapping) or set(value) != {
@@ -215,8 +219,14 @@ def settle_attempt(value: Mapping[str, Any]) -> dict[str, Any]:
         normalized_usage = None
         normalized_recount = dict(recount)
     else:
-        charge = UNKNOWN_ACTUAL_ATTEMPT_RMB
-        method = "actual_attempt_unquantifiable_fallback"
+        if missing_usage_rmb is not None:
+            if not missing_usage_rmb.is_finite() or missing_usage_rmb <= 0:
+                raise DiagnosticCostError("missing_usage_rmb_invalid")
+            charge = missing_usage_rmb
+            method = "conservative_fixed_missing_usage"
+        else:
+            charge = UNKNOWN_ACTUAL_ATTEMPT_RMB
+            method = "actual_attempt_unquantifiable_fallback"
         normalized_usage = None
         normalized_recount = None
     return {
@@ -258,6 +268,7 @@ class Plan100BudgetLedger:
         cap_rmb: Decimal = BUDGET_CAP_RMB,
         must_exist: bool = False,
         read_only: bool = False,
+        missing_usage_rmb: Decimal | None = None,
     ) -> None:
         if not path.is_absolute():
             raise DiagnosticCostError("ledger_path_must_be_absolute")
@@ -269,6 +280,11 @@ class Plan100BudgetLedger:
         self.cap_rmb = cap_rmb
         self.must_exist = must_exist
         self.read_only = read_only
+        if missing_usage_rmb is not None and (
+            not missing_usage_rmb.is_finite() or missing_usage_rmb <= 0
+        ):
+            raise DiagnosticCostError("missing_usage_rmb_invalid")
+        self.missing_usage_rmb = missing_usage_rmb
         self._thread_lock = threading.Lock()
         self._lock_path = path.with_name(f".{path.name}.lock")
         if must_exist:
@@ -321,7 +337,10 @@ class Plan100BudgetLedger:
             raise DiagnosticCostError("ledger_is_read_only")
         if not attempts_value:
             raise DiagnosticCostError("settlement_attempts_empty")
-        attempts = [settle_attempt(value) for value in attempts_value]
+        attempts = [
+            settle_attempt(value, missing_usage_rmb=self.missing_usage_rmb)
+            for value in attempts_value
+        ]
         if [row["attempt"] for row in attempts] != list(range(1, len(attempts) + 1)):
             raise DiagnosticCostError("settlement_attempt_order_invalid")
         settled = sum((Decimal(row["charge_rmb"]) for row in attempts), Decimal(0))

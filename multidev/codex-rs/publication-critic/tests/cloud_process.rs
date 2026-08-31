@@ -488,6 +488,16 @@ async fn run_cloud_diagnostic(
     input: &[u8],
     mode: DiagnosticMode,
 ) -> TestResult<CapturedProbe> {
+    run_cloud_diagnostic_with_thinking(fixture, task, input, mode, None).await
+}
+
+async fn run_cloud_diagnostic_with_thinking(
+    fixture: &Fixture,
+    task: &str,
+    input: &[u8],
+    mode: DiagnosticMode,
+    thinking: Option<&str>,
+) -> TestResult<CapturedProbe> {
     let mut command = Command::new(cargo_bin("codex-publication-critic-cloud-diagnostic")?);
     command
         .arg("--descriptor")
@@ -498,6 +508,9 @@ async fn run_cloud_diagnostic(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
+    if let Some(thinking) = thinking {
+        command.arg("--thinking").arg(thinking);
+    }
     match mode {
         DiagnosticMode::Evaluate => {
             command.env(API_KEY_ENV, API_KEY);
@@ -797,6 +810,41 @@ async fn diagnostic_message_renderer_is_offline_and_matches_the_paid_request() -
     let body: Value = serde_json::from_slice(&requests[0].body)?;
     assert_eq!(rendered["system"], body["messages"][0]["content"]);
     assert_eq!(rendered["user"], body["messages"][1]["content"]);
+    Ok(())
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn diagnostic_thinking_flag_is_runtime_and_does_not_change_the_product_path() -> TestResult {
+    let provider = FakeProvider::start().await;
+    provider
+        .mount(
+            ResponseTemplate::new(200).set_body_json(detailed_completion(
+                PROVIDER_MODEL,
+                Some(r#"{"quality":0.83}"#),
+                Some("stop"),
+            )),
+        )
+        .await;
+    let fixture = Fixture::new(&provider.base_url(), DescriptorOptions::default())?;
+    let input = std::fs::read(&fixture.packet_path)?;
+    let output = run_cloud_diagnostic_with_thinking(
+        &fixture,
+        "scalar",
+        &input,
+        DiagnosticMode::Evaluate,
+        Some("enabled"),
+    )
+    .await?;
+    assert!(
+        output.status.success(),
+        "thinking-enabled diagnostic failed: {}",
+        output.stderr
+    );
+    let requests = provider.requests().await;
+    assert_eq!(requests.len(), 1);
+    let body: Value = serde_json::from_slice(&requests[0].body)?;
+    assert_eq!(body["thinking"]["type"], json!("enabled"));
+    assert_eq!(body["temperature"], json!(0.0));
     Ok(())
 }
 

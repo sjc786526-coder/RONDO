@@ -174,7 +174,8 @@ class RustSubprocessEvaluator:
     arguments: tuple[str, ...]
     credential_env: Mapping[str, str]
     timeout_seconds: float
-    recounter: TokenRecounter
+    recounter: TokenRecounter | None = None
+    thinking: str | None = None
 
     _SYSTEM_ENV = (
         "PATH",
@@ -198,7 +199,10 @@ class RustSubprocessEvaluator:
             or not self.executable.is_file()
             or not math.isfinite(self.timeout_seconds)
             or self.timeout_seconds <= 0
-            or self.recounter is None
+            or (
+                self.thinking is not None
+                and self.thinking not in {"disabled", "enabled"}
+            )
         ):
             raise DiagnosticRunnerError("subprocess_configuration_invalid")
 
@@ -232,6 +236,8 @@ class RustSubprocessEvaluator:
                 DiagnosticTask.STRUCTURED: "five-dimension",
             }[task],
         ]
+        if self.thinking is not None:
+            command.extend(["--thinking", self.thinking])
         try:
             completed = subprocess.run(
                 command,
@@ -312,7 +318,7 @@ def _attempt_times(
 def _adapter_failure(
     task: DiagnosticTask,
     packet: Mapping[str, Any],
-    recounter: TokenRecounter,
+    recounter: TokenRecounter | None,
     requested_at: Sequence[datetime],
     code: str,
     elapsed_seconds: float,
@@ -332,7 +338,7 @@ def _normalize_rust_observation(
     task: DiagnosticTask,
     packet: Mapping[str, Any],
     value: Mapping[str, Any],
-    recounter: TokenRecounter,
+    recounter: TokenRecounter | None,
 ) -> dict[str, Any]:
     expected = {
         "task",
@@ -506,7 +512,7 @@ def _normalize_usage(value: Any) -> dict[str, int | None] | None:
 def _settlement_attempts(
     task: DiagnosticTask,
     packet: Mapping[str, Any],
-    recounter: TokenRecounter,
+    recounter: TokenRecounter | None,
     requested_at: Sequence[datetime],
     final_usage: Mapping[str, Any] | None,
     response_text: str | None,
@@ -517,7 +523,7 @@ def _settlement_attempts(
         attempt_response = response_text if index == len(requested_at) else None
         recount = (
             None
-            if usage is not None or attempt_response is None
+            if usage is not None or recounter is None or attempt_response is None
             else recounter.recount(
                 task,
                 packet,
@@ -954,7 +960,7 @@ def recompute_commissioning(
     items: Sequence[PublicItem],
     archive: DiagnosticArchive,
     ledger: Plan100BudgetLedger,
-    recounter: TokenRecounter,
+    recounter: TokenRecounter | None,
 ) -> dict[str, Any]:
     """Prove 9/9 output success and calibrate the frozen counter on usage evidence."""
 

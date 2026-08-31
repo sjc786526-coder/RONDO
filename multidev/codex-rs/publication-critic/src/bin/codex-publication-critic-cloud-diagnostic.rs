@@ -6,6 +6,7 @@
 
 use clap::Parser;
 use codex_publication_critic::CloudDiagnosticTask;
+use codex_publication_critic::CloudDiagnosticThinking;
 use codex_publication_critic::CloudPublicationScorer;
 use codex_publication_critic::CloudScorerConfig;
 use codex_publication_critic::CloudScorerDescriptor;
@@ -27,6 +28,9 @@ struct Args {
     descriptor: PathBuf,
     #[arg(long)]
     task: CloudDiagnosticTask,
+    /// Eval-only thinking switch. Product scoring never uses this flag.
+    #[arg(long, default_value = "disabled")]
+    thinking: CloudDiagnosticThinking,
     /// Render the exact provider-visible messages without loading credentials or sending HTTP.
     #[arg(long)]
     render_messages: bool,
@@ -83,7 +87,7 @@ async fn run(args: Args) -> Result<(), DiagnosticError> {
     )
     .map_err(|_| DiagnosticError::Configuration)?;
     let observation = scorer
-        .score_for_diagnostic(packet, args.task)
+        .score_for_diagnostic(packet, args.task, args.thinking)
         .await
         .map_err(|_| DiagnosticError::Packet)?;
     write_json(&observation)

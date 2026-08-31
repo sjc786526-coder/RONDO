@@ -26,6 +26,7 @@ use crate::cloud_diagnostic::CloudDiagnosticObservation;
 use crate::cloud_diagnostic::CloudDiagnosticOutcome;
 use crate::cloud_diagnostic::CloudDiagnosticOutput;
 use crate::cloud_diagnostic::CloudDiagnosticTask;
+use crate::cloud_diagnostic::CloudDiagnosticThinking;
 use crate::cloud_diagnostic::diagnostic_messages;
 use crate::cloud_diagnostic::parse_output;
 use crate::cloud_template;
@@ -47,6 +48,7 @@ use tokio_util::sync::CancellationToken;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_RESPONSE_BYTES: usize = 64 * 1024;
+const MAX_DIAGNOSTIC_RESPONSE_BYTES: usize = 1024 * 1024;
 const RETRYABLE_STATUS: [u16; 6] = [408, 425, 429, 500, 502, 503];
 
 /// Revision recorded on an observed served model that differs from the requested one.
@@ -211,6 +213,7 @@ impl CloudPublicationScorer {
         &self,
         packet: PublicationPacket,
         task: CloudDiagnosticTask,
+        thinking: CloudDiagnosticThinking,
     ) -> Result<CloudDiagnosticObservation, CloudEvaluationInputError> {
         packet
             .validate()
@@ -226,7 +229,7 @@ impl CloudPublicationScorer {
                 .call(
                     &messages.system,
                     messages.user,
-                    ResponseProjection::Diagnostic(task),
+                    ResponseProjection::Diagnostic { task, thinking },
                 )
                 .await,
         ))
@@ -355,9 +358,12 @@ impl CloudScorerInner {
                 }),
                 CloudResponseFormat::Unconstrained => None,
             },
-            thinking: matches!(projection, ResponseProjection::Diagnostic(_)).then_some(Thinking {
-                thinking_type: "disabled",
-            }),
+            thinking: match projection {
+                ResponseProjection::Scalar => None,
+                ResponseProjection::Diagnostic { thinking, .. } => Some(Thinking {
+                    thinking_type: thinking.as_request_type(),
+                }),
+            },
         }
     }
 
@@ -383,7 +389,7 @@ impl CloudScorerInner {
                 code: status.as_u16(),
             }));
         }
-        let body = read_bounded(response)
+        let body = read_bounded(response, projection.response_limit())
             .await
             .map_err(ObservedFailure::without_metadata)?;
         let parsed: ChatCompletionsResponse = serde_json::from_slice(&body)
@@ -598,16 +604,20 @@ impl CloudScorerInner {
     }
 }
 
-/// Reads at most [`MAX_RESPONSE_BYTES`] so a hostile or broken provider cannot stream unbounded
-/// data into the service.
-async fn read_bounded(mut response: HttpResponse) -> Result<Vec<u8>, CloudFailure> {
+/// Reads at most the projection's body cap so a hostile or broken provider cannot stream unbounded
+/// data into the service. Product scoring stays at [`MAX_RESPONSE_BYTES`]; diagnostic scoring uses
+/// a larger cap so thinking traces can fit without changing the product path.
+async fn read_bounded(
+    mut response: HttpResponse,
+    max_bytes: usize,
+) -> Result<Vec<u8>, CloudFailure> {
     let mut body = Vec::new();
     while let Some(chunk) = response
         .chunk()
         .await
         .map_err(|_| CloudFailure::Transport)?
     {
-        if body.len().saturating_add(chunk.len()) > MAX_RESPONSE_BYTES {
+        if body.len().saturating_add(chunk.len()) > max_bytes {
             return Err(CloudFailure::Malformed);
         }
         body.extend_from_slice(&chunk);
@@ -743,7 +753,19 @@ struct CloudCallObservation {
 #[derive(Clone, Copy)]
 enum ResponseProjection {
     Scalar,
-    Diagnostic(CloudDiagnosticTask),
+    Diagnostic {
+        task: CloudDiagnosticTask,
+        thinking: CloudDiagnosticThinking,
+    },
+}
+
+impl ResponseProjection {
+    fn response_limit(self) -> usize {
+        match self {
+            Self::Scalar => MAX_RESPONSE_BYTES,
+            Self::Diagnostic { .. } => MAX_DIAGNOSTIC_RESPONSE_BYTES,
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -834,7 +856,7 @@ fn project_content(
         ResponseProjection::Scalar => cloud_template::parse_quality_scalar(content)
             .map(ObservedOutput::Scalar)
             .ok_or(CloudFailure::Projection),
-        ResponseProjection::Diagnostic(task) => parse_output(task, content)
+        ResponseProjection::Diagnostic { task, .. } => parse_output(task, content)
             .map(ObservedOutput::Diagnostic)
             .ok_or(CloudFailure::Projection),
     }

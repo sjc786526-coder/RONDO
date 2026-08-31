@@ -33,6 +33,8 @@ pub use cloud_diagnostic::CloudDiagnosticOutcome;
 pub use cloud_diagnostic::CloudDiagnosticOutput;
 pub use cloud_diagnostic::CloudDiagnosticTask;
 pub use cloud_diagnostic::CloudDiagnosticTaskParseError;
+pub use cloud_diagnostic::CloudDiagnosticThinking;
+pub use cloud_diagnostic::CloudDiagnosticThinkingParseError;
 pub use cloud_diagnostic::CloudDiagnosticVerdict;
 pub use cloud_diagnostic::CloudFiveDimensionDecisions;
 pub use cloud_diagnostic::CloudHardDecision;

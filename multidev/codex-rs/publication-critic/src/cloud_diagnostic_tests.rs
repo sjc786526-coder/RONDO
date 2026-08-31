@@ -86,3 +86,55 @@ fn five_dimension_contract_is_exact_and_gate_is_non_compensating() {
         );
     }
 }
+
+#[test]
+fn output_contracts_use_illegal_templates_instead_of_copyable_legal_values() {
+    let scalar = system_message(CloudDiagnosticTask::Scalar);
+    let direct = system_message(CloudDiagnosticTask::DirectGate);
+    let five = system_message(CloudDiagnosticTask::FiveDimension);
+    let scalar_contract = scalar
+        .split_once("# Output contract\n\n")
+        .expect("scalar contract")
+        .1;
+    let direct_contract = direct
+        .split_once("# Output contract\n\n")
+        .expect("direct contract")
+        .1;
+    let five_contract = five
+        .split_once("# Output contract\n\n")
+        .expect("five-dimension contract")
+        .1;
+
+    assert!(scalar_contract.contains(r#"{"quality":<number in [0,1]>}"#));
+    assert!(!scalar_contract.contains(r#"{"quality":0.42}"#));
+    assert_eq!(
+        parse_output(
+            CloudDiagnosticTask::Scalar,
+            r#"{"quality":<number in [0,1]>}"#
+        ),
+        None
+    );
+
+    assert!(direct_contract.contains(r#"{"verdict":<PASS or REWRITE>}"#));
+    assert!(!direct_contract.contains(r#"{"verdict":"PASS"}"#));
+    assert!(!direct_contract.contains(r#"{"verdict":"REWRITE"}"#));
+    assert_eq!(
+        parse_output(
+            CloudDiagnosticTask::DirectGate,
+            r#"{"verdict":<PASS or REWRITE>}"#
+        ),
+        None
+    );
+
+    assert!(five_contract.contains(r#"{"useful_state_transfer":<PASS or FAIL>"#));
+    assert!(!five_contract.contains(
+        r#"{"useful_state_transfer":"PASS","honest_uncertainty":"PASS","conditional_continuity":"N/A","scope_and_signal":"PASS","internal_consistency":"PASS"}"#
+    ));
+    assert_eq!(
+        parse_output(
+            CloudDiagnosticTask::FiveDimension,
+            r#"{"useful_state_transfer":<PASS or FAIL>,"honest_uncertainty":<PASS or FAIL>,"conditional_continuity":<PASS, FAIL, or N/A>,"scope_and_signal":<PASS or FAIL>,"internal_consistency":<PASS or FAIL>}"#
+        ),
+        None
+    );
+}
