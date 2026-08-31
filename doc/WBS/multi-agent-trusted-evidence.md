@@ -337,7 +337,18 @@ validation 的 27 candidates / 12 pairs。它是**测评（eval）而非资格�
 不读取 qualification 或 v9 test 正文，不改写 task/product contract 语义。旧的单标量路径保留为历史身份与可复算路径，
 不删除，但不再作为接入方向。
 
-**当前状态**：未授权启动。需要用户单独授权真实 API 与预算后另立 ExecPlan。
+**已获授权**：
+
+- 真实 `deepseek-v4-flash` API，task-wide 硬上限 `10 RMB`；missing-usage 的保守兜底记账为 `0.1 RMB/次`
+  （Plan 101 用的是 `1 RMB`，本任务下调）。该预算的用途是**用真实 API 证明接缝真的通了，避免只有 fake 绿**。
+- 真实 API 调用**不限制重跑次数与轮次**，只受上述预算约束；打通过程中的失败重试与重跑由执行者自行决定。
+- 重型 Cargo 构建与 Docker（如确有必要）已授权，仍须走仓库根共享 `scripts/with-build-lock.sh` / `just`，
+  并遵守 CLAUDE.md §3 的看门狗与容量门禁。
+- **必须复用主工作区既有 target `.codex/cargo-target/rondo-multi`，不得新建 target 目录。**
+
+**仍未授权**：训练、GPU/RunPod、真实本地模型加载与推理、上传、充值、产品默认启用与发布、qualification 与 v9 test 正文。
+
+**当前状态**：已授权，未启动。启动时另立 ExecPlan。
 
 #### 工作包四：模型资格验收与横评（未解锁）
 
