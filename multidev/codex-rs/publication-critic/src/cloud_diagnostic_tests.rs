@@ -92,18 +92,18 @@ fn output_contracts_use_illegal_templates_instead_of_copyable_legal_values() {
     let scalar = system_message(CloudDiagnosticTask::Scalar);
     let direct = system_message(CloudDiagnosticTask::DirectGate);
     let five = system_message(CloudDiagnosticTask::FiveDimension);
-    let scalar_contract = scalar
+    let (scalar_common, scalar_contract) = scalar
         .split_once("# Output contract\n\n")
-        .expect("scalar contract")
-        .1;
-    let direct_contract = direct
+        .expect("scalar contract");
+    let (direct_common, direct_contract) = direct
         .split_once("# Output contract\n\n")
-        .expect("direct contract")
-        .1;
-    let five_contract = five
+        .expect("direct contract");
+    let (five_common, five_contract) = five
         .split_once("# Output contract\n\n")
-        .expect("five-dimension contract")
-        .1;
+        .expect("five-dimension contract");
+    assert_eq!(scalar_common, direct_common);
+    assert_eq!(scalar_common, five_common);
+    assert!(scalar_common.contains("specific packet in the user message"));
 
     assert!(scalar_contract.contains(r#"{"quality":<number in [0,1]>}"#));
     assert!(!scalar_contract.contains(r#"{"quality":0.42}"#));
