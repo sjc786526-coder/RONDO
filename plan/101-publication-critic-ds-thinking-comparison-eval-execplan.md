@@ -246,26 +246,30 @@ tracked 代码、测试、合同、结果与文档变动仍然全部落在 101 w
 - 2026-08-29：从 clean main 创建 `.claude/worktrees/101-publication-critic-ds-thinking-eval` /
   `worktree-101-publication-critic-ds-thinking-eval`。
 - 2026-08-29：建立本 ExecPlan 并把 Plan 101 最小登记到根 WBS 与方向 3 子 WBS。规划阶段未调用 API、未构建、未训练。
+- 2026-08-31：阶段 A 落地（占位符契约、thinking 运行期开关、对比 runner）并提交任务分支。
+- 2026-08-31：阶段 B1 多次真实打通；thinking 开关与 A/C 非退化可通过，thinking_off B 在 1-bit 输出上持续塌缩。
 
 ### 当前工作
 
-- `PLANNED / AWAITING_EXECUTOR`。
+- `BLOCKED / AWAITING_USER_DECISION`：B1 §5.1 第 3 项（单元内响应不得全部逐字节相同）在 `thinking_off:B` 上无法用合法占位符 prompt 打通。
 
 ### 本任务剩余步骤
 
-- 阶段 A 离线实现与定向测试。
-- 阶段 B1 打通与配置冻结。
+- 用户决定是否放宽 B1 对二元 B 臂的逐字节互异要求，或接受其它处置后再冻结并进入 B2。
 - 阶段 B2 正式矩阵与结果。
 - 文档、日志与任务分支提交，交付完成汇报。
 
 ### 阻塞项
 
-- 无。用户已授权真实 DeepSeek API 与 `20 RMB` 硬上限。
+- `thinking_off:B` 在 commissioning 三条 packet 上始终输出同一个 `PASS` 或同一个 `REWRITE`（随 prompt 用词翻转，不随 packet 变化）。A/C 与 `thinking_on:B` 可以区分。继续改 prompt 会再烧打通预算，且会把已能区分的单元带回去。
+- 已结算约 `1.49 RMB` / 上限 `20 RMB`；未进入 B2。
 
 ### 当前验收状态
 
 - 规划：`COMPLETE / FROZEN`。
-- 阶段 A / B1 / B2：`NOT_STARTED`。
+- 阶段 A：`COMPLETE`（任务分支已提交）。
+- 阶段 B1：`BLOCKED`。
+- 阶段 B2：`NOT_STARTED`。
 
 ### 交接边界
 
