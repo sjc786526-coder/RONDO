@@ -97,10 +97,12 @@ def run_batch(
         raise ComparisonRunnerError("runner_item_cohort_invalid")
     if set(evaluators) != set(CONDITIONS):
         raise ComparisonRunnerError("runner_evaluators_incomplete")
+    missing_usage = Decimal(str(freeze["budget"]["missing_usage_rmb"]))
     reserve = worst_case_reservation_rmb(
         max_attempts=freeze["request"]["max_attempts"],
         max_prompt_tokens=16_384,
-        max_completion_tokens=freeze["request"]["max_output_tokens"],
+        max_completion_tokens=max(freeze["request"]["max_output_tokens"], 131_072),
+        missing_usage_rmb=missing_usage,
     )
     completed: list[dict[str, Any]] = []
     stopped: dict[str, Any] | None = None
@@ -758,6 +760,16 @@ def _settle_or_verify(
         raise ComparisonRunnerError("receipt_budget_reservation_missing")
     missing = Decimal(str(freeze["budget"]["missing_usage_rmb"]))
     if matches[0]["state"] == "reserved":
+        needed = sum(
+            (
+                Decimal(settle_attempt(item, missing_usage_rmb=missing)["charge_rmb"])
+                for item in receipt["observation"]["attempts"]
+            ),
+            Decimal(0),
+        )
+        reserved = Decimal(matches[0]["reserved_rmb"])
+        if needed > reserved:
+            ledger.top_up_reservation(key, needed)
         ledger.settle(key, receipt["observation"]["attempts"])
     else:
         expected = [

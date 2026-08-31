@@ -15,7 +15,11 @@ from rondo_eval.publication_critic.structured_diagnostic.contract import (
     DiagnosticTask,
     parse_output,
 )
-from rondo_eval.publication_critic.structured_diagnostic.cost import Plan100BudgetLedger
+from rondo_eval.publication_critic.structured_diagnostic.cost import (
+    Plan100BudgetLedger,
+    settle_attempt,
+    worst_case_reservation_rmb,
+)
 from rondo_eval.publication_critic.structured_diagnostic.release import PublicItem
 from rondo_eval.publication_critic.thinking_comparison.archive import ComparisonArchive
 from rondo_eval.publication_critic.thinking_comparison.freeze import (
@@ -271,6 +275,53 @@ class ArchiveAndRunnerTests(unittest.TestCase):
             logical_key("thinking_on", DiagnosticTask.SCALAR, "cand-1", 3),
             "thinking_on:A:cand-1:r03",
         )
+
+    def test_reservation_covers_missing_usage_retry_via_top_up(self) -> None:
+        reserve = worst_case_reservation_rmb(
+            max_attempts=2,
+            max_prompt_tokens=16_384,
+            max_completion_tokens=131_072,
+            missing_usage_rmb=Decimal("1"),
+        )
+        self.assertGreaterEqual(reserve, Decimal("2"))
+        attempts = [
+            {
+                "attempt": 1,
+                "requested_at": "2026-08-31T04:00:00+00:00",
+                "usage": None,
+                "recount": None,
+                "explicitly_unbilled": False,
+            },
+            {
+                "attempt": 2,
+                "requested_at": "2026-08-31T04:01:00+00:00",
+                "usage": {
+                    "prompt_tokens": 100,
+                    "completion_tokens": 10,
+                    "prompt_cache_hit_tokens": 40,
+                    "prompt_cache_miss_tokens": 60,
+                },
+                "recount": None,
+                "explicitly_unbilled": False,
+            },
+        ]
+        needed = sum(
+            (
+                Decimal(settle_attempt(item, missing_usage_rmb=Decimal("1"))["charge_rmb"])
+                for item in attempts
+            ),
+            Decimal(0),
+        )
+        with tempfile.TemporaryDirectory() as raw:
+            ledger = Plan100BudgetLedger(
+                Path(raw) / "budget-ledger.json", missing_usage_rmb=Decimal("1")
+            )
+            ledger.reserve("stuck:retry:1", Decimal("0.24576"))
+            ledger.top_up_reservation("stuck:retry:1", needed)
+            ledger.settle("stuck:retry:1", attempts)
+            snapshot = ledger.snapshot()
+            self.assertEqual(snapshot["settled_rmb"], format(needed, "f"))
+            self.assertEqual(snapshot["outstanding_reserved_rmb"], "0")
 
     def test_commissioning_matrix_writes_eighteen_keys(self) -> None:
         freeze = _freeze(

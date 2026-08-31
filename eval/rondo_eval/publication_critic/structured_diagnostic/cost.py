@@ -242,11 +242,19 @@ def settle_attempt(
 
 
 def worst_case_reservation_rmb(
-    *, max_attempts: int, max_prompt_tokens: int, max_completion_tokens: int
+    *,
+    max_attempts: int,
+    max_prompt_tokens: int,
+    max_completion_tokens: int,
+    missing_usage_rmb: Decimal | None = None,
 ) -> Decimal:
     attempts = _count(max_attempts, "reservation_attempts_invalid")
     if attempts <= 0:
         raise DiagnosticCostError("reservation_attempts_invalid")
+    if missing_usage_rmb is not None and (
+        not missing_usage_rmb.is_finite() or missing_usage_rmb <= 0
+    ):
+        raise DiagnosticCostError("missing_usage_rmb_invalid")
     token_envelope = token_cost_rmb(
         prompt_tokens=max_prompt_tokens,
         completion_tokens=max_completion_tokens,
@@ -254,7 +262,12 @@ def worst_case_reservation_rmb(
         cache_miss_tokens=max_prompt_tokens,
         tier="peak",
     )
-    per_attempt = max(token_envelope, UNKNOWN_ACTUAL_ATTEMPT_RMB)
+    floor = (
+        UNKNOWN_ACTUAL_ATTEMPT_RMB
+        if missing_usage_rmb is None
+        else missing_usage_rmb
+    )
+    per_attempt = max(token_envelope, floor)
     return Decimal(attempts) * per_attempt
 
 
@@ -328,6 +341,32 @@ class Plan100BudgetLedger:
             }
             updated = {**document, "reservations": [*document["reservations"], row]}
             self._persist(updated)
+            return copy.deepcopy(row)
+
+    def top_up_reservation(self, logical_key: str, amount: Decimal) -> dict[str, Any]:
+        if self.read_only:
+            raise DiagnosticCostError("ledger_is_read_only")
+        if not amount.is_finite() or amount <= 0:
+            raise DiagnosticCostError("reservation_amount_invalid")
+        with self._locked_document() as document:
+            matches = [
+                row
+                for row in document["reservations"]
+                if row["logical_key"] == logical_key
+            ]
+            if len(matches) != 1 or matches[0]["state"] != "reserved":
+                raise DiagnosticCostError("reservation_not_open")
+            row = matches[0]
+            current = Decimal(row["reserved_rmb"])
+            if amount < current:
+                raise DiagnosticCostError("reservation_top_up_must_not_decrease")
+            if amount == current:
+                return copy.deepcopy(row)
+            charged, outstanding = _totals(document["reservations"])
+            if charged + outstanding + (amount - current) > self.cap_rmb:
+                raise DiagnosticBudgetExceeded("budget_insufficient_for_next_action")
+            row["reserved_rmb"] = decimal_text(amount)
+            self._persist(document)
             return copy.deepcopy(row)
 
     def settle(
@@ -439,11 +478,15 @@ class Plan100BudgetLedger:
             document = json.loads(self.path.read_text(encoding="utf-8"))
         except (OSError, UnicodeError, json.JSONDecodeError) as exc:
             raise DiagnosticCostError("ledger_file_invalid") from exc
-        _validate_document(document, self.cap_rmb)
+        _validate_document(
+            document, self.cap_rmb, missing_usage_rmb=self.missing_usage_rmb
+        )
         return dict(document)
 
     def _persist(self, document: dict[str, Any]) -> None:
-        _validate_document(document, self.cap_rmb)
+        _validate_document(
+            document, self.cap_rmb, missing_usage_rmb=self.missing_usage_rmb
+        )
         encoded = canonical_json_bytes(document)
         if len(encoded) > _MAX_LEDGER_BYTES:
             raise DiagnosticCostError("ledger_file_too_large")
@@ -485,7 +528,9 @@ def validate_task_budget_snapshot(value: Any) -> dict[str, Any]:
         name: value[name]
         for name in ("schema", "cap_rmb", "price_card_sha256", "reservations")
     }
-    _validate_document(document, BUDGET_CAP_RMB)
+    _validate_document(
+        document, BUDGET_CAP_RMB, missing_usage_rmb=None
+    )
     settled, outstanding = _totals(document["reservations"])
     if (
         value["settled_rmb"] != decimal_text(settled)
@@ -569,7 +614,12 @@ def _stored_decimal(value: Any, code: str) -> Decimal:
     return result
 
 
-def _validate_document(document: Any, cap: Decimal) -> None:
+def _validate_document(
+    document: Any,
+    cap: Decimal,
+    *,
+    missing_usage_rmb: Decimal | None = None,
+) -> None:
     if (
         not isinstance(document, Mapping)
         or set(document) != {"schema", "cap_rmb", "price_card_sha256", "reservations"}
@@ -598,7 +648,9 @@ def _validate_document(document: Any, cap: Decimal) -> None:
             if not isinstance(attempts, list) or not attempts:
                 raise DiagnosticCostError("ledger_reservation_invalid")
             normalized_attempts = [
-                _validate_settled_attempt(item, index)
+                _validate_settled_attempt(
+                    item, index, missing_usage_rmb=missing_usage_rmb
+                )
                 for index, item in enumerate(attempts, start=1)
             ]
             settled = _stored_decimal(row["settled_rmb"], "ledger_reservation_invalid")
@@ -639,7 +691,12 @@ def _totals(reservations: Sequence[Mapping[str, Any]]) -> tuple[Decimal, Decimal
     return settled, outstanding
 
 
-def _validate_settled_attempt(value: Any, expected_attempt: int) -> dict[str, Any]:
+def _validate_settled_attempt(
+    value: Any,
+    expected_attempt: int,
+    *,
+    missing_usage_rmb: Decimal | None = None,
+) -> dict[str, Any]:
     expected_fields = {
         "attempt",
         "requested_at",
@@ -659,7 +716,8 @@ def _validate_settled_attempt(value: Any, expected_attempt: int) -> dict[str, An
             "usage": value["usage"],
             "recount": value["recount"],
             "explicitly_unbilled": value["explicitly_unbilled"],
-        }
+        },
+        missing_usage_rmb=missing_usage_rmb,
     )
     if recalculated != dict(value) or recalculated["attempt"] != expected_attempt:
         raise DiagnosticCostError("ledger_attempt_invalid")
