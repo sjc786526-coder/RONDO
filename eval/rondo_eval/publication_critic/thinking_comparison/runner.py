@@ -14,6 +14,7 @@ from ..structured_diagnostic.contract import (
     OutputContractError,
     ScalarOutput,
     StructuredOutput,
+    derive_verdict,
     parse_output,
 )
 from ..structured_diagnostic.cost import (
@@ -42,6 +43,7 @@ from .freeze import (
 from .metrics import (
     SENSITIVE_CANDIDATE_IDS,
     difference_table,
+    fixed_threshold_verdicts,
     majority_discrete,
     mean_score,
     unit_metrics,
@@ -473,8 +475,9 @@ def recompute_formal(
             aggregated_labels: list[dict[str, str] | None] = []
             aggregated_scores: list[float | None] = []
             repeat_values: dict[str, list[Any]] = {}
+            per_repeat_verdicts: dict[str, list[str | None]] = {}
             for item_id in ids:
-                candidate_rows = by_candidate[item_id]
+                candidate_rows = sorted(by_candidate[item_id], key=lambda row: row["repeat"])
                 parsed = [
                     None if row["status"] != "success" else row["parsed_output"]
                     for row in candidate_rows
@@ -488,6 +491,7 @@ def recompute_formal(
                     aggregated_verdicts.append(None)
                     aggregated_labels.append(None)
                     repeat_values[item_id] = scores
+                    per_repeat_verdicts[item_id] = fixed_threshold_verdicts(scores)
                 elif task is DiagnosticTask.DIRECT:
                     verdicts = [
                         None if item is None else item["verdict"] for item in parsed
@@ -496,6 +500,7 @@ def recompute_formal(
                     aggregated_scores.append(None)
                     aggregated_labels.append(None)
                     repeat_values[item_id] = verdicts
+                    per_repeat_verdicts[item_id] = list(verdicts)
                 else:
                     decisions = [
                         None if item is None else item["decisions"] for item in parsed
@@ -521,19 +526,24 @@ def recompute_formal(
                         None if item is None else tuple(sorted(item.items()))
                         for item in decisions
                     ]
+                    per_repeat_verdicts[item_id] = [
+                        None if item is None else derive_verdict(item)
+                        for item in decisions
+                    ]
+            by_repeat = _transpose_repeats(ids, per_repeat_verdicts)
             if task is DiagnosticTask.SCALAR:
                 curve_scores = aggregated_scores
-                selected = _selected_scalar_verdicts(ids, gold_verdicts, curve_scores)
                 unit = unit_metrics(
                     arm="A",
                     candidate_ids=ids,
                     gold_verdicts=gold_verdicts,
                     gold_labels=gold_labels,
-                    predicted_verdicts=selected,
+                    predicted_verdicts=fixed_threshold_verdicts(curve_scores),
                     predicted_labels=[None] * len(ids),
                     scores=curve_scores,
                     pairs=release.pair_supervision,
                     per_candidate_repeats=repeat_values,
+                    per_repeat_verdicts=by_repeat,
                 )
             elif task is DiagnosticTask.DIRECT:
                 unit = unit_metrics(
@@ -546,6 +556,7 @@ def recompute_formal(
                     scores=[None] * len(ids),
                     pairs=release.pair_supervision,
                     per_candidate_repeats=repeat_values,
+                    per_repeat_verdicts=by_repeat,
                 )
             else:
                 unit = unit_metrics(
@@ -558,6 +569,7 @@ def recompute_formal(
                     scores=[None] * len(ids),
                     pairs=release.pair_supervision,
                     per_candidate_repeats=repeat_values,
+                    per_repeat_verdicts=by_repeat,
                 )
             units[unit_key] = unit
     sensitive = set(SENSITIVE_CANDIDATE_IDS)
@@ -621,7 +633,8 @@ def tracked_projection(result: Mapping[str, Any]) -> dict[str, Any]:
         for key, unit in metrics.items():
             compact[key] = {
                 "balanced_accuracy": unit["binary"]["balanced_accuracy"],
-                "balanced_accuracy_wilson": unit["binary"]["balanced_accuracy_wilson"],
+                "balanced_accuracy_band": unit["binary"]["balanced_accuracy_band"],
+                "aggregation": unit["binary"]["aggregation"],
                 "false_pass": unit["binary"]["false_pass"],
                 "false_rewrite": unit["binary"]["false_rewrite"],
                 "class_recall": unit["binary"]["class_recall"],
@@ -629,8 +642,22 @@ def tracked_projection(result: Mapping[str, Any]) -> dict[str, Any]:
                 "pairs_closed": unit["pairs"]["closed"],
                 "repeat_consistency_rate": unit["repeat_consistency"]["rate"],
             }
+            if "single_call" in unit:
+                compact[key]["single_call"] = {
+                    name: unit["single_call"][name]
+                    for name in (
+                        "semantics",
+                        "repeats",
+                        "balanced_accuracy_mean",
+                        "balanced_accuracy_min",
+                        "balanced_accuracy_max",
+                        "balanced_accuracy_sd",
+                        "per_repeat",
+                    )
+                }
             if "scalar" in unit:
                 compact[key]["auc"] = unit["scalar"]["auc"]
+                compact[key]["operating_point"] = unit["scalar"]["operating_point"]
                 compact[key]["ties"] = {
                     name: unit["scalar"]["ties"][name]
                     for name in (
@@ -816,20 +843,36 @@ def _thinking_on_versus_off_direction(
     units: Mapping[str, Mapping[str, Any]],
 ) -> dict[str, Any]:
     out: dict[str, Any] = {}
-    for arm in ("A", "C"):
+    for arm in ("A", "B", "C"):
         off = units[f"thinking_off:{arm}"]["binary"]
         on = units[f"thinking_on:{arm}"]["binary"]
-        delta = on["balanced_accuracy"] - off["balanced_accuracy"]
-        if delta < 0:
+        off_single = units[f"thinking_off:{arm}"].get("single_call") or {}
+        on_single = units[f"thinking_on:{arm}"].get("single_call") or {}
+        off_mean = off_single.get("balanced_accuracy_mean")
+        on_mean = on_single.get("balanced_accuracy_mean")
+        single_delta = (
+            None if off_mean is None or on_mean is None else on_mean - off_mean
+        )
+        # The deployable number decides the direction; majority vote is the k-call ensemble.
+        basis = single_delta if single_delta is not None else (
+            on["balanced_accuracy"] - off["balanced_accuracy"]
+        )
+        if basis < 0:
             direction = "on_lower"
-        elif delta > 0:
+        elif basis > 0:
             direction = "on_higher"
         else:
             direction = "tied"
         row = {
+            "direction_basis": "single_call_mean"
+            if single_delta is not None
+            else "majority_vote",
+            "single_call_balanced_accuracy_off": off_mean,
+            "single_call_balanced_accuracy_on": on_mean,
+            "single_call_delta_on_minus_off": single_delta,
             "balanced_accuracy_off": off["balanced_accuracy"],
             "balanced_accuracy_on": on["balanced_accuracy"],
-            "delta_on_minus_off": delta,
+            "delta_on_minus_off": on["balanced_accuracy"] - off["balanced_accuracy"],
             "false_pass_off": off["false_pass"],
             "false_pass_on": on["false_pass"],
             "false_rewrite_off": off["false_rewrite"],
@@ -849,34 +892,22 @@ def _thinking_on_versus_off_direction(
     return out
 
 
-def _selected_scalar_verdicts(
-    candidate_ids: Sequence[str],
-    gold_verdicts: Sequence[str],
-    scores: Sequence[float | None],
-) -> list[str | None]:
-    from .metrics import _scalar_curve
+def _transpose_repeats(
+    candidate_ids: Sequence[str], per_candidate: Mapping[str, Sequence[str | None]]
+) -> list[list[str | None]]:
+    """Turn candidate-major repeat verdicts into one verdict row per repeat.
 
-    curve = _scalar_curve(candidate_ids, gold_verdicts, scores, ())
-    if not curve:
-        return [None for _ in candidate_ids]
-    best = max(
-        curve,
-        key=lambda point: (
-            point["balanced_accuracy"],
-            -point["false_pass"],
-            point["correct"],
-            -point["false_rewrite"],
-            -1.0 if point["threshold"] is None else point["threshold"],
-        ),
-    )
-    threshold = best["threshold"]
+    Each row is a complete single-call pass over the cohort, which is what the deployable metric
+    scores. A short candidate would silently drop a repeat, so the row count is the shared minimum.
+    """
+
+    if not candidate_ids:
+        return []
+    lengths = {len(per_candidate[item_id]) for item_id in candidate_ids}
+    count = min(lengths)
     return [
-        None
-        if score is None
-        else "REWRITE"
-        if threshold is None or score < threshold
-        else "PASS"
-        for score in scores
+        [per_candidate[item_id][index] for item_id in candidate_ids]
+        for index in range(count)
     ]
 
 

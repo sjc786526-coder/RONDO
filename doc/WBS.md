@@ -103,7 +103,9 @@ Plan 097 的 `M3_D_DUAL_BACKEND_ENGINEERING_PASS / FINAL_REVIEW_ACCEPTED / INTEG
 方向 3 当前 active 工作包为独立诊断支线上的 **Plan 101 DS 思考开关 × 输出表达对比测评**：在同一 v10 development validation
 上测量 `thinking_off / thinking_on` × `A/B/C` 的 `2 × 3` 矩阵，用户已授权真实 `deepseek-v4-flash` 与 `20 RMB` 硬上限。
 它是测评而非资格门，不产出路线终态或通过/不通过结论，不读取 qualification 或 v9 test 正文，不训练，不改变产品默认，
-也不解锁工作包四。Plan 100 的负向诊断本身不自动启动后续路线。Plan 081 已取得 `LOCAL_TRAINING_READINESS_PASS`；三期 Plan 082 已获用户付费批准并完成
+也不解锁工作包四。正式矩阵已跑满 `810/810`（两条件各 5 次重复），累计结算 `6.68 RMB`，结果见
+`eval/results/publication-critic/plan101-thinking-comparison-v1.{json,md}`，等待用户验收与合并。
+Plan 100 的负向诊断本身不自动启动后续路线。Plan 081 已取得 `LOCAL_TRAINING_READINESS_PASS`；三期 Plan 082 已获用户付费批准并完成
 真实 commissioning、正式 freeze、干净 formal 和新进程恢复，终态为 `VALID_NO_IMPROVEMENT`。保留 Pod 的 GPU 专项验收已经通过，
 唯一训练 Pod 已释放并确认持续 compute 费率为 0；保留卷所在 `US-TX-3` 不提供 S3 API，故按用户一次性授权使用单个 transfer Pod
 只读回传冻结 39 对象。全部对象完成本地 bytes/SHA-256 校验后 transfer Pod 已删除；最终验收通过。用户本人随后明确决定继续保留

@@ -25,6 +25,12 @@ SENSITIVE_CANDIDATE_IDS = (
 )
 Z_WILSON = 1.96
 
+#: Arm A needs an operating point to become PASS/REWRITE. This one is committed in advance and
+#: never fitted, so the A column of the cross-arm table stays comparable with B and C, which have
+#: no tunable parameter at all. The best-on-this-data threshold is reported separately as an
+#: explicit upper bound.
+FIXED_SCALAR_THRESHOLD = 0.5
+
 
 class ComparisonMetricsError(ValueError):
     """Metric inputs do not form one comparable Plan 101 unit."""
@@ -58,13 +64,72 @@ def _recall_interval(binary: Mapping[str, Any], gold: str) -> dict[str, float]:
     return wilson_interval(correct, support)
 
 
-def _balanced_accuracy_interval(binary: Mapping[str, Any]) -> dict[str, float]:
+def _balanced_accuracy_band(binary: Mapping[str, Any]) -> dict[str, Any]:
+    """Average the endpoints of the two per-class Wilson recall intervals.
+
+    This is deliberately not a Wilson interval for balanced accuracy. Averaging endpoints gives a
+    half-width of `(m_pass + m_rewrite) / 2`, which is never smaller than the
+    `sqrt(m_pass^2 + m_rewrite^2) / 2` a variance-based interval would give, so the band errs wide
+    and cannot manufacture confidence. It is named accordingly.
+    """
+
     pass_interval = _recall_interval(binary, "PASS")
     rewrite_interval = _recall_interval(binary, "REWRITE")
     return {
         "low": (pass_interval["low"] + rewrite_interval["low"]) / 2.0,
         "high": (pass_interval["high"] + rewrite_interval["high"]) / 2.0,
         "n": binary["total"],
+        "method": "endpoint_average_of_two_wilson_recall_intervals_conservative",
+    }
+
+
+def fixed_threshold_verdicts(
+    scores: Sequence[float | None], *, threshold: float = FIXED_SCALAR_THRESHOLD
+) -> list[str | None]:
+    """Map arm A scores to verdicts at a threshold committed before the data was seen."""
+
+    return [
+        None if score is None else ("PASS" if score >= threshold else "REWRITE")
+        for score in scores
+    ]
+
+
+def single_call_metrics(
+    candidate_ids: Sequence[str],
+    gold_verdicts: Sequence[str],
+    per_repeat_verdicts: Sequence[Sequence[str | None]],
+) -> dict[str, Any]:
+    """Score each repeat on its own, then summarise across repeats.
+
+    The product issues one call per candidate, so a repeat scored alone is the deployable number.
+    Majority voting over k repeats is a k-times-more-expensive ensemble and is reported separately.
+    """
+
+    if not per_repeat_verdicts:
+        raise ComparisonMetricsError("single_call_repeats_empty")
+    rows: list[dict[str, Any]] = []
+    for index, predicted in enumerate(per_repeat_verdicts, start=1):
+        binary = _strip_gate(binary_metrics(candidate_ids, gold_verdicts, list(predicted)))
+        rows.append(
+            {
+                "repeat": index,
+                "balanced_accuracy": binary["balanced_accuracy"],
+                "false_pass": binary["false_pass"],
+                "false_rewrite": binary["false_rewrite"],
+                "typed_failures": binary["typed_failures"],
+            }
+        )
+    values = [row["balanced_accuracy"] for row in rows]
+    mean = sum(values) / len(values)
+    variance = sum((value - mean) ** 2 for value in values) / len(values)
+    return {
+        "semantics": "expected_single_call_performance_product_issues_one_call",
+        "repeats": len(rows),
+        "balanced_accuracy_mean": mean,
+        "balanced_accuracy_min": min(values),
+        "balanced_accuracy_max": max(values),
+        "balanced_accuracy_sd": math.sqrt(variance),
+        "per_repeat": rows,
     }
 
 
@@ -168,7 +233,7 @@ def miss_versus_wrong_drawer(
         any_predicted_fail = bool(predicted_fail)
         for dimension in gold_fail:
             gold_fail_cells += 1
-            predicted_label = None if predicted is None else predicted[dimension]
+            predicted_label = None if predicted is None else predicted.get(dimension)
             if predicted_label == "FAIL":
                 continue
             if any_predicted_fail:
@@ -208,6 +273,7 @@ def unit_metrics(
     scores: Sequence[float | None],
     pairs: Sequence[Any],
     per_candidate_repeats: Mapping[str, Sequence[Any]],
+    per_repeat_verdicts: Sequence[Sequence[str | None]] | None = None,
 ) -> dict[str, Any]:
     if arm not in {"A", "B", "C"}:
         raise ComparisonMetricsError("unknown_arm")
@@ -227,7 +293,10 @@ def unit_metrics(
             **binary,
             "pass_recall_wilson": _recall_interval(binary, "PASS"),
             "rewrite_recall_wilson": _recall_interval(binary, "REWRITE"),
-            "balanced_accuracy_wilson": _balanced_accuracy_interval(binary),
+            "balanced_accuracy_band": _balanced_accuracy_band(binary),
+            "aggregation": "majority_vote_over_repeats"
+            if arm != "A"
+            else "mean_score_over_repeats_then_fixed_threshold",
         },
         "pairs": pairs_out,
         "repeat_consistency": {
@@ -237,14 +306,22 @@ def unit_metrics(
             "rows": consistency_rows,
         },
     }
+    if per_repeat_verdicts is not None:
+        result["single_call"] = single_call_metrics(
+            candidate_ids, gold_verdicts, per_repeat_verdicts
+        )
     if arm == "A":
         finite_scores = [score for score in scores if score is not None]
+        curve = _scalar_curve(candidate_ids, gold_verdicts, scores, pairs)
         result["scalar"] = {
             "auc": None
             if len(finite_scores) != len(scores)
             else roc_auc(gold_verdicts, finite_scores),
             "ties": scalar_tie_stats(candidate_ids, gold_verdicts, scores),
-            "curve": _scalar_curve(candidate_ids, gold_verdicts, scores, pairs),
+            "curve": curve,
+            "operating_point": _scalar_operating_point(
+                candidate_ids, gold_verdicts, scores, curve
+            ),
         }
     if arm == "C":
         result["structured"] = {
@@ -256,14 +333,36 @@ def unit_metrics(
     return result
 
 
+def _single_call_delta(
+    units: Mapping[str, Mapping[str, Any]], arm: str
+) -> float | None:
+    off = (units[f"thinking_off:{arm}"].get("single_call") or {}).get(
+        "balanced_accuracy_mean"
+    )
+    on = (units[f"thinking_on:{arm}"].get("single_call") or {}).get(
+        "balanced_accuracy_mean"
+    )
+    return None if off is None or on is None else on - off
+
+
+def _single_call_mean(units: Mapping[str, Mapping[str, Any]], key: str) -> float | None:
+    return (units[key].get("single_call") or {}).get("balanced_accuracy_mean")
+
+
 def difference_table(units: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
-    """units keyed by f"{condition}:{arm}"."""
+    """units keyed by f"{condition}:{arm}".
+
+    Every contrast carries the single-call delta first: that is the deployable comparison. The
+    majority-vote delta is kept beside it because the two can disagree in sign when an arm is
+    unstable across repeats.
+    """
 
     thinking: dict[str, Any] = {}
     for arm in ("A", "B", "C"):
         off = units[f"thinking_off:{arm}"]["binary"]
         on = units[f"thinking_on:{arm}"]["binary"]
         thinking[arm] = {
+            "single_call_balanced_accuracy": _single_call_delta(units, arm),
             "balanced_accuracy": on["balanced_accuracy"] - off["balanced_accuracy"],
             "false_pass": on["false_pass"] - off["false_pass"],
             "false_rewrite": on["false_rewrite"] - off["false_rewrite"],
@@ -281,24 +380,91 @@ def difference_table(units: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
         a = units[f"{condition}:A"]["binary"]
         b = units[f"{condition}:B"]["binary"]
         c = units[f"{condition}:C"]["binary"]
+        single = {
+            arm: _single_call_mean(units, f"{condition}:{arm}") for arm in ("A", "B", "C")
+        }
+
+        def contrast(
+            left: str, right: str, left_binary: Mapping[str, Any], right_binary: Mapping[str, Any]
+        ) -> dict[str, Any]:
+            left_mean, right_mean = single[left], single[right]
+            return {
+                "single_call_balanced_accuracy": None
+                if left_mean is None or right_mean is None
+                else left_mean - right_mean,
+                "balanced_accuracy": left_binary["balanced_accuracy"]
+                - right_binary["balanced_accuracy"],
+                "false_pass": left_binary["false_pass"] - right_binary["false_pass"],
+                "false_rewrite": left_binary["false_rewrite"]
+                - right_binary["false_rewrite"],
+            }
+
         expression[condition] = {
-            "C_minus_B": {
-                "balanced_accuracy": c["balanced_accuracy"] - b["balanced_accuracy"],
-                "false_pass": c["false_pass"] - b["false_pass"],
-                "false_rewrite": c["false_rewrite"] - b["false_rewrite"],
-            },
-            "C_minus_A": {
-                "balanced_accuracy": c["balanced_accuracy"] - a["balanced_accuracy"],
-                "false_pass": c["false_pass"] - a["false_pass"],
-                "false_rewrite": c["false_rewrite"] - a["false_rewrite"],
-            },
-            "B_minus_A": {
-                "balanced_accuracy": b["balanced_accuracy"] - a["balanced_accuracy"],
-                "false_pass": b["false_pass"] - a["false_pass"],
-                "false_rewrite": b["false_rewrite"] - a["false_rewrite"],
-            },
+            "C_minus_B": contrast("C", "B", c, b),
+            "C_minus_A": contrast("C", "A", c, a),
+            "B_minus_A": contrast("B", "A", b, a),
         }
     return {"thinking_on_minus_off": thinking, "expression": expression}
+
+
+def oracle_curve_point(curve: Sequence[Mapping[str, Any]]) -> Mapping[str, Any] | None:
+    """Best point on the curve, chosen against the same gold rows it is scored on."""
+
+    if not curve:
+        return None
+    return max(
+        curve,
+        key=lambda point: (
+            point["balanced_accuracy"],
+            -point["false_pass"],
+            point["correct"],
+            -point["false_rewrite"],
+            -1.0 if point["threshold"] is None else point["threshold"],
+        ),
+    )
+
+
+def _scalar_operating_point(
+    candidate_ids: Sequence[str],
+    gold_verdicts: Sequence[str],
+    scores: Sequence[float | None],
+    curve: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Report arm A at a pre-committed threshold, and separately at its best-on-this-data one.
+
+    Arms B and C emit a verdict with no free parameter. Scoring A at a threshold fitted to these
+    27 gold rows would hand it an advantage they never get, so the fitted number is kept but is
+    labelled an upper bound and is not what the cross-arm table uses.
+    """
+
+    fixed = _strip_gate(
+        binary_metrics(
+            candidate_ids, gold_verdicts, fixed_threshold_verdicts(scores)
+        )
+    )
+    oracle = oracle_curve_point(curve)
+    return {
+        "primary": "fixed_threshold",
+        "fixed_threshold": {
+            "threshold": FIXED_SCALAR_THRESHOLD,
+            "committed": "before_any_plan_101_observation",
+            "balanced_accuracy": fixed["balanced_accuracy"],
+            "false_pass": fixed["false_pass"],
+            "false_rewrite": fixed["false_rewrite"],
+        },
+        "oracle_threshold": None
+        if oracle is None
+        else {
+            "threshold": oracle["threshold"],
+            "balanced_accuracy": oracle["balanced_accuracy"],
+            "false_pass": oracle["false_pass"],
+            "false_rewrite": oracle["false_rewrite"],
+            "caveat": (
+                "selected_on_the_same_27_gold_rows_it_is_scored_on_"
+                "upper_bound_not_deployable_and_not_comparable_with_B_or_C"
+            ),
+        },
+    }
 
 
 def _scalar_curve(

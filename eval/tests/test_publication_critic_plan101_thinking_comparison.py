@@ -28,11 +28,14 @@ from rondo_eval.publication_critic.thinking_comparison.freeze import (
     validate_freeze,
 )
 from rondo_eval.publication_critic.thinking_comparison.metrics import (
+    FIXED_SCALAR_THRESHOLD,
     difference_table,
+    fixed_threshold_verdicts,
     majority_discrete,
     miss_versus_wrong_drawer,
     repeat_consistency,
     scalar_tie_stats,
+    single_call_metrics,
     unit_metrics,
     wilson_interval,
 )
@@ -269,7 +272,59 @@ class MetricSliceTests(unittest.TestCase):
         self.assertNotIn("meets_gate", dumped)
         self.assertNotIn("meets_candidate_gate", dumped)
         self.assertNotIn("meets_basic", dumped)
-        self.assertIn("balanced_accuracy_wilson", dumped)
+        self.assertIn("balanced_accuracy_band", dumped)
+        self.assertNotIn("balanced_accuracy_wilson", dumped)
+
+
+class OperatingPointAndSingleCallTests(unittest.TestCase):
+    """Arm A must not be scored at a threshold fitted to the rows it is scored on."""
+
+    def test_fixed_threshold_is_committed_and_not_fitted(self) -> None:
+        scores = [0.9, 0.1, 0.5, None]
+        self.assertEqual(
+            fixed_threshold_verdicts(scores),
+            ["PASS", "REWRITE", "PASS", None],
+        )
+        self.assertEqual(FIXED_SCALAR_THRESHOLD, 0.5)
+
+    def test_arm_a_headline_uses_fixed_threshold_and_labels_the_oracle(self) -> None:
+        ids = [f"c{index}" for index in range(6)]
+        gold = ["PASS", "PASS", "PASS", "REWRITE", "REWRITE", "REWRITE"]
+        # Every gold PASS sits just under 0.5, so a fitted threshold separates the classes
+        # perfectly while the committed 0.5 calls every candidate REWRITE.
+        scores = [0.45, 0.44, 0.43, 0.05, 0.04, 0.03]
+        unit = unit_metrics(
+            arm="A",
+            candidate_ids=ids,
+            gold_verdicts=gold,
+            gold_labels=[{}] * 6,
+            predicted_verdicts=fixed_threshold_verdicts(scores),
+            predicted_labels=[None] * 6,
+            scores=scores,
+            pairs=(),
+            per_candidate_repeats={item: [score] for item, score in zip(ids, scores)},
+        )
+        point = unit["scalar"]["operating_point"]
+        self.assertEqual(point["primary"], "fixed_threshold")
+        self.assertEqual(point["fixed_threshold"]["balanced_accuracy"], 0.5)
+        self.assertEqual(point["oracle_threshold"]["balanced_accuracy"], 1.0)
+        self.assertIn("upper_bound", point["oracle_threshold"]["caveat"])
+        # The cross-arm number is the committed one, not the fitted one.
+        self.assertEqual(unit["binary"]["balanced_accuracy"], 0.5)
+
+    def test_single_call_summarises_each_repeat_separately(self) -> None:
+        ids = ["a", "b"]
+        gold = ["PASS", "REWRITE"]
+        # First pass is perfect, second inverts: the mean must land between them, not on the
+        # majority vote of the two.
+        per_repeat = [["PASS", "REWRITE"], ["REWRITE", "PASS"]]
+        summary = single_call_metrics(ids, gold, per_repeat)
+        self.assertEqual(summary["repeats"], 2)
+        self.assertEqual(summary["balanced_accuracy_max"], 1.0)
+        self.assertEqual(summary["balanced_accuracy_min"], 0.0)
+        self.assertEqual(summary["balanced_accuracy_mean"], 0.5)
+        self.assertEqual(summary["balanced_accuracy_sd"], 0.5)
+        self.assertIn("one_call", summary["semantics"])
 
 
 class ArchiveAndRunnerTests(unittest.TestCase):
