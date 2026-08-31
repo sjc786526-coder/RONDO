@@ -46,7 +46,7 @@ const DIRECT_GATE_OUTPUT_CONTRACT: &str = r#"Reply with exactly one JSON object 
 
 {"verdict":<PASS or REWRITE>}
 
-`verdict` must be exactly `PASS` or `REWRITE`. Emit `PASS` when every applicable hard requirement holds for this packet; emit `REWRITE` when any applicable requirement fails. Emit no other key, scalar, dimension, prose, explanation, confidence, or code fence."#;
+`verdict` must be exactly `PASS` or `REWRITE`. Check this packet against every applicable hard requirement. If any applicable requirement fails, emit REWRITE; if none fail, emit PASS. Emit no other key, scalar, dimension, prose, explanation, confidence, or code fence."#;
 
 const FIVE_DIMENSION_OUTPUT_CONTRACT: &str = r#"Reply with exactly one JSON object and nothing else, containing exactly these five keys. The angle-bracket template is not valid JSON and must not be copied:
 

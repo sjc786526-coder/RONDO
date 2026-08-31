@@ -64,7 +64,7 @@
     },
     "prompt_candidate": {
       "source_path": "multidev/codex-rs/publication-critic/src/cloud_diagnostic.rs",
-      "source_sha256": "efaa8fb7a2eb60e20ae310850f0d4751664f478ab8273dd7205cdf874b96ca57",
+      "source_sha256": "0796f112616d98f2f492ff74db6b59417f337fc2e8964ef07700a2de43f0d3af",
       "common_semantics": "task_v2_rubric_v2_semantics_and_public_evidence_boundary",
       "arm_specific_suffix": "illegal_placeholder_output_instruction_and_exact_output_schema_only",
       "thinking": "runtime_parameter_on_diagnostic_path_only"
