@@ -108,10 +108,17 @@ def repeats_for(freeze: Mapping[str, Any], condition: str) -> int:
     raise ComparisonFreezeError("unknown_condition")
 
 
-def expected_observation_count(freeze: Mapping[str, Any], *, item_count: int) -> int:
+def expected_observation_count(
+    freeze: Mapping[str, Any],
+    *,
+    item_count: int,
+    off_repeats: int | None = None,
+    on_repeats: int | None = None,
+) -> int:
     matrix = freeze["matrix"]
-    repeats = int(matrix["thinking_off_repeats"]) + int(matrix["thinking_on_repeats"])
-    return 3 * item_count * repeats
+    off = int(matrix["thinking_off_repeats"] if off_repeats is None else off_repeats)
+    on = int(matrix["thinking_on_repeats"] if on_repeats is None else on_repeats)
+    return 3 * item_count * (off + on)
 
 
 def validate_freeze(value: Any) -> dict[str, Any]:
@@ -216,7 +223,7 @@ def validate_freeze(value: Any) -> dict[str, Any]:
     if mode == "commissioning":
         repeats_ok = off_repeats == 1 and on_repeats == 1
     else:
-        repeats_ok = off_repeats == 2 and on_repeats in {1, 3, 5}
+        repeats_ok = off_repeats == 3 and on_repeats == 3
     if not shared_ok or not repeats_ok:
         raise ComparisonFreezeError("freeze_matrix_invalid")
     expected_release = {

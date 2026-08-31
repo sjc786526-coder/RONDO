@@ -25,6 +25,7 @@ from .freeze import build_freeze, validate_freeze
 from .report import markdown_report
 from .runner import (
     build_commissioning_binding,
+    decide_supplement,
     recompute_commissioning,
     recompute_formal,
     run_batch,
@@ -36,6 +37,8 @@ _TASK_ROOT_RELATIVE = Path("eval-data/publication-critic/plan101")
 _CONTRACT_RELATIVE = Path(
     "eval/templates/publication-critic/plan101-thinking-comparison-contract-v1.json"
 )
+_PROMPT_RELATIVE = Path("multidev/codex-rs/publication-critic/src/cloud_diagnostic.rs")
+_ROUND_LOG_NAME = "round-log.json"
 _CONDITIONS = ("thinking_off", "thinking_on")
 _CONDITION_THINKING = {"thinking_off": "disabled", "thinking_on": "enabled"}
 
@@ -168,6 +171,32 @@ def _validate_runtime_identities(
             raise DiagnosticRunnerError(code)
 
 
+def _preregistered(contract_path: Path) -> list[Any]:
+    contract = _load(contract_path)
+    rows = contract.get("commissioning", {}).get("preregistered_observations")
+    if not isinstance(rows, list):
+        raise DiagnosticRunnerError("cli_preregistered_observations_invalid")
+    return rows
+
+
+def _load_round_log(task_root: Path) -> list[Any]:
+    path = task_root / _ROUND_LOG_NAME
+    if not path.exists() and not path.is_symlink():
+        return []
+    value = _load(path)
+    rounds = value.get("rounds") if isinstance(value, dict) else None
+    return rounds if isinstance(rounds, list) else []
+
+
+def _require_prompt_source(repo: Path, contract_path: Path) -> None:
+    contract = _load(contract_path)
+    expected = contract.get("comparison", {}).get("prompt_candidate", {}).get(
+        "source_sha256"
+    )
+    if _sha_file(repo / _PROMPT_RELATIVE) != expected:
+        raise DiagnosticRunnerError("cli_prompt_source_drifted")
+
+
 def _evaluators(
     args: argparse.Namespace, freeze: dict[str, Any]
 ) -> dict[str, RustSubprocessEvaluator]:
@@ -220,6 +249,12 @@ def build_parser() -> argparse.ArgumentParser:
         run.add_argument("--commissioning-binding", type=Path)
         run.add_argument("--resume", action="store_true")
 
+    decide = commands.add_parser("decide-supplement")
+    decide.add_argument("--repo", type=Path, required=True)
+    decide.add_argument("--freeze", type=Path, required=True)
+    decide.add_argument("--runs-root", type=Path, required=True)
+    decide.add_argument("--ledger", type=Path, required=True)
+
     recompute = commands.add_parser("recompute")
     recompute.add_argument("--freeze", type=Path, required=True)
     recompute.add_argument("--runs-root", type=Path, required=True)
@@ -254,6 +289,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             missing_usage_rmb=Decimal(args.missing_usage_rmb),
             commissioning_binding_sha256=commissioning,
         )
+        _require_prompt_source(args.repo, args.contract)
         if args.mode == "formal":
             validate_commissioning_binding(commissioning_value, freeze)
         _write_exclusive(args.output, freeze)
@@ -297,7 +333,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             allow_technical_retry=args.resume,
         )
         if expected_mode == "commissioning":
-            result = recompute_commissioning(freeze, items, archive, ledger)
+            result = recompute_commissioning(
+                freeze,
+                items,
+                archive,
+                ledger,
+                preregistered_observations=_preregistered(args.contract),
+            )
             if result["complete"]:
                 archive.bind_json("commissioning-result.json", result)
                 binding = build_commissioning_binding(freeze, result)
@@ -306,11 +348,35 @@ def main(argv: Sequence[str] | None = None) -> int:
             else:
                 _print({"execution": execution, "binding": None, "result": result})
         else:
-            result = recompute_formal(freeze, release, archive, ledger)
-            if result["observations_complete"]:
-                archive.bind_json("result.json", result)
-            _print(result)
+            _print(
+                {
+                    "execution": execution,
+                    "supplement": archive.load_optional_json("supplement-decision.json"),
+                    "next": None
+                    if archive.load_optional_json("supplement-decision.json")
+                    is not None
+                    else "decide-supplement",
+                }
+            )
         return 0
+    if args.command == "decide-supplement":
+        paths = _repo_paths(args.repo)
+        freeze = validate_freeze(_load(args.freeze))
+        _require_task_paths(args, paths)
+        if freeze["mode"] != "formal":
+            raise DiagnosticRunnerError("cli_run_mode_mismatch")
+        archive = ComparisonArchive(
+            args.runs_root, freeze["run_id"], freeze["mode"]
+        ).reopen_read_only(freeze)
+        missing = Decimal(str(freeze["budget"]["missing_usage_rmb"]))
+        ledger = Plan100BudgetLedger(
+            args.ledger, must_exist=True, missing_usage_rmb=missing
+        )
+        decision = decide_supplement(freeze, ledger, archive)
+        _print(decision)
+        return 0
+    if args.command != "recompute":
+        raise DiagnosticRunnerError("cli_command_invalid")
     paths = RepoPaths.discover(Path.cwd())
     freeze = validate_freeze(_load(args.freeze))
     _, expected_runs, expected_ledger = _task_paths(paths)
@@ -329,7 +395,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         read_only=True,
         missing_usage_rmb=Decimal(str(freeze["budget"]["missing_usage_rmb"])),
     )
-    result = recompute_formal(freeze, load_validation_release(), archive, ledger)
+    task_root, _, _ = _task_paths(paths)
+    result = recompute_formal(
+        freeze,
+        load_validation_release(),
+        archive,
+        ledger,
+        preregistered_observations=_preregistered(
+            paths.worktree_root / _CONTRACT_RELATIVE
+        ),
+    )
+    result["disclosed_rounds"] = _load_round_log(task_root)
+    if result.get("observations_complete"):
+        archive.bind_json("result.json", result)
     tracked = tracked_projection(result)
     if args.tracked_json is not None:
         _write_exclusive(args.tracked_json, tracked)

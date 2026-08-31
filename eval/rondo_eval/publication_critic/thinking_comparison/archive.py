@@ -71,6 +71,20 @@ class ComparisonArchive:
         except WriteOnceError as exc:
             raise ComparisonArchiveError("write_failed") from exc
 
+    def load_optional_json(self, name: str) -> dict[str, Any] | None:
+        path = self.path / name
+        if not path.exists() and not path.is_symlink():
+            return None
+        if path.is_symlink() or not path.is_file():
+            raise ComparisonArchiveError("binding_unsafe")
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            raise ComparisonArchiveError("binding_unreadable") from exc
+        if not isinstance(value, dict):
+            raise ComparisonArchiveError("binding_invalid")
+        return value
+
     def bind_json(self, name: str, value: Mapping[str, Any]) -> Path:
         body = _pretty(value)
         destination = self.path / name

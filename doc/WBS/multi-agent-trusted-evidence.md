@@ -294,7 +294,7 @@ validation 的 27 candidates / 12 pairs。它是**测评（eval）而非资格�
 **授权与边界**：用户已授权真实 `deepseek-v4-flash` 与 task-wide `20 RMB` 硬上限。不读取 qualification 或 v9 test 正文，
 不训练，不使用 GPU/RunPod/Docker/真实本地模型，不上传，不充值，不改变 Publication Critic 产品默认与发布路径。
 
-**当前状态**：`PLANNED / AWAITING_EXECUTOR`。合同见 `plan/101-publication-critic-ds-thinking-comparison-eval-execplan.md`。
+**当前状态**：B1 已按审查者修正后的分级非退化门通过（r4 prompt 冻结；`thinking_off:B` 打通恒定 PASS 已预登记）。B2 批准为两条件各 3 次重复（486 次），补 4/5 轮只看预算。合同见 `plan/101-publication-critic-ds-thinking-comparison-eval-execplan.md`。
 本任务无论数字如何都不解锁工作包四；产品接入、qualification 与训练路线须由用户另行决定并另立任务与授权。
 
 #### 工作包四：模型资格验收与横评（未解锁）

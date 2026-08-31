@@ -74,9 +74,10 @@
     "conditions": ["thinking_off", "thinking_on"],
     "candidate_order": "release_physical_jsonl_line_order",
     "unique_observation_key": "condition_x_arm_x_candidate_x_repeat",
-    "thinking_off_repeats": 2,
-    "thinking_on_repeats_default": 5,
-    "thinking_on_repeats_allowed_degrade": [5, 3, 1],
+    "thinking_off_repeats": 3,
+    "thinking_on_repeats": 3,
+    "supplement_repeats_if_budget": 5,
+    "supplement_rule": "budget_only_before_inspecting_whether_extra_rounds_change_conclusions",
     "provider_visible_difference": "thinking_switch_and_output_instruction_and_exact_output_schema_only"
   },
   "outputs": {
@@ -135,16 +136,45 @@
     "objective_gates": [
       "six_units_complete_strict_parse",
       "thinking_on_completion_tokens_significantly_above_thinking_off",
-      "within_unit_responses_not_all_byte_identical",
+      "no_response_byte_identical_to_angle_bracket_template",
+      "each_thinking_condition_has_an_arm_with_at_least_two_distinct_responses",
       "arm_A_has_non_boundary_quality",
+      "constant_units_preregistered",
       "extrapolated_b2_cost_within_20_rmb"
+    ],
+    "b1_pass_evidence": {
+      "run_id": "plan101-commissioning-20260831T134732Z-b1r4",
+      "prompt_source_sha256": "0796f112616d98f2f492ff74db6b59417f337fc2e8964ef07700a2de43f0d3af",
+      "gate_revision": "graded_non_degeneration_reviewer_2026-08-31",
+      "unit_response_distinct": {
+        "thinking_off:A": 2,
+        "thinking_off:B": 1,
+        "thinking_off:C": 3,
+        "thinking_on:A": 3,
+        "thinking_on:B": 2,
+        "thinking_on:C": 3
+      }
+    },
+    "preregistered_observations": [
+      {
+        "id": "thinking_off_B_constant_pass_on_commissioning_triplet",
+        "condition": "thinking_off",
+        "arm": "B",
+        "commissioning_constant_response": "{\"verdict\":\"PASS\"}",
+        "commissioning_distinct_responses": 1,
+        "missed_gold_rewrite_candidate_id": "pcv9-hard-boundaries-validation-01-qminus",
+        "b1_evidence_run_id": "plan101-commissioning-20260831T134732Z-b1r4",
+        "note": "n=3 cannot conclude no discrimination; B-off missed the obvious REWRITE in the triplet. B2 tests constancy on 27.",
+        "b2_test": "whether_thinking_off_B_is_constant_on_validation_27"
+      }
     ]
   },
   "formal": {
     "candidate_rows": 27,
     "arms": 3,
     "conditions": 2,
-    "thinking_off_repeats": 2,
+    "thinking_off_repeats": 3,
+    "thinking_on_repeats": 3,
     "namespace": "main_physical_root_eval_data_publication_critic_plan101_runs_new_empty_write_once_after_six_unit_commissioning",
     "run_freeze_schema": "rondo-publication-critic-plan101-run-freeze@v1",
     "receipt_before_settlement_before_terminal": true,

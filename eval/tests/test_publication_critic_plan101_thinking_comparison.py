@@ -23,6 +23,7 @@ from rondo_eval.publication_critic.structured_diagnostic.cost import (
 from rondo_eval.publication_critic.structured_diagnostic.release import PublicItem
 from rondo_eval.publication_critic.thinking_comparison.archive import ComparisonArchive
 from rondo_eval.publication_critic.thinking_comparison.freeze import (
+    ComparisonFreezeError,
     build_freeze,
     validate_freeze,
 )
@@ -36,15 +37,17 @@ from rondo_eval.publication_critic.thinking_comparison.metrics import (
     wilson_interval,
 )
 from rondo_eval.publication_critic.thinking_comparison.runner import (
+    decide_supplement,
     logical_key,
+    recompute_commissioning,
     recompute_formal,
     run_batch,
     tracked_projection,
 )
 
 
-def _freeze(mode: str, run_id: str, *, on_repeats: int = 5) -> dict:
-    off = 1 if mode == "commissioning" else 2
+def _freeze(mode: str, run_id: str, *, on_repeats: int = 3) -> dict:
+    off = 1 if mode == "commissioning" else 3
     on = 1 if mode == "commissioning" else on_repeats
     return build_freeze(
         mode=mode,
@@ -411,10 +414,10 @@ class ArchiveAndRunnerTests(unittest.TestCase):
                 "schema": "rondo-publication-critic-plan101-comparison-result@v1",
                 "freeze_sha256": "a" * 64,
                 "complete": True,
-                "terminal_observation_count": 567,
-                "expected_terminal_observation_count": 567,
-                "thinking_off_repeats": 2,
-                "thinking_on_repeats": 5,
+                "terminal_observation_count": 486,
+                "expected_terminal_observation_count": 486,
+                "thinking_off_repeats": 3,
+                "thinking_on_repeats": 3,
                 "parse_failure_count": {},
                 "usage_and_cost": {
                     "attempts": 1,
@@ -436,6 +439,112 @@ class ArchiveAndRunnerTests(unittest.TestCase):
         )
         self.assertNotIn("route_terminal", tracked)
         self.assertNotIn("meets_gate", json.dumps(tracked))
+
+    def test_formal_freeze_requires_equal_three_repeats(self) -> None:
+        self.assertRaises(
+            ComparisonFreezeError,
+            _freeze,
+            "formal",
+            "plan101-formal-20260831T120000Z-bad",
+            on_repeats=5,
+        )
+
+    def test_commissioning_constant_b_is_not_failure_when_preregistered(self) -> None:
+        class ConstantB(_FakeEvaluator):
+            def evaluate(self, task: DiagnosticTask, packet: dict) -> dict:
+                if task is DiagnosticTask.DIRECT:
+                    self.calls.append((task, canonical_json_bytes(dict(packet))))
+                    attempt = {
+                        "attempt": 1,
+                        "requested_at": "2026-08-31T04:00:00+00:00",
+                        "usage": {
+                            "prompt_tokens": 80,
+                            "completion_tokens": self.completion_tokens,
+                            "prompt_cache_hit_tokens": 10,
+                            "prompt_cache_miss_tokens": 70,
+                        },
+                        "recount": None,
+                        "explicitly_unbilled": False,
+                    }
+                    return {
+                        "requested_model": "deepseek-v4-flash",
+                        "served_model": "deepseek-v4-flash",
+                        "response_text": '{"verdict":"PASS"}',
+                        "attempts": [attempt],
+                        "elapsed_ms": 12,
+                        "outcome": {"type": "success"},
+                    }
+                return super().evaluate(task, packet)
+
+        freeze = _freeze(
+            "commissioning", "plan101-commissioning-20260831T120000Z-preg"
+        )
+        items = [_item("alpha"), _item("beta"), _item("gamma")]
+        prereg = [
+            {
+                "condition": "thinking_off",
+                "arm": "B",
+                "commissioning_constant_response": '{"verdict":"PASS"}',
+            },
+            {
+                "condition": "thinking_on",
+                "arm": "B",
+                "commissioning_constant_response": '{"verdict":"PASS"}',
+            },
+        ]
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            archive = ComparisonArchive(
+                root / "runs", freeze["run_id"], "commissioning"
+            ).start(freeze)
+            ledger = Plan100BudgetLedger(
+                root / "budget-ledger.json", missing_usage_rmb=Decimal("1")
+            )
+            evaluators = {
+                "thinking_off": ConstantB(quality=0.31, completion_tokens=8),
+                "thinking_on": ConstantB(quality=0.44, completion_tokens=80),
+            }
+            run_batch(
+                freeze,
+                items,
+                archive=archive,
+                ledger=ledger,
+                evaluators=evaluators,
+            )
+            failed = recompute_commissioning(freeze, items, archive, ledger)
+            self.assertFalse(failed["complete"])
+            passed = recompute_commissioning(
+                freeze,
+                items,
+                archive,
+                ledger,
+                preregistered_observations=prereg,
+            )
+            self.assertTrue(passed["complete"])
+            self.assertTrue(passed["checks"]["constants_preregistered"])
+            self.assertEqual(passed["unit_response_distinct"]["thinking_off:B"], 1)
+
+    def test_supplement_decision_uses_ledger_only(self) -> None:
+        freeze = _freeze("formal", "plan101-formal-20260831T120000Z-sup")
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            archive = ComparisonArchive(
+                root / "runs", freeze["run_id"], "formal"
+            ).start(freeze)
+            ledger = Plan100BudgetLedger(
+                root / "budget-ledger.json", missing_usage_rmb=Decimal("1")
+            )
+            for condition in ("thinking_off", "thinking_on"):
+                key = f"{freeze['run_id']}:{condition}:A:c00:r01:1"
+                ledger.reserve(key, Decimal("1"))
+                ledger.settle(key, [_attempt()])
+            decision = decide_supplement(freeze, ledger, archive)
+            self.assertFalse(decision["looked_at_unit_metrics"])
+            self.assertFalse(decision["looked_at_parsed_outputs"])
+            self.assertIn(decision["decision"], {"proceed", "stop"})
+            self.assertEqual(
+                archive.load_optional_json("supplement-decision.json"), decision
+            )
 
 
 if __name__ == "__main__":

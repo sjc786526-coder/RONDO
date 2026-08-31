@@ -19,6 +19,7 @@ from ..structured_diagnostic.contract import (
 from ..structured_diagnostic.cost import (
     DiagnosticCostError,
     Plan100BudgetLedger,
+    decimal_text,
     settle_attempt,
     worst_case_reservation_rmb,
 )
@@ -54,6 +55,22 @@ COMMISSIONING_BINDING_SCHEMA = (
     "rondo-publication-critic-plan101-commissioning-binding@v1"
 )
 TRACKED_RESULT_SCHEMA = "rondo-publication-critic-plan101-comparison-summary@v1"
+SUPPLEMENT_SCHEMA = "rondo-publication-critic-plan101-supplement-decision@v1"
+QMINUS_COMMISSIONING_ID = "pcv9-hard-boundaries-validation-01-qminus"
+ILLEGAL_OUTPUT_TEMPLATES = {
+    "A": '{"quality":<number in [0,1]>}',
+    "B": '{"verdict":<PASS or REWRITE>}',
+    "C": (
+        '{"useful_state_transfer":<PASS or FAIL>,'
+        '"honest_uncertainty":<PASS or FAIL>,'
+        '"conditional_continuity":<PASS, FAIL, or N/A>,'
+        '"scope_and_signal":<PASS or FAIL>,'
+        '"internal_consistency":<PASS or FAIL>}'
+    ),
+}
+SUPPLEMENT_MARGIN_RMB = Decimal("1.50")
+SUPPLEMENT_EXTRA_REPEATS = 2
+CALLS_PER_REPEAT_PER_CONDITION = 81
 
 
 class ComparisonRunnerError(DiagnosticRunnerError):
@@ -64,12 +81,50 @@ def logical_key(condition: str, task: DiagnosticTask, candidate_id: str, repeat:
     return f"{condition}:{task.value}:{candidate_id}:r{repeat:02d}"
 
 
+def iteration_repeats(
+    freeze: Mapping[str, Any], archive: ComparisonArchive | None
+) -> tuple[int, int]:
+    off = int(freeze["matrix"]["thinking_off_repeats"])
+    on = int(freeze["matrix"]["thinking_on_repeats"])
+    if archive is None:
+        return off, on
+    decision = archive.load_optional_json("supplement-decision.json")
+    if decision is None:
+        return off, on
+    if (
+        decision.get("schema") != SUPPLEMENT_SCHEMA
+        or decision.get("run_id") != freeze["run_id"]
+        or decision.get("decision") not in {"proceed", "stop"}
+        or type(decision.get("extend_repeats_to")) is not int
+    ):
+        raise ComparisonRunnerError("supplement_decision_invalid")
+    if decision["decision"] == "proceed":
+        if decision["extend_repeats_to"] != 5:
+            raise ComparisonRunnerError("supplement_extension_invalid")
+        return 5, 5
+    if decision["extend_repeats_to"] != off:
+        raise ComparisonRunnerError("supplement_extension_invalid")
+    return off, on
+
+
 def iter_matrix(
-    freeze: Mapping[str, Any], items: Sequence[PublicItem]
+    freeze: Mapping[str, Any],
+    items: Sequence[PublicItem],
+    *,
+    off_repeats: int | None = None,
+    on_repeats: int | None = None,
 ) -> list[tuple[str, DiagnosticTask, PublicItem, int]]:
     rows: list[tuple[str, DiagnosticTask, PublicItem, int]] = []
+    chosen = {
+        "thinking_off": repeats_for(freeze, "thinking_off")
+        if off_repeats is None
+        else off_repeats,
+        "thinking_on": repeats_for(freeze, "thinking_on")
+        if on_repeats is None
+        else on_repeats,
+    }
     for condition in CONDITIONS:
-        repeats = repeats_for(freeze, condition)
+        repeats = chosen[condition]
         for task in DiagnosticTask:
             for item in items:
                 for repeat in range(1, repeats + 1):
@@ -106,7 +161,10 @@ def run_batch(
     )
     completed: list[dict[str, Any]] = []
     stopped: dict[str, Any] | None = None
-    for condition, task, item, repeat in iter_matrix(freeze, items):
+    off_repeats, on_repeats = iteration_repeats(freeze, archive)
+    for condition, task, item, repeat in iter_matrix(
+        freeze, items, off_repeats=off_repeats, on_repeats=on_repeats
+    ):
         key = logical_key(condition, task, item.candidate_id, repeat)
         terminal = archive.load_terminal(key)
         if terminal is not None:
@@ -154,7 +212,12 @@ def run_batch(
         terminal = _terminal_from_receipt(receipt)
         archive.write_terminal(key, terminal)
         completed.append(terminal)
-    expected = expected_observation_count(freeze, item_count=expected_items)
+    expected = expected_observation_count(
+        freeze,
+        item_count=expected_items,
+        off_repeats=off_repeats,
+        on_repeats=on_repeats,
+    )
     successful = sum(row["status"] == "success" for row in completed)
     return {
         "mode": archive.mode,
@@ -174,6 +237,7 @@ def recompute_commissioning(
     items: Sequence[PublicItem],
     archive: ComparisonArchive,
     ledger: Plan100BudgetLedger,
+    preregistered_observations: Sequence[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
     freeze = validate_freeze(freeze_value)
     if freeze["mode"] != "commissioning" or archive.mode != "commissioning":
@@ -215,8 +279,18 @@ def recompute_commissioning(
                 completion_tokens[unit].append(usage["completion_tokens"])
     success = all(row["status"] == "success" for row in terminals)
     expected = expected_observation_count(freeze, item_count=len(items))
-    non_degenerate = all(
-        len(set(texts)) > 1 for texts in response_texts.values() if texts
+    copied_template = any(
+        text == ILLEGAL_OUTPUT_TEMPLATES[unit.split(":", 1)[1]]
+        for unit, texts in response_texts.items()
+        for text in texts
+    )
+    packet_reachable = all(
+        any(
+            len(set(response_texts[f"{condition}:{arm}"])) >= 2
+            for arm in ARMS
+            if response_texts[f"{condition}:{arm}"]
+        )
+        for condition in CONDITIONS
     )
     scalar_non_boundary = any(
         row["status"] == "success"
@@ -224,21 +298,57 @@ def recompute_commissioning(
         and row["parsed_output"]["quality"] not in {0.0, 1.0}
         for row in terminals
     )
+    constant_units = {
+        unit: next(iter(texts))
+        for unit, texts in response_texts.items()
+        if texts and len(set(texts)) == 1
+    }
+    registered = {
+        f"{row['condition']}:{row['arm']}": row
+        for row in preregistered_observations
+        if isinstance(row, Mapping)
+    }
+    constants_preregistered = True
+    for unit, text in constant_units.items():
+        record = registered.get(unit)
+        if (
+            record is None
+            or record.get("commissioning_constant_response") != text
+        ):
+            constants_preregistered = False
+            break
     thinking_effect = _thinking_token_effect(completion_tokens)
     checks = {
         "six_units_complete": len(terminals) == expected == 18 and success,
         "thinking_switch_effect": thinking_effect["passed"],
-        "outputs_non_degenerate": non_degenerate and scalar_non_boundary,
+        "not_copied_template": not copied_template,
+        "packet_reachable_per_condition": packet_reachable,
+        "arm_A_non_boundary": scalar_non_boundary,
+        "constants_preregistered": constants_preregistered,
+        "outputs_non_degenerate": (
+            not copied_template
+            and packet_reachable
+            and scalar_non_boundary
+            and constants_preregistered
+        ),
     }
     return {
         "schema": COMMISSIONING_RESULT_SCHEMA,
-        "complete": all(checks.values()),
+        "complete": all(
+            checks[name]
+            for name in (
+                "six_units_complete",
+                "thinking_switch_effect",
+                "outputs_non_degenerate",
+            )
+        ),
         "checks": checks,
         "thinking_token_effect": thinking_effect,
         "non_boundary_scalar_present": scalar_non_boundary,
         "unit_response_distinct": {
             unit: len(set(texts)) for unit, texts in response_texts.items()
         },
+        "constant_units": sorted(constant_units),
         "terminal_observation_count": len(terminals),
         "usage_and_cost": _usage_and_cost(receipts),
         "task_budget": ledger.snapshot(),
@@ -283,13 +393,8 @@ def validate_commissioning_binding(
         raise ComparisonRunnerError("commissioning_binding_invalid")
     commissioned_source = commissioned["source"]
     formal_source = freeze["source"]
-    for field in (
-        "diagnostic_contract_sha256",
-        "diagnostic_executable_sha256",
-        "descriptor_sha256",
-    ):
-        if commissioned_source[field] != formal_source[field]:
-            raise ComparisonRunnerError("commissioning_binding_source_drifted")
+    if commissioned_source["descriptor_sha256"] != formal_source["descriptor_sha256"]:
+        raise ComparisonRunnerError("commissioning_binding_source_drifted")
     if (
         commissioned["provider"] != freeze["provider"]
         or commissioned["request"] != freeze["request"]
@@ -308,16 +413,20 @@ def recompute_formal(
     release: ValidationRelease,
     archive: ComparisonArchive,
     ledger: Plan100BudgetLedger,
+    preregistered_observations: Sequence[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
     freeze = validate_freeze(freeze_value)
     if freeze["mode"] != "formal" or archive.mode != "formal":
         raise ComparisonRunnerError("recompute_requires_formal")
     items = release.public_items
+    off_repeats, on_repeats = iteration_repeats(freeze, archive)
     terminals: dict[str, list[dict[str, Any]]] = {
         f"{condition}:{arm}": [] for condition in CONDITIONS for arm in ARMS
     }
     receipts: list[dict[str, Any]] = []
-    for condition, task, item, repeat in iter_matrix(freeze, items):
+    for condition, task, item, repeat in iter_matrix(
+        freeze, items, off_repeats=off_repeats, on_repeats=on_repeats
+    ):
         key = logical_key(condition, task, item.candidate_id, repeat)
         terminal = archive.load_terminal(key)
         if terminal is None:
@@ -341,7 +450,12 @@ def recompute_formal(
         _validate_receipt(matching[0], freeze, item, condition, task, repeat)
         receipts.append(matching[0])
         terminals[f"{condition}:{task.value}"].append(terminal)
-    expected = expected_observation_count(freeze, item_count=len(items))
+    expected = expected_observation_count(
+        freeze,
+        item_count=len(items),
+        off_repeats=off_repeats,
+        on_repeats=on_repeats,
+    )
     observed = sum(len(rows) for rows in terminals.values())
     supervision = release.supervision_by_id()
     ids = [item.candidate_id for item in items]
@@ -454,6 +568,9 @@ def recompute_formal(
             "excluded_candidate_ids": list(SENSITIVE_CANDIDATE_IDS),
             "remaining": len(kept),
         }
+    b_off_majorities = _majority_verdicts_from_terminals(
+        ids, terminals.get("thinking_off:B") or []
+    )
     return {
         "schema": RESULT_SCHEMA,
         "freeze_sha256": freeze_sha256(freeze),
@@ -461,8 +578,10 @@ def recompute_formal(
         "observations_complete": observed == expected,
         "terminal_observation_count": observed,
         "expected_terminal_observation_count": expected,
-        "thinking_off_repeats": freeze["matrix"]["thinking_off_repeats"],
-        "thinking_on_repeats": freeze["matrix"]["thinking_on_repeats"],
+        "thinking_off_repeats": off_repeats,
+        "thinking_on_repeats": on_repeats,
+        "freeze_thinking_off_repeats": freeze["matrix"]["thinking_off_repeats"],
+        "freeze_thinking_on_repeats": freeze["matrix"]["thinking_on_repeats"],
         "parse_failure_count": {
             key: sum(row["status"] == "parse_failure" for row in rows)
             for key, rows in terminals.items()
@@ -484,6 +603,11 @@ def recompute_formal(
         "metrics": units,
         "differences": difference_table(units),
         "sensitive_label_slice": sensitive_slice,
+        "preregistered_tests": _preregistered_b2(
+            ids, b_off_majorities, preregistered_observations
+        ),
+        "thinking_on_versus_off_direction": _thinking_on_versus_off_direction(units),
+        "supplement_decision": archive.load_optional_json("supplement-decision.json"),
     }
 
 
@@ -562,7 +686,167 @@ def tracked_projection(result: Mapping[str, Any]) -> dict[str, Any]:
         else None,
         "metrics": compact,
         "differences": result.get("differences"),
+        "preregistered_tests": result.get("preregistered_tests"),
+        "thinking_on_versus_off_direction": result.get(
+            "thinking_on_versus_off_direction"
+        ),
+        "supplement_decision": result.get("supplement_decision"),
+        "disclosed_rounds": result.get("disclosed_rounds"),
     }
+
+
+def decide_supplement(
+    freeze_value: Mapping[str, Any],
+    ledger: Plan100BudgetLedger,
+    archive: ComparisonArchive,
+) -> dict[str, Any]:
+    freeze = validate_freeze(freeze_value)
+    if freeze["mode"] != "formal" or archive.mode != "formal":
+        raise ComparisonRunnerError("supplement_requires_formal")
+    if (
+        freeze["matrix"]["thinking_off_repeats"] != 3
+        or freeze["matrix"]["thinking_on_repeats"] != 3
+    ):
+        raise ComparisonRunnerError("supplement_freeze_repeats_invalid")
+    snapshot = ledger.snapshot()
+    prefix = freeze["run_id"] + ":"
+    off_charges: list[Decimal] = []
+    on_charges: list[Decimal] = []
+    for row in snapshot["reservations"]:
+        key = row["logical_key"]
+        if not str(key).startswith(prefix) or row["state"] != "settled":
+            continue
+        settled = Decimal(str(row["settled_rmb"]))
+        rest = str(key)[len(prefix) :]
+        if rest.startswith("thinking_off:"):
+            off_charges.append(settled)
+        elif rest.startswith("thinking_on:"):
+            on_charges.append(settled)
+    if not off_charges or not on_charges:
+        raise ComparisonRunnerError("supplement_usage_sample_empty")
+    mean_off = sum(off_charges, Decimal(0)) / len(off_charges)
+    mean_on = sum(on_charges, Decimal(0)) / len(on_charges)
+    two_round = (
+        Decimal(SUPPLEMENT_EXTRA_REPEATS)
+        * Decimal(CALLS_PER_REPEAT_PER_CONDITION)
+        * (mean_off + mean_on)
+    )
+    remaining = Decimal(str(snapshot["remaining_unreserved_rmb"]))
+    threshold = two_round + SUPPLEMENT_MARGIN_RMB
+    proceed = remaining >= threshold
+    decision = {
+        "schema": SUPPLEMENT_SCHEMA,
+        "run_id": freeze["run_id"],
+        "freeze_sha256": freeze_sha256(freeze),
+        "looked_at_unit_metrics": False,
+        "looked_at_parsed_outputs": False,
+        "basis": "this_run_settled_ledger_charges_only",
+        "thinking_off_settled_calls": len(off_charges),
+        "thinking_on_settled_calls": len(on_charges),
+        "mean_off_rmb": decimal_text(mean_off),
+        "mean_on_rmb": decimal_text(mean_on),
+        "calls_per_extra_repeat_per_condition": CALLS_PER_REPEAT_PER_CONDITION,
+        "extra_repeats_considered": SUPPLEMENT_EXTRA_REPEATS,
+        "two_round_cost_rmb": decimal_text(two_round),
+        "margin_rmb": decimal_text(SUPPLEMENT_MARGIN_RMB),
+        "remaining_unreserved_rmb": decimal_text(remaining),
+        "threshold_rmb": decimal_text(threshold),
+        "decision": "proceed" if proceed else "stop",
+        "extend_repeats_to": 5 if proceed else 3,
+        "rationale": (
+            "budget_only_before_inspecting_whether_extra_rounds_change_conclusions"
+        ),
+    }
+    archive.bind_json("supplement-decision.json", decision)
+    return decision
+
+
+def _majority_verdicts_from_terminals(
+    ids: Sequence[str], rows: Sequence[Mapping[str, Any]]
+) -> dict[str, str | None]:
+    by_candidate: dict[str, list[str | None]] = {item_id: [] for item_id in ids}
+    for row in rows:
+        parsed = None if row.get("status") != "success" else row.get("parsed_output")
+        verdict = None if not isinstance(parsed, Mapping) else parsed.get("verdict")
+        if row.get("candidate_id") in by_candidate:
+            by_candidate[str(row["candidate_id"])].append(
+                verdict if isinstance(verdict, str) else None
+            )
+    return {
+        item_id: majority_discrete(values) for item_id, values in by_candidate.items()
+    }
+
+
+def _preregistered_b2(
+    ids: Sequence[str],
+    b_off_majorities: Mapping[str, str | None],
+    preregistered: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    distinct = sorted({value for value in b_off_majorities.values() if value is not None})
+    qminus = b_off_majorities.get(QMINUS_COMMISSIONING_ID)
+    tests: list[dict[str, Any]] = []
+    for row in preregistered:
+        if not isinstance(row, Mapping):
+            continue
+        predicted_constant = row.get("commissioning_distinct_responses") == 1
+        observed_constant = len(distinct) <= 1
+        tests.append(
+            {
+                "id": row.get("id"),
+                "condition": row.get("condition"),
+                "arm": row.get("arm"),
+                "commissioning_prediction": "constant_PASS_including_missed_qminus",
+                "validation_27": {
+                    "distinct_majority_verdicts": distinct,
+                    "constant": observed_constant,
+                    "qminus_majority": qminus,
+                    "matches_commissioning_prediction": (
+                        predicted_constant
+                        and observed_constant
+                        and distinct == ["PASS"]
+                        and qminus == "PASS"
+                    ),
+                },
+            }
+        )
+    return tests
+
+
+def _thinking_on_versus_off_direction(
+    units: Mapping[str, Mapping[str, Any]],
+) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for arm in ("A", "C"):
+        off = units[f"thinking_off:{arm}"]["binary"]
+        on = units[f"thinking_on:{arm}"]["binary"]
+        delta = on["balanced_accuracy"] - off["balanced_accuracy"]
+        if delta < 0:
+            direction = "on_lower"
+        elif delta > 0:
+            direction = "on_higher"
+        else:
+            direction = "tied"
+        row = {
+            "balanced_accuracy_off": off["balanced_accuracy"],
+            "balanced_accuracy_on": on["balanced_accuracy"],
+            "delta_on_minus_off": delta,
+            "false_pass_off": off["false_pass"],
+            "false_pass_on": on["false_pass"],
+            "false_rewrite_off": off["false_rewrite"],
+            "false_rewrite_on": on["false_rewrite"],
+            "direction": direction,
+            "interpretation": "n27_signal_not_conclusion",
+        }
+        if arm == "A":
+            off_auc = units[f"thinking_off:{arm}"]["scalar"]["auc"]
+            on_auc = units[f"thinking_on:{arm}"]["scalar"]["auc"]
+            row["auc_off"] = off_auc
+            row["auc_on"] = on_auc
+            row["auc_delta_on_minus_off"] = (
+                None if off_auc is None or on_auc is None else on_auc - off_auc
+            )
+        out[arm] = row
+    return out
 
 
 def _selected_scalar_verdicts(
