@@ -2620,3 +2620,37 @@ INTEGRATED / NOT_PUSHED`。clean formal source 为 `0ae9623`，执行者交付�
 - task-wide 99 HTTP attempts 全部按 provider usage 结算 `0.0396094 RMB`，outstanding 为 0、剩余 `19.9603906 RMB`。首个 formal authority 后停止 API；最终验收后本任务外部授权关闭，余额不转移。未读取 qualification/v9 test/unseen，未运行训练、真实本地模型、GPU/RunPod/Docker、上传或产品动作。
 - authority-bound tracked 结果与提交 JSON 完全一致，bounded detailed projection、81 receipts/terminals、唯一 authority、B1 binding 与 task-wide ledger 经独立复验闭合；Plan 100 Python 21/21 通过。本任务保持专用薄层并复用既有 provider、费用、write-once、配置和指标设施，没有建设第二套通用体系或额外可信平台。
 - 正式结果见 `eval/results/publication-critic/plan100-structured-diagnostic-v1.{json,md}`，执行见 `agent_log/2026-08-29-plan100-stage-b-execution.md`，最终验收见 `agent_log/2026-08-29-plan100-final-independent-review.md`。用户批准后，最终验收头 `2b6a1faff8209bd4f2f90c7807ba2e3d98bfcbb9` 以非快进 merge `71f42abd185ae12a2dc2138a90b0c7ab8a2036e3` 合入本地 `main`；主线 Plan 100 Python `21/21` 与合同 JSON/diff 门禁通过并推送 `origin/main`。本地任务分支归档为 `zz-done/worktree-100-publication-critic-ds-structured-diagnostic`，worktree 与 ignored 证据资产保留；集成记录见 `agent_log/2026-08-29-plan100-main-integration.md`。
+
+## Publication Critic DS 思考开关 × 输出表达对比测评（Plan 101，2026-08-31）
+
+**状态**：`MEASUREMENT_COMPLETE / FINAL_REVIEW_ACCEPTED / DIRECTION_FIXED`。
+
+- 在同一 `deepseek-v4-flash`、v10 development validation 27 candidates / 12 pairs、public packet、task v2 / rubric v2 下，
+  完成 `thinking_off / thinking_on` × `A/B/C` 的 `2 × 3` 矩阵。唯一 clean formal 为 `810/810` terminal observation
+  （六单元各 `135`，两条件各 5 次重复），`809` success + `1` `response_size` 解析失败（`thinking_on:B`，按合同写为 terminal，未重试）。
+  logical key 全唯一、单一 freeze SHA、requested/served 模型一致。
+- 主口径为单次调用（产品只发一次请求）：`thinking_off:C 0.747`、`thinking_on:B 0.667`、`thinking_on:C 0.657`、
+  `thinking_on:A 0.653`、`thinking_off:A 0.627`、`thinking_off:B 0.625`。多数票口径作为 k 倍成本的集成并列报告，
+  在 A/B 上与单次调用符号相反。`thinking_off:A` 的 ROC AUC 为 `0.839`，`thinking_on:A` 为 `0.728`。
+- 据此把**五维 hard decision 固定为云端判官接缝的后续方向，单标量云端接缝标注为废弃**。依据是同条件下
+  `C − B = +0.122`、`C − A = +0.120`，是唯一有明显间距的单元；并叠加架构契合（产品需要非补偿合取的 typed 判定与逐维可诊断性，
+  标量需另行标定阈值）。task contract v2 早已规定旧 `[B, 1]` scalar 不是合法 successor 输出，本次只是在云端判官侧补上同方向实测证据，
+  两份产品/任务合同因此无需改写。
+- 方向决定同时冻结以下限制：C 的优势依赖关闭思考（`thinking_on` 下 `C − B = -0.010`、`C − A = +0.003`，三臂持平，
+  且 `thinking_on:C` 跨重复自洽率仅 `0.481`）；A 被废弃不是因为无区分度，其低分来自固定工作点而非排序能力；
+  `thinking_off:C` 绝对水平仍差，15 条 gold REWRITE 放过 `8` 条，`conditional_continuity` failure recall 为 `0`、
+  `scope_and_signal` 为 `0.167`。因此本方向只支持实验性接入，不构成质量资格，不解锁产品启用或工作包四。
+- 预登记现象被证伪：`thinking_off:B` 在打通三元组上恒定 PASS，在 27 条上给出两种 verdict。方法论结论是三条 packet 的预览
+  无法区分“无区分度”与“轻度类别偏置”，把 n=3 恒定当作链路故障的自检项会阻塞唯一能回答该问题的测量；该自检项已改为跨臂验证
+  packet 可达性。同期退役 A 臂非边界取值自检项，因其只能靠改提示词满足，并已导致 A 臂独有的边界校准指令，
+  该跨臂提示词不对称已写入报告局限一节。
+- 指标口径纠偏：A 臂改用事前固定阈值 `0.5`，事后择优阈值保留但标注为 oracle 上界且不进跨臂差值表；
+  头条从多数票改为单次调用；`balanced_accuracy_wilson` 更名 `balanced_accuracy_band` 并注明为两个 Wilson 区间端点平均、偏保守。
+  冻结合同 `plan101-thinking-comparison-contract-v1.json` 未回改，其 SHA 已绑入 B2 freeze。
+- task-wide 结算 `6.6787625 RMB` / 上限 `20 RMB`，outstanding 为 0，剩余 `13.3212375 RMB`。五轮 commissioning 与一轮 formal
+  全部在结果与轮次日志中披露，含四轮废弃轮及原因。未读取 qualification / v9 test 正文，未训练，未使用 GPU/RunPod/Docker/真实本地模型，
+  未上传，未改变产品默认 scorer。
+- 正式结果见 `eval/results/publication-critic/plan101-thinking-comparison-v1.{json,md}`，合同见
+  `plan/101-publication-critic-ds-thinking-comparison-eval-execplan.md`，执行见
+  `agent_log/2026-08-31-plan101-b1-blocked.md`、`agent_log/2026-08-31-plan101-b1-gate-correction.md`、
+  `agent_log/2026-08-31-plan101-b2-complete.md`。
