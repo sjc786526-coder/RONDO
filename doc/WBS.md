@@ -1,6 +1,6 @@
 # RONDO 长程规划（WBS）
 
-最后更新：2026-08-29（方向 3 Publication Critic 三期在 Plan 097 双 backend 工程闭环后正式进入质量重构路线；原定串行为
+最后更新：2026-08-31（方向 3 Publication Critic 三期在 Plan 097 双 backend 工程闭环后正式进入质量重构路线；原定串行为
 “任务合同重构 → v8 后继数据改造与有限扩充 → 一次主方案训练 → 模型资格验收与横评”。Plan 098 已为前两个工作包建立同一两阶段
 ExecPlan；Plan 098 的任务合同、v9/v10/qualification、formal decoder、pair-aware margin selection 与 direct-dependency identity 已全部
 通过最终复验并冻结完成。工作包三 Plan 099 已完成阶段 B：commissioning 通过，clean formal 固定完成 16 次 update 和
@@ -9,7 +9,9 @@ ExecPlan；Plan 098 的任务合同、v9/v10/qualification、formal decoder、pa
 最终文档整改复验已通过，Plan 099 以“验收通过 / 任务目标失败”完整收口、合入本地 `main` 并推送；工作包四未解锁。
 Plan 097 的 `M3_D_DUAL_BACKEND_ENGINEERING_PASS / FINAL_REVIEW_ACCEPTED / INTEGRATED / PUSHED`、Plan 096 的
 `CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH`、Plan 095 最终验收、Plan 094 有效负向研究终态和 Plan 093 Linux 全 workspace 正确性基线
-均保持有效；Plan 100 独立诊断以 `TASK_EXECUTABILITY_INSUFFICIENT / FINAL_REVIEW_ACCEPTED / INTEGRATED / PUSHED` 收口，新路线不自动解锁产品质量、默认启用或生产）
+均保持有效；Plan 100 独立诊断以 `TASK_EXECUTABILITY_INSUFFICIENT / FINAL_REVIEW_ACCEPTED / INTEGRATED / PUSHED` 收口。
+Plan 101 对比测评已完成，据此把五维 hard decision 固定为云端判官接缝的后续方向、单标量云端接缝标注废弃，
+下一工作包为 Plan 102 五维云端判官实验性工程接入；新路线不自动解锁产品质量、默认启用或生产）
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段指针、跨方向关系、
 稳定工程边界和授权门；已完成成果与验收见 `doc/WBS-COMPLETED.md`，单次任务合同见 `plan/`，执行细节见
@@ -56,7 +58,9 @@ Plan 097 的 `M3_D_DUAL_BACKEND_ENGINEERING_PASS / FINAL_REVIEW_ACCEPTED / INTEG
 工作包四：模型资格验收与横评（未解锁）
 ```
 
-独立诊断支线：Plan 099 `VALID_FORMAL_NO_GO` → Plan 100 DS-V4-Flash 五维任务合同诊断；该支线不接入或解锁工作包四。
+独立诊断支线：Plan 099 `VALID_FORMAL_NO_GO` → Plan 100 DS-V4-Flash 五维任务合同诊断 → Plan 101 DS 思考开关 × 输出表达对比测评
+→ 方向固定为五维 hard decision、单标量云端接缝废弃 → Plan 102 五维云端判官实验性工程接入（next，未授权启动）；
+该支线不接入或解锁工作包四。
 
 - **工作包一 / Plan 098 阶段一已完成并冻结**：既有 `rondo-publication-critic-task@v2` 五头、non-compensating gate 与
   implementation `55342bdb11b09c11b589fd398717f7712fca012c` 保持不变；下游 `rondo-publication-critic-decision@v1` 已定义逐头 margin、
@@ -96,9 +100,18 @@ Plan 097 的 `M3_D_DUAL_BACKEND_ENGINEERING_PASS / FINAL_REVIEW_ACCEPTED / INTEG
 各工作包的详细目标、边界、宏观验收与授权门以 `doc/WBS/multi-agent-trusted-evidence.md` 为准。工作包一与二由
 `plan/098-publication-critic-contract-and-v8-successor-execplan.md` 冻结完成；工作包三由
 `plan/099-publication-critic-five-head-training-and-candidate-freeze-execplan.md` 已完成并冻结；Plan 100 合同见
-`plan/100-publication-critic-ds-structured-diagnostic-execplan.md`。工作包四未解锁，任何后续路线须另立任务和授权。
+`plan/100-publication-critic-ds-structured-diagnostic-execplan.md`；Plan 101 合同见
+`plan/101-publication-critic-ds-thinking-comparison-eval-execplan.md`。工作包四未解锁，任何后续路线须另立任务和授权。
 
-方向 3 当前无 active 工作包；Plan 100 的负向诊断不自动启动后续路线。Plan 081 已取得 `LOCAL_TRAINING_READINESS_PASS`；三期 Plan 082 已获用户付费批准并完成
+**Plan 101 DS 思考开关 × 输出表达对比测评已完成**：正式矩阵跑满 `810/810`（两条件各 5 次重复），累计结算 `6.68 RMB`，
+结果见 `eval/results/publication-critic/plan101-thinking-comparison-v1.{json,md}`。单次调用口径下 `thinking_off:C = 0.747`，
+同条件下比 B 高 `0.122`、比 A 高 `0.120`。据此固定方向：**五维 hard decision 为云端判官接缝的后续方向，单标量云端接缝废弃**。
+该结论只定方向，不授予质量资格——`thinking_off:C` 仍放过 15 条 gold REWRITE 中的 `8` 条，且 C 的优势依赖关闭思考。
+
+方向 3 下一工作包为 **Plan 102 五维云端判官实验性工程接入**：把 Plan 095/097 已打通的云端 scorer 接缝从单标量改造为
+五维 hard decision + 关闭思考，本地按非补偿合取派生 typed verdict，产品出口不变。**仅实验性质，不投入生产、不正式发布、
+不改变默认关闭姿态**，不训练、不做资格判定，也不解锁工作包四。未授权启动，需用户单独授权真实 API 与预算后另立 ExecPlan。
+Plan 100 的负向诊断本身不自动启动后续路线。Plan 081 已取得 `LOCAL_TRAINING_READINESS_PASS`；三期 Plan 082 已获用户付费批准并完成
 真实 commissioning、正式 freeze、干净 formal 和新进程恢复，终态为 `VALID_NO_IMPROVEMENT`。保留 Pod 的 GPU 专项验收已经通过，
 唯一训练 Pod 已释放并确认持续 compute 费率为 0；保留卷所在 `US-TX-3` 不提供 S3 API，故按用户一次性授权使用单个 transfer Pod
 只读回传冻结 39 对象。全部对象完成本地 bytes/SHA-256 校验后 transfer Pod 已删除；最终验收通过。用户本人随后明确决定继续保留

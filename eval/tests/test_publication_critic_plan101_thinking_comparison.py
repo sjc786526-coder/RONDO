@@ -1,0 +1,606 @@
+import json
+import sys
+import tempfile
+import unittest
+from decimal import Decimal
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+EVAL_ROOT = REPO_ROOT / "eval"
+if str(EVAL_ROOT) not in sys.path:
+    sys.path.insert(0, str(EVAL_ROOT))
+
+from rondo_eval.publication_critic.identity import canonical_json_bytes, sha256_bytes
+from rondo_eval.publication_critic.structured_diagnostic.contract import (
+    DiagnosticTask,
+    parse_output,
+)
+from rondo_eval.publication_critic.structured_diagnostic.cost import (
+    Plan100BudgetLedger,
+    settle_attempt,
+    worst_case_reservation_rmb,
+)
+from rondo_eval.publication_critic.structured_diagnostic.release import PublicItem
+from rondo_eval.publication_critic.thinking_comparison.archive import ComparisonArchive
+from rondo_eval.publication_critic.thinking_comparison.freeze import (
+    ComparisonFreezeError,
+    build_freeze,
+    validate_freeze,
+)
+from rondo_eval.publication_critic.thinking_comparison.metrics import (
+    FIXED_SCALAR_THRESHOLD,
+    difference_table,
+    fixed_threshold_verdicts,
+    majority_discrete,
+    miss_versus_wrong_drawer,
+    repeat_consistency,
+    scalar_tie_stats,
+    single_call_metrics,
+    unit_metrics,
+    wilson_interval,
+)
+from rondo_eval.publication_critic.thinking_comparison.runner import (
+    decide_supplement,
+    logical_key,
+    recompute_commissioning,
+    recompute_formal,
+    run_batch,
+    tracked_projection,
+)
+
+
+def _freeze(mode: str, run_id: str, *, on_repeats: int = 3) -> dict:
+    off = 1 if mode == "commissioning" else 3
+    on = 1 if mode == "commissioning" else on_repeats
+    return build_freeze(
+        mode=mode,
+        run_id=run_id,
+        git_commit="1" * 40,
+        diagnostic_contract_sha256="2" * 64,
+        executable_sha256="3" * 64,
+        descriptor_sha256="4" * 64,
+        thinking_off_repeats=off,
+        thinking_on_repeats=on,
+        missing_usage_rmb=Decimal("1"),
+        commissioning_binding_sha256="6" * 64 if mode == "formal" else None,
+    )
+
+
+def _packet(candidate_id: str) -> dict:
+    return {
+        "actor_role": "member",
+        "candidate": {"handoff": "", "summary": f"packet for {candidate_id}"},
+        "continuity": {"state": "not_applicable"},
+        "evidence_v1": {
+            "candidate_window": "not_frozen_before_commit",
+            "semantic_entailment": "not_evaluated",
+        },
+        "local_scope": {"title": candidate_id},
+        "qualification": {
+            "packet_schema": {"name": "rondo-publication-packet", "revision": "v1"},
+            "rubric": {"name": "rondo-publication-qualification", "revision": "v2"},
+        },
+        "target_kind": "new_event",
+    }
+
+
+def _item(candidate_id: str) -> PublicItem:
+    packet = _packet(candidate_id)
+    body = canonical_json_bytes(packet)
+    return PublicItem(candidate_id=candidate_id, packet=packet, packet_bytes=body)
+
+
+def _attempt() -> dict:
+    return {
+        "attempt": 1,
+        "requested_at": "2026-08-31T04:00:00+00:00",
+        "usage": {
+            "prompt_tokens": 100,
+            "completion_tokens": 10,
+            "prompt_cache_hit_tokens": 40,
+            "prompt_cache_miss_tokens": 60,
+        },
+        "recount": None,
+        "explicitly_unbilled": False,
+    }
+
+
+class _FakeEvaluator:
+    def __init__(self, *, quality: float, completion_tokens: int) -> None:
+        self.quality = quality
+        self.completion_tokens = completion_tokens
+        self.calls: list[tuple[DiagnosticTask, bytes]] = []
+
+    def evaluate(self, task: DiagnosticTask, packet: dict) -> dict:
+        self.calls.append((task, canonical_json_bytes(dict(packet))))
+        title = packet["local_scope"]["title"]
+        if task is DiagnosticTask.SCALAR:
+            # Distinct per packet so commissioning non-degeneration can pass.
+            quality = min(0.9, max(0.1, self.quality + (len(title) % 7) * 0.03))
+            response = json.dumps({"quality": quality}, separators=(",", ":"))
+        elif task is DiagnosticTask.DIRECT:
+            verdict = "PASS" if len(title) % 2 == 0 else "REWRITE"
+            response = json.dumps({"verdict": verdict}, separators=(",", ":"))
+        else:
+            fail = "FAIL" if len(title) % 2 else "PASS"
+            response = json.dumps(
+                {
+                    "useful_state_transfer": fail,
+                    "honest_uncertainty": "PASS",
+                    "conditional_continuity": "N/A",
+                    "scope_and_signal": "PASS",
+                    "internal_consistency": "PASS",
+                },
+                separators=(",", ":"),
+            )
+        usage = {
+            "prompt_tokens": 80,
+            "completion_tokens": self.completion_tokens,
+            "prompt_cache_hit_tokens": 10,
+            "prompt_cache_miss_tokens": 70,
+        }
+        attempt = {
+            "attempt": 1,
+            "requested_at": "2026-08-31T04:00:00+00:00",
+            "usage": usage,
+            "recount": None,
+            "explicitly_unbilled": False,
+        }
+        return {
+            "requested_model": "deepseek-v4-flash",
+            "served_model": "deepseek-v4-flash",
+            "response_text": response,
+            "attempts": [attempt],
+            "elapsed_ms": 12,
+            "outcome": {"type": "success"},
+        }
+
+
+class OutputContractTests(unittest.TestCase):
+    def test_placeholder_templates_are_not_valid_outputs(self) -> None:
+        self.assertRaises(
+            Exception, parse_output, DiagnosticTask.SCALAR, '{"quality":<number in [0,1]>}'
+        )
+        self.assertRaises(
+            Exception,
+            parse_output,
+            DiagnosticTask.DIRECT,
+            '{"verdict":<PASS or REWRITE>}',
+        )
+        self.assertRaises(
+            Exception,
+            parse_output,
+            DiagnosticTask.STRUCTURED,
+            '{"useful_state_transfer":<PASS or FAIL>,"honest_uncertainty":<PASS or FAIL>,'
+            '"conditional_continuity":<PASS, FAIL, or N/A>,"scope_and_signal":<PASS or FAIL>,'
+            '"internal_consistency":<PASS or FAIL>}',
+        )
+
+
+class MetricSliceTests(unittest.TestCase):
+    def test_wilson_and_ties_and_drawers_and_consistency(self) -> None:
+        interval = wilson_interval(18, 27)
+        self.assertGreater(interval["high"], interval["low"])
+        ties = scalar_tie_stats(
+            ["a", "b", "c", "d"],
+            ["PASS", "PASS", "REWRITE", "REWRITE"],
+            [0.4, 0.4, 0.4, 0.9],
+        )
+        self.assertEqual(ties["distinct_values"], 2)
+        self.assertEqual(ties["exact_ties"], 2)
+        drawers = miss_versus_wrong_drawer(
+            ["g1", "g2"],
+            [
+                {
+                    "useful_state_transfer": "FAIL",
+                    "honest_uncertainty": "PASS",
+                    "conditional_continuity": "N/A",
+                    "scope_and_signal": "PASS",
+                    "internal_consistency": "PASS",
+                },
+                {
+                    "useful_state_transfer": "FAIL",
+                    "honest_uncertainty": "PASS",
+                    "conditional_continuity": "N/A",
+                    "scope_and_signal": "PASS",
+                    "internal_consistency": "PASS",
+                },
+            ],
+            [
+                {
+                    "useful_state_transfer": "PASS",
+                    "honest_uncertainty": "FAIL",
+                    "conditional_continuity": "N/A",
+                    "scope_and_signal": "PASS",
+                    "internal_consistency": "PASS",
+                },
+                {
+                    "useful_state_transfer": "PASS",
+                    "honest_uncertainty": "PASS",
+                    "conditional_continuity": "N/A",
+                    "scope_and_signal": "PASS",
+                    "internal_consistency": "PASS",
+                },
+            ],
+        )
+        self.assertEqual(drawers["wrong_drawer"], 1)
+        self.assertEqual(drawers["gate_miss"], 1)
+        self.assertEqual(drawers["wrong_drawer_miss"], 1)
+        self.assertEqual(drawers["unnoticed_miss"], 1)
+        self.assertTrue(repeat_consistency(["PASS", "PASS"])["agreed"])
+        self.assertFalse(repeat_consistency(["PASS", "REWRITE"])["agreed"])
+        self.assertIsNone(majority_discrete(["PASS", "REWRITE"]))
+        self.assertEqual(majority_discrete(["PASS", "PASS", "REWRITE"]), "PASS")
+
+    def test_unit_metrics_omit_gate_fields(self) -> None:
+        ids = [f"c{i}" for i in range(12)] + [f"r{i}" for i in range(15)]
+        gold = ["PASS"] * 12 + ["REWRITE"] * 15
+        predicted = ["PASS"] * 10 + ["REWRITE"] * 2 + ["REWRITE"] * 12 + ["PASS"] * 3
+        labels = [
+            {
+                "useful_state_transfer": "PASS" if verdict == "PASS" else "FAIL",
+                "honest_uncertainty": "PASS",
+                "conditional_continuity": "N/A",
+                "scope_and_signal": "PASS",
+                "internal_consistency": "PASS",
+            }
+            for verdict in gold
+        ]
+        predicted_labels = [
+            {
+                "useful_state_transfer": "PASS" if verdict == "PASS" else "FAIL",
+                "honest_uncertainty": "PASS",
+                "conditional_continuity": "N/A",
+                "scope_and_signal": "PASS",
+                "internal_consistency": "PASS",
+            }
+            for verdict in predicted
+        ]
+        repeats = {item_id: [predicted[index], predicted[index]] for index, item_id in enumerate(ids)}
+        unit = unit_metrics(
+            arm="C",
+            candidate_ids=ids,
+            gold_verdicts=gold,
+            gold_labels=labels,
+            predicted_verdicts=predicted,
+            predicted_labels=predicted_labels,
+            scores=[None] * 27,
+            pairs=(),
+            per_candidate_repeats=repeats,
+        )
+        dumped = json.dumps(unit)
+        self.assertNotIn("meets_gate", dumped)
+        self.assertNotIn("meets_candidate_gate", dumped)
+        self.assertNotIn("meets_basic", dumped)
+        self.assertIn("balanced_accuracy_band", dumped)
+        self.assertNotIn("balanced_accuracy_wilson", dumped)
+
+
+class OperatingPointAndSingleCallTests(unittest.TestCase):
+    """Arm A must not be scored at a threshold fitted to the rows it is scored on."""
+
+    def test_fixed_threshold_is_committed_and_not_fitted(self) -> None:
+        scores = [0.9, 0.1, 0.5, None]
+        self.assertEqual(
+            fixed_threshold_verdicts(scores),
+            ["PASS", "REWRITE", "PASS", None],
+        )
+        self.assertEqual(FIXED_SCALAR_THRESHOLD, 0.5)
+
+    def test_arm_a_headline_uses_fixed_threshold_and_labels_the_oracle(self) -> None:
+        ids = [f"c{index}" for index in range(6)]
+        gold = ["PASS", "PASS", "PASS", "REWRITE", "REWRITE", "REWRITE"]
+        # Every gold PASS sits just under 0.5, so a fitted threshold separates the classes
+        # perfectly while the committed 0.5 calls every candidate REWRITE.
+        scores = [0.45, 0.44, 0.43, 0.05, 0.04, 0.03]
+        unit = unit_metrics(
+            arm="A",
+            candidate_ids=ids,
+            gold_verdicts=gold,
+            gold_labels=[{}] * 6,
+            predicted_verdicts=fixed_threshold_verdicts(scores),
+            predicted_labels=[None] * 6,
+            scores=scores,
+            pairs=(),
+            per_candidate_repeats={item: [score] for item, score in zip(ids, scores)},
+        )
+        point = unit["scalar"]["operating_point"]
+        self.assertEqual(point["primary"], "fixed_threshold")
+        self.assertEqual(point["fixed_threshold"]["balanced_accuracy"], 0.5)
+        self.assertEqual(point["oracle_threshold"]["balanced_accuracy"], 1.0)
+        self.assertIn("upper_bound", point["oracle_threshold"]["caveat"])
+        # The cross-arm number is the committed one, not the fitted one.
+        self.assertEqual(unit["binary"]["balanced_accuracy"], 0.5)
+
+    def test_single_call_summarises_each_repeat_separately(self) -> None:
+        ids = ["a", "b"]
+        gold = ["PASS", "REWRITE"]
+        # First pass is perfect, second inverts: the mean must land between them, not on the
+        # majority vote of the two.
+        per_repeat = [["PASS", "REWRITE"], ["REWRITE", "PASS"]]
+        summary = single_call_metrics(ids, gold, per_repeat)
+        self.assertEqual(summary["repeats"], 2)
+        self.assertEqual(summary["balanced_accuracy_max"], 1.0)
+        self.assertEqual(summary["balanced_accuracy_min"], 0.0)
+        self.assertEqual(summary["balanced_accuracy_mean"], 0.5)
+        self.assertEqual(summary["balanced_accuracy_sd"], 0.5)
+        self.assertIn("one_call", summary["semantics"])
+
+
+class ArchiveAndRunnerTests(unittest.TestCase):
+    def test_logical_key_includes_condition_arm_candidate_and_repeat(self) -> None:
+        self.assertEqual(
+            logical_key("thinking_on", DiagnosticTask.SCALAR, "cand-1", 3),
+            "thinking_on:A:cand-1:r03",
+        )
+
+    def test_reservation_covers_missing_usage_retry_via_top_up(self) -> None:
+        reserve = worst_case_reservation_rmb(
+            max_attempts=2,
+            max_prompt_tokens=16_384,
+            max_completion_tokens=131_072,
+            missing_usage_rmb=Decimal("1"),
+        )
+        self.assertGreaterEqual(reserve, Decimal("2"))
+        attempts = [
+            {
+                "attempt": 1,
+                "requested_at": "2026-08-31T04:00:00+00:00",
+                "usage": None,
+                "recount": None,
+                "explicitly_unbilled": False,
+            },
+            {
+                "attempt": 2,
+                "requested_at": "2026-08-31T04:01:00+00:00",
+                "usage": {
+                    "prompt_tokens": 100,
+                    "completion_tokens": 10,
+                    "prompt_cache_hit_tokens": 40,
+                    "prompt_cache_miss_tokens": 60,
+                },
+                "recount": None,
+                "explicitly_unbilled": False,
+            },
+        ]
+        needed = sum(
+            (
+                Decimal(settle_attempt(item, missing_usage_rmb=Decimal("1"))["charge_rmb"])
+                for item in attempts
+            ),
+            Decimal(0),
+        )
+        with tempfile.TemporaryDirectory() as raw:
+            ledger = Plan100BudgetLedger(
+                Path(raw) / "budget-ledger.json", missing_usage_rmb=Decimal("1")
+            )
+            ledger.reserve("stuck:retry:1", Decimal("0.24576"))
+            ledger.top_up_reservation("stuck:retry:1", needed)
+            ledger.settle("stuck:retry:1", attempts)
+            snapshot = ledger.snapshot()
+            self.assertEqual(snapshot["settled_rmb"], format(needed, "f"))
+            self.assertEqual(snapshot["outstanding_reserved_rmb"], "0")
+
+    def test_commissioning_matrix_writes_eighteen_keys(self) -> None:
+        freeze = _freeze(
+            "commissioning", "plan101-commissioning-20260831T120000Z-test"
+        )
+        items = [_item("alpha"), _item("beta"), _item("gamma")]
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            runs = root / "runs"
+            ledger_path = root / "budget-ledger.json"
+            archive = ComparisonArchive(runs, freeze["run_id"], "commissioning").start(
+                freeze
+            )
+            ledger = Plan100BudgetLedger(ledger_path, missing_usage_rmb=Decimal("1"))
+            evaluators = {
+                "thinking_off": _FakeEvaluator(quality=0.31, completion_tokens=8),
+                "thinking_on": _FakeEvaluator(quality=0.44, completion_tokens=80),
+            }
+            execution = run_batch(
+                freeze,
+                items,
+                archive=archive,
+                ledger=ledger,
+                evaluators=evaluators,
+            )
+            self.assertTrue(execution["complete"])
+            self.assertEqual(execution["terminal_observation_count"], 18)
+            key = logical_key("thinking_off", DiagnosticTask.SCALAR, "alpha", 1)
+            self.assertIsNotNone(archive.load_terminal(key))
+            self.assertEqual(
+                evaluators["thinking_off"].calls[0][1],
+                canonical_json_bytes(dict(items[0].packet)),
+            )
+            dumped = json.dumps(execution)
+            self.assertNotIn("meets_gate", dumped)
+
+    def test_placeholders_and_tracked_projection_have_no_route(self) -> None:
+        ids = [f"c{i:02d}" for i in range(27)]
+        gold = ["PASS"] * 12 + ["REWRITE"] * 15
+        predicted = ["PASS"] * 12 + ["REWRITE"] * 15
+        labels = [
+            {
+                "useful_state_transfer": "PASS" if verdict == "PASS" else "FAIL",
+                "honest_uncertainty": "PASS",
+                "conditional_continuity": "N/A",
+                "scope_and_signal": "PASS",
+                "internal_consistency": "PASS",
+            }
+            for verdict in gold
+        ]
+        units = {}
+        for condition in ("thinking_off", "thinking_on"):
+            for arm in ("A", "B", "C"):
+                units[f"{condition}:{arm}"] = unit_metrics(
+                    arm=arm if arm != "A" else "B",
+                    candidate_ids=ids,
+                    gold_verdicts=gold,
+                    gold_labels=labels,
+                    predicted_verdicts=predicted,
+                    predicted_labels=labels,
+                    scores=[0.7 if verdict == "PASS" else 0.2 for verdict in gold]
+                    if arm == "A"
+                    else [None] * 27,
+                    pairs=(),
+                    per_candidate_repeats={item_id: [predicted[i]] * 2 for i, item_id in enumerate(ids)},
+                )
+                if arm == "A":
+                    units[f"{condition}:{arm}"] = unit_metrics(
+                        arm="A",
+                        candidate_ids=ids,
+                        gold_verdicts=gold,
+                        gold_labels=labels,
+                        predicted_verdicts=predicted,
+                        predicted_labels=[None] * 27,
+                        scores=[0.7 if verdict == "PASS" else 0.2 for verdict in gold],
+                        pairs=(),
+                        per_candidate_repeats={
+                            item_id: [0.7 if gold[i] == "PASS" else 0.2] * 2
+                            for i, item_id in enumerate(ids)
+                        },
+                    )
+        table = difference_table(units)
+        self.assertIn("thinking_on_minus_off", table)
+        self.assertIn("C_minus_B", table["expression"]["thinking_off"])
+        tracked = tracked_projection(
+            {
+                "schema": "rondo-publication-critic-plan101-comparison-result@v1",
+                "freeze_sha256": "a" * 64,
+                "complete": True,
+                "terminal_observation_count": 486,
+                "expected_terminal_observation_count": 486,
+                "thinking_off_repeats": 3,
+                "thinking_on_repeats": 3,
+                "parse_failure_count": {},
+                "usage_and_cost": {
+                    "attempts": 1,
+                    "prompt_tokens": 1,
+                    "completion_tokens": 1,
+                    "elapsed_ms": 1,
+                    "settled_rmb": "0.0",
+                },
+                "task_budget": {
+                    "schema": "x",
+                    "cap_rmb": "20",
+                    "settled_rmb": "0",
+                    "outstanding_reserved_rmb": "0",
+                    "remaining_unreserved_rmb": "20",
+                },
+                "metrics": units,
+                "differences": table,
+            }
+        )
+        self.assertNotIn("route_terminal", tracked)
+        self.assertNotIn("meets_gate", json.dumps(tracked))
+
+    def test_formal_freeze_requires_equal_three_repeats(self) -> None:
+        self.assertRaises(
+            ComparisonFreezeError,
+            _freeze,
+            "formal",
+            "plan101-formal-20260831T120000Z-bad",
+            on_repeats=5,
+        )
+
+    def test_commissioning_constant_b_is_not_failure_when_preregistered(self) -> None:
+        class ConstantB(_FakeEvaluator):
+            def evaluate(self, task: DiagnosticTask, packet: dict) -> dict:
+                if task is DiagnosticTask.DIRECT:
+                    self.calls.append((task, canonical_json_bytes(dict(packet))))
+                    attempt = {
+                        "attempt": 1,
+                        "requested_at": "2026-08-31T04:00:00+00:00",
+                        "usage": {
+                            "prompt_tokens": 80,
+                            "completion_tokens": self.completion_tokens,
+                            "prompt_cache_hit_tokens": 10,
+                            "prompt_cache_miss_tokens": 70,
+                        },
+                        "recount": None,
+                        "explicitly_unbilled": False,
+                    }
+                    return {
+                        "requested_model": "deepseek-v4-flash",
+                        "served_model": "deepseek-v4-flash",
+                        "response_text": '{"verdict":"PASS"}',
+                        "attempts": [attempt],
+                        "elapsed_ms": 12,
+                        "outcome": {"type": "success"},
+                    }
+                return super().evaluate(task, packet)
+
+        freeze = _freeze(
+            "commissioning", "plan101-commissioning-20260831T120000Z-preg"
+        )
+        items = [_item("alpha"), _item("beta"), _item("gamma")]
+        prereg = [
+            {
+                "condition": "thinking_off",
+                "arm": "B",
+                "commissioning_constant_response": '{"verdict":"PASS"}',
+            },
+            {
+                "condition": "thinking_on",
+                "arm": "B",
+                "commissioning_constant_response": '{"verdict":"PASS"}',
+            },
+        ]
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            archive = ComparisonArchive(
+                root / "runs", freeze["run_id"], "commissioning"
+            ).start(freeze)
+            ledger = Plan100BudgetLedger(
+                root / "budget-ledger.json", missing_usage_rmb=Decimal("1")
+            )
+            evaluators = {
+                "thinking_off": ConstantB(quality=0.31, completion_tokens=8),
+                "thinking_on": ConstantB(quality=0.44, completion_tokens=80),
+            }
+            run_batch(
+                freeze,
+                items,
+                archive=archive,
+                ledger=ledger,
+                evaluators=evaluators,
+            )
+            failed = recompute_commissioning(freeze, items, archive, ledger)
+            self.assertFalse(failed["complete"])
+            passed = recompute_commissioning(
+                freeze,
+                items,
+                archive,
+                ledger,
+                preregistered_observations=prereg,
+            )
+            self.assertTrue(passed["complete"])
+            self.assertTrue(passed["checks"]["constants_preregistered"])
+            self.assertEqual(passed["unit_response_distinct"]["thinking_off:B"], 1)
+
+    def test_supplement_decision_uses_ledger_only(self) -> None:
+        freeze = _freeze("formal", "plan101-formal-20260831T120000Z-sup")
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            archive = ComparisonArchive(
+                root / "runs", freeze["run_id"], "formal"
+            ).start(freeze)
+            ledger = Plan100BudgetLedger(
+                root / "budget-ledger.json", missing_usage_rmb=Decimal("1")
+            )
+            for condition in ("thinking_off", "thinking_on"):
+                key = f"{freeze['run_id']}:{condition}:A:c00:r01:1"
+                ledger.reserve(key, Decimal("1"))
+                ledger.settle(key, [_attempt()])
+            decision = decide_supplement(freeze, ledger, archive)
+            self.assertFalse(decision["looked_at_unit_metrics"])
+            self.assertFalse(decision["looked_at_parsed_outputs"])
+            self.assertIn(decision["decision"], {"proceed", "stop"})
+            self.assertEqual(
+                archive.load_optional_json("supplement-decision.json"), decision
+            )
+
+
+if __name__ == "__main__":
+    unittest.main()

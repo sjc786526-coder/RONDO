@@ -1,6 +1,6 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
-最后更新：2026-08-29 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
+最后更新：2026-08-31 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
 状态：**第一期、第二期、第四期已完成；Publication Critic 三期 Plan 097 已完成并闭合双 backend 工程 E2E 与可替换接缝。质量重构原定串行为
 “任务合同重构 → v8 后继数据改造与有限扩充 → 一次主方案训练 → 模型资格验收与横评”；前三个工作包已执行，第四个因无候选未解锁。Plan 098 已把
 前两个工作包规划为严格串行的两个阶段；Plan 098 的 v2/v9/v10/qualification 主体与此前方向性整改保留，formal
@@ -8,7 +8,9 @@ decoder 唯一入口、pair-aware margin selection 和 frozen decision direct-de
 工作包三 Plan 099 已完成唯一主方案 commissioning 与 clean formal，终态为 `VALID_FORMAL_NO_GO / FINAL_REVIEW_ACCEPTED`；没有候选，
 工作包四未解锁，Plan 099 外部动作授权已关闭。Plan 100 已在同一 v10/task v2/rubric v2 下完成 DeepSeek V4 Flash 的 scalar、直接 gate 与
 五维 hard decision 正式 development-validation 诊断，冻结为 `TASK_EXECUTABILITY_INSUFFICIENT` 并通过最终验收；它不属于工作包四，也不解锁
-qualification、训练或产品启用。Plan 097 的
+qualification、训练或产品启用。Plan 101 已在同一 cohort 上跑满 `810/810` 思考开关 × 输出表达对比测评，
+据此把**五维 hard decision 固定为云端判官接缝的后续方向，并把单标量云端接缝标注为废弃**；该结论只定方向，
+不授予质量资格，也不解锁产品启用。Plan 097 的
 `M3_D_DUAL_BACKEND_ENGINEERING_PASS / FINAL_REVIEW_ACCEPTED / INTEGRATED / PUSHED`、Plan 096 的
 `CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH / FINAL_REVIEW_ACCEPTED / INTEGRATED / PUSHED`、Plan 094 的有效负向终态和 Plan 095 的
 最终验收均保持有效；新路线完成资格前，本地/云端质量、产品价值、Publication Critic 默认与生产启用继续锁定**
@@ -29,7 +31,10 @@ Multi-Agent 作为存在前提。预期团队规模为 2–8 个 Agent，通常�
 质量。稳定产品语义见 [`doc/rondo-multi-publication-critic-product-contract.md`](../rondo-multi-publication-critic-product-contract.md)；
 Producer、Critic、Harness、Root 的职责及现行 Team State 不变量以该合同为共同前置。
 Plan 095 已在同一服务边界增加 eval/reference-only 的云端 scorer backend，不改变上述本地产品目标或默认关闭姿态。Plan 096 只为该
-backend 增加 validation 质量测量与 scalar/curve 接缝，不把 reference score 扩成产品 API。Plan 097 不再以合格 scorer 为前置，
+backend 增加 validation 质量测量与 scalar/curve 接缝，不把 reference score 扩成产品 API。
+该 scalar/curve 云端接缝自 Plan 101 起标注为**废弃**：它保留历史身份与可复算性，但不再是后续接入方向，
+新的云端判官接缝一律走五维 hard decision。task contract v2 早已规定旧 `[B, 1]` scalar 不是合法 successor 输出，
+Plan 101 只是在云端判官这一侧补上了同方向的实测证据。Plan 097 不再以合格 scorer 为前置，
 只把 local/cloud 都当作 engineering fixture，验证同一产品链在两个真实 backend 下的组合正确性；它不改写上述质量结论。
 Plan 097 完成后，三期不再继续沿用旧的单标量混合目标搜索，而是先重构任务合同，再依次重建数据、形成一个主训练候选并独立验收。
 
@@ -147,7 +152,12 @@ M3-B1c 正式分阶段训练与工件回收          │
                        ╳
         工作包四：模型资格验收与横评（未解锁）
 
-独立诊断支线：Plan 099 `VALID_FORMAL_NO_GO` → Plan 100 DS-V4-Flash 五维任务合同诊断（不解锁工作包四）
+独立诊断支线：Plan 099 `VALID_FORMAL_NO_GO` → Plan 100 DS-V4-Flash 五维任务合同诊断 → Plan 101 DS 思考开关 × 输出表达对比测评
+                                                                                        ↓
+                                              方向固定：五维 hard decision；单标量云端接缝废弃
+                                                                                        ↓
+                                              Plan 102 五维云端判官实验性工程接入（next，未授权启动）
+（均不解锁工作包四）
 
 并列 reference 支线：M3-B2a 已有可替换 service → Plan 095 云端参考 scorer backend（已完成）
                                               ↓
@@ -281,6 +291,53 @@ provider usage 结算 `0.0396094 RMB`，余额 `19.9603906 RMB`、outstanding re
 **路线交接**：完整有效 formal 按预冻结规则形成“五维结构强支持 / 离散判定支持但五维增益未确认 / 约束或数据问题 / 任务可执行性不足”之一；
 技术或预算未闭合只报 `INCONCLUSIVE`。只有“五维结构强支持”可以建议未来另立部分解冻后层的五头训练任务，该任务仍需用户决定、新 ExecPlan 与
 独立授权；Plan 100 不自动执行或解锁它。
+
+#### Plan 101：DS 思考开关 × 输出表达对比测评（已完成）
+
+**定位与依赖**：Plan 101 承接 Plan 100，属同一独立诊断支线，只消费 Plan 098 冻结的 task v2 / rubric v2 与 v10 development
+validation 的 27 candidates / 12 pairs。它是**测评（eval）而非资格门**：不设通过门、不产出路线终态、不授予任何模型或产品资格。
+
+**目标**：在同一 `deepseek-v4-flash` 与同一 packet 上测量 `thinking_off / thinking_on` × `A/B/C` 的 `2 × 3` 矩阵，
+产出可复算、可重复、可在同一 cohort 上连成曲线的差值型测评结果，并修复 Plan 100 已确认的输出示例锚定与单次采样两处测量缺陷。
+
+**授权与边界**：用户已授权真实 `deepseek-v4-flash` 与 task-wide `20 RMB` 硬上限。不读取 qualification 或 v9 test 正文，
+不训练，不使用 GPU/RunPod/Docker/真实本地模型，不上传，不充值，不改变 Publication Critic 产品默认与发布路径。
+
+**终态**：`MEASUREMENT_COMPLETE / FINAL_REVIEW_ACCEPTED`。B2 跑满 `810/810` observation（两条件各 5 次重复，
+补轮依据仅为预算），累计结算 `6.6787625 RMB` / 上限 `20 RMB`。合同见
+`plan/101-publication-critic-ds-thinking-comparison-eval-execplan.md`，结果见
+`eval/results/publication-critic/plan101-thinking-comparison-v1.{json,md}`。
+
+**据此形成的方向决定**：五维 hard decision（arm C）固定为云端判官接缝的后续方向，单标量（arm A）云端接缝标注废弃。
+依据是单次调用口径下 `thinking_off:C = 0.747`，在同条件下比 B 高 `0.122`、比 A 高 `0.120`，是唯一有明显间距的单元。
+方向选择同时基于架构契合：产品需要的是非补偿合取的 typed 判定与逐维可诊断性，标量需要一个另行标定的阈值，
+而 task contract v2 只允许把 scalar 当作五头 gate 的派生诊断。
+
+**必须一并记住的限制**：C 的优势依赖于关闭思考。开启思考时 `C − B = -0.010`、`C − A = +0.003`，三臂基本持平，
+且 `thinking_on:C` 跨重复自洽率只有 `0.481`。A 被废弃不是因为无区分度——`thinking_off:A` 的 AUC 是 `0.839`，
+排序能力好于任何一臂的判定能力，其低分来自固定工作点而非排序。`thinking_off:C` 的绝对水平仍然很差：
+15 条 gold REWRITE 里放过 `8` 条，`conditional_continuity` 的 failure recall 为 `0`，`scope_and_signal` 为 `0.167`。
+因此本方向只用于实验性接入，不构成质量资格，也不得据此发布或默认启用。
+
+**预登记现象被证伪**：`thinking_off:B` 在打通三元组上恒定 PASS，在 27 条上给出两种 verdict。方法论结论是
+三条 packet 的预览无法区分“无区分度”与“轻度类别偏置”，把 n=3 的恒定当作链路故障的自检项会阻塞唯一能回答该问题的测量。
+
+本任务不解锁工作包四；qualification 与训练路线须由用户另行决定并另立任务与授权。
+
+#### Plan 102：五维云端判官实验性工程接入（next，未授权启动）
+
+**定位与依赖**：承接 Plan 101 的方向决定，把 Plan 095/097 已经打通过的云端 scorer 接缝从单标量改造为
+五维 hard decision + 关闭思考。属工程接入，不属工作包四，不产出质量结论。
+
+**目标**：让 `codex-publication-critic-cloud-service` 在同一服务边界、同一 typed `PASS/REWRITE` 产品出口下，
+用五维输出合同向 `deepseek-v4-flash` 取回五个 hard decision，并在本地按 task contract v2 §3 的非补偿合取派生 verdict。
+产品外部消费的仍然只有 typed verdict。
+
+**边界**：**标注为仅实验性质，不投入生产、不正式发布、不改变默认关闭姿态**。不训练，不做质量测评或资格判定，
+不读取 qualification 或 v9 test 正文，不改写 task/product contract 语义。旧的单标量路径保留为历史身份与可复算路径，
+不删除，但不再作为接入方向。
+
+**当前状态**：未授权启动。需要用户单独授权真实 API 与预算后另立 ExecPlan。
 
 #### 工作包四：模型资格验收与横评（未解锁）
 

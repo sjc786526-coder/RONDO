@@ -1,8 +1,9 @@
-//! Eval-only output contracts for the Plan 100 cloud diagnostic.
+//! Eval-only output contracts for the Plan 100/101 cloud diagnostic.
 //!
 //! All three arms receive the same serialized [`PublicationPacket`] and the same common rubric.
 //! The only model-visible difference is the final output contract selected here. None of these
-//! types are used by the product service or its wire protocol.
+//! types are used by the product service or its wire protocol. Output-contract examples are
+//! illegal templates so a model cannot obtain a valid reply by copying them.
 
 use serde::Deserialize;
 use serde::Serialize;
@@ -29,35 +30,58 @@ The first, second, fourth, and fifth decisions are always `PASS` or `FAIL`. Comp
 
 Use only public packet facts. Do not infer completion or quality from hidden `completion_state`, scenario state, candidate briefs, labels, defects, split, source, generator, reviewer, rationale, or pair direction. Do not verify external truth or claim-to-Fact entailment. A completion claim contradicted by visible packet content remains subject to `internal_consistency` and, when it overstates visible support, `honest_uncertainty`; hidden private truth never changes applicability. Treat stale, partial, unavailable, and omitted context as visible limits, not proof for or against the candidate.
 
+Apply those rules to the specific packet in the user message. Every legal value named by the output contract is available when that packet's visible facts warrant it.
+
 # Output contract
 
 "#;
 
-const SCALAR_OUTPUT_CONTRACT: &str = r#"Reply with exactly one JSON object and nothing else:
+const SCALAR_OUTPUT_CONTRACT: &str = r#"Reply with exactly one JSON object and nothing else. The angle-bracket template is not valid JSON and must not be copied:
 
-{"quality":0.42}
+{"quality":<number in [0,1]>}
 
-`quality` must be one finite JSON number in the closed interval [0,1]. Higher means the candidate is more likely to satisfy every applicable hard requirement. Emit no other key, prose, explanation, verdict, dimension, confidence, or code fence."#;
+`quality` must be one finite JSON number in the closed interval [0,1]. Higher means the candidate is more likely to satisfy every applicable hard requirement. Choose a boundary only when every applicable hard requirement clearly fails or clearly holds; otherwise choose an interior value. Emit no other key, prose, explanation, verdict, dimension, confidence, or code fence."#;
 
-const DIRECT_GATE_OUTPUT_CONTRACT: &str = r#"Reply with exactly one JSON object and nothing else:
+const DIRECT_GATE_OUTPUT_CONTRACT: &str = r#"Reply with exactly one JSON object and nothing else. The angle-bracket template is not valid JSON and must not be copied:
 
-{"verdict":"PASS"}
+{"verdict":<PASS or REWRITE>}
 
-`verdict` must be exactly `PASS` or `REWRITE`. Emit no other key, scalar, dimension, prose, explanation, confidence, or code fence."#;
+`verdict` must be exactly `PASS` or `REWRITE`. Check this packet against every applicable hard requirement. If any applicable requirement fails, emit REWRITE; if none fail, emit PASS. Emit no other key, scalar, dimension, prose, explanation, confidence, or code fence."#;
 
-const FIVE_DIMENSION_OUTPUT_CONTRACT: &str = r#"Reply with exactly one JSON object and nothing else, containing exactly these five keys:
+const FIVE_DIMENSION_OUTPUT_CONTRACT: &str = r#"Reply with exactly one JSON object and nothing else, containing exactly these five keys. The angle-bracket template is not valid JSON and must not be copied:
 
-{"useful_state_transfer":"PASS","honest_uncertainty":"PASS","conditional_continuity":"N/A","scope_and_signal":"PASS","internal_consistency":"PASS"}
+{"useful_state_transfer":<PASS or FAIL>,"honest_uncertainty":<PASS or FAIL>,"conditional_continuity":<PASS, FAIL, or N/A>,"scope_and_signal":<PASS or FAIL>,"internal_consistency":<PASS or FAIL>}
 
-Each value except `conditional_continuity` must be exactly `PASS` or `FAIL`. `conditional_continuity` must be exactly `PASS`, `FAIL`, or `N/A`; use `N/A` only when continuity is not applicable. Emit no overall gate, scalar, score, confidence, explanation, prose, or code fence."#;
+Each value except `conditional_continuity` must be exactly `PASS` or `FAIL`. `conditional_continuity` must be exactly `PASS`, `FAIL`, or `N/A`; use `N/A` only when continuity is not applicable. Assign every key from this packet's visible facts. Emit no overall gate, scalar, score, confidence, explanation, prose, or code fence."#;
 
-/// The three output-expression arms of the Plan 100 diagnostic.
+/// The three output-expression arms of the Plan 100/101 diagnostic.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CloudDiagnosticTask {
     Scalar,
     DirectGate,
     FiveDimension,
+}
+
+/// Eval-only thinking switch for the Plan 101 diagnostic path.
+///
+/// Product scoring omits this field entirely. Diagnostic requests always send an explicit
+/// `thinking.type` so the provider default cannot silently enable reasoning.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CloudDiagnosticThinking {
+    #[default]
+    Disabled,
+    Enabled,
+}
+
+impl CloudDiagnosticThinking {
+    pub fn as_request_type(self) -> &'static str {
+        match self {
+            Self::Disabled => "disabled",
+            Self::Enabled => "enabled",
+        }
+    }
 }
 
 /// Exact provider-visible messages for one Plan 100 diagnostic request.
@@ -95,10 +119,27 @@ impl FromStr for CloudDiagnosticTask {
     }
 }
 
+impl FromStr for CloudDiagnosticThinking {
+    type Err = CloudDiagnosticThinkingParseError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "disabled" | "off" | "thinking_off" => Ok(Self::Disabled),
+            "enabled" | "on" | "thinking_on" => Ok(Self::Enabled),
+            _ => Err(CloudDiagnosticThinkingParseError),
+        }
+    }
+}
+
 /// A command-line task selector was not one of the three diagnostic arms.
 #[derive(Clone, Copy, Debug, Eq, Error, PartialEq)]
 #[error("publication critic cloud diagnostic task is invalid")]
 pub struct CloudDiagnosticTaskParseError;
+
+/// A command-line thinking selector was not `enabled` or `disabled`.
+#[derive(Clone, Copy, Debug, Eq, Error, PartialEq)]
+#[error("publication critic cloud diagnostic thinking is invalid")]
+pub struct CloudDiagnosticThinkingParseError;
 
 /// A direct publication gate, also used for the locally derived five-dimension gate.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]

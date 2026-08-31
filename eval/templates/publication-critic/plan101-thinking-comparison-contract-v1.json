@@ -1,0 +1,235 @@
+{
+  "schema": "rondo-publication-critic-plan101-thinking-comparison-contract@v1",
+  "scope": "development_validation_only",
+  "authority": {
+    "task": {
+      "path": "doc/rondo-multi-publication-critic-task-contract-v2.md",
+      "sha256": "3eb0539b16403ebe20e74ce1b1ea5114d2383c6118f61fef56c9c91426e6a560"
+    },
+    "task_projection": {
+      "path": "eval/templates/publication-critic/task-contract-v2.json",
+      "sha256": "6642a743d5d497e9ac6d9bec297fa780cd80b010049f4bda38ce03fcc582f3bd"
+    },
+    "rubric": {
+      "path": "eval/templates/publication-critic/qualification-rubric-v2.md",
+      "sha256": "c26ffffc41aa9adf68cffc38b14eb8e1da34f2e28dcb966fae8fec8055675946"
+    },
+    "input_contract": {
+      "path": "eval/templates/publication-critic/input-contract-v3.md",
+      "sha256": "9c43c7ca81caa20c337d025375020548bab3b0508f1a4aeff2ca4647c8197f7d"
+    },
+    "render_contract": {
+      "path": "eval/templates/publication-critic/render-contract-v4.json",
+      "sha256": "74f4623fe47188bc947a8a7559f90364fd528a6f9eebdc1b9676cbb2e3d96dde"
+    }
+  },
+  "release": {
+    "revision": "publication-critic-v10",
+    "manifest": {
+      "path": "training/publication-critic-v10/manifest.json",
+      "sha256": "61498f2f8580eab7dda59df0e2dba9bf5700c168e33f41bfec5cbdf3bd5041a4"
+    },
+    "validation_candidates": {
+      "path": "training/publication-critic-v10/splits/validation/candidates.jsonl",
+      "sha256": "20c545469a3c1972e90d4c587fc114845000a2c938c21bea95e42eeb94602508",
+      "bytes": 34370,
+      "rows": 27,
+      "order": "physical_jsonl_line_order"
+    },
+    "validation_pairs": {
+      "path": "training/publication-critic-v10/splits/validation/pairs.jsonl",
+      "sha256": "4b0fe7c7f8148b5c5d9b12fdfe9e2055c6b46e4c9cdb30e2058be0d13224edfd",
+      "bytes": 4544,
+      "rows": 12,
+      "order": "physical_jsonl_line_order"
+    },
+    "projection": {
+      "provider_visible": ["packet"],
+      "local_only": ["candidate_id", "group_id", "labels", "continuity_label_basis", "pairs"],
+      "packet_canonicalization": "utf8_sha256_canonical_json_sort_keys_compact_trailing_newline"
+    }
+  },
+  "comparison": {
+    "provider": "deepseek-official",
+    "requested_model": "deepseek-v4-flash",
+    "descriptor_candidate": {
+      "path": "eval/locks/publication-critic-plan101-thinking-comparison-descriptor-v1.json",
+      "sha256": "26860eede7956720804af7efabf841548b4695d07bd1462399adb84cddb46e3a",
+      "temperature": 0.0,
+      "max_output_tokens": 8192,
+      "max_attempts": 2,
+      "request_timeout_ms": 120000,
+      "retry_backoff_ms": 1000,
+      "response_format": "json_object"
+    },
+    "prompt_candidate": {
+      "source_path": "multidev/codex-rs/publication-critic/src/cloud_diagnostic.rs",
+      "source_sha256": "0796f112616d98f2f492ff74db6b59417f337fc2e8964ef07700a2de43f0d3af",
+      "common_semantics": "task_v2_rubric_v2_semantics_and_public_evidence_boundary",
+      "arm_specific_suffix": "illegal_placeholder_output_instruction_and_exact_output_schema_only",
+      "thinking": "runtime_parameter_on_diagnostic_path_only"
+    },
+    "same_packet_bytes_per_candidate": true,
+    "arm_order": ["A", "B", "C"],
+    "conditions": ["thinking_off", "thinking_on"],
+    "candidate_order": "release_physical_jsonl_line_order",
+    "unique_observation_key": "condition_x_arm_x_candidate_x_repeat",
+    "thinking_off_repeats": 3,
+    "thinking_on_repeats": 3,
+    "supplement_repeats_if_budget": 5,
+    "supplement_rule": "budget_only_before_inspecting_whether_extra_rounds_change_conclusions",
+    "provider_visible_difference": "thinking_switch_and_output_instruction_and_exact_output_schema_only"
+  },
+  "outputs": {
+    "A": {
+      "name": "single_scalar",
+      "example_form": "illegal_angle_bracket_template"
+    },
+    "B": {
+      "name": "direct_gate",
+      "example_form": "illegal_angle_bracket_template"
+    },
+    "C": {
+      "name": "five_hard_decisions",
+      "model_outputs_global_gate": false,
+      "local_gate": "all_applicable_heads_pass",
+      "example_form": "illegal_angle_bracket_template"
+    },
+    "strict_parser": {
+      "single_json_object": true,
+      "duplicate_keys": "reject",
+      "nan_infinity": "reject",
+      "prose_or_trailing_non_whitespace": "reject",
+      "missing_or_additional_fields": "reject",
+      "maximum_response_bytes_utf8": 4096
+    }
+  },
+  "commissioning": {
+    "quality_evidence": false,
+    "synthetic_per_unit": 1,
+    "synthetic_item": {
+      "candidate_id": "plan100-synthetic-commissioning-v1",
+      "path": "eval/fixtures/publication-critic/plan100-synthetic-packet-v1.json",
+      "file_bytes": 684,
+      "file_sha256": "4e3da1240827cc290dde7e020dd4ad0849ad0af7a8d4bc2e32133f0fedd17c10"
+    },
+    "public_packets_per_unit": 2,
+    "public_selection": "minimum_and_maximum_canonical_packet_bytes_candidate_id_tie_break_without_supervision",
+    "public_items": [
+      {
+        "selection": "minimum_canonical_packet_bytes_then_candidate_id",
+        "candidate_id": "pcv9-hard-boundaries-validation-01-qminus",
+        "packet_bytes": 486,
+        "packet_sha256": "f3d11525367bc1400a7531b78d89c009812bf7bd42cec75f79a7d2e43c0bbdeb"
+      },
+      {
+        "selection": "maximum_canonical_packet_bytes_then_candidate_id",
+        "candidate_id": "pcv9-continuity-context-020-qplus",
+        "packet_bytes": 1241,
+        "packet_sha256": "6677a5c61e0043245c95af5201a43c5851021ae6b9e13b7dc7db71365f10e2a2"
+      }
+    ],
+    "units": 6,
+    "repeats_per_unit": 1,
+    "logical_calls": 18,
+    "physical_namespace": "separate_from_formal",
+    "objective_gates": [
+      "six_units_complete_strict_parse",
+      "thinking_on_completion_tokens_significantly_above_thinking_off",
+      "no_response_byte_identical_to_angle_bracket_template",
+      "each_thinking_condition_has_an_arm_with_at_least_two_distinct_responses",
+      "arm_A_has_non_boundary_quality",
+      "constant_units_preregistered",
+      "extrapolated_b2_cost_within_20_rmb"
+    ],
+    "b1_pass_evidence": {
+      "run_id": "plan101-commissioning-20260831T134732Z-b1r4",
+      "prompt_source_sha256": "0796f112616d98f2f492ff74db6b59417f337fc2e8964ef07700a2de43f0d3af",
+      "gate_revision": "graded_non_degeneration_reviewer_2026-08-31",
+      "unit_response_distinct": {
+        "thinking_off:A": 2,
+        "thinking_off:B": 1,
+        "thinking_off:C": 3,
+        "thinking_on:A": 3,
+        "thinking_on:B": 2,
+        "thinking_on:C": 3
+      }
+    },
+    "preregistered_observations": [
+      {
+        "id": "thinking_off_B_constant_pass_on_commissioning_triplet",
+        "condition": "thinking_off",
+        "arm": "B",
+        "commissioning_constant_response": "{\"verdict\":\"PASS\"}",
+        "commissioning_distinct_responses": 1,
+        "missed_gold_rewrite_candidate_id": "pcv9-hard-boundaries-validation-01-qminus",
+        "b1_evidence_run_id": "plan101-commissioning-20260831T134732Z-b1r4",
+        "note": "n=3 cannot conclude no discrimination; B-off missed the obvious REWRITE in the triplet. B2 tests constancy on 27.",
+        "b2_test": "whether_thinking_off_B_is_constant_on_validation_27"
+      }
+    ]
+  },
+  "formal": {
+    "candidate_rows": 27,
+    "arms": 3,
+    "conditions": 2,
+    "thinking_off_repeats": 3,
+    "thinking_on_repeats": 3,
+    "namespace": "main_physical_root_eval_data_publication_critic_plan101_runs_new_empty_write_once_after_six_unit_commissioning",
+    "run_freeze_schema": "rondo-publication-critic-plan101-run-freeze@v1",
+    "receipt_before_settlement_before_terminal": true,
+    "technical_receipt": "settled_without_terminal_stops_then_explicit_same_freeze_resume_appends_next_ordinal_only_for_that_logical_item",
+    "output_contract_failure": "terminal_quality_observation_no_retry",
+    "no_route_terminal": true,
+    "no_meets_gate": true
+  },
+  "metrics": {
+    "shared": [
+      "balanced_accuracy",
+      "wilson_interval",
+      "false_pass",
+      "false_rewrite",
+      "class_recall",
+      "twelve_pair_results",
+      "repeat_consistency"
+    ],
+    "A": ["operating_curve", "roc_auc", "tie_ratio", "distinct_values"],
+    "C": [
+      "five_dimension_confusion",
+      "failure_recall",
+      "continuity_na_recall",
+      "miss_versus_wrong_drawer"
+    ],
+    "differences": [
+      "thinking_on_minus_thinking_off",
+      "C_minus_B",
+      "C_minus_A",
+      "B_minus_A"
+    ]
+  },
+  "budget": {
+    "currency": "RMB",
+    "hard_limit": 20.0,
+    "task_root": "main_physical_root/eval-data/publication-critic/plan101",
+    "missing_usage": "conservative_fixed_from_b1_max_rounded_up_not_offline_recount",
+    "price_card": {
+      "identity": "deepseek-v4-flash-live-2026-08-31-weekday-v3",
+      "source": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/",
+      "checked_at": "2026-08-31",
+      "timezone": "Asia/Shanghai",
+      "peak_days_beijing": ["monday", "tuesday", "wednesday", "thursday", "friday"],
+      "peak_windows_beijing": ["09:00-12:00", "14:00-18:00"],
+      "weekends": "off_peak_all_day",
+      "off_peak_rmb_per_million_tokens": {
+        "cache_hit_input": 0.05,
+        "cache_miss_input": 1.5,
+        "output": 4.5
+      },
+      "peak_rmb_per_million_tokens": {
+        "cache_hit_input": 0.1,
+        "cache_miss_input": 3.0,
+        "output": 9.0
+      }
+    }
+  }
+}
