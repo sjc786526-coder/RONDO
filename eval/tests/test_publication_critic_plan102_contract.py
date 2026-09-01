@@ -267,6 +267,10 @@ class Plan102ProducerPromptTests(unittest.TestCase):
         # The Plan 102 sharpening: bind the result, read the id off it, and
         # treat a rejected attempt as recoverable rather than terminal.
         self.assertIn("Bind the awaited result to a variable", prompt)
+        # The cell output is the model's only window onto the result; a prompt
+        # that only says "bind it" leaves the model blind to the verdict.
+        self.assertIn("print its status, its feedback, and its review_cycle_id", prompt)
+        self.assertIn("never print the candidate or any publication body", prompt)
         self.assertIn("never as a literal string you transcribed", prompt)
         self.assertIn("never resend the previous candidate unchanged", prompt)
         self.assertIn("A rejection does not consume a rewrite opportunity", prompt)

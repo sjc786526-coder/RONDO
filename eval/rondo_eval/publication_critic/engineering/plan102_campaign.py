@@ -75,7 +75,7 @@ PLAN102_PRODUCER_MEMBER_PROMPT = f"""You are the only Producer in a bounded synt
 Do not spawn another agent and do not ask Root to publish for you.
 Your assignment is complete only after team_publish returns the canonical event_id, version_id, and revision. Neither a rewrite_required result nor a rejected attempt is ever a terminal result: do not send a final response or end your assignment on one.
 1. Your first action on the publication path must be one team_publish opening a new Event. Use a short synthetic title, omit event_id and review_cycle_id, and make the complete summary exactly: {INITIAL_SYNTHETIC_DRAFT}
-2. Use exactly one fresh code cell for each team_publish attempt. That cell must contain exactly one awaited team_publish call and no second publish call. Bind the awaited result to a variable and end the cell immediately; when the result is rewrite_required you MUST continue in the next model turn and make the required revised attempt. Never prewrite, duplicate, batch, or parallelize publish attempts.
+2. Use exactly one fresh code cell for each team_publish attempt. That cell must contain exactly one awaited team_publish call and no second publish call. Bind the awaited result to a variable, then print its status, its feedback, and its review_cycle_id -- print nothing else from it, and never print the candidate or any publication body. The cell output is the only part of the result you can read, so a cell that prints nothing tells you nothing. End the cell after that print; when the result is rewrite_required you MUST continue in the next model turn and make the required revised attempt. Never prewrite, duplicate, batch, or parallelize publish attempts.
 3. Inspect the actual team_publish result. If and only if its status is rewrite_required, read its fixed feedback and autonomously write a materially revised, concise, self-contained synthetic summary. The revised summary must differ in wording from the one you just sent; never resend the previous candidate unchanged. Retry from this same thread with the same new-Event title. Do not prepare or copy a second draft before receiving feedback.
 4. The first team_publish is the only call that may omit review_cycle_id. Every later team_publish MUST pass the review_cycle_id of the immediately preceding rewrite_required result. Pass it as an expression that indexes the variable you bound in step 2, never as a literal string you transcribed: a retyped id will not match and the attempt will be rejected. Cells share one session, so that variable is still in scope. Never open a second Event and never issue a retry without it.
 5. If a team_publish attempt is rejected instead of reviewed, the cycle is still open: read the error, correct that same attempt in a fresh cell in the next model turn, and retry. A rejection does not consume a rewrite opportunity and must not end your assignment.
@@ -105,6 +105,7 @@ _PRODUCER_LEDGER_GENERATIONS: tuple[tuple[str, str], ...] = (
     # pins `unpriced_fallback_usd`; that keeps the `low` and `high` rounds in
     # separate books without loosening the task cap.
     ("plan102-producer-terra-v4", "producer-terra-v4-ledger.json"),
+    ("plan102-producer-terra-v5", "producer-terra-v5-ledger.json"),
 )
 _PRODUCER_BATCH_ID, _PRODUCER_LEDGER_NAME = _PRODUCER_LEDGER_GENERATIONS[-1]
 _CLOUD_LEDGER_NAME = "cloud-scorer-v1-ledger.json"
