@@ -59,6 +59,25 @@ PLAN102_PRODUCER_FORMAL_PROMPT = """Run one bounded synthetic Plan 102 Publicati
 4. Stop after both inspections. Do not quote or summarize the publication body in the final response.
 """
 _PRODUCER_WAIT_TIMEOUT_MS = 180_000
+# Plan 097's member prompt states the retry rule in prose. Under `terra` at
+# `low` effort that reliably produced a second `team_publish` that dropped
+# `review_cycle_id` and resent the identical candidate, which `team_publish`
+# rejects with a cycle mismatch; the model then treated the rejection as
+# terminal. This variant pins the same rules to a concrete mechanic (keep the
+# result, read the id off it) and says a rejection must be corrected rather
+# than ended on. It relaxes none of the evidence invariants: one publish per
+# fresh cell, no prewriting, one Event, one canonical commit.
+PLAN102_PRODUCER_MEMBER_PROMPT = f"""You are the only Producer in a bounded synthetic Plan 102 engineering run.
+Do not spawn another agent and do not ask Root to publish for you.
+Your assignment is complete only after team_publish returns the canonical event_id, version_id, and revision. Neither a rewrite_required result nor a rejected attempt is ever a terminal result: do not send a final response or end your assignment on one.
+1. Your first action on the publication path must be one team_publish opening a new Event. Use a short synthetic title, omit event_id and review_cycle_id, and make the complete summary exactly: {INITIAL_SYNTHETIC_DRAFT}
+2. Use exactly one fresh code cell for each team_publish attempt. That cell must contain exactly one awaited team_publish call and no second publish call. Bind the awaited result to a variable and end the cell immediately; when the result is rewrite_required you MUST continue in the next model turn and make the required revised attempt. Never prewrite, duplicate, batch, or parallelize publish attempts.
+3. Inspect the actual team_publish result. If and only if its status is rewrite_required, read its fixed feedback and autonomously write a materially revised, concise, self-contained synthetic summary. The revised summary must differ in wording from the one you just sent; never resend the previous candidate unchanged. Retry from this same thread with the same new-Event title. Do not prepare or copy a second draft before receiving feedback.
+4. The first team_publish is the only call that may omit review_cycle_id. Every later team_publish MUST pass the review_cycle_id of the immediately preceding rewrite_required result. Read it off the variable you bound in step 2 rather than retyping it, and pass it in the same cell as that retry. Never open a second Event and never issue a retry without it.
+5. If a team_publish attempt is rejected instead of reviewed, the cycle is still open: read the error, correct that same attempt in a fresh cell in the next model turn, and retry. A rejection does not consume a rewrite opportunity and must not end your assignment.
+6. Repeat steps 3-5 for at most the two blocking rewrite opportunities. The third review is non-blocking. Stop immediately when team_publish returns event_id, version_id, and revision; do not publish another Version.
+7. End your assignment after the canonical commit. Never print or send the publication body to Root.
+"""
 from .service_runtime import (
     RunningScorerService,
     RuntimeBinaries,
@@ -481,6 +500,7 @@ def _run_producer(
                         member_model=provider.main_model,
                         member_effort=provider.main_effort,
                         instruction=PLAN102_PRODUCER_FORMAL_PROMPT,
+                        member_instruction=PLAN102_PRODUCER_MEMBER_PROMPT,
                     )
                     separator = command.index("--")
                     command = [

@@ -212,6 +212,38 @@ class Plan102ProducerLedgerGenerationTests(unittest.TestCase):
                 campaign._producer_retired_spend(paths)
 
 
+class Plan102ProducerPromptTests(unittest.TestCase):
+    def test_plan102_member_prompt_keeps_every_evidence_invariant(self) -> None:
+        from rondo_eval.publication_critic.engineering import (  # noqa: E402
+            plan102_campaign as campaign,
+        )
+        from rondo_eval.publication_critic.engineering.producer_runtime import (  # noqa: E402
+            PRODUCER_MEMBER_PROMPT,
+        )
+
+        prompt = campaign.PLAN102_PRODUCER_MEMBER_PROMPT
+        for requirement in (
+            "exactly one fresh code cell for each team_publish attempt",
+            "exactly one awaited team_publish call",
+            "Never prewrite, duplicate, batch, or parallelize publish attempts",
+            "The first team_publish is the only call that may omit review_cycle_id",
+            "Never open a second Event",
+            "you MUST continue in the next model turn",
+            "do not publish another Version",
+            "Never print or send the publication body to Root",
+        ):
+            self.assertIn(requirement, prompt)
+        # The Plan 102 sharpening: bind the result, read the id off it, and
+        # treat a rejected attempt as recoverable rather than terminal.
+        self.assertIn("Bind the awaited result to a variable", prompt)
+        self.assertIn("rather than retyping it", prompt)
+        self.assertIn("never resend the previous candidate unchanged", prompt)
+        self.assertIn("A rejection does not consume a rewrite opportunity", prompt)
+        # Plan 097 keeps its own frozen prompt.
+        self.assertNotEqual(prompt, PRODUCER_MEMBER_PROMPT)
+        self.assertIn("Plan 097", PRODUCER_MEMBER_PROMPT)
+
+
 class Plan102ProxyShapeTests(unittest.TestCase):
     def test_records_disabled_thinking_without_bodies(self) -> None:
         from rondo_eval.publication_critic.engineering.cloud_budget_proxy import (  # noqa: E402

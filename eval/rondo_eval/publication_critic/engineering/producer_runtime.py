@@ -75,6 +75,7 @@ def build_producer_command(
     member_model: str | None = None,
     member_effort: str | None = None,
     instruction: str = PRODUCER_FORMAL_PROMPT,
+    member_instruction: str = PRODUCER_MEMBER_PROMPT,
 ) -> list[str]:
     """Build the strict current ``codex exec`` command for one Producer run.
 
@@ -101,6 +102,8 @@ def build_producer_command(
         raise ValueError("endpoint must be a literal 127.0.0.1 socket address")
     if not isinstance(instruction, str) or not instruction.strip():
         raise ValueError("instruction must be non-empty")
+    if not isinstance(member_instruction, str) or not member_instruction.strip():
+        raise ValueError("member_instruction must be non-empty")
 
     command = build_multi_exec_command(
         Path(binary),
@@ -114,7 +117,7 @@ def build_producer_command(
     separator = command.index("--")
     critic_overrides = (
         "features.multi_agent_v2.subagent_developer_instructions="
-        f"{json.dumps(PRODUCER_MEMBER_PROMPT)}",
+        f"{json.dumps(member_instruction)}",
         f"features.multi_agent_v2.publication_critic.endpoint={json.dumps(endpoint)}",
         "features.multi_agent_v2.publication_critic.expected_descriptor_json="
         f"{json.dumps(descriptor_json)}",
