@@ -1,22 +1,26 @@
+{{! Triple braces everywhere on purpose. Handlebars HTML-escapes {{..}} by
+    default, which turns `PROVIDED "AS IS"` into `PROVIDED &quot;AS IS&quot;`
+    and corrupts every reproduced license text. A notice file has to be
+    verbatim, and this output is Markdown, not HTML. }}
 ## Overview
 
 {{#each overview}}
-- {{name}} ({{count}})
+- {{{name}}} ({{count}})
 {{/each}}
 
 {{#each licenses}}
 ---
 
-## {{name}}
+## {{{name}}}
 
 Used by:
 
 {{#each used_by}}
-- {{crate.name}} {{crate.version}}{{#if crate.repository}} — {{crate.repository}}{{/if}}
+- {{{crate.name}}} {{{crate.version}}}{{#if crate.repository}} — {{{crate.repository}}}{{/if}}
 {{/each}}
 
 ```text
-{{text}}
+{{{text}}}
 ```
 
 {{/each}}

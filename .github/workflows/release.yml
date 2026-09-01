@@ -485,15 +485,51 @@ jobs:
           echo "$out" | grep -E 'search.*bundled' \
             || { echo "::error::doctor did not resolve the bundled ripgrep"; exit 1; }
 
-      - name: Smoke test - arg0 and sandbox
+      # Ubuntu 24.04 restricts unprivileged user namespaces through AppArmor,
+      # and bubblewrap needs CLONE_NEWUSER. Without this the bundled sandbox
+      # cannot start at all, so the checks below would be testing the
+      # restriction rather than the package.
+      - name: Allow unprivileged user namespaces (Ubuntu 24.04)
         shell: bash
         run: |
           set -euo pipefail
+          echo "kernel: $(uname -r)"
+          for knob in kernel.apparmor_restrict_unprivileged_userns \
+                      kernel.unprivileged_userns_clone; do
+            if sysctl -n "$knob" >/dev/null 2>&1; then
+              echo "$knob = $(sysctl -n "$knob")"
+            else
+              echo "$knob: not present"
+            fi
+          done
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+          sudo sysctl -w kernel.unprivileged_userns_clone=1 || true
+
+      - name: Smoke test - arg0 and sandbox
+        shell: bash
+        run: |
+          set -uo pipefail
           export CODEX_HOME="${RUNNER_TEMP}/codex-home"
           mkdir -p "$CODEX_HOME"
+
+          # Deliberately NOT `set -e` around this: the whole point of the step
+          # is the command's output, and letting -e kill the shell first throws
+          # away the only diagnostic there is.
           out="$("${PKG}/bin/${VARIANT}" sandbox -- /bin/echo rondo-sandbox-ok 2>&1)"
+          status=$?
+          echo "--- exit ${status} ---"
           echo "$out"
-          echo "$out" | grep -q 'rondo-sandbox-ok'
+
+          if [[ $status -ne 0 ]] || ! grep -q 'rondo-sandbox-ok' <<<"$out"; then
+            echo "--- diagnostics ---"
+            echo "bundled bwrap:"
+            "${PKG}/codex-resources/bwrap" --version || echo "  bundled bwrap failed to run"
+            echo "direct bwrap userns probe:"
+            "${PKG}/codex-resources/bwrap" --unshare-user --unshare-pid \
+              --ro-bind / / /bin/echo bwrap-userns-ok || echo "  bwrap could not create a user namespace"
+            echo "::error::sandbox smoke test failed"
+            exit 1
+          fi
 
       # A14: prove the bundled bwrap digest check is actually compiled in.
       #

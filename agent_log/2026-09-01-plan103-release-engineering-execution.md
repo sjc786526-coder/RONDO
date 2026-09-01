@@ -170,6 +170,50 @@ cli = ["dep:nu-ansi-term", "dep:handlebars", "dep:mimalloc", "dep:jiff", "dep:fe
 而且这次它连报错都懒得报。也正因为许可收集脚本自己是 fail-closed 的，
 才没有把一个缺许可闭包的包悄悄归档发出去。
 
+**rc3（`multi-v0.1.0-rc3`）：构建 job 全绿（1h30m），verify job 停在 sandbox 冒烟测试。**
+
+构建侧全部通过，包括许可注入、归档、**解包复验**（三个预构建产物的 SHA-256 与
+`CODEX_BWRAP_SHA256` 全部对上）、上传。verify job 也通过了校验和、
+**"runner 上没有 system bwrap"守卫**、`--version`、bundled ripgrep 解析。
+
+sandbox 那步失败，但**我自己的测试脚本把唯一的诊断信息弄丢了**：
+`set -e` + `out="$(cmd)"` 在命令非零时直接终止 shell，后面的 `echo "$out"` 根本没机会跑。
+已改为显式捕获 status、先打印再判定，并在失败时追加 bwrap 自检与 userns 探测。
+
+### 用 rc3 的真实产物在本机定位
+
+与其再等 1.5 小时，直接把 rc3 的 artifact 下下来在本机验：
+
+- 校验和 ✅，包内容完整（10 个许可文件 + 三个二进制 + rg + zsh + `codex-package.json`）
+- `bin/rondo-multi` 是静态 musl PIE ✅
+- 造一个**不含 bwrap 的 PATH farm** 强制走 bundled 路径 →
+  `sandbox -- /bin/echo` 输出正确、exit 0 ✅
+
+所以 musl 产物本身没问题，runner 上的失败是**环境限制**：
+Ubuntu 24.04 用 AppArmor 限制非特权 user namespace，而 bubblewrap 需要 `CLONE_NEWUSER`。
+verify job 已加 `kernel.apparmor_restrict_unprivileged_userns=0`（一次性 VM 上的标准做法）。
+
+### A14 已在真实发布产物上验证通过（本机）
+
+```
+exit=101
+thread 'main' panicked at linux-sandbox/src/bundled_bwrap.rs:44:35:
+bundled bubblewrap digest mismatch for …/codex-resources/bwrap:
+  expected sha256:91d6120338523f6f…, got sha256:d44993ed59c90f95…
+```
+
+四步都成立：尾部追加一字节后摘要改变 → **篡改后的 bwrap 自身仍能运行**
+（`bubblewrap built for Codex`，排除"跑不起来"这个假阳性）→ 经产品触发 →
+命中**那一条具体错误**。而且 expected 值 `91d6120338523f6f…` 与构建日志里导出的
+`CODEX_BWRAP_SHA256` **完全一致**——这就证明了冻结构建顺序确实把摘要编进了发布二进制，
+H12 不是纸面约束。
+
+### 许可报告的一处真实缺陷
+
+生成出来的报告里有 **2084 处 HTML 实体**，
+例如 `THE SOFTWARE IS PROVIDED &quot;AS IS&quot;`。原因是 handlebars 的 `{{ }}` 默认转义，
+而许可全文必须逐字复制。模板已全部改为 `{{{ }}}`。
+
 ### 本机预跑（先于 rc1 降风险）
 
 用 multidev 既有 debug 产物 + 新建 `bwrap`，走 C-3 的准确路径打了一个本机包：
