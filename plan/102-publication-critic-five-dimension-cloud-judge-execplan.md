@@ -55,16 +55,17 @@ Plan 100/101 已经在**诊断路径**上实现并验证过五维输出合同、
       `REWRITE = 任一 applicable head 为 FAIL`；`N/A` 只排除该 head，**不提供正分**。
 - [ ] §4.3 的穷举等价测试通过：五维 `2×2×3×2×2 = 48` 种合法组合全部覆盖，派生 verdict 与 §3 规则逐条相等。
 - [ ] 五维模式下，**没有任何自由 threshold 能改变 verdict**；typed verdict 只由离散合取规则产生（见 §3.3）。
-- [ ] 用真实 `deepseek-v4-flash` 跑通**判官接缝的端到端路径**：`PublicationScorer → service → typed client`
-      在同一次服务运行中得到 typed `PASS` 与 `REWRITE` 两种外部结果，并留下可复算回执与费用账本。
-      **不接受只有 fake/离线绿**。
-- [ ] （**待用户决定，见 §4.2**）若用户另行授权 Producer 侧付费模型，则再补跑一次含 `team_publish`
-      与 Producer 重写的完整发布链路；未获该授权时，本条不做，并在结果中如实写明未覆盖范围。
+- [ ] 用真实 `deepseek-v4-flash` 跑通**判官段**：`PublicationScorer → service → typed client`
+      在同一次服务运行中得到 typed `PASS` 与 `REWRITE` 两种外部结果。**不接受只有 fake/离线绿**。
+- [ ] 用真实 `gpt-5.6-terra` 跑通**写作者段**：真实 Producer 调 `team_publish`，被判 `REWRITE` 后完成重写，
+      形成唯一 canonical commit。判官段与写作者段合起来构成**一次完整发布链路**，
+      从干净状态完整跑通一轮并留下可复算回执与费用账本（见 §4.2）。
 - [ ] 默认关闭姿态、`team_publish` 语义、Producer 重写、canonical commit、infra fallback、取消、
       Root/Team State 不变量全部未变，并有测试守住。
 - [ ] 旧标量路径仍可按**原身份**复算：既有 scalar identity、模板字节、解析与阈值语义不变，
       既有 Plan 095/096/097 结果不因本次改动而失效。
-- [ ] task-wide 真实 API 消费不超过 `10 RMB`；缺失 usage 时按 `0.1 RMB/次` 保守兜底入账（见 §4.1）。
+- [ ] 两笔预算各自独立、各自不超限：判官段 `deepseek-v4-flash` ≤ `10 RMB`（缺失 usage 按 `0.1 RMB/次` 兜底），
+      写作者段 `gpt-5.6-terra` ≤ `50 USD`。两笔分账记录，不互相挪用、不合并计算（见 §4.1）。
 - [ ] 相称的定向测试通过；Rust 构建/测试只走主物理根 `just` + `scripts/with-build-lock.sh`，
       并复用唯一 `.codex/cargo-target/rondo-multi`。
 - [ ] 只提交 102 任务分支并保持 worktree clean；合并、推送、分支归档与 worktree 删除等待用户批准。
@@ -113,17 +114,20 @@ Plan 100/101 已经在**诊断路径**上实现并验证过五维输出合同、
 
 ### 3.1 授权边界
 
-1. **已授权**：真实 `deepseek-v4-flash`，task-wide 硬上限 `10 RMB`；不限重跑次数与轮次，真实 API 只受预算约束；
-   必要的重型 Cargo 构建与 Docker，仍走共享构建锁与看门狗；必须复用 `.codex/cargo-target/rondo-multi`。
+1. **已授权**：两个付费模型，两笔**互相独立**的预算：
+   - 判官段：真实 `deepseek-v4-flash`，硬上限 `10 RMB`；
+   - 写作者段：真实 `gpt-5.6-terra`（Producer），硬上限 `50 USD`。
+
+   不限重跑次数与轮次，真实 API 只受各自预算约束；必要的重型 Cargo 构建与 Docker，仍走共享构建锁与看门狗；
+   必须复用 `.codex/cargo-target/rondo-multi`。
 2. **仍未授权**：训练、GPU/RunPod、真实本地模型加载与推理、上传、充值、产品默认启用与发布、
    qualification 与 v9 test 正文。任一项都不得因“为了把链路跑通”而突破。
-3. **只授权了一个付费模型。** 本任务的付费外发对象**只有** `deepseek-v4-flash`，上限 `10 RMB`。
-   Plan 097 发布链路中的 Producer 使用**另一个付费模型** `gpt-5.6-terra`（合同别名 `terra`，按美元计价，
-   Plan 097 为其单列 `producer_rmb = 24 RMB`）。该模型**不在本任务授权内**。
-   注意 `LoopbackResponsesProxy` **不是离线假件**：它是短命本地代理，持真实 key 转发到真实付费上游并计量扣账，
-   走它一样花钱。因此在未获追加授权前，**不得以任何方式发起 Producer 侧付费调用**，
-   包括为了"把链路跑通"而临时改配置或复用 Plan 097 的既有 ledger。
-   需要该覆盖时按 §4.2 停下来向用户申请，不得先花钱再报告。
+3. **只授权了这两个付费模型，且两笔钱不串。** 付费外发对象只有 `deepseek-v4-flash` 与 `gpt-5.6-terra`。
+   两笔预算**分账、独立、不得互相挪用**：判官段花不完不能挪给写作者段，反之亦然；
+   任一笔耗尽时停止该段的付费动作并如实报告，不得用另一笔续命。
+   注意 `LoopbackResponsesProxy` 与 `CloudBudgetProxy` **都不是离线假件**：它们是短命本地代理，
+   持真实 key 转发到真实付费上游并计量扣账，走它们一样花钱。
+   任何第三个付费模型、任何充值动作都未授权。
 4. **不得新建 target 目录。** `CARGO_TARGET_DIR` 只能是 `.codex/cargo-target/rondo-multi`，
    且必须位于受监控的 RONDO 项目根内。不直接调用 Cargo 跑正式重型任务。
 
@@ -153,17 +157,18 @@ Plan 100/101 已经在**诊断路径**上实现并验证过五维输出合同、
 
 ### 3.4 数据与外发
 
-13. **外发最小化。** 只允许向 DeepSeek 外发 bounded public packet、必要的无监督 synthetic 打通 packet
-    和冻结的 task/rubric/output 指令。不得外发 labels、pairs/direction、split、defects、candidate brief、
-    生成/审查记录、qualification/test 正文、源码、密钥或私有日志。
+13. **外发最小化。** 判官段只允许向 DeepSeek 外发 bounded public packet、必要的无监督 synthetic 打通 packet
+    和冻结的 task/rubric/output 指令；写作者段只允许外发 Producer 正常完成发布任务所必需的运行上下文。
+    两段都不得外发 labels、pairs/direction、split、defects、candidate brief、生成/审查记录、
+    qualification/test 正文、源码、密钥或私有日志。
 14. **body-free 证据。** tracked 结果与日志不得包含 packet 正文、provider 响应正文、credential 或私有 endpoint。
     响应正文只允许进入 task-owned ignored 回执。
 
 ### 3.5 预算与诚实
 
-15. **预算硬上限 `10 RMB`。** 不继承历史余额，不授权充值。发起下一次可能计费动作前，
-    “已结算费用 + 未结算预留 + 下一动作的保守预估”必须 ≤ `10 RMB`。
-    余额不足以完成下一必要步骤时停止并如实报告。
+15. **两笔独立硬上限：判官段 `10 RMB`、写作者段 `50 USD`。** 不继承历史余额，不授权充值，两笔不互相挪用。
+    发起下一次可能计费动作前，该段的“已结算费用 + 未结算预留 + 下一动作的保守预估”必须落在**本段**上限内。
+    某段余额不足以完成下一必要步骤时，停止该段并如实报告，不得改用另一段的额度。
 16. **费用结算从简。** provider 返回 usage 时按 usage 与当次请求北京时间适用的官方价卡精确结算；
     usage 缺失时按 `0.1 RMB/次` 保守固定值入账。**不得**建设离线 token 复算、tokenizer 冻结
     或“离线复算必须与 provider 精确相等”的自检门。
@@ -184,46 +189,54 @@ Plan 100/101 已经在**诊断路径**上实现并验证过五维输出合同、
 
 ### 4.1 预算与费用口径
 
-- task-wide 硬上限 `10 RMB`，覆盖阶段 B1 与 B2 的全部真实调用。
-- usage 优先按 provider 返回值与当次适用价卡精确结算；缺失 usage 时按 `0.1 RMB/次` 入账。
+两笔预算分账、互不挪用，各自覆盖阶段 B1 与 B2 的全部真实调用：
+
+| 段 | 模型 | 上限 | 缺失 usage 兜底 | 参考单价 |
+|---|---|---|---|---|
+| 判官段 | `deepseek-v4-flash` | `10 RMB` | `0.1 RMB/次` | Plan 101 约 `0.008 RMB/次`；Plan 097 约 `0.003 RMB/次` |
+| 写作者段 | `gpt-5.6-terra` | `50 USD` | 按 `maximum_usage_cost(pricing, envelope)` 的保守预留入账 | Plan 097 约 `0.124 RMB/次`（约 `0.0165 USD/次`） |
+
+- usage 优先按 provider 返回值与当次适用价卡精确结算；判官段缺失 usage 时按 `0.1 RMB/次` 入账，
   该值取代 Plan 101 使用的 `1 RMB/次`（当时口径偏高）。
-- 参考量级：Plan 101 的 `810` 次真实调用共结算 `6.68 RMB`，约 `0.008 RMB/次`。
-  因此本任务的**约束大概率不是 scorer 调用费用**，执行者不必为省钱牺牲打通质量；
+- 写作者段沿用既有 `PersistentBudgetLedger` 的 USD 记账与保守预留机制，不另造第二套账本。
+- 参考量级：Plan 097 全任务 `172` 次 Producer 请求共 `21.35 RMB`（约 `2.85 USD`），
+  且那已经包含两个 backend、多轮 commissioning 与七代废弃 ledger。
+  因此 `50 USD` 对本任务是**宽裕**的额度，执行者不必为省钱牺牲打通质量；
   但仍须在每次可能计费动作前完成 §3.15 的预检。
 - 费用账本落在 task-owned ignored namespace，并在阶段与最终汇报中如实列出已结算金额与剩余额度。
 
-### 4.2 端到端链路的范围与那笔没被授权的钱
+### 4.2 端到端链路的两段与它们各自的钱
 
-完整发布链路 `PublicationScorer → service → typed client → team_publish` 由两段构成，**分别花不同的钱**：
+完整发布链路 `PublicationScorer → service → typed client → team_publish` 由两段构成，**分别花不同的钱**。
+两段都已授权，两段都要真跑：
 
-| 段 | 覆盖内容 | 付费模型 | Plan 097 实际花费 |
-|---|---|---|---|
-| 判官段（direct case） | `service.review(packet)` → typed `pass`/`rewrite` | 云端 scorer（本任务为 `deepseek-v4-flash`） | `0.0741636 RMB` / 24 次（约 `0.003 RMB` 一次） |
-| 写作者段（Producer） | 真实 agent 调 `team_publish`、被判 REWRITE 后重写、canonical commit | `gpt-5.6-terra` | `21.3455550 RMB` / 172 次（约 `0.124 RMB` 一次） |
+| 段 | 覆盖内容 | 付费模型 | Plan 097 实际花费 | 本任务上限 |
+|---|---|---|---|---|
+| 判官段（direct case） | `service.review(packet)` → typed `pass`/`rewrite` | `deepseek-v4-flash` | `0.0741636 RMB` / 24 次 | `10 RMB` |
+| 写作者段（Producer） | 真实 agent 调 `team_publish`、被判 REWRITE 后重写、canonical commit | `gpt-5.6-terra` | `21.3455550 RMB` / 172 次 | `50 USD` |
 
-Plan 097 总花费 `21.4197186 RMB` 中，**99.65% 花在 Producer 段**，判官段几乎不要钱。
-本任务的 `10 RMB` 只授权给 `deepseek-v4-flash`，**没有覆盖 Producer 段**。
+Plan 097 总花费 `21.4197186 RMB` 中 **99.65% 花在 Producer 段**，判官段几乎不要钱。
+执行者据此安排节奏：判官段可以放开打通，**成本压力全在写作者段**，那一段要想清楚了再发起。
 
-因此本任务的默认范围是：
+### 4.2.1 Plan 097 的预算合同不能直接复用
 
-- **做**：判官段的真实端到端。同一次服务运行内取得 typed `PASS` 与 `REWRITE`，
-  证明五维接缝在真实 provider 下真通。这一段完全落在已授权预算内，且成本可忽略。
-- **不做**：Producer 段的真实运行。`team_publish` 语义、Producer 重写、canonical commit、fallback、取消、
-  Team State 不变量改由既有离线/进程级测试守住不回归，**并如实标注为非真实模型证据**。
-- **不得**：为了凑出"完整链路"而动用 Plan 097 的 Producer 路径或其 ledger。
+`engineering/contract.py#_validate_budgets` 把 Plan 097 的四个数**硬编码为身份**：
+`cloud_scorer_rmb = 6`、`producer_rmb = 24`、`rmb_per_usd = 7.5`、`total_rmb = 30`，
+任一不等即 `budget_identity_invalid`。`campaign.py` 里同样钉死了
+`_PRODUCER_TOTAL_CAP_USD = 24/7.5 = 3.2`、`_PRODUCER_RUN_CAP_USD = 2.4`、`_PRODUCER_MAX_RUNS = 2`。
 
-工程上还有一个现成障碍：`engineering/campaign.py` 的 `_execute_backend` 无条件调用 `_run_producer`，
-没有"只跑 direct case"的模式（`skip_direct_cases` 给的是相反的 producer-only，且只允许 commissioning）。
-执行者可在 §2 允许的范围内为该 harness 增加一个不含 Producer 的模式，或另择更合适的落点。
+也就是说：**Plan 102 的 `10 RMB / 50 USD` 无法塞进 Plan 097 的合同**，必须有属于自己的预算身份。
+怎么做由执行者定（Plan 102 专属 contract、把预算身份参数化、或另起一个 Plan 102 campaign 入口都可以），
+硬要求只有两条：
 
-**待用户决定**：若用户希望本任务也覆盖 Producer 段，需要追加一笔 `gpt-5.6-terra` 授权。
-参考量级：单次请求约 `0.124 RMB`；一次干净的云端 backend Producer 运行约十几到二十几次请求，
-加上打通阶段的失败重试，`6–8 RMB` 是一个够用且不宽松的口径（Plan 097 的 172 次里包含两个 backend、
-多轮 commissioning 与七代废弃 ledger，不能直接类比）。在拿到该授权前，本节"不做"一栏保持不变。
+- 不得改写 Plan 097 的既有合同数值或复用其 ledger，历史证据必须仍能按原身份复算；
+- 新的预算身份必须同样是**机械校验、fail-closed** 的，不能退化成一个可随手改的普通配置项。
 
-另外，真实本地模型加载与推理同样未授权，因此 local backend 与 OFF 分支也只做离线守护。
-最终汇报必须把"真实 API 覆盖了哪一段、哪些只有离线证据"写清楚，
-不得表述为"完整发布链路已真实验证"或"三态都做了真实验证"。
+### 4.2.2 未授权的部分
+
+真实**本地模型**加载与推理仍未授权。因此 local backend 与 OFF 分支只做离线守护，不做真实模型运行。
+最终汇报必须写清楚"真实 API 覆盖了 cloud backend 的哪两段、local/OFF 只有离线证据"，
+不得表述为"三态都做了真实验证"。
 
 ### 4.3 穷举 gate 等价测试
 
@@ -246,7 +259,10 @@ Plan 097 总花费 `21.4197186 RMB` 中，**99.65% 花在 Producer 段**，判�
 3. 至少观察到一次 typed `PASS` 与一次 typed `REWRITE`，证明两种外部结果都能真实产生。
 4. 至少构造一次非法响应（可用 loopback 注入），确认走的是**已有** typed failure 分类且不重试。
 5. 默认关闭姿态与旧标量路径在同一次运行中仍然可用且未变。
-6. 按 B1 实测 token 与当次价卡外推的 B2 保守总成本，加上已结算费用，落在 `10 RMB` 以内。
+6. 写作者段至少完成一次真实 Producer 往返：agent 调 `team_publish`，收到判官的 `REWRITE`，
+   并据此发起第二次尝试。这是证明"判官接缝真的挂在发布链路上"的最小充分事实。
+7. 两笔预算各自的 B2 保守外推（B1 实测 × 当次价卡 + 已结算）分别落在 `10 RMB` 与 `50 USD` 以内。
+   任一笔外推超限即不得进入 B2，先缩减该段的 B2 规模或修实现，不得挪用另一笔。
 
 自检项只能是可机器判定的链路事实。**任何时候都不得用“判官判得准不准”决定是否继续、是否重跑或是否记入结果。**
 
@@ -290,9 +306,9 @@ tracked 代码、测试、合同、结果与文档变动仍然全部落在 102 w
   served-model 校验对两种投影是共用的；`ResponseProjection` 已经是“同一请求路径、不同输出投影”的分叉点。
 - **端到端 harness**：`eval/rondo_eval/publication_critic/engineering/`（Plan 097）已经具备
   service runtime、producer runtime、可续跑 write-once 回执、`PersistentBudgetLedger` 与
-  `CloudBudgetProxy` / `LoopbackResponsesProxy`，是判官段端到端最自然的落点。
+  `CloudBudgetProxy` / `LoopbackResponsesProxy`，是本任务端到端最自然的落点。
   注意其中的 direct case（`service.review(packet)`）与 Producer 运行是**两段不同花费**的东西，
-  两个 proxy 也都是**真实付费转发**而非离线假件；按 §4.2 只复用判官段。
+  两个 proxy 也都是**真实付费转发**而非离线假件。预算身份不能直接复用，见 §4.2.1。
 - **费用口径**：`structured_diagnostic/cost.py` 已有 `UNKNOWN_ACTUAL_ATTEMPT_RMB = Decimal("0.1")`，
   与本任务要求的兜底值一致。
 - **集成测试**：`multidev/codex-rs/publication-critic/tests/cloud_process.rs` 已覆盖 ready、双 verdict、
@@ -366,20 +382,23 @@ service.rs: verdict_for_scores(&output.scores) → typed verdict
 
 ### 阻塞项
 
-- 不阻塞阶段 A/B1/B2 的默认范围。未授权项与 `10 RMB` 上限见 §3.1 与 §3.5。
-- **待用户决定（决策 008）**：是否追加 `gpt-5.6-terra` 授权以覆盖 Producer 段。
-  未获授权时按 §4.2 的默认范围执行并如实标注未覆盖部分，不因此停工。
+- 无。两笔预算与未授权项见 §3.1 与 §3.5。
+- 提醒：`10 RMB` 是用户最初的书面授权数字。用户后续口头提到过 `20 RMB`／`19 RMB`，
+  本计划按保守口径保留 `10 RMB`；判官段实测约 `0.003–0.008 RMB/次`，该差额对本任务没有实际影响。
+  若用户明确抬高，按用户口径更新本条与 §3.1、§3.5、§4.1。
 
 ### 当前验收状态
 
 - 规划：`COMPLETE / FROZEN`。
 - 阶段 A / B1 / B2：`NOT_STARTED`。
-- 任务累计结算 `0 RMB` / 上限 `10 RMB`。
+- 判官段累计结算 `0 RMB` / 上限 `10 RMB`；写作者段累计结算 `0 USD` / 上限 `50 USD`。
 
 ### 交接边界
 
 - 执行者只在 102 worktree/branch 完成 tracked 实现、测试、文档与提交；
   主物理根 ignored `plan102` 资产按 §4.5 单列汇报。
+- 执行者的启动提示词见 `plan/102-publication-critic-five-dimension-cloud-judge-executor-prompt.md`。
+  本计划是合同，那份只是入场引导；两者冲突时以本计划为准。
 - 本计划完成后冻结为任务合同与历史记录；后续路线只写入 `doc/WBS.md` 与
   `doc/WBS/multi-agent-trusted-evidence.md`，本文不复制。
 
@@ -394,6 +413,7 @@ service.rs: verdict_for_scores(&output.scores) → typed verdict
 | 003 | 复用 Plan 100/101 已验证的五维合同、解析与 thinking 开关，不重写 | 这些设施已在真实 API 下跑过 `810` 次调用，重写只会引入新风险 | 实现路线 | 已采纳 |
 | 004 | 旧标量路径保留为历史身份与可复算路径，不删除、不改写 | Plan 095/096/097 的历史结果必须仍能按原身份复算 | 兼容性、历史证据 | 已采纳 |
 | 005 | 真实 API 覆盖只包括云端 backend；local/OFF 分支用离线设施守不回归 | 真实本地模型加载与推理在本任务中未授权 | 端到端范围、汇报口径 | 已采纳 |
-| 006 | 付费外发只允许 `deepseek-v4-flash`；**Producer 段不做真实运行**，改由离线证据守护并如实标注 | Producer 用的是另一个付费模型 `gpt-5.6-terra`，不在本次授权内；Plan 097 的钱 99.65% 花在这一段 | 预算、端到端范围、验收标准 | 已采纳 |
+| 006 | 付费外发允许两个模型、两笔独立预算：`deepseek-v4-flash ≤ 10 RMB`、`gpt-5.6-terra ≤ 50 USD`，不得互相挪用 | 发布链路两段分别由不同模型驱动、分别计费；用户已就 Producer 段单独授权 `50 USD` | 预算、端到端范围、验收标准 | 已采纳 |
 | 007 | missing-usage 兜底由 Plan 101 的 `1 RMB/次` 下调为 `0.1 RMB/次` | 原值明显高于实测约 `0.008 RMB/次` 的单次成本，过度保守会挤占有限预算 | 费用账本 | 已采纳 |
-| 008 | 是否追加 `gpt-5.6-terra` 授权以覆盖 Producer 段（参考 `6–8 RMB`） | 用户的完成标准原文要求“完整发布链路”，但该段超出现有授权，只能由用户决定是否加钱 | 端到端范围、预算 | **待用户决定** |
+| 008 | Plan 102 建立自己的预算身份，不复用 Plan 097 的合同数值 | `_validate_budgets` 把 `6/24/7.5/30` 硬编码为身份，`10 RMB / 50 USD` 塞不进去；改写它会破坏 Plan 097 历史证据的可复算性 | 预算合同、campaign 入口 | 已采纳 |
+| 009 | 判官段上限按最初书面授权保留 `10 RMB`，不按后续口头提到的 `20/19 RMB` 自行上调 | 两个口头数字不一致，且判官段实测约 `0.003–0.008 RMB/次`，`10 RMB` 已远超所需；上调预算属用户决定 | 预算 | 已采纳（可由用户改） |

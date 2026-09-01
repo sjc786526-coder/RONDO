@@ -346,9 +346,11 @@ validation 的 27 candidates / 12 pairs。它是**测评（eval）而非资格�
   并遵守 CLAUDE.md §3 的看门狗与容量门禁。
 - **必须复用主工作区既有 target `.codex/cargo-target/rondo-multi`，不得新建 target 目录。**
 
+- 发布链路写作者段（Producer）使用的 `gpt-5.6-terra`（Plan 097 合同别名 `terra`）已单独授权，
+  硬上限 `50 USD`，**独立于判官段的 RMB 预算，两笔不得互相挪用**。据此 Plan 102 需完整跑通含
+  `team_publish` 与 Producer 重写的发布链路。
+
 **仍未授权**：训练、GPU/RunPod、真实本地模型加载与推理、上传、充值、产品默认启用与发布、qualification 与 v9 test 正文。
-另：发布链路 Producer 段使用的付费模型 `gpt-5.6-terra`（Plan 097 合同别名 `terra`）不在本次授权内，
-因此 Plan 102 的真实 API 覆盖默认只到判官段；是否追加该授权由用户决定。
 
 **当前状态**：已授权，ExecPlan 已建立，未启动。合同见
 `plan/102-publication-critic-five-dimension-cloud-judge-execplan.md`。
