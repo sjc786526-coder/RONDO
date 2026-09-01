@@ -337,18 +337,22 @@ def _validate_producer(value: Any) -> Plan102ProducerContract:
     max_output = _positive_int(
         envelope["max_output_tokens"], "producer_max_output_tokens_invalid"
     )
+    # `high` effort spends far more completion tokens than `low`, and usage
+    # outside the envelope is refused rather than priced, so the envelope and
+    # the run timeout move with it. The authorized caps -- 50 USD for the
+    # Producer, 10 RMB for the judge, 15 USD per run -- are unchanged.
     if (
         producer["model_alias"] != "terra"
-        or producer["reasoning_effort"] != "low"
-        or run_timeout != 600
+        or producer["reasoning_effort"] != "high"
+        or run_timeout != 1800
         or max_runs != 6
         or run_cap != Decimal("15")
-        or max_input != 32000
-        or max_output != 2000
+        or max_input != 48000
+        or max_output != 16000
     ):
         raise Plan102ContractError("producer_identity_invalid")
     return Plan102ProducerContract(
-        "terra", "low", run_timeout, max_runs, run_cap, max_input, max_output
+        "terra", "high", run_timeout, max_runs, run_cap, max_input, max_output
     )
 
 

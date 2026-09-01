@@ -80,6 +80,33 @@ class Plan102ContractTests(unittest.TestCase):
             CLOUD_BUDGET_IDENTITY.schema, PLAN097_CLOUD_BUDGET_IDENTITY.schema
         )
 
+    def test_producer_runs_at_high_effort_without_moving_the_authorized_caps(
+        self,
+    ) -> None:
+        contract = load_plan102_contract(REPO_ROOT)
+
+        producer = contract.producer
+        self.assertEqual(producer.model_alias, "terra")
+        self.assertEqual(producer.reasoning_effort, "high")
+        # `high` needs room the `low` envelope did not have: usage outside the
+        # envelope is refused rather than priced, and observed `low` runs
+        # already peaked at 29434 input tokens against a 32000 bound.
+        self.assertEqual(producer.max_input_tokens, 48000)
+        self.assertEqual(producer.max_output_tokens, 16000)
+        self.assertEqual(producer.run_timeout_seconds, 1800)
+        # The authorized money is untouched by the effort change.
+        self.assertEqual(producer.run_cap_usd, Decimal("15"))
+        self.assertEqual(producer.max_runs, 6)
+        self.assertEqual(contract.budgets.producer_usd, Decimal("50"))
+        self.assertEqual(contract.budgets.judge_rmb, Decimal("10"))
+
+    def test_rejects_a_producer_identity_that_drifts_from_the_lock(self) -> None:
+        def change(contract: dict[str, Any]) -> None:
+            contract["producer"]["reasoning_effort"] = "low"
+
+        with self.assertRaisesRegex(Plan102ContractError, "producer_identity_invalid"):
+            self._load_changed(change)
+
     def test_plan097_budget_identity_is_untouched(self) -> None:
         plan097 = load_plan097_contract(REPO_ROOT)
 

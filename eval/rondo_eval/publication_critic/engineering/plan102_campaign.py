@@ -54,11 +54,15 @@ from .producer_runtime import (
 
 PLAN102_PRODUCER_FORMAL_PROMPT = """Run one bounded synthetic Plan 102 Publication Critic engineering flow as Root.
 1. Spawn exactly one member with task_name producer and the exact user task: Complete the full Producer rewrite cycle and do not finish until canonical commit. The runtime supplies that member its complete detailed task as developer instructions, so add no other task detail. Do not spawn any other member. Root must never call team_publish.
-2. Immediately call wait_agent once with timeout_ms 180000 and wait for the Producer's canonical Team State publish to wake Root. A blocked rewrite is not a publish and must not wake Root.
+2. Immediately call wait_agent once with timeout_ms 900000 and wait for the Producer's canonical Team State publish to wake Root. A blocked rewrite is not a publish and must not wake Root.
 3. After the wake, call team_inspect exactly once with action dump and limit 50, then exactly once with action log and limit 50. Do not mutate Team State.
 4. Stop after both inspections. Do not quote or summarize the publication body in the final response.
 """
-_PRODUCER_WAIT_TIMEOUT_MS = 180_000
+# Root waits for the member's canonical publish. At `high` effort the rewrite
+# cycle takes far longer than the 180s that sufficed at `low`, and a Root that
+# wakes early loses the evidence the round was run for. This is a ceiling, so a
+# round that finishes sooner still wakes on the publish.
+_PRODUCER_WAIT_TIMEOUT_MS = 900_000
 # Plan 097's member prompt states the retry rule in prose. Under `terra` at
 # `low` effort that reliably produced a second `team_publish` that dropped
 # `review_cycle_id` and resent the identical candidate, which `team_publish`
@@ -96,6 +100,11 @@ _PRODUCER_LEDGER_GENERATIONS: tuple[tuple[str, str], ...] = (
     ("plan102-producer-terra-v1", "producer-terra-v1-ledger.json"),
     ("plan102-producer-terra-v2", "producer-terra-v2-ledger.json"),
     ("plan102-producer-terra-v3", "producer-terra-v3-ledger.json"),
+    # v4 is the first `high` effort generation. A generation also has to be
+    # retired when the per-request reservation changes, because the ledger
+    # pins `unpriced_fallback_usd`; that keeps the `low` and `high` rounds in
+    # separate books without loosening the task cap.
+    ("plan102-producer-terra-v4", "producer-terra-v4-ledger.json"),
 )
 _PRODUCER_BATCH_ID, _PRODUCER_LEDGER_NAME = _PRODUCER_LEDGER_GENERATIONS[-1]
 _CLOUD_LEDGER_NAME = "cloud-scorer-v1-ledger.json"

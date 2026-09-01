@@ -18,13 +18,13 @@
   },
   "producer": {
     "model_alias": "terra",
-    "reasoning_effort": "low",
-    "run_timeout_seconds": 600,
+    "reasoning_effort": "high",
+    "run_timeout_seconds": 1800,
     "max_runs": 6,
     "run_cap_usd": "15",
     "usage_envelope": {
-      "max_input_tokens": 32000,
-      "max_output_tokens": 2000
+      "max_input_tokens": 48000,
+      "max_output_tokens": 16000
     }
   },
   "direct_cases": [
