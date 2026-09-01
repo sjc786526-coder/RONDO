@@ -167,7 +167,9 @@ class Plan102ProducerLedgerGenerationTests(unittest.TestCase):
         )
 
         contract = load_plan102_contract(REPO_ROOT)
-        first, second = campaign._PRODUCER_LEDGER_GENERATIONS
+        generations = campaign._PRODUCER_LEDGER_GENERATIONS
+        first, second = generations[0], generations[-1]
+        self.assertGreaterEqual(len(generations), 2)
         self.assertEqual(campaign._PRODUCER_BATCH_ID, second[0])
 
         with tempfile.TemporaryDirectory() as directory:
@@ -185,7 +187,9 @@ class Plan102ProducerLedgerGenerationTests(unittest.TestCase):
                 contract.budgets.producer_usd - Decimal("0.752782"),
             )
             self.assertEqual(snapshot["run_count"], 2)
-            self.assertEqual(snapshot["generations"], [first[0], second[0]])
+            self.assertEqual(
+                snapshot["generations"], [batch for batch, _ in generations]
+            )
 
             # Spending in the active generation keeps counting against the one cap.
             self._write(root, second[1], second[0], ["0.200000"])
@@ -201,7 +205,7 @@ class Plan102ProducerLedgerGenerationTests(unittest.TestCase):
             plan102_campaign as campaign,
         )
 
-        first, _second = campaign._PRODUCER_LEDGER_GENERATIONS
+        first = campaign._PRODUCER_LEDGER_GENERATIONS[0]
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             paths = SimpleNamespace(runtime_root=root)

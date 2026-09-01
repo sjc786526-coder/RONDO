@@ -442,6 +442,7 @@ class ProducerEvidenceTests(unittest.TestCase):
         self.assertTrue(result["last_publish_failed"])
         self.assertTrue(result["ended_after_failed_dispatch"])
         self.assertFalse(result["producer_followup_after_last_publish"])
+        self.assertEqual(result["producer_followup_tools_after_last_publish"], [])
 
     def test_failed_retry_classifies_cycle_mismatch_from_argument_hashes(self) -> None:
         jsonl, trace = _fixture()

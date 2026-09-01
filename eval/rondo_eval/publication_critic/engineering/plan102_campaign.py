@@ -95,6 +95,7 @@ _RUN_ID = re.compile(r"plan102-[a-z0-9][a-z0-9-]{0,79}\Z")
 _PRODUCER_LEDGER_GENERATIONS: tuple[tuple[str, str], ...] = (
     ("plan102-producer-terra-v1", "producer-terra-v1-ledger.json"),
     ("plan102-producer-terra-v2", "producer-terra-v2-ledger.json"),
+    ("plan102-producer-terra-v3", "producer-terra-v3-ledger.json"),
 )
 _PRODUCER_BATCH_ID, _PRODUCER_LEDGER_NAME = _PRODUCER_LEDGER_GENERATIONS[-1]
 _CLOUD_LEDGER_NAME = "cloud-scorer-v1-ledger.json"

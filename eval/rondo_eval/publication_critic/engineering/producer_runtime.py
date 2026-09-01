@@ -399,7 +399,8 @@ def project_producer_attempts(jsonl: str, trace: RolloutTrace) -> dict[str, Any]
         "inspect_actions": list(evidence["inspect_actions"]),
         "unattributed_count": len(evidence["unattributed"]),
         "last_publish_failed": last_publish_failed,
-        "producer_followup_after_last_publish": producer_followup,
+        "producer_followup_after_last_publish": bool(producer_followup),
+        "producer_followup_tools_after_last_publish": producer_followup,
         "ended_after_failed_dispatch": last_publish_failed and not producer_followup,
     }
 
@@ -600,9 +601,15 @@ def _error_returned_to_model(status: object, dispatch_error_kind: str | None) ->
 
 def _producer_followup_after_last_publish(
     trace: RolloutTrace, publishes: list[Any]
-) -> bool:
+) -> list[str]:
+    """Tool names the Producer reached for after its last publish attempt.
+
+    Tool names are fixed identifiers, so this stays body-free while showing what
+    the model did instead of retrying.
+    """
+
     if not publishes:
-        return False
+        return []
     last_end = publishes[-1].get("end_seq")
     producer_threads = {
         row.get("thread_id")
@@ -610,10 +617,15 @@ def _producer_followup_after_last_publish(
         if row.get("thread_id") != trace.root_thread_id
     }
     if not isinstance(last_end, int) or not producer_threads:
-        return False
-    return any(
-        call.thread_id in producer_threads and call.seq > last_end
-        for call in trace.calls
+        return []
+    return sorted(
+        {
+            f"{call.tool_namespace}.{call.tool_name}"
+            if call.tool_namespace
+            else call.tool_name
+            for call in trace.calls
+            if call.thread_id in producer_threads and call.seq > last_end
+        }
     )
 
 
