@@ -382,15 +382,26 @@ service.rs: verdict_for_scores(&output.scores) → typed verdict
 - 2026-08-31：阶段 B1 写作者段 `plan102-b1-producer-r1`：首次 `team_publish` 得 `rewrite_required`，
   并发起第二次尝试（第二次 dispatch 失败）。B1 §4.4.6 按“REWRITE 后第二次尝试”记为打通。
 - 2026-08-31：阶段 B2 五轮 e2e（`plan102-b2-r1`…`r5`）均未形成 canonical commit，全部披露为废弃轮。
-  Producer v1 ledger 的 6 个 run slot 已用尽。
+  Producer v1 ledger 的 6 个 run slot 已用尽（卡在 `max_runs=6`，不是预算耗尽：`0.752782/50 USD`）。
+- 2026-08-31：审查者接受阶段 A 与 B1 判官段，接缝不再改。B2 授权继续但须先给 r3 定性、补失败侧诊断、并在结论中写明 B1 回执不干净。
+- 2026-08-31：r3 定性（离线，未付费）：`continuation_matches_previous=False` 与 `candidate_changed_from_previous=True` 都是空失败结果的投影假象，不能用来判断 Producer 是否送错 `review_cycle_id`。五维接缝不返回 `review_cycle_id`；该 UUID 由未改动的 `publication_review` 在 REWRITE 之后生成。r3 第一次 publish 已完成 `rewrite_required` 且带合法 `next_review_cycle_sha1`，说明 cycle id 已生成。第二次 dispatch 失败原因在旧投影里被丢掉（`type=error` 被读成空结果）。**排除「接缝返回了不可用的 cycle id」**；第二次失败的具体 typed 原因（错 id / 未送 / 其它）在 r3 的 trace 已删除后无法从旧回执恢复。B1 第二次 dispatch 同样失败，且回执为 `error_code: trace_wire_binding_invalid`、`status: rewrite_observed_canonical_not_required`。
+- 2026-08-31：补上失败侧 body-free 诊断：trace 保留 dispatch error；投影分类 typed `failure_kind`、用参数哈希比较 continuation、区分模型收到拒绝后是否还有 followup。未发起 B2 正式付费轮。
+- 2026-09-01：审查者接手执行（执行者频繁崩溃）。复跑阶段 A 门禁，并把门禁扩到产品构建图，发现并修复一处回归：
+  `ScoringContract` 的 `#[serde(untagged)]` 在任何统一了 `serde_json/arbitrary_precision` 的构建里
+  （`codex-exec-server-protocol` 开启，凡链接 `codex-core` 的二进制均继承）无法解析旧标量 descriptor 的
+  `domain` / `threshold`。改为按 `pass_rule` 显式判别，两个变体 wire 字节不变，并补两条回归测试。
+  这直接关系到"旧标量路径仍可按原身份复算"这条完成标准；只跑叶子 crate 无法发现。
+- 2026-09-01：Producer ledger 改为代际累计：新一代 `total_cap_usd` 只继承历史各代的剩余额度，
+  `_producer_budget_snapshot` 跨代求和。此前每代都带满 `50 USD`，换账本会把任务级上限重置。
+  对齐 Plan 097 v2–v8 逐代收缩 cap 的先例。
 
 ### 当前工作
 
-- 阶段 A 已完成。阶段 B1 判官段与 Producer 最小往返已完成。阶段 B2 正式 canonical 尚未取得，已停止继续付费，交给审查者。
+- 阶段 A 与 B1 判官段已接受。r3 已定性并补诊断。按批复停在此处，不进入 B2 正式付费轮，等待审查者看完第 1 条结论。
 
 ### 本任务剩余步骤
 
-- 审查者验收。B2 若要求继续取得 canonical commit，需另开 Producer ledger 身份（当前 v1 `max_runs=6` 已用尽）。
+- 审查者确认 r3 定性后，再开 `plan102-producer-terra-v2` ledger（新身份，不是新授权）跑 B2。
 - 合并与推送等待用户批准。
 
 ### 阻塞项
@@ -401,8 +412,8 @@ service.rs: verdict_for_scores(&output.scores) → typed verdict
 
 - 规划：`COMPLETE / FROZEN`。
 - 阶段 A：`COMPLETE`（离线门禁）。
-- 阶段 B1：`COMPLETE`（真实 API；判官双 verdict + thinking off + Producer REWRITE 后二次尝试）。
-- 阶段 B2：`INCOMPLETE`（无正式 canonical 轮；r1–r5 均废弃）。
+- 阶段 B1：`COMPLETE`（真实 API；判官双 verdict + thinking off + Producer REWRITE 后二次尝试）。写作者回执**不干净**：`error_code: trace_wire_binding_invalid`，`status: rewrite_observed_canonical_not_required`。§4.4.6 仍算通过（`rewrite_then_retry: true`、两次 publish），但“通过”≠“回执干净”。
+- 阶段 B2：`INCOMPLETE`（无正式 canonical 轮；r1–r5 均废弃）。r3 已离线定性；失败侧诊断已补；未再付费。
 - 判官段累计结算 `0.0075277 RMB` / 上限 `10 RMB`，剩余 `9.9924723 RMB`。
 - 写作者段累计结算 `0.752782 USD` / 上限 `50 USD`，剩余 `49.247218 USD`。
 - ignored 证据：`/home/sjc/desktop/RONDO/eval-data/publication-critic/plan102/`，约 `220K`。

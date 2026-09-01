@@ -263,6 +263,66 @@ fn controlled_threshold_maps_rewrite_pass_and_equality() {
 }
 
 #[test]
+fn historical_scalar_descriptor_still_parses_through_the_scoring_contract() {
+    // Widening `scoring` into an untagged `ScoringContract` must not cost the
+    // historical scalar descriptor its wire compatibility: peers announce this
+    // JSON on startup and callers deserialize it back.
+    let descriptor =
+        controlled_test_descriptor(codex_publication_critic::RuntimeLimits::production());
+    let encoded = serde_json::to_string(&descriptor).expect("descriptor serializes");
+
+    let decoded: codex_publication_critic::ServiceDescriptor =
+        serde_json::from_str(&encoded).expect("historical scalar descriptor still parses");
+
+    assert_eq!(decoded, descriptor);
+}
+
+#[test]
+fn scoring_contract_reads_pass_rule_as_the_discriminant() {
+    let scalar = serde_json::json!({
+        "definition": {"name": "controlled-test-scalar", "revision": "v1"},
+        "input_template": {"name": "rondo-publication-packet-render", "revision": "v1"},
+        "scalar_projection": {"name": "single-scalar", "revision": "v1"},
+        "domain": {"min": 0.0, "max": 1.0},
+        "threshold": 0.5,
+        "pass_rule": "score_greater_than_or_equal_to_threshold"
+    });
+    let five_dimension = serde_json::json!({
+        "definition": {"name": "rondo-cloud-reference-five-dimension", "revision": "v1"},
+        "input_template": {"name": "rondo-publication-packet-render", "revision": "v1"},
+        "decision_projection": {"name": "five-dimension-decisions", "revision": "v1"},
+        "pass_rule": "discrete_non_compensating_conjunction"
+    });
+
+    let parsed_scalar: codex_publication_critic::ScoringContract =
+        serde_json::from_value(scalar.clone()).expect("scalar contract parses");
+    assert!(parsed_scalar.as_scalar().is_some());
+    let parsed_five: codex_publication_critic::ScoringContract =
+        serde_json::from_value(five_dimension.clone()).expect("five-dimension contract parses");
+    assert!(parsed_five.as_five_dimension().is_some());
+
+    // Neither shape may borrow the other's fields.
+    let mut scalar_with_projection = scalar.clone();
+    scalar_with_projection["decision_projection"] =
+        serde_json::json!({"name": "five-dimension-decisions", "revision": "v1"});
+    serde_json::from_value::<codex_publication_critic::ScoringContract>(scalar_with_projection)
+        .expect_err("scalar identity must not carry decision_projection");
+
+    let mut five_with_threshold = five_dimension.clone();
+    five_with_threshold["threshold"] = serde_json::json!(0.5);
+    serde_json::from_value::<codex_publication_critic::ScoringContract>(five_with_threshold)
+        .expect_err("five-dimension identity must not carry a threshold");
+
+    let mut scalar_without_threshold = scalar;
+    scalar_without_threshold
+        .as_object_mut()
+        .expect("object")
+        .remove("threshold");
+    serde_json::from_value::<codex_publication_critic::ScoringContract>(scalar_without_threshold)
+        .expect_err("scalar identity requires a threshold");
+}
+
+#[test]
 fn expected_descriptor_rejects_identity_drift() {
     let expected =
         controlled_test_descriptor(codex_publication_critic::RuntimeLimits::production());

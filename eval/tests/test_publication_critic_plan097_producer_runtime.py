@@ -54,6 +54,7 @@ def _call(
     result: object,
     seq: int,
     end_seq: int,
+    status: str = "completed",
 ) -> NestedToolCall:
     return NestedToolCall(
         tool_call_id=call_id,
@@ -65,7 +66,7 @@ def _call(
         model_visible_call_id=None,
         arguments=arguments,
         result=result,
-        status="completed",
+        status=status,
         seq=seq,
         end_seq=end_seq,
     )
@@ -390,6 +391,10 @@ class ProducerEvidenceTests(unittest.TestCase):
         self.assertEqual(second["commit_outcome"], "committed")
         self.assertTrue(second["continuation_matches_previous"])
         self.assertTrue(second["candidate_changed_from_previous"])
+        self.assertFalse(first["error_returned_to_model"])
+        self.assertFalse(second["error_returned_to_model"])
+        self.assertFalse(result["last_publish_failed"])
+        self.assertFalse(result["ended_after_failed_dispatch"])
         self.assertEqual(
             result["waits"],
             [
@@ -413,6 +418,73 @@ class ProducerEvidenceTests(unittest.TestCase):
             VERSION_ID,
         ):
             self.assertNotIn(private, encoded)
+
+    def test_empty_failed_retry_does_not_invent_continuation_or_candidate_change(self) -> None:
+        jsonl, trace = _fixture()
+        failed = replace(
+            trace.calls[3],
+            status="failed",
+            result=None,
+            arguments={"body": "omitted"},
+        )
+        failed_trace = replace(trace, calls=[*trace.calls[:3], failed, *trace.calls[4:]])
+
+        result = project_producer_attempts(jsonl, failed_trace)
+
+        first, second = result["attempts"]
+        self.assertEqual(first["result_kind"], "rewrite_required")
+        self.assertEqual(second["dispatch_status"], "failed")
+        self.assertEqual(second["result_fields"], [])
+        self.assertIsNone(second["failure_kind"])
+        self.assertIsNone(second["continuation_matches_previous"])
+        self.assertIsNone(second["candidate_changed_from_previous"])
+        self.assertIsNone(second["error_returned_to_model"])
+        self.assertTrue(result["last_publish_failed"])
+        self.assertTrue(result["ended_after_failed_dispatch"])
+        self.assertFalse(result["producer_followup_after_last_publish"])
+
+    def test_failed_retry_classifies_cycle_mismatch_from_argument_hashes(self) -> None:
+        jsonl, trace = _fixture()
+        cycle_message = (
+            "review_cycle_id must match the active publication review cycle"
+        )
+        matching = replace(
+            trace.calls[3],
+            status="failed",
+            arguments={
+                "candidate_title_sha1": _digest("Synthetic migration"),
+                "candidate_summary_sha1": _digest(REVISED_DRAFT),
+                "continuation_sha1": _digest("cycle-1"),
+            },
+            result={"type": "error", "error": cycle_message},
+        )
+        matching_trace = replace(
+            trace, calls=[*trace.calls[:3], matching, *trace.calls[4:]]
+        )
+
+        matched = project_producer_attempts(jsonl, matching_trace)
+        second = matched["attempts"][1]
+        self.assertEqual(second["failure_kind"], "cycle_mismatch")
+        self.assertTrue(second["continuation_matches_previous"])
+        self.assertTrue(second["candidate_changed_from_previous"])
+        self.assertTrue(second["error_returned_to_model"])
+        self.assertNotIn(cycle_message, json.dumps(matched))
+
+        mismatched = replace(
+            matching,
+            arguments={
+                "candidate_title_sha1": _digest("Synthetic migration"),
+                "candidate_summary_sha1": _digest(REVISED_DRAFT),
+                "continuation_sha1": _digest("wrong-cycle"),
+            },
+        )
+        mismatched_trace = replace(
+            trace, calls=[*trace.calls[:3], mismatched, *trace.calls[4:]]
+        )
+        wrong = project_producer_attempts(jsonl, mismatched_trace)
+        self.assertFalse(wrong["attempts"][1]["continuation_matches_previous"])
+        self.assertEqual(wrong["attempts"][1]["failure_kind"], "cycle_mismatch")
+        self.assertNotIn("wrong-cycle", json.dumps(wrong))
 
     def test_projects_one_rewrite_and_one_canonical_publish_without_bodies(self) -> None:
         jsonl, trace = _fixture()

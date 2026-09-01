@@ -69,8 +69,15 @@ from .service_runtime import (
 
 RECEIPT_SCHEMA = "rondo-publication-critic-plan102-step-v1"
 _RUN_ID = re.compile(r"plan102-[a-z0-9][a-z0-9-]{0,79}\Z")
-_PRODUCER_BATCH_ID = "plan102-producer-terra-v1"
-_PRODUCER_LEDGER_NAME = "producer-terra-v1-ledger.json"
+# Producer ledgers are generational: a generation is retired once its run slots
+# are used up, and the next one carries only the budget the earlier generations
+# left behind. Opening a generation with the full task cap would let a new
+# ledger silently reset the task-wide `producer_usd` limit.
+_PRODUCER_LEDGER_GENERATIONS: tuple[tuple[str, str], ...] = (
+    ("plan102-producer-terra-v1", "producer-terra-v1-ledger.json"),
+    ("plan102-producer-terra-v2", "producer-terra-v2-ledger.json"),
+)
+_PRODUCER_BATCH_ID, _PRODUCER_LEDGER_NAME = _PRODUCER_LEDGER_GENERATIONS[-1]
 _CLOUD_LEDGER_NAME = "cloud-scorer-v1-ledger.json"
 _PRODUCER_MAX_CONCURRENT_MAIN = 1
 _MAX_RECEIPT_BYTES = 1024 * 1024
@@ -396,10 +403,13 @@ def _run_producer(
     ledger_path = paths.runtime_root / f"budget/{_PRODUCER_LEDGER_NAME}"
     ledger_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     metadata_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    active_cap = contract.budgets.producer_usd - _producer_retired_spend(paths)
+    if active_cap <= 0 or run_cap > active_cap:
+        raise Plan102CampaignError("producer_budget_derivation_invalid")
     with PersistentBudgetLedger(
         ledger_path,
         batch_id=_PRODUCER_BATCH_ID,
-        total_cap_usd=contract.budgets.producer_usd,
+        total_cap_usd=active_cap,
         max_runs=contract.producer.max_runs,
         default_run_cap_usd=contract.producer.run_cap_usd,
         usage_envelope=envelope,
@@ -645,36 +655,56 @@ def _judge_budget_snapshot(
     }
 
 
-def _producer_budget_snapshot(
-    paths: Plan102Paths, contract: Plan102Contract
-) -> dict[str, Any]:
-    ledger_path = paths.runtime_root / f"budget/{_PRODUCER_LEDGER_NAME}"
+def _producer_generation_spend(
+    paths: Plan102Paths, batch_id: str, ledger_name: str
+) -> tuple[Decimal, int]:
+    ledger_path = paths.runtime_root / f"budget/{ledger_name}"
     if not ledger_path.exists():
-        return {
-            "batch_id": _PRODUCER_BATCH_ID,
-            "spent_usd": "0",
-            "remaining_usd": _decimal_text(contract.budgets.producer_usd),
-            "run_count": 0,
-        }
+        return Decimal("0"), 0
     ledger = _read_json(ledger_path, "producer_ledger")
-    if ledger.get("batch_id") != _PRODUCER_BATCH_ID:
+    if ledger.get("batch_id") != batch_id:
         raise Plan102CampaignError("producer_ledger_identity_invalid")
-    spent = Decimal("0")
     runs = ledger.get("runs")
     if not isinstance(runs, Mapping):
         raise Plan102CampaignError("producer_ledger_invalid")
+    spent = Decimal("0")
     for run in runs.values():
         if not isinstance(run, Mapping):
             raise Plan102CampaignError("producer_ledger_invalid")
         spent += Decimal(str(run.get("spent_usd", "0")))
+    return spent, len(runs)
+
+
+def _producer_retired_spend(paths: Plan102Paths) -> Decimal:
+    """Sum what every retired generation already charged against the task cap."""
+
+    spent = Decimal("0")
+    for batch_id, ledger_name in _PRODUCER_LEDGER_GENERATIONS[:-1]:
+        generation, _ = _producer_generation_spend(paths, batch_id, ledger_name)
+        spent += generation
+    return spent
+
+
+def _producer_budget_snapshot(
+    paths: Plan102Paths, contract: Plan102Contract
+) -> dict[str, Any]:
+    spent = Decimal("0")
+    run_count = 0
+    for batch_id, ledger_name in _PRODUCER_LEDGER_GENERATIONS:
+        generation, generation_runs = _producer_generation_spend(
+            paths, batch_id, ledger_name
+        )
+        spent += generation
+        run_count += generation_runs
     remaining = contract.budgets.producer_usd - spent
     if remaining < 0:
         raise Plan102CampaignError("producer_ledger_over_cap")
     return {
         "batch_id": _PRODUCER_BATCH_ID,
+        "generations": [batch_id for batch_id, _ in _PRODUCER_LEDGER_GENERATIONS],
         "spent_usd": _decimal_text(spent),
         "remaining_usd": _decimal_text(remaining),
-        "run_count": len(runs),
+        "run_count": run_count,
     }
 
 

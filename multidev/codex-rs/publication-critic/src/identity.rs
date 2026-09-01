@@ -318,13 +318,112 @@ impl FiveDimensionScoringIdentity {
     }
 }
 
-/// Product scoring contract. Untagged so a historical scalar identity stays
-/// byte-identical; the five-dimension variant cannot carry a threshold.
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-#[serde(untagged)]
+/// Product scoring contract. Both variants keep their historical wire bytes: a
+/// scalar identity serializes exactly as it always did, and the five-dimension
+/// variant cannot carry a threshold.
+///
+/// `pass_rule` is the discriminant, read explicitly rather than through
+/// `#[serde(untagged)]`. Untagged variants buffer into `serde_json`'s private
+/// `Content`, and any build that unifies `serde_json/arbitrary_precision`
+/// — `codex-exec-server-protocol` enables it, so every binary linking
+/// `codex-core` gets it — represents numbers there as an internal map that
+/// `f64` cannot read back. That silently broke every scalar `domain` and
+/// `threshold` in the product binary while the leaf crate stayed green.
+#[derive(Clone, Debug, PartialEq)]
 pub enum ScoringContract {
     FiveDimension(FiveDimensionScoringIdentity),
     Scalar(ScoringIdentity),
+}
+
+#[derive(Clone, Copy, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum AnyPassRule {
+    ScoreGreaterThanOrEqualToThreshold,
+    DiscreteNonCompensatingConjunction,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ScoringContractRepr {
+    definition: ComponentIdentity,
+    input_template: ComponentIdentity,
+    #[serde(default)]
+    scalar_projection: Option<ComponentIdentity>,
+    #[serde(default)]
+    domain: Option<ScoreDomain>,
+    #[serde(default)]
+    threshold: Option<FiniteValue>,
+    #[serde(default)]
+    decision_projection: Option<ComponentIdentity>,
+    pass_rule: AnyPassRule,
+}
+
+impl Serialize for ScoringContract {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            Self::FiveDimension(identity) => identity.serialize(serializer),
+            Self::Scalar(identity) => identity.serialize(serializer),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for ScoringContract {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+
+        let repr = ScoringContractRepr::deserialize(deserializer)?;
+        match repr.pass_rule {
+            AnyPassRule::ScoreGreaterThanOrEqualToThreshold => {
+                if repr.decision_projection.is_some() {
+                    return Err(D::Error::custom(
+                        "scalar scoring identity must not carry decision_projection",
+                    ));
+                }
+                let (Some(scalar_projection), Some(domain), Some(threshold)) =
+                    (repr.scalar_projection, repr.domain, repr.threshold)
+                else {
+                    return Err(D::Error::custom(
+                        "scalar scoring identity requires scalar_projection, domain, and threshold",
+                    ));
+                };
+                Ok(Self::Scalar(ScoringIdentity {
+                    definition: repr.definition,
+                    input_template: repr.input_template,
+                    scalar_projection,
+                    domain,
+                    threshold,
+                    pass_rule: PassRule::ScoreGreaterThanOrEqualToThreshold,
+                }))
+            }
+            AnyPassRule::DiscreteNonCompensatingConjunction => {
+                if repr.scalar_projection.is_some()
+                    || repr.domain.is_some()
+                    || repr.threshold.is_some()
+                {
+                    return Err(D::Error::custom(
+                        "five-dimension scoring identity must not carry a scalar projection, domain, or threshold",
+                    ));
+                }
+                let Some(decision_projection) = repr.decision_projection else {
+                    return Err(D::Error::custom(
+                        "five-dimension scoring identity requires decision_projection",
+                    ));
+                };
+                Ok(Self::FiveDimension(FiveDimensionScoringIdentity {
+                    definition: repr.definition,
+                    input_template: repr.input_template,
+                    decision_projection,
+                    pass_rule: FiveDimensionPassRule::DiscreteNonCompensatingConjunction,
+                }))
+            }
+        }
+    }
 }
 
 impl ScoringContract {

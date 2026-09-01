@@ -140,6 +140,78 @@ class Plan102ContractTests(unittest.TestCase):
             self.assertEqual(snapshot["conservative_charged_rmb"], "0.1")
 
 
+class Plan102ProducerLedgerGenerationTests(unittest.TestCase):
+    """A retired ledger generation must not hand the next one a fresh task cap."""
+
+    def _write(self, root: Path, ledger_name: str, batch_id: str, spends: list[str]) -> None:
+        path = root / "budget" / ledger_name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(
+                {
+                    "batch_id": batch_id,
+                    "runs": {
+                        f"run-{index}": {"spent_usd": spent}
+                        for index, spent in enumerate(spends)
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    def test_active_generation_only_inherits_the_leftover_budget(self) -> None:
+        from types import SimpleNamespace
+
+        from rondo_eval.publication_critic.engineering import (  # noqa: E402
+            plan102_campaign as campaign,
+        )
+
+        contract = load_plan102_contract(REPO_ROOT)
+        first, second = campaign._PRODUCER_LEDGER_GENERATIONS
+        self.assertEqual(campaign._PRODUCER_BATCH_ID, second[0])
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            paths = SimpleNamespace(runtime_root=root)
+            self._write(root, first[1], first[0], ["0.700000", "0.052782"])
+
+            retired = campaign._producer_retired_spend(paths)
+            self.assertEqual(retired, Decimal("0.752782"))
+
+            snapshot = campaign._producer_budget_snapshot(paths, contract)
+            self.assertEqual(Decimal(snapshot["spent_usd"]), Decimal("0.752782"))
+            self.assertEqual(
+                Decimal(snapshot["remaining_usd"]),
+                contract.budgets.producer_usd - Decimal("0.752782"),
+            )
+            self.assertEqual(snapshot["run_count"], 2)
+            self.assertEqual(snapshot["generations"], [first[0], second[0]])
+
+            # Spending in the active generation keeps counting against the one cap.
+            self._write(root, second[1], second[0], ["0.200000"])
+            snapshot = campaign._producer_budget_snapshot(paths, contract)
+            self.assertEqual(Decimal(snapshot["spent_usd"]), Decimal("0.952782"))
+            self.assertEqual(snapshot["run_count"], 3)
+            self.assertEqual(campaign._producer_retired_spend(paths), Decimal("0.752782"))
+
+    def test_rejects_a_generation_ledger_with_a_foreign_batch_id(self) -> None:
+        from types import SimpleNamespace
+
+        from rondo_eval.publication_critic.engineering import (  # noqa: E402
+            plan102_campaign as campaign,
+        )
+
+        first, _second = campaign._PRODUCER_LEDGER_GENERATIONS
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            paths = SimpleNamespace(runtime_root=root)
+            self._write(root, first[1], "plan097-producer-terra-v8", ["1.0"])
+            with self.assertRaisesRegex(
+                campaign.Plan102CampaignError, "producer_ledger_identity_invalid"
+            ):
+                campaign._producer_retired_spend(paths)
+
+
 class Plan102ProxyShapeTests(unittest.TestCase):
     def test_records_disabled_thinking_without_bodies(self) -> None:
         from rondo_eval.publication_critic.engineering.cloud_budget_proxy import (  # noqa: E402

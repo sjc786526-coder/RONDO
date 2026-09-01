@@ -290,14 +290,36 @@ def project_producer_attempts(jsonl: str, trace: RolloutTrace) -> dict[str, Any]
     previous_summary_sha1: object = None
     previous_cycle_sha1: object = None
     for row in publishes:
-        result = row.get("result")
-        result = result if isinstance(result, Mapping) else {}
+        raw_result = row.get("result")
+        dispatch_error_kind = _classify_dispatch_error(raw_result)
+        if dispatch_error_kind is not None:
+            result: dict[str, Any] = {}
+            failure_kind: object = dispatch_error_kind
+        else:
+            result = raw_result if isinstance(raw_result, Mapping) else {}
+            failure_kind = result.get("failure_kind")
+        args = row.get("arguments")
+        args = args if isinstance(args, Mapping) else {}
+        sent_continuation_sha1 = _observation_sha1(args, result, "continuation_sha1")
+        sent_summary_sha1 = _observation_sha1(args, result, "candidate_summary_sha1")
         if result.get("status") == "rewrite_required":
             result_kind = "rewrite_required"
         elif _is_commit_result(result):
             result_kind = "canonical_commit"
         else:
             result_kind = "other"
+        if previous_cycle_sha1 is None:
+            continuation_matches_previous: object = sent_continuation_sha1 is None
+        elif sent_continuation_sha1 is None:
+            continuation_matches_previous = None
+        else:
+            continuation_matches_previous = sent_continuation_sha1 == previous_cycle_sha1
+        if previous_summary_sha1 is None:
+            candidate_changed_from_previous: object = None
+        elif sent_summary_sha1 is None:
+            candidate_changed_from_previous = None
+        else:
+            candidate_changed_from_previous = sent_summary_sha1 != previous_summary_sha1
         attempts.append(
             {
                 "thread_role": (
@@ -309,18 +331,12 @@ def project_producer_attempts(jsonl: str, trace: RolloutTrace) -> dict[str, Any]
                 "review_attempt": result.get("review_attempt"),
                 "blocking_rewrite_count": result.get("blocking_rewrite_count"),
                 "commit_outcome": result.get("commit_outcome"),
-                "failure_kind": result.get("failure_kind"),
-                "continuation_matches_previous": (
-                    result.get("continuation_sha1") == previous_cycle_sha1
-                    if previous_cycle_sha1 is not None
-                    else result.get("continuation_sha1") is None
+                "failure_kind": failure_kind,
+                "error_returned_to_model": _error_returned_to_model(
+                    row.get("status"), dispatch_error_kind
                 ),
-                "candidate_changed_from_previous": (
-                    result.get("candidate_summary_sha1")
-                    != previous_summary_sha1
-                    if previous_summary_sha1 is not None
-                    else None
-                ),
+                "continuation_matches_previous": continuation_matches_previous,
+                "candidate_changed_from_previous": candidate_changed_from_previous,
                 "result_fields": sorted(
                     key
                     for key in result
@@ -328,8 +344,11 @@ def project_producer_attempts(jsonl: str, trace: RolloutTrace) -> dict[str, Any]
                 ),
             }
         )
-        previous_summary_sha1 = result.get("candidate_summary_sha1")
-        previous_cycle_sha1 = result.get("next_review_cycle_sha1")
+        if _is_sha1(sent_summary_sha1):
+            previous_summary_sha1 = sent_summary_sha1
+        next_cycle_sha1 = result.get("next_review_cycle_sha1")
+        if result.get("status") == "rewrite_required" and _is_sha1(next_cycle_sha1):
+            previous_cycle_sha1 = next_cycle_sha1
     waits = _team_calls(trace, "wait_agent")
     first_publish_seq = publishes[0]["seq"] if publishes else None
     commit_end_seq = publishes[-1]["end_seq"] if publishes else None
@@ -363,6 +382,8 @@ def project_producer_attempts(jsonl: str, trace: RolloutTrace) -> dict[str, Any]
                 ),
             }
         )
+    last_publish_failed = bool(publishes) and publishes[-1].get("status") != "completed"
+    producer_followup = _producer_followup_after_last_publish(trace, publishes)
     return {
         "schema": "rondo-publication-critic-plan097-producer-failure-v1",
         "wire_request_count": wire_request_count,
@@ -374,6 +395,9 @@ def project_producer_attempts(jsonl: str, trace: RolloutTrace) -> dict[str, Any]
         "waits": wait_projection,
         "inspect_actions": list(evidence["inspect_actions"]),
         "unattributed_count": len(evidence["unattributed"]),
+        "last_publish_failed": last_publish_failed,
+        "producer_followup_after_last_publish": producer_followup,
+        "ended_after_failed_dispatch": last_publish_failed and not producer_followup,
     }
 
 
@@ -508,6 +532,86 @@ def _team_calls(trace: RolloutTrace, name: str) -> list[NestedToolCall]:
         for call in trace.calls
         if call.tool_namespace == _TEAM_NAMESPACE and call.tool_name == name
     ]
+
+
+_DISPATCH_ERROR_KINDS = {
+    "review_cycle_id must match the active publication review cycle": "cycle_mismatch",
+    "review_cycle_id does not name an active publication review cycle": "cycle_not_active",
+    "publication review cycle belongs to a different actor": "cycle_wrong_actor",
+    "publication review target cannot change within a cycle": "cycle_target_changed",
+    "publication review cycle is no longer valid for this team turn": "cycle_turn_invalid",
+    "publication review cycle ended unexpectedly": "cycle_ended",
+    "publication review cycle advanced unexpectedly": "cycle_advanced",
+    "failed to parse Publication Critic team_publish arguments": "arguments_unparseable",
+    "invalid Publication Critic team_publish target; nothing was published": (
+        "invalid_target"
+    ),
+    "publication review preparation failed; nothing was published": (
+        "invalid_preparation"
+    ),
+    "publication review was cancelled before commit; nothing was published": (
+        "cancelled"
+    ),
+    "title is required when opening a new event": "missing_title",
+}
+
+
+def _classify_dispatch_error(result: object) -> str | None:
+    if not isinstance(result, Mapping) or result.get("type") != "error":
+        return None
+    message = result.get("error")
+    if not isinstance(message, str) or not message:
+        return "dispatch_error_unclassified"
+    if message.startswith("Fatal error:"):
+        return "fatal"
+    kind = _DISPATCH_ERROR_KINDS.get(message)
+    if kind is not None:
+        return kind
+    if "retry identity" in message:
+        return "retry_identity_conflict"
+    return "dispatch_error_unclassified"
+
+
+def _observation_sha1(
+    args: Mapping[str, Any], result: Mapping[str, Any], field: str
+) -> object:
+    if field in args:
+        value = args.get(field)
+        if value is None or _is_sha1(value):
+            return value
+    value = result.get(field)
+    if value is None or _is_sha1(value):
+        return value
+    return None
+
+
+def _error_returned_to_model(status: object, dispatch_error_kind: str | None) -> object:
+    if dispatch_error_kind == "fatal":
+        return False
+    if dispatch_error_kind is not None:
+        return True
+    if status != "completed":
+        return None
+    return False
+
+
+def _producer_followup_after_last_publish(
+    trace: RolloutTrace, publishes: list[Any]
+) -> bool:
+    if not publishes:
+        return False
+    last_end = publishes[-1].get("end_seq")
+    producer_threads = {
+        row.get("thread_id")
+        for row in publishes
+        if row.get("thread_id") != trace.root_thread_id
+    }
+    if not isinstance(last_end, int) or not producer_threads:
+        return False
+    return any(
+        call.thread_id in producer_threads and call.seq > last_end
+        for call in trace.calls
+    )
 
 
 def _arguments(value: object) -> dict[str, Any]:

@@ -284,7 +284,14 @@ def _absorb_ended(
         elif result.get("type") == "direct_response":
             value = result.get("response_item")
         elif result.get("type") == "error":
-            value = None
+            # Keep the typed dispatch error so a failed tool can be classified
+            # without a structured handler result. Callers that publish evidence
+            # must project this into a body-free code and must not copy `error`.
+            error = result.get("error")
+            value = {
+                "type": "error",
+                "error": error if isinstance(error, str) else None,
+            }
     trace.calls.append(
         NestedToolCall(
             tool_call_id=call_id,

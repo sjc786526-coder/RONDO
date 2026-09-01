@@ -20,6 +20,7 @@ use codex_tools::ToolSpec;
 use serde_json::json;
 use sha1::Digest;
 use sha1::Sha1;
+use std::borrow::Cow;
 
 pub(crate) struct Handler {
     publication_critic: Option<PublicationCriticConfig>,
@@ -70,6 +71,32 @@ impl CoreToolRuntime for Handler {
 
     fn redacts_tool_bodies(&self) -> bool {
         self.publication_critic.is_some()
+    }
+
+    fn log_payload<'a>(&'a self, invocation: &'a ToolInvocation) -> Option<Cow<'a, str>> {
+        if self.publication_critic.is_none() {
+            return None;
+        }
+        let ToolPayload::Function { arguments } = &invocation.payload else {
+            return Some(Cow::Borrowed(r#"{"body":"omitted"}"#));
+        };
+        Some(Cow::Owned(reviewed_publish_log_payload(arguments)))
+    }
+}
+
+fn reviewed_publish_log_payload(arguments: &str) -> String {
+    match serde_json::from_str::<ReviewedPublishArgs>(arguments) {
+        Ok(args) => {
+            let observation = ReviewedAttemptObservation::from_args(&args);
+            json!({
+                "candidate_title_sha1": observation.title_sha1,
+                "candidate_summary_sha1": observation.summary_sha1,
+                "candidate_handoff_sha1": observation.handoff_sha1,
+                "continuation_sha1": observation.continuation_sha1,
+            })
+            .to_string()
+        }
+        Err(_) => r#"{"body":"omitted","arguments_parseable":false}"#.to_string(),
     }
 }
 
@@ -520,5 +547,34 @@ mod tests {
         )
         .expect_err("invalid reviewed target should fail");
         assert!(!invalid_target.to_string().contains("candidate-sentinel"));
+    }
+
+    #[test]
+    fn reviewed_log_payload_hashes_continuation_without_bodies() {
+        let payload = reviewed_publish_log_payload(
+            &json!({
+                "title": "rewrite title",
+                "summary": "candidate-sentinel",
+                "review_cycle_id": "cycle-uuid"
+            })
+            .to_string(),
+        );
+        let value: serde_json::Value = serde_json::from_str(&payload).unwrap();
+        assert_eq!(
+            value["candidate_summary_sha1"],
+            json!(body_sha1("candidate-sentinel"))
+        );
+        assert_eq!(value["continuation_sha1"], json!(body_sha1("cycle-uuid")));
+        assert!(!payload.contains("candidate-sentinel"));
+        assert!(!payload.contains("cycle-uuid"));
+        assert!(!payload.contains("rewrite title"));
+
+        let unparseable = reviewed_publish_log_payload(r#"{"summary":{"private":"secret"}}"#);
+        assert_eq!(
+            unparseable,
+            r#"{"body":"omitted","arguments_parseable":false}"#
+        );
+        assert!(!unparseable.contains("secret"));
+        assert!(!unparseable.contains("private"));
     }
 }
