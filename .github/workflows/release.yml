@@ -1,0 +1,569 @@
+name: release
+
+# Tag-triggered release for the two RONDO product lines.
+#
+#   local-vX.Y.Z[-rcN]  ->  builds and publishes mydev/    (RONDO Local)
+#   multi-vX.Y.Z[-rcN]  ->  builds and publishes multidev/ (RONDO Multi)
+#
+# The two tracks never mix: a `local-*` tag must not build multidev, and vice
+# versa (plan 103, H8).
+#
+# The product version lives ONLY in the tag. The Cargo workspace version stays
+# pinned at the frozen upstream baseline 0.147.0 because
+# `eval/rondo_eval/binary_freeze.py` hard-asserts it for byte-level fair
+# comparison against upstream Codex (plan 103, H1/KD-001). `--version` therefore
+# reports 0.147.0; that is intentional and is documented in the release notes.
+
+on:
+  push:
+    tags:
+      - "local-v*"
+      - "multi-v*"
+
+# Read-only by default. Only the `publish` job escalates to contents: write.
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # The `on.push.tags` globs above are deliberately loose (globs cannot express
+  # SemVer). This job is the real gate: anything that is not a well-formed RONDO
+  # release tag fails here rather than being silently published as a release.
+  # ---------------------------------------------------------------------------
+  validate:
+    name: Validate tag
+    runs-on: ubuntu-24.04
+    outputs:
+      product: ${{ steps.parse.outputs.product }}
+      product_dir: ${{ steps.parse.outputs.product_dir }}
+      variant: ${{ steps.parse.outputs.variant }}
+      version: ${{ steps.parse.outputs.version }}
+      base_version: ${{ steps.parse.outputs.base_version }}
+      prerelease: ${{ steps.parse.outputs.prerelease }}
+    steps:
+      - name: Parse and validate the release tag
+        id: parse
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          # SemVer core segments use (0|[1-9][0-9]*), not [0-9]+, so leading
+          # zeros like local-v01.2.3 are rejected. RC numbers start at 1.
+          core='(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)'
+
+          if [[ "$TAG" =~ ^(local|multi)-v${core}$ ]]; then
+            prerelease=false
+          elif [[ "$TAG" =~ ^(local|multi)-v${core}-rc[1-9][0-9]*$ ]]; then
+            prerelease=true
+          else
+            echo "::error::Tag '$TAG' is not a valid RONDO release tag."
+            echo "::error::Expected (local|multi)-vX.Y.Z or (local|multi)-vX.Y.Z-rcN."
+            exit 1
+          fi
+
+          product="${BASH_REMATCH[1]}"
+          version="${TAG#"${product}"-v}"
+          base_version="${version%-rc*}"
+
+          case "$product" in
+            local) product_dir=mydev;    variant=rondo ;;
+            multi) product_dir=multidev; variant=rondo-multi ;;
+          esac
+
+          {
+            echo "product=$product"
+            echo "product_dir=$product_dir"
+            echo "variant=$variant"
+            echo "version=$version"
+            echo "base_version=$base_version"
+            echo "prerelease=$prerelease"
+          } | tee -a "$GITHUB_OUTPUT"
+
+  # ---------------------------------------------------------------------------
+  # Build one complete product package.
+  #
+  # Single-entry matrix on purpose. The first release ships only
+  # x86_64-unknown-linux-musl -- shipping a platform we cannot verify ourselves
+  # is worse than not shipping it (plan 103, KD-009). Adding a target later is a
+  # one-line matrix change, not a restructure.
+  # ---------------------------------------------------------------------------
+  build:
+    name: Build ${{ needs.validate.outputs.variant }} (${{ matrix.target }})
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [x86_64-unknown-linux-musl]
+    env:
+      TARGET: ${{ matrix.target }}
+      PRODUCT_DIR: ${{ needs.validate.outputs.product_dir }}
+      VARIANT: ${{ needs.validate.outputs.variant }}
+      VERSION: ${{ needs.validate.outputs.version }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Print runner specs
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "CPUs: $(nproc)"
+          free -h
+          df -h .
+
+      # bwrap links libcap; the packaging step needs binutils for strip.
+      - name: Install Linux build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -y
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            binutils pkg-config libcap-dev
+
+      - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Use hermetic Cargo home (musl)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo_home="${GITHUB_WORKSPACE}/.cargo-home"
+          mkdir -p "${cargo_home}/bin"
+          echo "CARGO_HOME=${cargo_home}" >> "$GITHUB_ENV"
+          echo "${cargo_home}/bin" >> "$GITHUB_PATH"
+          : > "${cargo_home}/config.toml"
+
+      - name: Install Zig
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.14.0
+          use-cache: false
+
+      # Reuses the upstream script that already lives in the product tree. It
+      # builds libcap for the musl target, installs the zig cc/c++ shims and
+      # exports the whole CC/CXX/PKG_CONFIG environment to $GITHUB_ENV.
+      # Cross-compiling to musl is not "just add --target"; do not reimplement.
+      - name: Install musl build tools
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: bash "${GITHUB_WORKSPACE}/${PRODUCT_DIR}/.github/scripts/install-musl-build-tools.sh"
+
+      - name: Disable aws-lc jitter entropy (musl)
+        shell: bash
+        run: |
+          set -euo pipefail
+          # aws-lc's jitter entropy path misbehaves on musl builders.
+          echo "AWS_LC_SYS_NO_JITTER_ENTROPY=1" >> "$GITHUB_ENV"
+          target_no_jitter="AWS_LC_SYS_NO_JITTER_ENTROPY_${TARGET//-/_}"
+          echo "${target_no_jitter}=1" >> "$GITHUB_ENV"
+
+      # --- STEP 1 of the frozen build order ---------------------------------
+      # V8 artifacts are named with the full target triple. The product's
+      # with_codex_v8_artifacts.py wrapper selects by `rustc -vV` HOST, which on
+      # this runner is x86_64-unknown-linux-gnu -- using it would link the GNU
+      # V8 into a musl target. Select by $TARGET instead. The wrapper is not
+      # modified; this only imports the same modules it does.
+      #
+      # Both variables MUST land in $GITHUB_ENV: every step is a separate shell,
+      # so printing them to the log would not reach the later cargo steps.
+      - name: Fetch and verify rusty_v8 artifacts for $TARGET
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - "$TARGET" "$PRODUCT_DIR" >> "$GITHUB_ENV" <<'PY'
+          import sys
+          target, product_dir = sys.argv[1], sys.argv[2]
+          sys.path.insert(0, f"{product_dir}/scripts")
+          from codex_package.targets import TARGET_SPECS
+          from codex_package.v8 import fetch_codex_v8_artifacts, resolved_v8_crate_version
+
+          spec = TARGET_SPECS[target]
+          artifacts = fetch_codex_v8_artifacts(spec, version=resolved_v8_crate_version())
+          print(f"RUSTY_V8_ARCHIVE={artifacts.archive}")
+          print(f"RUSTY_V8_SRC_BINDING_PATH={artifacts.binding}")
+          PY
+          echo "Resolved V8 artifacts for ${TARGET}:"
+          grep -E '^RUSTY_V8_' "$GITHUB_ENV"
+
+      # --- STEP 2 of the frozen build order ---------------------------------
+      # SECURITY CONTROL, not ordering pedantry.
+      #
+      # `linux-sandbox/src/bundled_bwrap.rs` reads CODEX_BWRAP_SHA256 through
+      # option_env!(), i.e. at COMPILE TIME. If it is absent, expected_sha256()
+      # returns None and verify_digest() returns Ok(()) -- the bundled bwrap
+      # integrity check is silently skipped, and every ordinary smoke test still
+      # passes. So bwrap must be built, stripped and hashed BEFORE the codex
+      # binary is compiled. The digest covers the stripped bytes because those
+      # are the bytes that get packaged.
+      - name: Build bwrap, strip it, and export its digest
+        shell: bash
+        working-directory: ${{ needs.validate.outputs.product_dir }}/codex-rs
+        run: |
+          set -euo pipefail
+          cargo build --locked --target "$TARGET" --release --bin bwrap
+
+          bwrap_path="target/${TARGET}/release/bwrap"
+          test -f "$bwrap_path" || { echo "missing ${bwrap_path}" >&2; exit 1; }
+
+          strip --strip-debug --strip-unneeded "$bwrap_path"
+          digest="$(sha256sum "$bwrap_path" | awk '{print $1}')"
+          echo "CODEX_BWRAP_SHA256=${digest}" >> "$GITHUB_ENV"
+          echo "bwrap sha256:${digest}"
+
+      # --- STEP 3 of the frozen build order ---------------------------------
+      # Only now is the digest compiled into the entrypoint.
+      # --target and --profile are pinned explicitly: --entrypoint-bin only
+      # checks that the file exists and is executable, it does NOT validate the
+      # architecture, so a stray host/debug build would be packaged as a "musl
+      # release" without complaint.
+      - name: Build entrypoint and code-mode host
+        shell: bash
+        working-directory: ${{ needs.validate.outputs.product_dir }}/codex-rs
+        run: |
+          set -euo pipefail
+          cargo build --locked --target "$TARGET" --release \
+            --bin codex --bin codex-code-mode-host
+
+      - name: Verify the built artifacts are actually musl
+        shell: bash
+        working-directory: ${{ needs.validate.outputs.product_dir }}/codex-rs
+        run: |
+          set -euo pipefail
+          out="target/${TARGET}/release"
+          for binary in codex codex-code-mode-host bwrap; do
+            test -f "${out}/${binary}" || { echo "missing ${out}/${binary}" >&2; exit 1; }
+            file "${out}/${binary}"
+            # A statically linked musl build must not carry an ELF interpreter.
+            if readelf -l "${out}/${binary}" | grep -q "Requesting program interpreter"; then
+              echo "::error::${binary} is dynamically linked; expected a static musl build."
+              exit 1
+            fi
+          done
+
+      # --- STEP 4 of the frozen build order ---------------------------------
+      # All three prebuilt artifacts are handed in explicitly so the packager's
+      # `binaries` list is empty and its internal cargo build is skipped
+      # entirely. That internal build does NOT pass --locked and would also
+      # rebuild bwrap after the digest was already compiled in.
+      #
+      # --archive-output is deliberately NOT passed: the packager writes the
+      # archive immediately after validating the package dir, so license
+      # material injected afterwards would never reach it. Archive by hand.
+      - name: Build the product package directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="${PRODUCT_DIR}/codex-rs/target/${TARGET}/release"
+          stage="${RUNNER_TEMP}/stage"
+          pkgname="${VARIANT}-${VERSION}-${TARGET}"
+          mkdir -p "$stage"
+
+          python3 "${PRODUCT_DIR}/scripts/build_codex_package.py" \
+            --target "$TARGET" \
+            --variant "$VARIANT" \
+            --cargo-profile release \
+            --entrypoint-bin "${out}/codex" \
+            --code-mode-host-bin "${out}/codex-code-mode-host" \
+            --bwrap-bin "${out}/bwrap" \
+            --package-dir "${stage}/${pkgname}"
+
+          echo "STAGE=${stage}" >> "$GITHUB_ENV"
+          echo "PKGNAME=${pkgname}" >> "$GITHUB_ENV"
+          echo "PKGDIR=${stage}/${pkgname}" >> "$GITHUB_ENV"
+          find "${stage}/${pkgname}" -type f | sort
+
+      # --- STEP 5: license material, BEFORE archiving ------------------------
+      - name: Install cargo-about
+        uses: taiki-e/install-action@44c6d64aa62cd779e873306675c7a58e86d6d532 # v2.62.49
+        with:
+          tool: cargo-about@0.9.2
+
+      - name: Inject license material into the package
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp LICENSE "${PKGDIR}/LICENSE"
+          cp "${PRODUCT_DIR}/NOTICE" "${PKGDIR}/NOTICE"
+          bash .github/scripts/collect-third-party-licenses.sh \
+            --product-dir "$PRODUCT_DIR" \
+            --target "$TARGET" \
+            --entrypoint "$VARIANT" \
+            --out "${PKGDIR}/THIRD-PARTY-LICENSES"
+
+      # --- STEP 6: archive, then unpack and re-verify ------------------------
+      - name: Archive and checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          dist="${GITHUB_WORKSPACE}/dist"
+          mkdir -p "$dist"
+          tar -C "$STAGE" -czf "${dist}/${PKGNAME}.tar.gz" "$PKGNAME"
+          ( cd "$dist" && sha256sum "${PKGNAME}.tar.gz" > SHA256SUMS )
+          cat "${dist}/SHA256SUMS"
+
+      # "The command did not error" is not evidence. Unpack what was actually
+      # archived and compare it against the prebuilt inputs byte for byte.
+      - name: Unpack the archive and re-verify its contents
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="${GITHUB_WORKSPACE}/${PRODUCT_DIR}/codex-rs/target/${TARGET}/release"
+          check="${RUNNER_TEMP}/unpack"
+          mkdir -p "$check"
+          tar -C "$check" -xzf "${GITHUB_WORKSPACE}/dist/${PKGNAME}.tar.gz"
+          root="${check}/${PKGNAME}"
+
+          same() {
+            local a b
+            a="$(sha256sum "$1" | awk '{print $1}')"
+            b="$(sha256sum "$2" | awk '{print $1}')"
+            if [[ "$a" != "$b" ]]; then
+              echo "::error::$1 does not match $2 ($a != $b)"
+              exit 1
+            fi
+            echo "ok  $1  sha256:$a"
+          }
+
+          same "${root}/bin/${VARIANT}"              "${out}/codex"
+          same "${root}/bin/codex-code-mode-host"    "${out}/codex-code-mode-host"
+          same "${root}/codex-resources/bwrap"       "${out}/bwrap"
+
+          # The packaged bwrap must be exactly the bytes whose digest was
+          # compiled into the entrypoint.
+          packaged="$(sha256sum "${root}/codex-resources/bwrap" | awk '{print $1}')"
+          if [[ "$packaged" != "$CODEX_BWRAP_SHA256" ]]; then
+            echo "::error::packaged bwrap digest ${packaged} != compiled-in ${CODEX_BWRAP_SHA256}"
+            exit 1
+          fi
+          echo "ok  packaged bwrap matches the compiled-in digest"
+
+          for required in \
+            LICENSE \
+            NOTICE \
+            codex-package.json \
+            codex-path/rg \
+            THIRD-PARTY-LICENSES/README.md \
+            THIRD-PARTY-LICENSES/v8-icu-NOTICE.md \
+            THIRD-PARTY-LICENSES/bubblewrap-0.11.2-COPYING \
+            "THIRD-PARTY-LICENSES/rust-dependencies-${VARIANT}.md" \
+            THIRD-PARTY-LICENSES/rust-dependencies-codex-code-mode-host.md \
+            THIRD-PARTY-LICENSES/rust-dependencies-bwrap.md
+          do
+            test -f "${root}/${required}" || { echo "::error::archive is missing ${required}"; exit 1; }
+            echo "ok  ${required}"
+          done
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: rondo-package-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # Clean-environment verification.
+  #
+  # A separate job means a fresh, disposable runner that has never built or
+  # installed RONDO -- the "clean machine" requirement, without needing Docker.
+  # Running BEFORE publish means a broken package is never published.
+  # ---------------------------------------------------------------------------
+  verify:
+    name: Verify package on a clean runner
+    needs: [validate, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      TARGET: x86_64-unknown-linux-musl
+      VARIANT: ${{ needs.validate.outputs.variant }}
+      VERSION: ${{ needs.validate.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: rondo-package-x86_64-unknown-linux-musl
+          path: dist
+
+      - name: Verify checksums and unpack
+        shell: bash
+        run: |
+          set -euo pipefail
+          ( cd dist && sha256sum -c SHA256SUMS )
+          mkdir -p unpacked
+          tar -C unpacked -xzf "dist/${VARIANT}-${VERSION}-${TARGET}.tar.gz"
+          echo "PKG=${GITHUB_WORKSPACE}/unpacked/${VARIANT}-${VERSION}-${TARGET}" >> "$GITHUB_ENV"
+
+      # The bundled bwrap is only used when no usable system bwrap exists on
+      # PATH (see linux-sandbox/src/launcher.rs). If one were present, the
+      # checks below would exercise the wrong code path and pass without
+      # proving anything. Fail loudly instead of quietly testing nothing.
+      - name: Assert no system bwrap shadows the bundled one
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v bwrap >/dev/null 2>&1; then
+            echo "::error::A system bwrap is on PATH ($(command -v bwrap))."
+            echo "::error::The bundled-bwrap checks below would not be exercised."
+            exit 1
+          fi
+          echo "ok  no system bwrap on PATH"
+
+      - name: Smoke test - version
+        shell: bash
+        run: |
+          set -euo pipefail
+          export CODEX_HOME="${RUNNER_TEMP}/codex-home"
+          mkdir -p "$CODEX_HOME"
+          "${PKG}/bin/${VARIANT}" --version
+          # The workspace version is frozen at the upstream baseline on purpose
+          # (H1); the product version lives in the tag.
+          "${PKG}/bin/${VARIANT}" --version | grep -q '0\.147\.0'
+
+      # Exercises a bundled companion component through the product rather than
+      # by running it directly: doctor's `search` check resolves ripgrep from
+      # the package layout, which also proves that renaming the entrypoint did
+      # not break package-layout detection.
+      - name: Smoke test - bundled companion components
+        shell: bash
+        run: |
+          set -euo pipefail
+          export CODEX_HOME="${RUNNER_TEMP}/codex-home"
+          mkdir -p "$CODEX_HOME"
+          set +e
+          out="$("${PKG}/bin/${VARIANT}" doctor 2>&1)"
+          set -e
+          echo "$out"
+          # doctor legitimately exits non-zero when not logged in, so assert on
+          # the specific line rather than on the exit code.
+          echo "$out" | grep -E 'search.*bundled' \
+            || { echo "::error::doctor did not resolve the bundled ripgrep"; exit 1; }
+
+      - name: Smoke test - arg0 and sandbox
+        shell: bash
+        run: |
+          set -euo pipefail
+          export CODEX_HOME="${RUNNER_TEMP}/codex-home"
+          mkdir -p "$CODEX_HOME"
+          out="$("${PKG}/bin/${VARIANT}" sandbox -- /bin/echo rondo-sandbox-ok 2>&1)"
+          echo "$out"
+          echo "$out" | grep -q 'rondo-sandbox-ok'
+
+      # A14: prove the bundled bwrap digest check is actually compiled in.
+      #
+      # Flipping a random byte is NOT acceptable evidence: it can simply corrupt
+      # the ELF, so a refusal proves only "it would not run". Appending one byte
+      # to the tail changes the SHA-256 while leaving the file executable (ELF
+      # loaders ignore trailing bytes), and step 2 below confirms that directly.
+      # Only the specific digest-mismatch error proves the check fired.
+      - name: A14 - bundled bwrap tamper detection
+        shell: bash
+        run: |
+          set -euo pipefail
+          export CODEX_HOME="${RUNNER_TEMP}/codex-home-tamper"
+          mkdir -p "$CODEX_HOME"
+
+          tampered="${RUNNER_TEMP}/tampered"
+          rm -rf "$tampered"
+          cp -a "$PKG" "$tampered"
+
+          before="$(sha256sum "${tampered}/codex-resources/bwrap" | awk '{print $1}')"
+          printf 'X' >> "${tampered}/codex-resources/bwrap"
+          after="$(sha256sum "${tampered}/codex-resources/bwrap" | awk '{print $1}')"
+          test "$before" != "$after" || { echo "::error::tampering did not change the digest"; exit 1; }
+          echo "digest changed: ${before} -> ${after}"
+
+          # Rule out the false positive: the tampered file must still execute.
+          if ! "${tampered}/codex-resources/bwrap" --version >/dev/null 2>&1; then
+            echo "::error::tampered bwrap no longer runs; a refusal below would prove nothing."
+            exit 1
+          fi
+          echo "ok  tampered bwrap still executes standalone"
+
+          set +e
+          out="$("${tampered}/bin/${VARIANT}" sandbox -- /bin/true 2>&1)"
+          status=$?
+          set -e
+          echo "$out"
+
+          if [[ $status -eq 0 ]]; then
+            echo "::error::product accepted a tampered bundled bwrap."
+            exit 1
+          fi
+          echo "$out" | grep -q 'bundled bubblewrap digest mismatch' || {
+            echo "::error::product failed, but not with the digest-mismatch error."
+            echo "::error::That does not prove CODEX_BWRAP_SHA256 was compiled in."
+            exit 1
+          }
+          echo "ok  bundled bwrap integrity check is active"
+
+  # ---------------------------------------------------------------------------
+  # Publish. This is the only job with write access.
+  # ---------------------------------------------------------------------------
+  publish:
+    name: Publish release
+    needs: [validate, build, verify]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ github.ref_name }}
+      PRODUCT_DIR: ${{ needs.validate.outputs.product_dir }}
+      VARIANT: ${{ needs.validate.outputs.variant }}
+      VERSION: ${{ needs.validate.outputs.version }}
+      BASE_VERSION: ${{ needs.validate.outputs.base_version }}
+      PRERELEASE: ${{ needs.validate.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: rondo-package-x86_64-unknown-linux-musl
+          path: dist
+
+
+      - name: Compose release notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          notes="${RUNNER_TEMP}/notes.md"
+          bash .github/scripts/compose-release-notes.sh \
+            --product-dir "$PRODUCT_DIR" \
+            --variant "$VARIANT" \
+            --version "$VERSION" \
+            --base-version "$BASE_VERSION" \
+            --tag "$TAG" \
+            --prerelease "$PRERELEASE" \
+            --out "$notes"
+          echo "NOTES=$notes" >> "$GITHUB_ENV"
+          echo "----- release notes -----"
+          cat "$notes"
+
+      - name: Create the GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          args=(
+            "$TAG"
+            --title "${VARIANT} ${VERSION}"
+            --notes-file "$NOTES"
+            --verify-tag
+          )
+          if [[ "$PRERELEASE" == "true" ]]; then
+            # A release candidate must never become the repository's "latest".
+            args+=(--prerelease --latest=false)
+          else
+            args+=(--latest=true)
+          fi
+
+          gh release create "${args[@]}" dist/*
+          gh release view "$TAG" --json tagName,isPrerelease,isLatest,assets

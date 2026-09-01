@@ -1,0 +1,227 @@
+name: ci
+
+# RONDO's own CI. This is the ONLY workflow directory GitHub executes:
+# `mydev/.github/` and `multidev/.github/` are inert files inherited from the
+# frozen upstream Codex tree (kept so the product trees stay diffable against
+# upstream, and because the product justfiles reference `.github/scripts/`).
+#
+# The repo does not use pull requests, so `push` to `main` is the real gate.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Least privilege by default. No job in this workflow needs write access, and
+# no job may reference a repository secret (see plan 103, H6).
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # GitHub standard runners are 4 vCPU / 16 GB, while a full local build of this
+  # workspace is provisioned for 21 GB. Cap parallelism and drop debug info to
+  # keep link-time memory well under the runner ceiling (plan 103, R1).
+  CARGO_BUILD_JOBS: "2"
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_INCREMENTAL: "0"
+  RUST_MIN_STACK: "8388608"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Which product lines does this push affect?
+  #
+  # Three path classes, not two: a change to shared infrastructure must run BOTH
+  # product lines, otherwise editing e.g. `scripts/` would silently run nothing.
+  # ---------------------------------------------------------------------------
+  changed:
+    name: Detect changed product lines
+    runs-on: ubuntu-24.04
+    outputs:
+      products: ${{ steps.detect.outputs.products }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Detect changed paths (no external action)
+        id: detect
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE_SHA: ${{ github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          local_changed=false
+          multi_changed=false
+
+          # Manual runs, brand-new branches and force pushes cannot be diffed
+          # reliably, so fall back to running both product lines. Failing open
+          # here means "run more tests", never "run fewer".
+          if [[ "$EVENT_NAME" != "push" ]] \
+            || [[ -z "$BEFORE_SHA" ]] \
+            || [[ "$BEFORE_SHA" == "0000000000000000000000000000000000000000" ]] \
+            || ! git cat-file -e "${BEFORE_SHA}^{commit}" 2>/dev/null; then
+            echo "No usable diff base; running both product lines."
+            local_changed=true
+            multi_changed=true
+          else
+            mapfile -t files < <(git diff --name-only --no-renames "$BEFORE_SHA" "$HEAD_SHA")
+            printf 'Changed files:\n'
+            printf '  %s\n' "${files[@]:-<none>}"
+            for f in "${files[@]:-}"; do
+              case "$f" in
+                mydev/*)    local_changed=true ;;
+                multidev/*) multi_changed=true ;;
+                # Shared infrastructure: affects both product lines.
+                .github/*|scripts/*|eval/*|justfile|*.toml)
+                  local_changed=true
+                  multi_changed=true
+                  ;;
+              esac
+            done
+          fi
+
+          products=()
+          [[ "$local_changed" == true ]] && products+=('"local"')
+          [[ "$multi_changed" == true ]] && products+=('"multi"')
+          json="[$(IFS=,; echo "${products[*]:-}")]"
+          echo "products=$json" | tee -a "$GITHUB_OUTPUT"
+
+  # ---------------------------------------------------------------------------
+  # Three gates per affected product line: fmt, build, test.
+  # Written once, reused by both product lines via the matrix.
+  # ---------------------------------------------------------------------------
+  check:
+    name: check (${{ matrix.product }})
+    needs: changed
+    if: needs.changed.outputs.products != '[]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        product: ${{ fromJSON(needs.changed.outputs.products) }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Resolve product line
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "${{ matrix.product }}" in
+            local)
+              echo "PRODUCT_DIR=mydev" >> "$GITHUB_ENV"
+              # RONDO Local's changes live in the guardian/config surface.
+              echo "TEST_PACKAGES=-p codex-config -p codex-features" >> "$GITHUB_ENV"
+              ;;
+            multi)
+              echo "PRODUCT_DIR=multidev" >> "$GITHUB_ENV"
+              # codex-publication-critic is the direction-3 crate and is cheap:
+              # it depends only on http-client/serde/tokio/url, no V8, no core.
+              echo "TEST_PACKAGES=-p codex-config -p codex-features -p codex-publication-critic" >> "$GITHUB_ENV"
+              ;;
+            *)
+              echo "unknown product ${{ matrix.product }}" >&2
+              exit 2
+              ;;
+          esac
+
+      - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
+        with:
+          components: rustfmt
+
+      # Swatinem/rust-cache is not used: it is not pinned anywhere in the frozen
+      # upstream tree, and actions/cache (which is) covers this adequately.
+      # Cache keys are per product line so the two workspaces never evict each
+      # other's artifacts.
+      - uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            ${{ env.PRODUCT_DIR }}/codex-rs/target
+          key: cargo-${{ runner.os }}-${{ matrix.product }}-${{ hashFiles('mydev/codex-rs/Cargo.lock', 'multidev/codex-rs/Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-${{ matrix.product }}-
+
+      # Gate 1: formatting. No compilation, so this is the fastest feedback.
+      # The nightly-only `imports_granularity` is passed on the command line
+      # exactly as upstream does, since stable rustfmt ignores it in the file.
+      - name: cargo fmt --check
+        working-directory: ${{ env.PRODUCT_DIR }}/codex-rs
+        run: cargo fmt -- --config imports_granularity=Item --check
+
+      # Gate 2: the binary that actually ships must build. Kept as its own
+      # invocation because `--bin` is ambiguous once several packages are
+      # selected with -p.
+      - name: cargo build (release entrypoint)
+        working-directory: ${{ env.PRODUCT_DIR }}/codex-rs
+        run: cargo build --locked -p codex-cli --bin codex
+
+      # Gate 3a: full test targets for the light, RONDO-relevant crates.
+      - name: cargo test (product crates)
+        working-directory: ${{ env.PRODUCT_DIR }}/codex-rs
+        run: cargo test --locked ${{ env.TEST_PACKAGES }}
+
+      # Gate 3b: the config loader tests in codex-core. Narrow on purpose --
+      # codex-core is the heaviest crate in the workspace and its integration
+      # suite is far past what a 4 vCPU runner should carry -- but this filter
+      # covers the one RONDO change to runtime defaults
+      # (`check_for_update_on_startup`), so it must not be dropped.
+      - name: cargo test (core config loader)
+        working-directory: ${{ env.PRODUCT_DIR }}/codex-rs
+        run: "cargo test --locked -p codex-core --lib -- config::"
+
+  # ---------------------------------------------------------------------------
+  # Packaging scripts are Python and cost seconds; always run them.
+  # ---------------------------------------------------------------------------
+  package-scripts:
+    name: packaging scripts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+      - name: codex_package unit tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          for dir in mydev multidev; do
+            echo "== $dir =="
+            ( cd "$dir/scripts" && python3 -m unittest discover -s codex_package -p 'test_*.py' -t . -v )
+          done
+
+# ---------------------------------------------------------------------------
+# Why this is not the full workspace (plan 103, KD-006 / A3):
+#
+# Each product workspace has ~130 crates, and the local full-workspace gate is
+# provisioned for 21 GB of RAM with `jobs=1`. A GitHub standard runner has
+# 16 GB and 4 vCPU. Running everything here would either OOM or blow the time
+# budget, and the honest fix is a smaller CI scope plus the existing local full
+# gate -- not deleting tests to get green (plan 103, H7).
+#
+# Deliberately excluded, with reasons:
+#   * codex-core integration suites  -- heaviest crate in the workspace.
+#   * anything reaching V8           -- `codex-code-mode-runtime` and
+#     `codex-code-mode-host` need a checksum-verified prebuilt librusty_v8
+#     download; that belongs to the release workflow, not to a push gate.
+#   * everything needing a secret, a real model, a paid API or Docker (H6).
+#
+# Excluded means "not run here", never "passing". The full workspace gate
+# remains local: `just test-with-codex-v8-conservative`.
+# ---------------------------------------------------------------------------

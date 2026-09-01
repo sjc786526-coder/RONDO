@@ -644,6 +644,64 @@ C-3 必须实测这条准确路径，不得假设默认路径可用。
   → 改为"尾部追加一字节（ELF 仍可执行）→ 先确认其自身可运行 → 再断言出现
   `bundled bubblewrap digest mismatch` 具体错误"；阶段 C 退出条件补上 A14
 
+### 阶段 A｜已完成（2026-09-01，全部验证通过）
+
+| 步骤 | 结果 |
+|---|---|
+| A-2 | 两条产品线 `codex-cli/package.json` 改为 `rondo-cli` / `rondo-multi-cli` + `private: true`；顺带修正 `description` 与 `repository`（改名后原值即为错误陈述）。**验证**：`build_npm_package.py` 用自带常量 `CODEX_NPM_NAME` 构造清单，只继承 `license`/`repository`/`engines`/`packageManager`，无任何测试或脚本读取 `name` |
+| A-3 | 两份 CHANGELOG 重写（原为指向上游 releases 页的单行）。首条 `## 0.1.0`，供 release 工作流按版本段提取 |
+| A-4 | README 增加惰性 `.github` 说明，并把根 `.github/` 补进仓库结构树 |
+| A-5 | **E-X1**：两条产品线各新增一个 `PackageVariant`（`cargo_bin="codex"` 不变）。**验证**：既有 13 个打包测试全绿；另写临时脚本实测新变体经 `build_package_dir`/`validate_package_dir` 产出 `bin/rondo`、`bin/rondo-multi`，元数据 `entrypoint`/`variant`/`target` 正确，既有 `codex` 变体产物不变 |
+| A-6 | **E-X2**：`unwrap_or(true)` → `unwrap_or(false)`，同步修正 `config_toml.rs` 的文档注释（原文写"Defaults to `true`"，是 JSON schema 描述的来源），并用 `codex-write-config-schema` 重新生成两份 `config.schema.json`（各 1 行差异） |
+
+**A-6 专项验证（四项全部闭合）：**
+
+1. ✅ config 与快照测试全绿：Local `472 passed / 0 failed`，Multi `486 passed / 0 failed`；
+   其中 `config::schema::tests::config_schema_matches_fixture` 单独复跑通过
+2. ✅ A12：直接调用 `binary_freeze._validate_workspace_manifests()`，两条产品线均 `OK`
+   （workspace 版本、`codex-cli`/`codex-code-mode-host`/`codex-bwrap` 的 package 与 bin 契约全部成立）
+3. ✅ A11：`git status` 确认 `Cargo.toml`/`Cargo.lock` 零改动、`eval/` 零改动，
+   改动面仅限 §2 允许清单加两处窄例外
+4. n/a（第 2 项成立，无需回退）
+
+### 阶段 B / C｜已落地待实跑
+
+已写出并通过本地可验证部分：
+
+- `.github/workflows/ci.yml`：三类 path filter（用 git diff 自算，**不引入第三方 action**）、
+  fmt / build / test 三门禁、`actions/cache` 分产品线 key、`package-scripts` job、
+  工作流级 `permissions: contents: read`
+- `.github/workflows/release.yml`：SemVer 严格校验 job、冻结构建顺序、musl 工具链、
+  三产物显式传入、许可注入→归档→**解包复验**→`SHA256SUMS`、
+  独立 `verify` job（干净 runner，含 A7 与 A14）、仅 `publish` job 提升 `contents: write`
+- `.github/scripts/collect-third-party-licenses.sh`、`.github/scripts/compose-release-notes.sh`
+- `.github/licenses/`：`about.toml`、`about.hbs`、`v8-icu-NOTICE.md`、
+  `vendor/`（ripgrep 15.2.0 与 zsh `77045ef8` 的许可原文，**入库避免发布期依赖第三方站点可达**）
+
+**本地已验证**：两份工作流 YAML 可解析；`compose-release-notes.sh` 实跑产出正确；
+`collect-third-party-licenses.sh` 的文件搬运与 fail-closed 行为正确。
+**待 rc1 实跑验证**：musl 交叉编译链、V8 按 target 取产物、cargo-about 的实际 flag、
+`codex sandbox` 在 runner 上的可用性、A14 篡改测试。
+
+### 实施期的新发现（均已落地，不改变计划契约）
+
+1. **musl 交叉编译远不止 `--target`**：上游 `install-musl-build-tools.sh` 需要 Zig 0.14.0、
+   从源码编译 libcap、注入 zig cc/c++ shim 与整套 `CC`/`PKG_CONFIG` 环境；另需
+   `AWS_LC_SYS_NO_JITTER_ENTROPY=1`。工作流直接复用产品树内该脚本，不重写。
+   （原计划 R9 已预见需要它，但低估了规模。）
+2. **上游 musl 用的是自建 XL runner**，本项目只能用 4 vCPU/16 GB 标准 runner，
+   release 构建时长与内存是 rc1 的主要风险点。
+3. **包布局识别不依赖入口文件名**：`install-context/src/lib.rs` 按目录名 `bin/` 与
+   `codex-package.json` 存在性判定，因此改名 `bin/codex` → `bin/rondo-multi` 对
+   `rg`/`code-mode-host` 解析安全。这把 C-7 的"预期安全"从推理升级为代码证据，但仍需实测。
+4. **`codex doctor` 的 `search` 检查**会经包布局解析 bundled ripgrep，
+   正好用作 A7 中"依赖附属组件的功能"这一条，比直接运行 `rg --version` 更贴近产品行为。
+5. **bundled bwrap 只在 PATH 上没有可用 system bwrap 时才启用**（`launcher.rs`），
+   因此 verify job 必须先断言 runner 上没有 system bwrap，否则 A14 会在错误代码路径上"通过"。
+6. **本机磁盘余量成为实施约束**：项目从 343 GB 增至 357 GB（告警 350 / 主动停 365）。
+   Local 冷构建改用 `CARGO_PROFILE_DEV_DEBUG=0`（target 仅 6.5 GB）；Multi 复用既有缓存、
+   **不加该变量**，否则会因指纹变化触发全量重建。
+
 ### 当前工作
 
 **终审后的用户决策与收口（2026-09-01）：**
@@ -661,8 +719,9 @@ C-3 必须实测这条准确路径，不得假设默认路径可用。
 **规划阶段已完成并通过终审（2026-09-01）。** 用户已批准 KD-012（窄例外 E-X2）与 KD-007
 （现仓库整体转 public），并同意先在 private 仓库用 `multi-v0.1.0-rc1` 实跑验证。
 
-**尚未开始阶段 A-2 及之后的任何动作**：`check_for_update_on_startup` 默认值仍为 `true`，
-远端仓库仍为 `PRIVATE`，产品源码零改动。
+**当前进度（2026-09-01）**：阶段 A 已完成并验证；阶段 B/C 的工作流与脚本已写出，待实跑。
+`check_for_update_on_startup` 默认值已改为 `false`（E-X2 已实施并验证）。
+**远端仓库仍为 `PRIVATE`，尚未打任何 tag，尚未创建任何 Release。**
 
 **实施时的一个已知落地点**（终审提示，非计划阻塞）：C-3 第①步的 V8 脚本必须把
 `RUSTY_V8_ARCHIVE` 与 `RUSTY_V8_SRC_BINDING_PATH` **真正写入 `$GITHUB_ENV`**，
@@ -674,7 +733,8 @@ C-3 必须实测这条准确路径，不得假设默认路径可用。
 
 ### 本任务剩余步骤
 
-按 §5 路线图顺序执行 A-2 → E-5。
+阶段 A 已收口。剩余：B-4/B-5（CI 实测时长并据此定范围）→ C 的 rc1 实跑与迭代 →
+D（四项复核 + 用户确认 + 转 public + 正式 tag）→ E（文档回写）。
 
 ### 阻塞项
 

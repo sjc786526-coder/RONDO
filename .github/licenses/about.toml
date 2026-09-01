@@ -1,0 +1,42 @@
+# cargo-about configuration for the RONDO release third-party license report.
+#
+# This covers ONLY the Cargo dependency closure. It does NOT cover the native
+# V8/ICU code inside the prebuilt `librusty_v8_*.a`, which cargo-about cannot
+# see -- that closure is documented separately in v8-icu-NOTICE.md.
+#
+# The accepted list is deliberately broad-permissive. If a dependency shows up
+# with a license that is not listed, the release build FAILS rather than
+# quietly shipping an incomplete notice file. That is the intended behaviour:
+# fix the list (or the dependency) instead of relaxing the gate.
+
+accepted = [
+    "0BSD",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "CC0-1.0",
+    "CDLA-Permissive-2.0",
+    "ISC",
+    "MIT",
+    "MIT-0",
+    "MPL-2.0",
+    "NCSA",
+    "OpenSSL",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "Unlicense",
+    "Zlib",
+]
+
+# `ring` ships a composite license that cargo-about cannot infer on its own.
+workarounds = ["ring"]
+
+# Build scripts and dev-dependencies are not linked into the shipped binaries.
+ignore-build-dependencies = true
+ignore-dev-dependencies = true
+
+# Every private/workspace-internal crate is first-party RONDO/Codex code and is
+# already covered by the top-level LICENSE and NOTICE.
+private = { ignore = true }
