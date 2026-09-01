@@ -12,7 +12,8 @@
 - `ScoringContract` 去掉 `#[serde(untagged)]`，改为按 `pass_rule` 显式判别；两个变体的 wire 字节不变。
 - Producer ledger 改为代际：新一代只继承上一代剩余额度，换账本不再重置任务级 `50 USD` 上限。
 - Plan 102 自己的 Producer 成员提示词（Plan 097 的常量不变，`build_producer_command` 参数化）：
-  把重试机制讲死到"绑定结果、按下标传 cycle id、被拒后纠正而不是结束"，不放松任何证据不变量。
+  把重试机制讲死到"绑定结果、只打印 status/反馈/cycle id、按下标传 cycle id、被拒后纠正而不是结束"，
+  不放松任何证据不变量（每个 cell 一次 publish、不预写、单 Event、唯一 canonical commit 仍由校验器强制）。
 - 失败可读性：先查 `returncode` 再加载 trace；`TraceError` 折叠成 `producer_trace_invalid:<slug>`；
   投影记录最后一次 publish 之后 Producer 还调过哪些工具（只记工具名）。
 
@@ -24,15 +25,20 @@
   只有 `codex-core` 的 `concurrent_exact_publish_reviews_and_commits_only_once` 暴露出来
   （`data did not match any variant of untagged enum ScoringContract`）。已改为按 `pass_rule` 显式判别。
 - 旧 `codex` 二进制仍按标量 `ServiceDescriptor` 解析，Producer 段必须先 `just build -p codex-cli`。
-- **B2 跑满 17 个 Producer run 仍无 canonical commit，卡点在 Producer 侧模型行为，不在接缝。**
-  每轮第一次 `team_publish` 都被正常评审为 `rewrite_required` 且带合法 `next_review_cycle_sha1`；
-  第二次要么不发（多数轮），要么不带 `review_cycle_id`（r6），要么带了对不上的 id（r13）。
-  后两种被 core 以 typed `cycle_mismatch` 正确拒绝，错误也回给了模型，模型随后自行结束。
-  已排除：接缝返回不可用 cycle id、模型看不到评审结果、cell 间不共享状态。
+- **B2 前 22 轮都卡在第二次 `team_publish`，真因是成员提示词让模型读不到裁决。**
+  `code_mode_result` 把完整结果交给 code cell，模型只看得见 cell 的输出；我先前把提示词写成
+  "绑定结果后立刻结束 cell"，等于劝阻打印。表现是第二次 publish 不带 `review_cycle_id`
+  且候选一字未改，随后转去 `team_history` / `team_inspect` / `send_message` 查发生了什么——
+  这是看不到裁决的样子，不是无视裁决。改为显式打印 status / 反馈 / `review_cycle_id`
+  （只打印这三项）后，下一轮 r23 即取得 canonical commit。Plan 097 原文的
+  "inspect the actual result" 隐含了这一步。
+- 全程每一轮的第一次 `team_publish` 都被正常评审并带合法 `next_review_cycle_sha1`，
+  失败从未落在接缝上；两种畸形重试都被 core 以 typed `cycle_mismatch` 正确拒绝。
 - r3 的 `continuation_matches_previous=False` 是空失败结果的投影假象；r13 才是真的送错 id。
-  旧投影把 `type=error` 读成空结果，丢掉了 typed 原因，这也是本次补诊断的直接动机。
-- `reasoning_effort` 被合同锁钉死为 `low`。Plan 097 在相同配置下最终成功，且其留有 attempt 投影的轮次
-  19 次 dispatch 全部 `completed`；差异未能完全解释。调高 effort 需改合同身份，未擅自更改。
+  旧投影把 `type=error` 读成空结果，丢掉了 typed 原因，这是本次补诊断的直接动机。
+- 已排除：接缝返回不可用 cycle id、`redacts_tool_bodies` 挡住模型、cell 间不共享状态。
+- `reasoning_effort` 经用户批准由 `low` 提两档到 `high`。它把走到第二次 publish 的比例从
+  少数轮提到 3/6，但不足以单独打通；真正解锁的是上面的打印修复。
 
 ## 验收
 
@@ -44,11 +50,15 @@
   `error_code: trace_wire_binding_invalid`、`status: rewrite_observed_canonical_not_required`。
   该码实为严格证据校验要求的 `team_inspect` dump/log 未发生（`inspect_actions: []`）所致，
   是 Producer 未完成导致 Root 未被正常唤醒的连锁结果，不是 wire 绑定缺陷。
-- 阶段 B2：无 canonical 轮。真实跑过并全部披露为废弃：`plan102-b2-r1`…`r16`（含 B1 共 17 个 Producer run）。
-- 判官累计 `0.0191452 RMB` / 剩余 `9.9808548 RMB`，65 次调用。
-- 写作者累计 `2.585289 USD` / 剩余 `47.414711 USD`，17 个 run；三代 ledger cap
-  `50` → `49.247218` → `48.265400`。
-- 证据：`/home/sjc/desktop/RONDO/eval-data/publication-critic/plan102/`，约 596K。
-- 定向测试：`test_publication_critic_plan097_producer_runtime` + `..._plan102_contract` 24/24。
+- 阶段 B2：正式轮 `plan102-b2-r23`，真实 API、`status: passed`、`effort: high`：
+  3 次 publish、2 次重写（feedback v1+v2）、唯一 canonical commit（1 event / 1 version / 1 mutation）、
+  `root_wake=true`、`inspect_actions=[dump,log]`；判官 6 次请求全部 `thinking_disabled`，
+  同一轮内 `direct_branch_coverage=[pass, rewrite]`。
+  废弃轮全部披露：`plan102-b2-r1`…`r22`（low 段 r1–r16，high 段 r17–r22）。
+- 判官累计 `0.0277544 RMB` / 剩余 `9.9722456 RMB`，95 次调用。
+- 写作者累计 `4.009768 USD` / 剩余 `45.990232 USD`，24 个 run；五代 ledger cap
+  `50` → `49.247218` → `48.265400` → `47.414711` → `46.135724`。
+- 证据：`/home/sjc/desktop/RONDO/eval-data/publication-critic/plan102/`，约 876K。
+- 定向测试：`test_publication_critic_plan097_producer_runtime` + `..._plan102_contract` 26/26。
 - 真实/离线分界：真实 API 覆盖云端判官段与写作者段；local backend 与 OFF 分支只有离线守护，
   未做真实本地模型加载推理。
