@@ -172,7 +172,16 @@ jobs:
       # back to cargo-binstall, adding a failure mode for no benefit.
       - name: Install cargo-about
         shell: bash
-        run: cargo install cargo-about --locked --version 0.9.2
+        run: |
+          set -euo pipefail
+          # --features cli is required, not optional: cargo-about declares
+          #   [[bin]] required-features = ["cli"]
+          # and has no default feature, so a plain `cargo install` builds the
+          # library, installs no binary, and still exits 0 with only a warning.
+          cargo install cargo-about --locked --version 0.9.2 --features cli
+          # Never trust the exit code alone for that reason.
+          command -v cargo-about
+          cargo about --version
 
       - name: Install Zig
         uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1

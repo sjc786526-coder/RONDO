@@ -134,6 +134,42 @@ error: could not compile `codex-cli` (bin "codex")
 
 另加了构建前后的 `df -h` 与 target 体积输出，下次再撞磁盘时可直接定位。
 
+**rc2（`multi-v0.1.0-rc2`）：磁盘问题解决，改在许可注入步骤失败，耗时 1h18m。**
+
+新通过的步骤：**构建入口与 code-mode-host** ✅、**产物确为静态 musl** ✅、
+**打包器用真实 musl 产物走新变体产包** ✅。
+
+失败信息是我自己脚本的 fail-closed 断言：
+
+```
+cargo-about is not installed; cannot produce the Cargo license closure
+```
+
+但上一步 `Install cargo-about` 是**绿的**。翻日志才看到它只留了一句 warning：
+
+```
+warning: none of the package's binaries are available for install using the selected features
+```
+
+对照 cargo-about 0.9.2 的 `Cargo.toml`：
+
+```toml
+[[bin]]
+name = "cargo-about"
+required-features = ["cli"]
+
+[features]
+cli = ["dep:nu-ansi-term", "dep:handlebars", "dep:mimalloc", "dep:jiff", "dep:fern", "dep:clap"]
+```
+
+**没有 `default` feature**，所以 `cargo install cargo-about` 只编库、不装任何二进制，
+而且**退出码是 0**。整改：加 `--features cli`，并在安装后显式断言
+`command -v cargo-about` 与 `cargo about --version`——退出码在这里不能单独采信。
+
+这条和规划期那七条是同一类毛病：**以为现成工具会替我做的事，它其实没做**，
+而且这次它连报错都懒得报。也正因为许可收集脚本自己是 fail-closed 的，
+才没有把一个缺许可闭包的包悄悄归档发出去。
+
 ### 本机预跑（先于 rc1 降风险）
 
 用 multidev 既有 debug 产物 + 新建 `bwrap`，走 C-3 的准确路径打了一个本机包：
