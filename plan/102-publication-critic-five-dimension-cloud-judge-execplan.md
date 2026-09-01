@@ -397,12 +397,12 @@ service.rs: verdict_for_scores(&output.scores) → typed verdict
 
 ### 当前工作
 
-- 阶段 A / B1 / B2 全部完成。B2 正式 canonical 轮为 `plan102-b2-r23`（真实 API，`status: passed`）。
-- 交付待办只剩合并与推送（等待用户批准）。
+- 本计划已完成并冻结为任务合同与历史记录。终态 `ENGINEERING_SEAM_PASS`：接缝工程可用，
+  不含任何质量或资格结论。已合入本地 `main` 并推送。
 
 ### 本任务剩余步骤
 
-- 合并与推送等待用户批准。
+- 无。后续路线、当前阶段与下一工作包以 `doc/WBS.md` 与 `doc/WBS/multi-agent-trusted-evidence.md` 为唯一来源。
 
 ### B2 打通经过（24 个 Producer run 的结论）
 
@@ -430,9 +430,9 @@ service.rs: verdict_for_scores(&output.scores) → typed verdict
 
 ### 当前验收状态
 
-- 规划：`COMPLETE / FROZEN`。
+- 规划：`COMPLETE / FROZEN`。任务终态：`ENGINEERING_SEAM_PASS / INTEGRATED / PUSHED`。
 - 阶段 A：`COMPLETE`。接手者复跑：`test-with-codex-v8-conservative -p codex-publication-critic` 79/79；
-  产品构建图 `-p codex-core --lib -E 'test(publish)'` 6/6；eval 定向 24/24。
+  产品构建图 `-p codex-core --lib -E 'test(publish)'` 6/6；eval 定向 26/26。
 - 阶段 B1：`COMPLETE`（真实 API；判官双 verdict + thinking off + Producer REWRITE 后二次尝试）。
   写作者回执**不干净**：`error_code: trace_wire_binding_invalid`、`status: rewrite_observed_canonical_not_required`；
   该码实为 Plan 097 严格证据校验要求的 `team_inspect` dump/log 未发生所致（`inspect_actions: []`），

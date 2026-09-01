@@ -2654,3 +2654,54 @@ INTEGRATED / NOT_PUSHED`。clean formal source 为 `0ae9623`，执行者交付�
   `plan/101-publication-critic-ds-thinking-comparison-eval-execplan.md`，执行见
   `agent_log/2026-08-31-plan101-b1-blocked.md`、`agent_log/2026-08-31-plan101-b1-gate-correction.md`、
   `agent_log/2026-08-31-plan101-b2-complete.md`。
+
+## Publication Critic 五维云端判官实验性工程接入（Plan 102，2026-09-01）
+
+- 把 Plan 095/097 已打通的云端 scorer **产品接缝**从单标量改造为**五维 hard decision + 关闭思考**：
+  `codex-publication-critic-cloud-service` 在同一服务边界取回五个 hard decision，本地按
+  `rondo-publication-critic-task@v2` §3 的非补偿合取派生 typed verdict，产品外部消费的仍只有 `PASS/REWRITE`。
+  采用「拓宽接缝」路线：新增 `ScorerProjection` 与 `ScoringContract`，五维路径上不存在任何自由 threshold，
+  旧标量 identity 的 wire 字节保持不变。云端产品路径按 descriptor 显式二选一，五维固定 `thinking.type=disabled`。
+- 正确性主证据是**穷举等价测试**：五维 `2×2×3×2×2 = 48` 种合法组合全部覆盖，期望值在测试内按 §3 语义独立计算
+  （不回调被测函数），并断言 48 种中恰好 2 种为 PASS（continuity ∈ {PASS, N/A} 且其余四维全 PASS），
+  从而同时证明 `N/A` 只排除、不提供正分。该测试打到 in-process 服务与 loopback HTTP 服务出口。
+- **修复一处只在产品构建图里才暴露的回归**：`ScoringContract` 最初用 `#[serde(untagged)]`，而
+  `codex-exec-server-protocol` 开启了 `serde_json/arbitrary_precision`；Cargo 特性统一后，凡链接 `codex-core`
+  的二进制（含产品 `codex`）都继承该特性，untagged 缓冲会把数字表示为内部 map，导致旧标量 descriptor 的
+  `domain` / `threshold` 无法反序列化——即所有历史标量 descriptor 在产品二进制中解析失败。叶子 crate 单独跑
+  全绿，只有 `codex-core` 的 `concurrent_exact_publish_reviews_and_commits_only_once` 能暴露。已改为按
+  `pass_rule` 显式判别，两个变体 wire 字节不变，并补 JSON 往返与判别式拒绝规则两条回归测试。
+  该问题直接关系到「旧标量路径仍可按原身份复算」这条完成标准。
+- **预算记账修正**：Producer ledger 改为代际累计，新一代 `total_cap_usd` 只继承历史各代的剩余额度，
+  跨代求和后再与任务上限比较。此前每代都带满 `50 USD`，换一本账就会把任务级上限重置。
+  对齐 Plan 097 v2–v8 逐代收缩 cap 的先例。
+- **B2 打通的真因不是算力档位**：前 22 轮恒定卡在第二次 `team_publish`（不发、或不带 `review_cycle_id`、
+  或带了对不上的 id），而每一轮的第一次 publish 都被正常评审并返回合法 `next_review_cycle_sha1`，
+  失败从未落在接缝上。`code_mode_result` 把完整结果交给 code cell，模型只看得见 cell 的**输出**；
+  执行期一版成员提示词写成「绑定结果后立刻结束 cell」，等于劝阻打印，模型因此读不到 `rewrite_required`、
+  反馈与 cycle id，表现为原样重发候选并转去 `team_history` / `team_inspect` 查证。改为显式打印
+  status / 反馈 / `review_cycle_id`（且只打印这三项）后即打通。`reasoning_effort` 经用户批准由 `low`
+  提两档到 `high`，把「走到第二次 publish」的比例从少数轮提到 3/6，但单独不足以打通。
+- 正式轮 `plan102-b2-r23`（真实 API，`status: passed`，`effort: high`）：`publish_attempt_count=3`、
+  `rewrite_count=2`、`feedback_versions=[v1,v2]`、`canonical_commit_count=1`、`publish_mutation_count=1`、
+  `event_count=1`、`version_count=1`、`rewrite_then_retry=true`、`root_wake=true`、
+  `inspect_actions=[dump,log]`；判官侧 6 次请求全部 `thinking_disabled`（completion 42–44，上限 512），
+  同一轮内 `direct_branch_coverage=[pass, rewrite]`；`product_default=off`、`quality_evaluation=not_in_scope`。
+- 费用与轮次全部披露：写作者段 `gpt-5.6-terra` 结算 `4.009768 USD` / 上限 `50 USD`，24 个 run 分五代 ledger，
+  cap 依次 `50 → 49.247218 → 48.265400 → 47.414711 → 46.135724`；判官段 `deepseek-v4-flash` 结算
+  `0.0277544 RMB` / 上限 `10 RMB`，95 次调用。两笔预算独立分账、互不挪用。废弃轮 `plan102-b2-r1`…`r22`
+  （`low` 段 r1–r16、`high` 段 r17–r22）与 B1 全部列出。ignored 证据约 `876K`，位于
+  `eval-data/publication-critic/plan102/`。
+- 为支持 `high` effort 连带调整（授权上限未变）：用量包络 `32000/2000 → 48000/16000`（超出包络的用量是被拒绝
+  而非计价，`low` 实测输入峰值已达 29434）、Root 等待 `180s → 900s`、进程超时 `600s → 1800s`；
+  包络变化使每请求预留由 `0.104` 变为 `0.312 USD`，账本会校验该字段，故必须开新一代。
+- 门禁：`just test-with-codex-v8-conservative -p codex-publication-critic` 79/79；产品构建图
+  `-p codex-core --lib -E 'test(publish)'` 6/6（含上述回归测试）；eval 定向 26/26；`fmt-check` 干净。
+  未跑全量 workspace。构建全程走共享 build lock 与看门狗，复用唯一 target `.codex/cargo-target/rondo-multi`，
+  未新建 target 目录。
+- 边界：本任务仅实验性工程接入。产品默认仍为 `OFF`，云端 backend 仍需显式选择；不做质量测评与资格判定，
+  不产出任何通过/不通过裁决；真实 API 只覆盖云端判官段与写作者段，local backend 与 OFF 分支只有离线守护，
+  未做真实本地模型加载推理；未训练、未使用 GPU/RunPod、未上传、未读取 qualification 与 v9 test 正文，
+  不解锁工作包四。
+- 合同见 `plan/102-publication-critic-five-dimension-cloud-judge-execplan.md`，执行见
+  `agent_log/2026-08-31-plan102-five-dimension-cloud-judge.md`。

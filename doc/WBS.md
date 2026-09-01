@@ -1,6 +1,6 @@
 # RONDO 长程规划（WBS）
 
-最后更新：2026-08-31（方向 3 Publication Critic 三期在 Plan 097 双 backend 工程闭环后正式进入质量重构路线；原定串行为
+最后更新：2026-09-01（方向 3 Publication Critic 三期在 Plan 097 双 backend 工程闭环后正式进入质量重构路线；原定串行为
 “任务合同重构 → v8 后继数据改造与有限扩充 → 一次主方案训练 → 模型资格验收与横评”。Plan 098 已为前两个工作包建立同一两阶段
 ExecPlan；Plan 098 的任务合同、v9/v10/qualification、formal decoder、pair-aware margin selection 与 direct-dependency identity 已全部
 通过最终复验并冻结完成。工作包三 Plan 099 已完成阶段 B：commissioning 通过，clean formal 固定完成 16 次 update 和
@@ -11,7 +11,7 @@ Plan 097 的 `M3_D_DUAL_BACKEND_ENGINEERING_PASS / FINAL_REVIEW_ACCEPTED / INTEG
 `CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH`、Plan 095 最终验收、Plan 094 有效负向研究终态和 Plan 093 Linux 全 workspace 正确性基线
 均保持有效；Plan 100 独立诊断以 `TASK_EXECUTABILITY_INSUFFICIENT / FINAL_REVIEW_ACCEPTED / INTEGRATED / PUSHED` 收口。
 Plan 101 对比测评已完成，据此把五维 hard decision 固定为云端判官接缝的后续方向、单标量云端接缝标注废弃，
-下一工作包为 Plan 102 五维云端判官实验性工程接入（阶段 A/B1/B2 全部完成，正式轮 `plan102-b2-r23` 已取得唯一 canonical commit，待合并推送）；新路线不自动解锁产品质量、默认启用或生产）
+Plan 102 五维云端判官实验性工程接入已以 `ENGINEERING_SEAM_PASS` 完成并合入推送，方向 3 当前无 active 工作包；该方向不自动解锁产品质量、默认启用或生产）
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段指针、跨方向关系、
 稳定工程边界和授权门；已完成成果与验收见 `doc/WBS-COMPLETED.md`，单次任务合同见 `plan/`，执行细节见
@@ -31,7 +31,7 @@ Plan 101 对比测评已完成，据此把五维 hard decision 固定为云端�
 | 0：量化测评基准 | 既有设施与首次 schema v7 正式 canary 已完成，当前无 active campaign | 保留设施；历史结果见 COMPLETED，新 campaign 须重新立项与授权 |
 | 1：Harness 优化 | **正式收口；当前无 active 工作包** | 当前不继续新增观测或内核/热路径优化；既有实现、设施与历史结果保留。未来可由用户另行决定是否重新立项，本次收口不作永久禁止 |
 | 2：本地审批模型 | **已收口，今后不再开启** | 最终结论为“保留为实验”；不改生产默认，不再规划后续工作包 |
-| 3：RONDO Multi | 第一、二期、第四期已完成；三期 Plan 099 有效 `NO-GO`；Plan 100 正式诊断最终验收通过 | 工作包四仍未解锁。Plan 100 完成唯一 clean formal，冻结为 `TASK_EXECUTABILITY_INSUFFICIENT`；API 授权已关闭，不读冻结测试、不训练、不改产品默认，不授予 qualification、产品价值或生产资格 |
+| 3：RONDO Multi | 第一、二期、第四期已完成；三期 Plan 099 有效 `NO-GO`；Plan 100 正式诊断最终验收通过；Plan 101 定方向、Plan 102 完成五维云端判官接缝接入（`ENGINEERING_SEAM_PASS`）。**当前无 active 工作包** | 工作包四仍未解锁。Plan 102 只交付工程接缝可用性，不含质量或资格结论；产品默认仍为 `OFF`，云端 backend 需显式选择。不读冻结测试、不训练、不改产品默认，不授予 qualification、产品价值或生产资格 |
 
 方向 3 当前 Linux 正确性基线由 Plan 093 建立：default features、standard local Nextest、checksum-verified V8 的完整 workspace
 为 `14660/14660` passed、0 failure/error/timeout，另有 1/1 setup passed；24 个 skip 不计 passed。正式证据和精确边界见
@@ -59,7 +59,7 @@ Plan 101 对比测评已完成，据此把五维 hard decision 固定为云端�
 ```
 
 独立诊断支线：Plan 099 `VALID_FORMAL_NO_GO` → Plan 100 DS-V4-Flash 五维任务合同诊断 → Plan 101 DS 思考开关 × 输出表达对比测评
-→ 方向固定为五维 hard decision、单标量云端接缝废弃 → Plan 102 五维云端判官实验性工程接入（A/B1/B2 完成，待合并）；
+→ 方向固定为五维 hard decision、单标量云端接缝废弃 → Plan 102 五维云端判官实验性工程接入（已完成并合入，`ENGINEERING_SEAM_PASS`）；
 该支线不接入或解锁工作包四。
 
 - **工作包一 / Plan 098 阶段一已完成并冻结**：既有 `rondo-publication-critic-task@v2` 五头、non-compensating gate 与
@@ -108,13 +108,15 @@ Plan 101 对比测评已完成，据此把五维 hard decision 固定为云端�
 同条件下比 B 高 `0.122`、比 A 高 `0.120`。据此固定方向：**五维 hard decision 为云端判官接缝的后续方向，单标量云端接缝废弃**。
 该结论只定方向，不授予质量资格——`thinking_off:C` 仍放过 15 条 gold REWRITE 中的 `8` 条，且 C 的优势依赖关闭思考。
 
-方向 3 下一工作包为 **Plan 102 五维云端判官实验性工程接入**：把 Plan 095/097 已打通的云端 scorer 接缝从单标量改造为
-五维 hard decision + 关闭思考，本地按非补偿合取派生 typed verdict，产品出口不变。**仅实验性质，不投入生产、不正式发布、
-不改变默认关闭姿态**，不训练、不做资格判定，也不解锁工作包四。已获授权：判官段真实 `deepseek-v4-flash` 上限 `10 RMB`
-（保守兜底 `0.1 RMB/次`，用于证明接缝真通而非 fake 绿，不限重跑轮次）、写作者段 Producer 模型 `gpt-5.6-terra`
-上限 `50 USD`（独立预算，两笔不互相挪用）、必要的重型构建与 Docker，
-且必须复用主工作区既有 target `.codex/cargo-target/rondo-multi`。合同见
+**Plan 102 五维云端判官实验性工程接入已完成并合入**：云端 scorer 产品接缝已从单标量改造为五维 hard decision +
+关闭思考，本地按非补偿合取派生 typed verdict，产品出口不变；48 组合穷举等价测试与正式端到端轮
+`plan102-b2-r23`（真实 API、唯一 canonical commit、判官侧 thinking 全程关闭且同轮覆盖 typed `PASS`/`REWRITE`）
+构成主证据。写作者段结算 `4.009768 USD` / `50 USD`，判官段 `0.0277544 RMB` / `10 RMB`。
+终态为 **`ENGINEERING_SEAM_PASS`：接缝工程可用，不含任何质量或资格结论**。产品默认仍为 `OFF`，云端 backend
+仍需显式选择；不解锁工作包四，也不启动产品化、默认启用或发布。完成证据见 `doc/WBS-COMPLETED.md`，合同见
 `plan/102-publication-critic-five-dimension-cloud-judge-execplan.md`。
+
+**方向 3 当前无 active 工作包。** 后续任何产品化、默认启用、qualification 或训练路线都须另行立项与授权。
 Plan 100 的负向诊断本身不自动启动后续路线。Plan 081 已取得 `LOCAL_TRAINING_READINESS_PASS`；三期 Plan 082 已获用户付费批准并完成
 真实 commissioning、正式 freeze、干净 formal 和新进程恢复，终态为 `VALID_NO_IMPROVEMENT`。保留 Pod 的 GPU 专项验收已经通过，
 唯一训练 Pod 已释放并确认持续 compute 费率为 0；保留卷所在 `US-TX-3` 不提供 S3 API，故按用户一次性授权使用单个 transfer Pod
