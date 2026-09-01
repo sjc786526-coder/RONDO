@@ -46,8 +46,8 @@
 - [ ] **A2** CI 包含至少三个门禁：`cargo fmt --check`、目标 crate 子集 `cargo build`、目标 crate 子集测试；任一失败则 CI 红
 - [ ] **A3** CI 在缓存命中时单次总时长 ≤ 30 分钟；冷启动 ≤ 90 分钟（超出则按 KD-006 缩小范围并记录实测值）
 - [ ] **A4** 根 `.github/workflows/release.yml` 存在，由 `local-v*` / `multi-v*` tag 分流触发
-- [ ] **A5** Release 产物为 `build_codex_package.py` 生成的**完整产品包**（含 `codex-code-mode-host`、Linux `bwrap`、`rg`、`codex-package.json`），覆盖 Linux x86_64 与 macOS aarch64，并附 `SHA256SUMS`
-- [ ] **A6** 归档内入口可执行文件名为 `rondo`（Local）/ `rondo-multi`（Multi），且归档含 `LICENSE`、对应 `NOTICE` 与 `THIRD-PARTY-LICENSES/`（覆盖该平台随包的 bwrap / rg / zsh **以及两个最终二进制的 Cargo 依赖闭包**）
+- [ ] **A5** Release 产物为 `build_codex_package.py` 生成的**完整产品包**（含 `codex-code-mode-host`、`bwrap`、`rg`、`codex-package.json`），目标为 `x86_64-unknown-linux-musl`，并附 `SHA256SUMS`
+- [ ] **A6** 归档内入口可执行文件名为 `rondo`（Local）/ `rondo-multi`（Multi），且归档含 `LICENSE`、对应 `NOTICE` 与 `THIRD-PARTY-LICENSES/`（覆盖随包的 bwrap / rg / zsh **以及两个最终二进制的 Cargo 依赖闭包与 V8/ICU 原生闭包**）
 - [ ] **A7** 产物在**干净环境**（未安装 RONDO 的机器或容器）中通过 smoke test：`--version`、一条触碰 arg0/sandbox 的命令、一条依赖附属组件（`rg` 或 `code-mode-host`）的功能
 - [ ] **A8** 仓库 visibility 为 `PUBLIC`，且转换前完成密钥历史复核（见硬约束 H4）
 - [ ] **A9** `local-v0.1.0` 与 `multi-v0.1.0` 两个 Release 均已发布，Release notes 明确标注实验性质与"无性能承诺"
@@ -146,7 +146,7 @@
      公开后任何人可见。这是每个公开 GitHub 仓库的常态，但需用户知情确认；
      若不接受，唯一手段是改写全历史，**本任务不做，需另立任务**。
   3. **个人环境信息**：`doc/development-environment.md` 含本机绝对路径、Windows 用户名、硬件配置与代理配置。
-     按 D-3 决定脱敏或保留，由用户拍板。
+     执行者在 D-3 备好**具体脱敏 diff** 供用户批准，不把选择题原样抛回。
   4. **再分发边界**：确认 `training/` 内受跟踪的数据集、`eval/results/` 内的测评结果不含第三方受限材料，
      可以公开再分发。
 
@@ -213,9 +213,9 @@
 - **V8 依赖**：需要 V8 的测试要经 `<product>/scripts/with_codex_v8_artifacts.py` 获取 checksum 校验过的产物
   （联网下载）。建议 CI 的初始测试子集**避开需要 V8 的用例**，把 V8 相关留给本地全量门禁。
 - **RUST_MIN_STACK**：产品 justfile 使用 `8388608`；若 CI 出现栈溢出，优先对齐该值。
-- **平台矩阵推进顺序**：先 `x86_64-unknown-linux-musl` + `aarch64-apple-darwin` 跑通，
-  再考虑追加 `x86_64-pc-windows-msvc`。Linux 选 musl 是为了避免分发出去的二进制依赖特定 glibc 版本；
-  若 musl 工具链在 CI 上不通，按 R9 退回 gnu。Windows 上的 workspace 构建未在本项目验证过，不适合作为首发阻塞项。
+- **平台**：首发只做 `x86_64-unknown-linux-musl`（KD-009）。选 musl 是为了避免分发出去的二进制
+  依赖特定 glibc 版本；若 musl 工具链在 CI 上不通，按 R9 退回 gnu。
+  工作流仍写成 matrix 形状（只含一个条目），日后要加 `aarch64-unknown-linux-gnu` 之类只需加一行。
 - **Release notes 生成**：建议从 `<product>/CHANGELOG.md` 的对应版本段落提取，而不是自动汇总 commit message
   （本仓库 commit 粒度很细，自动汇总噪音大）。
 - **产物命名建议**：`rondo-<version>-<target>.tar.gz` / `rondo-multi-<version>-<target>.tar.gz`，
@@ -226,6 +226,39 @@
 ## 5. 路线图
 
 五个阶段串行推进。每个阶段有独立的退出条件，任一阶段可以单独停下而不留下半成品。
+
+### 阶段 0｜环境与凭据前置（已于 2026-09-01 核验）
+
+实施前所需的环境已实测确认，**只缺一项工具，且不需要用户做任何登录或授权操作**。
+
+| 项 | 状态 | 说明 |
+|---|---|---|
+| `gh` CLI | ✅ 2.96.0 | |
+| GitHub 认证 | ✅ `sjc786526-coder` | token scopes：`gist, read:org, repo, workflow` |
+| └ `repo` scope | ✅ | 建 Release、改仓库可见性所需 |
+| └ `workflow` scope | ✅ | 推送 `.github/workflows/*` 所需，**缺了会被 GitHub 拒绝推送** |
+| 仓库权限 | ✅ `ADMIN` | 可改可见性 |
+| GitHub Actions | ✅ 已启用 | `allowed_actions: all` |
+| SSH 推送通道 | ✅ 已实测 | `git@github.com` 认证通过 |
+| Rust 工具链 | ✅ 1.95.0 | |
+| `x86_64-unknown-linux-musl` target | ✅ 已安装 | |
+| `musl-gcc` | ✅ musl-tools 1.2.4-2 | |
+| `strip` / `sha256sum` / `tar` | ✅ | |
+| 网络（api.github.com 等） | ✅ | V8 / rg / zsh 产物下载可达 |
+| **`cargo-about`** | ❌ **未安装** | C-4 生成 Rust 依赖许可报告所需 |
+| Docker | ⚠️ 守护进程未运行 | **本任务不使用**，见下 |
+
+**唯一缺口 `cargo-about`**：执行时用 `cargo install cargo-about --locked --version <锁定版本>` 安装即可。
+这属于普通依赖下载，在已授权任务内可自主执行，**不需要用户介入**。
+
+**Docker 明确不用。** 原计划的"干净环境 smoke test"改为在 **CI 里新开一个 job**：
+从 Release 下载自己刚发布的产物、在全新 runner 上解压运行。这比 Docker 更干净（runner 本就是一次性的）、
+免费、自动，还顺带演示了"验证自己的发布物"这一发布工程实践。
+本地可再用 `env -i` + 临时 `HOME` 作补充验证。**因此本任务不触发 Docker 授权门。**
+
+**结论：不需要用户登录或配置任何东西。** 现有凭据足以完成从 CI、Release 到转 public 的全部动作。
+
+---
 
 ### 阶段 A｜发布身份收口（低风险，纯配置）
 
@@ -285,7 +318,7 @@
 | 步骤 | 动作 | 验证 |
 |---|---|---|
 | C-1 | 新建根 `.github/workflows/release.yml`，按 tag 前缀分流（H8）；tag 必须匹配**完整 SemVer**而非通配（见下方 tag 约定）；工作流默认 `permissions: contents: read`，**只有创建 Release 的 job 显式提升为 `contents: write`** | 打 `local-v*` 不构建 multidev；畸形 tag 被拒绝；非发布 job 无写权限 |
-| C-2 | matrix 构建 `x86_64-unknown-linux-musl`、`aarch64-apple-darwin`（musl 优先，避免 glibc 版本依赖；上游亦为此备有 `install-musl-build-tools.sh`） | 两个目标均在 `TARGET_SPECS` 内 |
+| C-2 | 构建 `x86_64-unknown-linux-musl`（musl 避免 glibc 版本依赖；上游亦为此备有 `install-musl-build-tools.sh`）。**首发只发 Linux**，见 KD-009 | 目标在 `TARGET_SPECS` 内；工作流保留 matrix 结构以便日后加目标 |
 | C-3 | **按下方冻结顺序打包**：V8 就绪 → (Linux) 构建并 strip `bwrap`、算摘要并 `export CODEX_BWRAP_SHA256` → 构建 `codex` 与 `codex-code-mode-host` → 三者全部经 `--entrypoint-bin`/`--code-mode-host-bin`/`--bwrap-bin` 传入，只生成 `--package-dir`（H9、H12、KD-002） | 包内三个产物 SHA-256 与预构建一致；打包器未自行 `cargo build`；入口名为 `rondo`/`rondo-multi` |
 | C-4 | 向该**包目录**注入 `LICENSE`、对应产品的 `NOTICE` 与自建的 `THIRD-PARTY-LICENSES/`（H10，清单见下） | 注入发生在归档生成之前 |
 | C-5 | 从注入后的包目录生成归档，**解包复验许可文件确实在内**，再生成 `SHA256SUMS` | 解包后许可材料齐全；校验和与产物匹配 |
@@ -348,42 +381,40 @@ workflow 的 `on.push.tags` 可以先用宽匹配，但 job 内必须**用上述
 **C-3 / C-4 / C-5 的冻结顺序**（顺序错了许可文件不会进归档）：
 
 ```bash
-# ── 公共 ──────────────────────────────────────────────
-TARGET=...                                # x86_64-unknown-linux-musl | aarch64-apple-darwin
+TARGET=x86_64-unknown-linux-musl          # 首发唯一目标（KD-009）
 MANIFEST=<product>/codex-rs/Cargo.toml
 OUT=<product>/codex-rs/target/"$TARGET"/release
 PKGDIR="$(mktemp -d)/pkg"
 
-# ① 按 $TARGET（不是 host）取 V8 产物并校验，导出 RUSTY_V8_* —— 见下方"必须点 1"
-python3 - "$TARGET" <<'PY'
-import sys, pathlib
+# ① 按 $TARGET（不是 host）取 V8 产物并校验 —— 见"必须点 1"
+#    输出的两行必须写入 $GITHUB_ENV，只 print 到日志不生效
+python3 - "$TARGET" >> "$GITHUB_ENV" <<'PY'
+import sys
 sys.path.insert(0, "<product>/scripts")
 from codex_package.targets import TARGET_SPECS
 from codex_package.v8 import fetch_codex_v8_artifacts, resolved_v8_crate_version
 spec = TARGET_SPECS[sys.argv[1]]
 a = fetch_codex_v8_artifacts(spec, version=resolved_v8_crate_version())
-print(f"RUSTY_V8_ARCHIVE={a.archive}\nRUSTY_V8_SRC_BINDING_PATH={a.binding}")
+print(f"RUSTY_V8_ARCHIVE={a.archive}")
+print(f"RUSTY_V8_SRC_BINDING_PATH={a.binding}")
 PY
-# 把上面两行写入 $GITHUB_ENV / export
 
-# ── 仅 Linux ──────────────────────────────────────────
 # ② 先构建 bwrap，strip 后算摘要并导出；必须在构建 codex 之前
 cargo build --locked --target "$TARGET" --release --bin bwrap --manifest-path "$MANIFEST"
 strip --strip-debug --strip-unneeded "$OUT/bwrap"
-export CODEX_BWRAP_SHA256="$(sha256sum "$OUT/bwrap" | awk '{print $1}')"
+echo "CODEX_BWRAP_SHA256=$(sha256sum "$OUT/bwrap" | awk '{print $1}')" >> "$GITHUB_ENV"
 
-# ── 公共 ──────────────────────────────────────────────
-# ③ 构建入口与 code-mode-host（Linux 上此步才把摘要编进 codex）
+# ③ 构建入口与 code-mode-host（此步才把摘要编进 codex）
 cargo build --locked --target "$TARGET" --release \
   --bin codex --bin codex-code-mode-host --manifest-path "$MANIFEST"
 
-# ④ 预构建产物全部显式传入；--bwrap-bin 只在 Linux 传
-PKG_ARGS=(--target "$TARGET" --cargo-profile release --variant rondo-multi
-          --entrypoint-bin "$OUT/codex"
-          --code-mode-host-bin "$OUT/codex-code-mode-host"
-          --package-dir "$PKGDIR")
-case "$TARGET" in *linux*) PKG_ARGS+=(--bwrap-bin "$OUT/bwrap") ;; esac
-python3 <product>/scripts/build_codex_package.py "${PKG_ARGS[@]}"
+# ④ 三个预构建产物全部显式传入；只生成包目录，不传 --archive-output
+python3 <product>/scripts/build_codex_package.py \
+  --target "$TARGET" --cargo-profile release --variant rondo-multi \
+  --entrypoint-bin "$OUT/codex" \
+  --code-mode-host-bin "$OUT/codex-code-mode-host" \
+  --bwrap-bin "$OUT/bwrap" \
+  --package-dir "$PKGDIR"
 
 # ⑤ 注入许可材料（C-4）→ ⑥ 自行归档、解包复验、算 SHA256SUMS（C-5）
 ```
@@ -399,18 +430,19 @@ python3 <product>/scripts/build_codex_package.py "${PKG_ARGS[@]}"
    `setup-rusty-v8` action 也是显式传 `target` 的。
    本步骤在**工作流层**完成（import 现有模块即可），**不改 `with_codex_v8_artifacts.py`**，
    因此不扩大 E-X1 范围。
-2. **bwrap 相关步骤必须按平台分支，macOS 不得执行。**
-   `cargo.py:validate_prebuilt_resource_inputs` 对非 Linux 目标传 `--bwrap-bin` 会直接
-   `RuntimeError("--bwrap-bin is only supported for Linux targets.")`，
-   无条件执行会让 macOS job 必然失败。macOS 路径为：V8 → codex/host → 两个预构建参数，
-   **不构建 bwrap、不传 `--bwrap-bin`**。
+2. **两个环境变量必须写进 `$GITHUB_ENV`，不能只 print。**
+   `RUSTY_V8_ARCHIVE`、`RUSTY_V8_SRC_BINDING_PATH` 与 `CODEX_BWRAP_SHA256` 都要被**后续 step 的 cargo**
+   读到；GitHub Actions 里每个 step 是独立 shell，只输出到日志不会传递。
+   （若日后新增非 Linux 目标，bwrap 相关步骤必须加平台分支——
+   `cargo.py:validate_prebuilt_resource_inputs` 对非 Linux 传 `--bwrap-bin` 会直接
+   `RuntimeError("--bwrap-bin is only supported for Linux targets.")`。首发单一 Linux 目标不涉及。）
 3. **bwrap 摘要必须在构建 `codex` 之前注入——这是安全控制，不是顺序洁癖。**
    `linux-sandbox/src/bundled_bwrap.rs` 的 `expected_sha256()` 读的是**编译期** `option_env!("CODEX_BWRAP_SHA256")`；
    取不到就返回 `None`，而 `verify_digest()` 拿到 `None` 直接 `return Ok(())`——
    **bundled bwrap 的完整性校验被静默跳过**。若先构建 `codex`、再让打包器构建 bwrap，
    发布出去的二进制就是"永不校验 bwrap"的版本，**而且任何常规 smoke test 都照样通过**。
    摘要必须对 **strip 之后**的字节计算，因为入包的就是那份字节（与上游 `rust-release.yml` 的顺序一致）。
-4. **预构建的 Cargo 产物全部显式传给打包器**（Linux 三个、macOS 两个）。 否则打包器会自行 `cargo build`
+4. **三个预构建 Cargo 产物全部显式传给打包器。** 否则打包器会自行 `cargo build`
    （`cargo.py` 的内部调用**不带 `--locked`**），既绕过锁文件，也会重新引入第 1 点的顺序问题。
    全部传入后 `binaries` 为空，内部构建被完全跳过。
 5. **`--target` 与 `--profile release` 必须显式固定。** 裸 `cargo build --bin codex` 在 Linux runner 上
@@ -475,9 +507,14 @@ C-3 必须实测这条准确路径，不得假设默认路径可用。
 |---|---|---|
 | D-1 | **重跑**密钥历史全量扫描（H4），结果留档到本次 agent_log | 零命中 |
 | D-2 | 复核 `.gitignore` 与 `git ls-files` 输出，确认重资产目录 tracked 文件数仍为 0 | `eval-data/` `test-data/` 等为 0 |
-| D-3 | 按 H4 的四项逐一复核：密钥、提交身份邮箱、`doc/development-environment.md` 的个人环境信息、`training/` 与 `eval/results/` 的再分发边界 | 四项各有明确结论 |
+| D-3 | 按 H4 的四项逐一复核，并**为每项准备好可直接采纳的具体结论与建议**（不是把问题抛回给用户）：密钥扫描结果、提交邮箱、`doc/development-environment.md` 的脱敏**具体 diff**、`training/` 与 `eval/results/` 的再分发结论 | 四项各有明确结论与建议动作 |
 | D-4 | 通读 README 与仓库描述，确认无 H3 违规 | 人工确认 |
-| D-5 | **向用户逐项说明 H4 四项结论 + 不可逆性，取得明确确认**，然后执行转换 | A8 达成 |
+| D-5 | 把 D-3 的四项结论 + 建议 + 不可逆性，**一次性整理成一份可直接批准的清单**呈给用户；获批后执行转换 | A8 达成 |
+
+**D-3 / D-5 的执行方式（重要）**：这四项复核**全部是项目内只读检查，不需要额外授权**，
+执行者应当自主完成到"只差用户点头"的程度。呈给用户的必须是：
+每项已经查完的结论 + 明确的推荐动作（例如"建议把 `C:\Users\35283` 替换为 `<Windows 用户名>`，
+代理配置整段删除，diff 如下"），用户只需批准或否决，**不应从零开始做决策**。
 | D-6 | 打 `multi-v0.1.0` 与 `local-v0.1.0`，等待流水线完成 | A9 达成 |
 | D-7 | 下载正式 Release 产物，重跑一次 C-7 的 smoke test | 产物真实可用 |
 
@@ -505,6 +542,8 @@ C-3 必须实测这条准确路径，不得假设默认路径可用。
 ## 6. 当前状态
 
 > 本节允许在执行过程中持续更新。只记录恢复任务所必需的信息，不记录普通工具调用流水账。
+> **维护约定**：本节与 §7 关键决策记录是本计划仅有的两个"活"章节，随任务进度实时更新；
+> 执行细节、反复过程与证据留在 `agent_log/`，便于追溯与审查，不堆进本计划。
 
 ### 已完成
 
@@ -595,6 +634,7 @@ C-3 必须实测这条准确路径，不得假设默认路径可用。
 - **冻结命令对 macOS 无条件走 Linux bwrap 路径**（真阻塞）：`cargo.py:validate_prebuilt_resource_inputs`
   对非 Linux 传 `--bwrap-bin` 会直接 `RuntimeError`，macOS job 必然失败
   → 命令块按平台分支，macOS 不构建 bwrap、不传 `--bwrap-bin`
+  （**该分支已被后续 KD-009 取代**：首发不再发 macOS，只剩单一 Linux 目标）
 - **Cargo 许可报告覆盖不到预编译 V8 的原生内容**：已核实 `v8 = "=150.4.0"` 实际链接的是另行下载的
   `librusty_v8_*.a`，其内容来自 `denoland/rusty_v8` 在 `submodules: recursive` 下检出的原生代码
   → C-4 拆成两层：固定版本 `cargo-about --locked --target` 生成 Rust 依赖报告，
@@ -605,6 +645,18 @@ C-3 必须实测这条准确路径，不得假设默认路径可用。
   `bundled bubblewrap digest mismatch` 具体错误"；阶段 C 退出条件补上 A14
 
 ### 当前工作
+
+**终审后的用户决策与收口（2026-09-01）：**
+
+- **不发 macOS**：用户只在 Linux 上开发与使用，无 macOS 环境可验证。首发收敛为单一
+  `x86_64-unknown-linux-musl`（KD-009）。副作用是 C-3 的平台分支复杂度与 macOS runner 风险一并消失。
+- **环境与凭据已实测核验**（阶段 0）：`gh` 已认证且 scopes 含 `repo` 与 `workflow`、仓库权限 `ADMIN`、
+  Actions 已启用、musl target 与 `musl-gcc` 均在位、SSH 推送通道已验证。
+  **唯一缺口是 `cargo-about`**，属普通依赖下载，执行时自行安装即可，不需要用户做任何登录或配置。
+- **Docker 不再使用**：干净环境 smoke test 改为 CI 内新开 job 下载并运行自己发布的产物，
+  比 Docker 更干净且免费。**本任务不触发 Docker 授权门。**
+- **D-3/D-5 的执行方式已明确**：四项公开前复核全部是项目内只读检查，执行者自主完成到
+  "只差点头"，呈给用户的是结论 + 具体建议（含脱敏 diff），而非选择题。
 
 **规划阶段已完成并通过终审（2026-09-01）。** 用户已批准 KD-012（窄例外 E-X2）与 KD-007
 （现仓库整体转 public），并同意先在 private 仓库用 `multi-v0.1.0-rc1` 实跑验证。
@@ -661,7 +713,7 @@ C-3 必须实测这条准确路径，不得假设默认路径可用。
 | KD-006 | CI **不跑全量 workspace**，只跑受影响产品线的 crate 子集，范围由实测时长决定 | workspace 有 131（Multi）/ 129（Local）个 crate；GitHub 标准 runner 为 4 vCPU/16 GB，而本项目本地全量需 `MemoryHigh=21G` / `jobs=1`。全量在 runner 上有 OOM 与超时风险 | `ci.yml`；全量门禁仍留本地 | 已采纳 |
 | KD-007 | 可见性方案取 **现仓库整体转 public** | 历史扫描零命中、`.git` 仅 45 MB、重资产目录 tracked 为 0，故原先推荐的"另建干净仓库"已无必要收益；而过程证据（WBS / plan / agent_log / audit-snapshots / eval results）恰是项目最有说服力的部分，另建仓库会丢失 | 阶段 D | **已采纳**（用户 2026-09-01 明确批准转 public；仍要求先完成规划、暂不执行） |
 | KD-008 | 文档语言：中文为主 + README 顶部英文摘要 | 全部既有文档为中文，全量翻译成本高收益低；英文摘要足以让非中文读者判断项目性质 | README | 已采纳 |
-| KD-009 | 首发平台为 Linux x86_64 + macOS aarch64，Windows 作为后续迭代 | 本项目从未在 Windows 上验证过 workspace 构建，不适合作为首发阻塞项；公开仓库的 Actions 额度免费，后续追加成本低 | `release.yml`；A5 | 已采纳 |
+| KD-009 | **首发只发 `x86_64-unknown-linux-musl` 一个目标**，不发 macOS，不发 Windows | 用户只在 Linux 上开发与使用，没有 macOS 环境可验证。**发一个自己无法验证的平台产物，比不发更糟**——用户装了跑不起来，你也复现不了。这同时消掉了 C-3 的平台分支复杂度（`--bwrap-bin` 仅限 Linux）与 macOS runner 的全部风险。工作流仍保留 matrix 结构，日后要加目标是改配置而非改架构 | `release.yml`；A5、C-2、C-3 | 已采纳（原"Linux + macOS 双平台"方案**已废弃**） |
 | KD-010 | `--version` 显示 `0.147.0` 与 Release tag `v0.1.0` 不一致的问题，通过 **文档说明** 解决，不改代码 | KD-001 的直接后果。可在 README/Release notes 用一句话说明："内部版本号沿用上游冻结基线以支持字节级公平对比，产品版本见 Release tag" | README、Release notes | 已采纳 |
 | KD-011 | 可选增强：由 release 工作流注入构建期常量，让二进制同时报告 `RONDO Multi 0.1.0 / based on Codex CLI 0.147.0` | 能消除 KD-010 的不一致观感，但需要改产品源码且触及版本展示逻辑，范围明显大于 E-X2 | 需另立任务 | **提议，本任务不做** |
 | KD-012 | **窄例外 E-X2**：把 `check_for_update_on_startup` 默认值改为 `false` | 这是**发布级缺陷**而非观感问题：`updates.rs` 会查询 `api.github.com/repos/openai/codex/releases/latest`，`update_action.rs` 会提示用户执行 `npm install -g @openai/codex` / `brew upgrade --cask codex`。发布一个引导用户去装上游产品的 fork 不可接受。已确认该行为受配置控制且默认为 `true`（`config/mod.rs:4007 unwrap_or(true)`），翻默认值是最小改动，不触碰 H1/H2 | 窄例外 E-X2；需跑 config 与快照测试 | **已采纳**（用户 2026-09-01 批准该窄例外；本轮只记录，不实施） |
