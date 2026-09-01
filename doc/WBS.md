@@ -37,17 +37,28 @@ Plan 102 五维云端判官实验性工程接入已以 `ENGINEERING_SEAM_PASS` �
 为 `14660/14660` passed、0 failure/error/timeout，另有 1/1 setup passed；24 个 skip 不计 passed。正式证据和精确边界见
 `doc/WBS/multi-agent-trusted-evidence.md` 与 `doc/WBS-COMPLETED.md`。
 
-### 发布工程（跨方向，当前唯一待实施工作包）
+### 发布工程（跨方向，当前唯一在办工作包）
 
-Plan 103 已通过终审，状态为**审查通过、待实施**：为两条产品线建立 CI 门禁与 Release 自动化，
-并把现仓库整体转为 public，各发一次 `v0.1.0`。它只交付发布工程能力，
-**不推进任何方向的产品功能、性能或质量资格**，不解锁方向 3 工作包四。
-
-两条发布轨为 `local-v*`（`mydev/`）与 `multi-v*`（`multidev/`），互不夹带。已获批准的两处产品侧窄例外为
-E-X1（打包变体新增条目）与 E-X2（`check_for_update_on_startup` 默认值改 `false`），
-均不改动 workspace 版本号、crate 名与 `[[bin]]` 名，以保持冻结二进制身份与公平对比设施不变。
-转 public 保留执行时的单独确认门。合同、验收标准与硬约束见
+Plan 103 实施中。它只交付发布工程能力，**不推进任何方向的产品功能、性能或质量资格**，
+不解锁方向 3 工作包四。合同、验收标准与硬约束见
 `plan/103-release-engineering-and-cicd-execplan.md`。
+
+**当前能力**（已落地并实跑验证）：
+
+- 根 `.github/workflows/ci.yml`：push 到 `main` 触发，按三类路径分流到受影响产品线，
+  跑 fmt / build / test 三门禁。冷跑约 23 分钟、热跑约 12–14 分钟。
+  **只跑 crate 子集**，全量门禁仍在本地（标准 runner 16 GB，本地全量需 21 GB）。
+- 根 `.github/workflows/release.yml`：`local-v*` / `multi-v*` 两条发布轨互不夹带，
+  tag 经严格 SemVer 校验（拒前导零，`-rcN` 标为 prerelease 且不置 latest），
+  产出 `x86_64-unknown-linux-musl` 的**完整产品包** + 完整第三方许可材料 + `SHA256SUMS`，
+  并在独立的干净 runner 上做发布前验证。首发只发这一个目标（见 plan KD-009）。
+
+**两处已批准的产品侧窄例外**：E-X1（打包变体新增条目）、
+E-X2（`check_for_update_on_startup` 默认值改 `false`）。二者均不改动 workspace 版本号、
+crate 名与 `[[bin]]` 名，冻结二进制身份与公平对比设施不变。
+
+**未决**：转 public 与正式 `v0.1.0` 仍需用户在执行时单独确认；
+`codex doctor` 绕过更新检查配置这一项（plan KD-016）是否修复，待用户决定。
 
 ### 方向命名口径
 

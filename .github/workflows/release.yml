@@ -644,4 +644,42 @@ jobs:
           fi
 
           gh release create "${args[@]}" dist/*
-          gh release view "$TAG" --json tagName,isPrerelease,isLatest,assets
+
+          # Confirm what was actually published rather than printing it.
+          # (`gh release view --json` has no isLatest/assets fields, so this
+          # goes through the REST API.)
+          published="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}")"
+          jq '{tag: .tag_name, name, draft, prerelease, assets: [.assets[].name]}' <<<"$published"
+
+          actual_prerelease="$(jq -r '.prerelease' <<<"$published")"
+          if [[ "$actual_prerelease" != "$PRERELEASE" ]]; then
+            echo "::error::prerelease is ${actual_prerelease}, expected ${PRERELEASE}"
+            exit 1
+          fi
+          if [[ "$(jq -r '.draft' <<<"$published")" != "false" ]]; then
+            echo "::error::release was published as a draft"
+            exit 1
+          fi
+          if [[ "$(jq -r '.assets | length' <<<"$published")" -lt 2 ]]; then
+            echo "::error::expected both the package archive and SHA256SUMS"
+            exit 1
+          fi
+
+          # A release candidate must never become the repository's "latest".
+          # A 404 here is normal (no non-prerelease exists yet). gh prints the
+          # error body on stdout, so branch on the exit status instead of
+          # letting it contaminate the value.
+          if latest_json="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" 2>/dev/null)"; then
+            latest_tag="$(jq -r '.tag_name' <<<"$latest_json")"
+          else
+            latest_tag="<none>"
+          fi
+          echo "latest release is now: ${latest_tag}"
+          if [[ "$PRERELEASE" == "true" && "$latest_tag" == "$TAG" ]]; then
+            echo "::error::a prerelease must not be marked latest"
+            exit 1
+          fi
+          if [[ "$PRERELEASE" == "false" && "$latest_tag" != "$TAG" ]]; then
+            echo "::error::a formal release should be latest, but latest is ${latest_tag}"
+            exit 1
+          fi
