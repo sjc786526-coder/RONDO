@@ -368,6 +368,10 @@ service.rs: verdict_for_scores(&output.scores) → typed verdict
   既有 093/095/097 及各 `zz-done/*` worktree 未复用或修改。
 - 2026-08-31：从 clean main 创建 `.claude/worktrees/102-five-dimension-cloud-judge` /
   `worktree-102-five-dimension-cloud-judge`，并建立本 ExecPlan。规划阶段未调用 API、未构建、未训练。
+- 2026-08-31：用户追加授权写作者段 `gpt-5.6-terra` `50 USD`（独立于判官段），并确认判官段为 `10 RMB`。
+  据此完整发布链路改为必做项，两笔预算分账写入 §3.1/§3.5/§4.1。
+- 2026-08-31：产出执行者启动提示词
+  `plan/102-publication-critic-five-dimension-cloud-judge-executor-prompt.md`。
 
 ### 当前工作
 
@@ -382,10 +386,7 @@ service.rs: verdict_for_scores(&output.scores) → typed verdict
 
 ### 阻塞项
 
-- 无。两笔预算与未授权项见 §3.1 与 §3.5。
-- 提醒：`10 RMB` 是用户最初的书面授权数字。用户后续口头提到过 `20 RMB`／`19 RMB`，
-  本计划按保守口径保留 `10 RMB`；判官段实测约 `0.003–0.008 RMB/次`，该差额对本任务没有实际影响。
-  若用户明确抬高，按用户口径更新本条与 §3.1、§3.5、§4.1。
+- 无。两笔预算与未授权项见 §3.1 与 §3.5，均已由用户确认。
 
 ### 当前验收状态
 
@@ -416,4 +417,4 @@ service.rs: verdict_for_scores(&output.scores) → typed verdict
 | 006 | 付费外发允许两个模型、两笔独立预算：`deepseek-v4-flash ≤ 10 RMB`、`gpt-5.6-terra ≤ 50 USD`，不得互相挪用 | 发布链路两段分别由不同模型驱动、分别计费；用户已就 Producer 段单独授权 `50 USD` | 预算、端到端范围、验收标准 | 已采纳 |
 | 007 | missing-usage 兜底由 Plan 101 的 `1 RMB/次` 下调为 `0.1 RMB/次` | 原值明显高于实测约 `0.008 RMB/次` 的单次成本，过度保守会挤占有限预算 | 费用账本 | 已采纳 |
 | 008 | Plan 102 建立自己的预算身份，不复用 Plan 097 的合同数值 | `_validate_budgets` 把 `6/24/7.5/30` 硬编码为身份，`10 RMB / 50 USD` 塞不进去；改写它会破坏 Plan 097 历史证据的可复算性 | 预算合同、campaign 入口 | 已采纳 |
-| 009 | 判官段上限按最初书面授权保留 `10 RMB`，不按后续口头提到的 `20/19 RMB` 自行上调 | 两个口头数字不一致，且判官段实测约 `0.003–0.008 RMB/次`，`10 RMB` 已远超所需；上调预算属用户决定 | 预算 | 已采纳（可由用户改） |
+| 009 | 判官段上限确定为 `10 RMB` | 用户 `2026-08-31` 明确确认按 `10 RMB`；判官段实测约 `0.003–0.008 RMB/次`，该额度已远超所需 | 预算 | 已采纳 |
