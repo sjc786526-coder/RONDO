@@ -701,6 +701,26 @@ C-3 必须实测这条准确路径，不得假设默认路径可用。
 6. **本机磁盘余量成为实施约束**：项目从 343 GB 增至 357 GB（告警 350 / 主动停 365）。
    Local 冷构建改用 `CARGO_PROFILE_DEV_DEBUG=0`（target 仅 6.5 GB）；Multi 复用既有缓存、
    **不加该变量**，否则会因指纹变化触发全量重建。
+7. **`codex doctor` 的更新检查不受 `check_for_update_on_startup` 约束**（见下方 KD-016）。
+   这是实测发现，直接影响 A13 的判定，**需要用户决定是否扩大窄例外**。
+
+### 实施期的本地实测（用真实二进制，先于 rc1 降风险）
+
+用 multidev 既有 debug 产物 + 新构建的 `bwrap`，走 C-3 的准确路径打了一个本机包并实测：
+
+| 检查 | 结果 |
+|---|---|
+| 打包器经 `--entrypoint-bin`/`--code-mode-host-bin`/`--bwrap-bin` 产包 | ✅ 产出 `bin/rondo-multi`，rg/zsh 经 DotSlash 正常下载 |
+| `rondo-multi --version` | ✅ `codex-cli 0.147.0`（符合 KD-010 预期） |
+| 包布局识别（改名后） | ✅ doctor 报 `runtime ✓` / `install ✓ consistent`，package/bin/resources/path 四个目录全部正确解析 |
+| bundled ripgrep 解析 | ✅ `search ✓ file exists (bundled, …/codex-path/rg)`，`search provider bundled` |
+| `rondo-multi sandbox -- /bin/echo` | ✅ 输出 `rondo-sandbox-ok`，exit 0；arg0 与 sandbox 在改名后均正常 |
+
+**结论**：C-7 原本"预期安全但未实测"的三件事（改名不破坏 arg0、不破坏包布局识别、
+附属组件仍可解析）已在本机取得实证，rc1 只需再验 musl 链、cargo-about 与 A14。
+
+**同时确认了 verify job 那道守卫的必要性**：本机 PATH 上有 system `bwrap 0.9.0`，
+按 `launcher.rs` 的优先级根本不会走 bundled 路径——若 runner 上也有，A14 会在错误的代码路径上"通过"。
 
 ### 当前工作
 
@@ -779,6 +799,7 @@ D（四项复核 + 用户确认 + 转 public + 正式 tag）→ E（文档回写
 | KD-012 | **窄例外 E-X2**：把 `check_for_update_on_startup` 默认值改为 `false` | 这是**发布级缺陷**而非观感问题：`updates.rs` 会查询 `api.github.com/repos/openai/codex/releases/latest`，`update_action.rs` 会提示用户执行 `npm install -g @openai/codex` / `brew upgrade --cask codex`。发布一个引导用户去装上游产品的 fork 不可接受。已确认该行为受配置控制且默认为 `true`（`config/mod.rs:4007 unwrap_or(true)`），翻默认值是最小改动，不触碰 H1/H2 | 窄例外 E-X2；需跑 config 与快照测试 | **已采纳**（用户 2026-09-01 批准该窄例外；本轮只记录，不实施） |
 | KD-013 | 判官后端**不随 Release 分发**，只在文档中给出源码构建方式 | scorer 是独立二进制（`codex-publication-critic-{service,real-service,cloud-service}`），不在主 CLI 内。但本地后端依赖未分发的模型权重与运行时、云端后端需用户自备凭据，**即使打包也不是下载即用**；而且本地模型 `NO-GO`、云端 `NOT_QUALIFIED`，主动分发会暗示可用性 | README、Release notes；H11 | 已采纳 |
 | KD-014 | 对外文档必须把 **RONDO Multi 产品** 与 **Publication Critic 子系统** 分层表述 | 混为一谈会让读者误以为整个 Multi 未获验收，既不准确（Multi 有 14,660 全量通过的正确性基线）也低估了项目价值；分层后既更诚实也更有说服力 | README（已改）、Release notes | 已采纳 |
+| KD-016 | **`codex doctor` 仍会查询并提示上游 Codex 版本**，`check_for_update_on_startup` 管不到它 | 实测：即使显式写入 `check_for_update_on_startup = false`，`codex doctor` 仍输出 `↑ updates 0.152.0 available (current 0.147.0)`。读代码确认 `cli/src/doctor/updates.rs:88` **无条件**调用 `fetch_latest_version()` → `curl https://api.github.com/repos/openai/codex/releases/latest`；该文件只在第 36–40 行把配置值当作一条 detail **打印**出来，从不用它做门禁。对 fork 而言这条输出具有误导性：它把上游 Codex 的版本当作"你该升级到的版本" | **A13 的判定**；如需修复，涉及 `doctor/updates.rs`，超出 E-X2 已批准范围（§2 明确"不得顺带改动更新提示的其他逻辑"） | **待用户决定**（建议见下） |
 | KD-015 | Publication Critic 在所有对外文档中必须表述为**有界改写机制**，不得表述为发布门或安全审批 | 已核实产品合同与实现（`publication_review.rs:469` `Some(Verdict::Rewrite) if attempt.review_index < 2`）：第三次审查非阻断，即使 `REWRITE` 也提交；服务故障时 fail-open 提交当前稿并记为"审核未完成" | README（已改）、Release notes | 已采纳 |
 
 ---

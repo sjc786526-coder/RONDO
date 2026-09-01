@@ -207,6 +207,17 @@ jobs:
           done
 
 # ---------------------------------------------------------------------------
+# Measured on the first runs of this workflow (2026-09-01, ubuntu-24.04,
+# 4 vCPU / 16 GB, cold cache):
+#
+#   check (multi)  23m40s     check (local)  23m24s
+#   packaging scripts  9-14s  detect changed  8-9s
+#   saved cache        ~2.0 GB per product line
+#
+# Budget is 90 min cold / 30 min warm, so there is real headroom, and two 2 GB
+# caches sit well inside GitHub's 10 GB per-repo limit. The dominant cost is
+# compiling codex-core's test harness in the last gate.
+#
 # Why this is not the full workspace (plan 103, KD-006 / A3):
 #
 # Each product workspace has ~130 crates, and the local full-workspace gate is

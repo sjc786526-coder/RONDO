@@ -103,10 +103,35 @@ jobs:
       PRODUCT_DIR: ${{ needs.validate.outputs.product_dir }}
       VARIANT: ${{ needs.validate.outputs.variant }}
       VERSION: ${{ needs.validate.outputs.version }}
+      # A release build of this workspace emits ~2700 object files, and the
+      # first rc run died with "No space left on device" while linking the
+      # entrypoint. Debug info is the bulk of that. We publish no symbols
+      # archive, so line tables would only ever have been read by us; drop them
+      # rather than pay for them twice in disk and link time.
+      CARGO_PROFILE_RELEASE_DEBUG: "0"
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
+
+      # The runner image ships toolchains this build never touches, and the
+      # root filesystem is the constraint. Only well-known preinstalled paths
+      # are removed, on a disposable VM.
+      - name: Free up runner disk space
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "before:"; df -h /
+          sudo rm -rf \
+            /usr/share/dotnet \
+            /usr/local/lib/android \
+            /opt/ghc \
+            /usr/local/.ghcup \
+            /usr/local/share/powershell \
+            /usr/share/swift \
+            /usr/local/share/boost \
+            "${AGENT_TOOLSDIRECTORY:-/opt/hostedtoolcache}" || true
+          echo "after:"; df -h /
 
       - name: Print runner specs
         shell: bash
@@ -138,6 +163,16 @@ jobs:
           echo "CARGO_HOME=${cargo_home}" >> "$GITHUB_ENV"
           echo "${cargo_home}/bin" >> "$GITHUB_PATH"
           : > "${cargo_home}/config.toml"
+
+      # Installed here, BEFORE the musl toolchain setup, on purpose: that script
+      # exports zig cc/c++ shims as the global CC/CXX, and cargo-about has
+      # native dependencies of its own that must be built for the host.
+      # Built from source rather than fetched: cargo-about is not in
+      # taiki-e/install-action's managed tool list, so that action would fall
+      # back to cargo-binstall, adding a failure mode for no benefit.
+      - name: Install cargo-about
+        shell: bash
+        run: cargo install cargo-about --locked --version 0.9.2
 
       - name: Install Zig
         uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
@@ -228,8 +263,11 @@ jobs:
         working-directory: ${{ needs.validate.outputs.product_dir }}/codex-rs
         run: |
           set -euo pipefail
+          df -h / | tail -1
           cargo build --locked --target "$TARGET" --release \
             --bin codex --bin codex-code-mode-host
+          echo "disk after linking:"; df -h / | tail -1
+          du -sh "target/${TARGET}/release" || true
 
       - name: Verify the built artifacts are actually musl
         shell: bash
@@ -280,11 +318,6 @@ jobs:
           find "${stage}/${pkgname}" -type f | sort
 
       # --- STEP 5: license material, BEFORE archiving ------------------------
-      - name: Install cargo-about
-        uses: taiki-e/install-action@44c6d64aa62cd779e873306675c7a58e86d6d532 # v2.62.49
-        with:
-          tool: cargo-about@0.9.2
-
       - name: Inject license material into the package
         shell: bash
         run: |
