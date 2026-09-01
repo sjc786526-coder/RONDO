@@ -35,7 +35,7 @@ from ...config import (
     load_runtime_config,
 )
 from ...multi_m5.capture import CaptureProxy
-from ...multi_m5.trace import find_trace_bundle, load_rollout_trace
+from ...multi_m5.trace import TraceError, find_trace_bundle, load_rollout_trace
 from ..identity import sha256_file
 from ..write_once import WriteOnceNamespace
 from .cloud_budget_proxy import CloudBudgetProxy
@@ -521,9 +521,12 @@ def _run_producer(
                         timeout_code="producer_process_timeout",
                     )
                     wire = capture.jsonl()
-                trace = load_rollout_trace(find_trace_bundle(trace_root))
+                # Check the process first: a failed or timed-out `codex` leaves a
+                # truncated trace, and loading it first reports the truncation
+                # instead of the reason the run died.
                 if completed.returncode != 0:
                     raise Plan102CampaignError("producer_process_failed")
+                trace = _load_producer_trace(trace_root)
                 evidence, rewrite_then_retry = _producer_evidence(
                     wire, trace, metadata_path, require_canonical=require_canonical
                 )
@@ -673,6 +676,21 @@ def _judge_budget_snapshot(
         "remaining_rmb": _decimal_text(remaining),
         "attempt_count": len(attempts),
     }
+
+
+def _load_producer_trace(trace_root: Path):
+    """Load the rollout trace, keeping the reason it failed as a stable code.
+
+    Every `TraceError` message in `multi_m5.trace` is a fixed literal, so
+    folding it into the failure code stays body-free and tells a later run what
+    to look at instead of collapsing to the exception class name.
+    """
+
+    try:
+        return load_rollout_trace(find_trace_bundle(trace_root))
+    except TraceError as exc:
+        slug = re.sub(r"[^a-z0-9]+", "_", str(exc).lower()).strip("_")
+        raise Plan102CampaignError(f"producer_trace_invalid:{slug}"[:160]) from exc
 
 
 def _producer_generation_spend(

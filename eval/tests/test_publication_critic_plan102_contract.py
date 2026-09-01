@@ -244,6 +244,23 @@ class Plan102ProducerPromptTests(unittest.TestCase):
         self.assertIn("Plan 097", PRODUCER_MEMBER_PROMPT)
 
 
+class Plan102TraceFailureTests(unittest.TestCase):
+    def test_trace_failures_keep_their_reason_as_a_body_free_code(self) -> None:
+        from rondo_eval.publication_critic.engineering import (  # noqa: E402
+            plan102_campaign as campaign,
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            # An empty trace root is the "no bundle was written" case.
+            with self.assertRaises(campaign.Plan102CampaignError) as raised:
+                campaign._load_producer_trace(Path(directory))
+
+        code = str(raised.exception)
+        self.assertTrue(code.startswith("producer_trace_invalid:"), code)
+        self.assertRegex(code, r"\A[a-z0-9_:-]{1,160}\Z")
+        self.assertIn("no_rollout_trace_bundle_was_written", code)
+
+
 class Plan102ProxyShapeTests(unittest.TestCase):
     def test_records_disabled_thinking_without_bodies(self) -> None:
         from rondo_eval.publication_critic.engineering.cloud_budget_proxy import (  # noqa: E402
