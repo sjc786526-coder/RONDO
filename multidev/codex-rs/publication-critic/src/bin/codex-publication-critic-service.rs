@@ -9,7 +9,9 @@ use codex_publication_critic::PublicationScorer;
 use codex_publication_critic::RawScorerOutput;
 use codex_publication_critic::RuntimeLimits;
 use codex_publication_critic::ScorerError;
+use codex_publication_critic::ScorerProjection;
 use codex_publication_critic::ScorerStatus;
+use codex_publication_critic::ScoringContract;
 use codex_publication_critic::ScoringIdentity;
 use codex_publication_critic::ServiceConfig;
 use codex_publication_critic::StartupAnnouncement;
@@ -93,9 +95,9 @@ struct ControlledScorer {
 
 struct ControlledScorerInner {
     model: ModelIdentity,
-    scoring: ScoringIdentity,
+    scoring: ScoringContract,
     drifted_model: ModelIdentity,
-    drifted_scoring: ScoringIdentity,
+    drifted_scoring: ScoringContract,
     behavior: ControlledBehavior,
     affected_calls: usize,
     score: f64,
@@ -206,7 +208,7 @@ impl PublicationScorer for ControlledScorer {
         Ok(RawScorerOutput {
             model,
             scoring,
-            scores,
+            projection: ScorerProjection::Scalar { scores },
         })
     }
 }
@@ -235,13 +237,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
         ComponentIdentity::new("rondo-controlled-test-scorer", "v1")?,
         ComponentIdentity::new("rondo-controlled-test-tokenizer-drift", "v1")?,
     );
-    let drifted_scoring = ScoringIdentity::new(
+    let scalar = descriptor
+        .identity
+        .scoring
+        .as_scalar()
+        .ok_or("controlled test identity must stay scalar")?;
+    let drifted_scoring = ScoringContract::from(ScoringIdentity::new(
         ComponentIdentity::new("controlled-test-scalar-drift", "v1")?,
-        descriptor.identity.scoring.input_template.clone(),
-        descriptor.identity.scoring.scalar_projection.clone(),
-        descriptor.identity.scoring.domain.clone(),
-        descriptor.identity.scoring.threshold(),
-    )?;
+        scalar.input_template.clone(),
+        scalar.scalar_projection.clone(),
+        scalar.domain.clone(),
+        scalar.threshold(),
+    )?);
     let scorer = ControlledScorer {
         inner: Arc::new(ControlledScorerInner {
             model: descriptor.identity.model.clone(),

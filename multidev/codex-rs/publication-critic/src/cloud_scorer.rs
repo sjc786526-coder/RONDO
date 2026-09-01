@@ -1,9 +1,9 @@
 //! Cloud reference scorer backend.
 //!
 //! This is a sibling of the local worker backend: it satisfies the same [`PublicationScorer`]
-//! contract, is driven by the same service, and returns either exactly one scalar or a body-free
-//! typed failure. Provider request and response bodies, the credential, and provider error text
-//! never leave this module.
+//! contract and is driven by the same service. The product path is an explicit choice between
+//! the historical scalar projection and the five-dimension decision projection. Provider
+//! request and response bodies, the credential, and provider error text never leave this module.
 
 use crate::ComponentIdentity;
 use crate::ContractFailure;
@@ -14,8 +14,9 @@ use crate::QualificationIdentity;
 use crate::RawScorerOutput;
 use crate::ScoreFailureKind;
 use crate::ScorerError;
+use crate::ScorerProjection;
 use crate::ScorerStatus;
-use crate::ScoringIdentity;
+use crate::ScoringContract;
 use crate::cloud_config::CloudProviderConfig;
 use crate::cloud_config::CloudResponseFormat;
 use crate::cloud_config::CloudScorerConfig;
@@ -27,6 +28,7 @@ use crate::cloud_diagnostic::CloudDiagnosticOutcome;
 use crate::cloud_diagnostic::CloudDiagnosticOutput;
 use crate::cloud_diagnostic::CloudDiagnosticTask;
 use crate::cloud_diagnostic::CloudDiagnosticThinking;
+use crate::cloud_diagnostic::CloudFiveDimensionDecisions;
 use crate::cloud_diagnostic::diagnostic_messages;
 use crate::cloud_diagnostic::parse_output;
 use crate::cloud_template;
@@ -63,7 +65,7 @@ struct CloudScorerInner {
     provider: CloudProviderConfig,
     qualification: QualificationIdentity,
     model: ModelIdentity,
-    scoring: ScoringIdentity,
+    scoring: ScoringContract,
 }
 
 /// Body-free token counts observed on one terminal provider response.
@@ -265,19 +267,39 @@ impl PublicationScorer for CloudPublicationScorer {
 
 impl CloudScorerInner {
     async fn score(&self, packet: PublicationPacket) -> Result<RawScorerOutput, ScorerError> {
-        let user =
-            cloud_template::render_user_message(&packet).ok_or(ScorerError::BackendUnavailable)?;
-        match self
-            .call(
-                cloud_template::CLOUD_SYSTEM_MESSAGE,
-                user,
-                ResponseProjection::Scalar,
-            )
-            .await
-            .outcome
-        {
-            Ok(observed) => self.output(observed),
-            Err(_) => Err(ScorerError::BackendUnavailable),
+        match &self.scoring {
+            ScoringContract::Scalar(_) => {
+                let user = cloud_template::render_user_message(&packet)
+                    .ok_or(ScorerError::BackendUnavailable)?;
+                match self
+                    .call(
+                        cloud_template::CLOUD_SYSTEM_MESSAGE,
+                        user,
+                        ResponseProjection::Scalar,
+                    )
+                    .await
+                    .outcome
+                {
+                    Ok(observed) => self.output(observed),
+                    Err(_) => Err(ScorerError::BackendUnavailable),
+                }
+            }
+            ScoringContract::FiveDimension(_) => {
+                let messages = diagnostic_messages(&packet, CloudDiagnosticTask::FiveDimension)
+                    .ok_or(ScorerError::BackendUnavailable)?;
+                match self
+                    .call(
+                        &messages.system,
+                        messages.user,
+                        ResponseProjection::FiveDimension,
+                    )
+                    .await
+                    .outcome
+                {
+                    Ok(observed) => self.output(observed),
+                    Err(_) => Err(ScorerError::BackendUnavailable),
+                }
+            }
         }
     }
 
@@ -360,6 +382,9 @@ impl CloudScorerInner {
             },
             thinking: match projection {
                 ResponseProjection::Scalar => None,
+                ResponseProjection::FiveDimension => Some(Thinking {
+                    thinking_type: CloudDiagnosticThinking::Disabled.as_request_type(),
+                }),
                 ResponseProjection::Diagnostic { thinking, .. } => Some(Thinking {
                     thinking_type: thinking.as_request_type(),
                 }),
@@ -399,13 +424,24 @@ impl CloudScorerInner {
 
     fn output(&self, observed: ObservedCompletion) -> Result<RawScorerOutput, ScorerError> {
         let model = self.observed_model(observed.served_model.as_deref())?;
-        let ObservedOutput::Scalar(score) = observed.output else {
-            return Err(ScorerError::BackendUnavailable);
+        let projection = match observed.output {
+            ObservedOutput::Scalar(score) => ScorerProjection::Scalar {
+                scores: vec![score],
+            },
+            ObservedOutput::FiveDimension(decisions) => {
+                ScorerProjection::FiveDimension { decisions }
+            }
+            ObservedOutput::Diagnostic(_) => return Err(ScorerError::BackendUnavailable),
         };
+        match (&self.scoring, &projection) {
+            (ScoringContract::Scalar(_), ScorerProjection::Scalar { .. })
+            | (ScoringContract::FiveDimension(_), ScorerProjection::FiveDimension { .. }) => {}
+            _ => return Err(ScorerError::BackendUnavailable),
+        }
         Ok(RawScorerOutput {
             model,
             scoring: self.scoring.clone(),
-            scores: vec![score],
+            projection,
         })
     }
 
@@ -427,7 +463,7 @@ impl CloudScorerInner {
                 let served_model = self.safe_served_model(observed.served_model.clone());
                 let score = match observed.output {
                     ObservedOutput::Scalar(score) => score,
-                    ObservedOutput::Diagnostic(_) => {
+                    ObservedOutput::Diagnostic(_) | ObservedOutput::FiveDimension(_) => {
                         return CloudEvaluationObservation {
                             requested_model,
                             served_model,
@@ -452,27 +488,33 @@ impl CloudScorerInner {
                         kind: CloudEvaluationFailureKind::ModelIdentityMismatch,
                         http_status: None,
                     },
-                    Ok(_) => match self.scoring.verdict_for_scores(&[score]) {
-                        Ok(_) => CloudEvaluationOutcome::Success,
-                        Err(ContractFailure::InvalidScore(ScoreFailureKind::Shape)) => {
-                            CloudEvaluationOutcome::Failure {
-                                kind: CloudEvaluationFailureKind::InvalidScoreShape,
-                                http_status: None,
+                    Ok(_) => match self.scoring.as_scalar() {
+                        Some(identity) => match identity.verdict_for_scores(&[score]) {
+                            Ok(_) => CloudEvaluationOutcome::Success,
+                            Err(ContractFailure::InvalidScore(ScoreFailureKind::Shape)) => {
+                                CloudEvaluationOutcome::Failure {
+                                    kind: CloudEvaluationFailureKind::InvalidScoreShape,
+                                    http_status: None,
+                                }
                             }
-                        }
-                        Err(ContractFailure::InvalidScore(ScoreFailureKind::NonFinite)) => {
-                            CloudEvaluationOutcome::Failure {
-                                kind: CloudEvaluationFailureKind::NonFiniteScore,
-                                http_status: None,
+                            Err(ContractFailure::InvalidScore(ScoreFailureKind::NonFinite)) => {
+                                CloudEvaluationOutcome::Failure {
+                                    kind: CloudEvaluationFailureKind::NonFiniteScore,
+                                    http_status: None,
+                                }
                             }
-                        }
-                        Err(ContractFailure::InvalidScore(ScoreFailureKind::OutOfDomain)) => {
-                            CloudEvaluationOutcome::Failure {
-                                kind: CloudEvaluationFailureKind::ScoreOutOfDomain,
-                                http_status: None,
+                            Err(ContractFailure::InvalidScore(ScoreFailureKind::OutOfDomain)) => {
+                                CloudEvaluationOutcome::Failure {
+                                    kind: CloudEvaluationFailureKind::ScoreOutOfDomain,
+                                    http_status: None,
+                                }
                             }
-                        }
-                        Err(_) => CloudEvaluationOutcome::Failure {
+                            Err(_) => CloudEvaluationOutcome::Failure {
+                                kind: CloudEvaluationFailureKind::ProviderMalformedResponse,
+                                http_status: None,
+                            },
+                        },
+                        None => CloudEvaluationOutcome::Failure {
                             kind: CloudEvaluationFailureKind::ProviderMalformedResponse,
                             http_status: None,
                         },
@@ -529,7 +571,7 @@ impl CloudScorerInner {
                         };
                         (Some(output), local_verdict)
                     }
-                    ObservedOutput::Scalar(_) => (None, None),
+                    ObservedOutput::Scalar(_) | ObservedOutput::FiveDimension(_) => (None, None),
                 };
                 let outcome = match self.observed_model(observed.served_model.as_deref()) {
                     Err(ScorerError::BackendUnavailable) => CloudDiagnosticOutcome::Failure {
@@ -722,6 +764,7 @@ struct ObservedCompletion {
 
 enum ObservedOutput {
     Scalar(f64),
+    FiveDimension(CloudFiveDimensionDecisions),
     Diagnostic(CloudDiagnosticOutput),
 }
 
@@ -753,6 +796,7 @@ struct CloudCallObservation {
 #[derive(Clone, Copy)]
 enum ResponseProjection {
     Scalar,
+    FiveDimension,
     Diagnostic {
         task: CloudDiagnosticTask,
         thinking: CloudDiagnosticThinking,
@@ -762,7 +806,7 @@ enum ResponseProjection {
 impl ResponseProjection {
     fn response_limit(self) -> usize {
         match self {
-            Self::Scalar => MAX_RESPONSE_BYTES,
+            Self::Scalar | Self::FiveDimension => MAX_RESPONSE_BYTES,
             Self::Diagnostic { .. } => MAX_DIAGNOSTIC_RESPONSE_BYTES,
         }
     }
@@ -856,6 +900,17 @@ fn project_content(
         ResponseProjection::Scalar => cloud_template::parse_quality_scalar(content)
             .map(ObservedOutput::Scalar)
             .ok_or(CloudFailure::Projection),
+        ResponseProjection::FiveDimension => {
+            parse_output(CloudDiagnosticTask::FiveDimension, content)
+                .and_then(|output| match output {
+                    CloudDiagnosticOutput::FiveDimension { decisions } => {
+                        Some(ObservedOutput::FiveDimension(decisions))
+                    }
+                    CloudDiagnosticOutput::Scalar { .. }
+                    | CloudDiagnosticOutput::DirectGate { .. } => None,
+                })
+                .ok_or(CloudFailure::Projection)
+        }
         ResponseProjection::Diagnostic { task, .. } => parse_output(task, content)
             .map(ObservedOutput::Diagnostic)
             .ok_or(CloudFailure::Projection),

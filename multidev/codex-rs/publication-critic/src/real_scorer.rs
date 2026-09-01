@@ -3,8 +3,9 @@ use crate::PublicationPacket;
 use crate::PublicationScorer;
 use crate::RawScorerOutput;
 use crate::ScorerError;
+use crate::ScorerProjection;
 use crate::ScorerStatus;
-use crate::ScoringIdentity;
+use crate::ScoringContract;
 use crate::ServiceDescriptor;
 use crate::transport::ReadFrameError;
 use crate::transport::read_frame;
@@ -352,7 +353,7 @@ struct WorkerProcess {
     stdin: Option<ChildStdin>,
     stdout: Option<BufReader<ChildStdout>>,
     model: ModelIdentity,
-    scoring: ScoringIdentity,
+    scoring: ScoringContract,
     io_timeout: Duration,
 }
 
@@ -455,7 +456,9 @@ impl WorkerProcess {
         Ok(RawScorerOutput {
             model: self.model.clone(),
             scoring: self.scoring.clone(),
-            scores: vec![response.projected_score],
+            projection: ScorerProjection::Scalar {
+                scores: vec![response.projected_score],
+            },
         })
     }
 

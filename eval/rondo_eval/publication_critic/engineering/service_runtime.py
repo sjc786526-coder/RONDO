@@ -25,6 +25,7 @@ from typing import Any
 _MAX_JSON_BYTES = 1024 * 1024
 _MAX_DIAGNOSTIC_BYTES = 64 * 1024
 _CLOUD_PROXY_KEY_ENV = "RONDO_PLAN097_DEEPSEEK_PROXY_KEY"
+_PROXY_KEY_ENV = re.compile(r"RONDO_PLAN[0-9]{3}_DEEPSEEK_PROXY_KEY\Z")
 _SYSTEM_ENV = (
     "PATH",
     "LANG",
@@ -364,18 +365,21 @@ def start_cloud_service(
     downstream_api_key: str,
     call_timeout_ms: int,
     startup_timeout_ms: int,
+    proxy_key_env: str = _CLOUD_PROXY_KEY_ENV,
 ) -> RunningScorerService:
     binaries.validate()
+    if not isinstance(proxy_key_env, str) or _PROXY_KEY_ENV.fullmatch(proxy_key_env) is None:
+        raise ServiceRuntimeError("proxy_key_env_invalid")
     descriptor = _load_json(tracked_descriptor, "cloud_descriptor")
     provider = descriptor.get("provider")
     if not isinstance(provider, dict):
         raise ServiceRuntimeError("cloud_descriptor_invalid")
     runtime_value = json.loads(json.dumps(descriptor))
     runtime_value["provider"]["base_url"] = proxy_base_url
-    runtime_value["provider"]["api_key_env"] = _CLOUD_PROXY_KEY_ENV
+    runtime_value["provider"]["api_key_env"] = proxy_key_env
     _exclusive_json(runtime_descriptor, runtime_value)
     environment = _base_environment()
-    environment[_CLOUD_PROXY_KEY_ENV] = downstream_api_key
+    environment[proxy_key_env] = downstream_api_key
     return _start_service(
         backend="cloud",
         command=[

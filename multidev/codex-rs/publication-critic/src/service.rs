@@ -4,6 +4,8 @@ use crate::PublicationScorer;
 use crate::RawScorerOutput;
 use crate::ScoreFailureKind;
 use crate::ScorerError;
+use crate::ScorerProjection;
+use crate::ScoringContract;
 use crate::ServiceConfig;
 use crate::ServiceDescriptor;
 use crate::backend::BackendState;
@@ -416,36 +418,56 @@ async fn handle_review<S>(
                     code: ServiceFailureCode::BackendScoringIdentityMismatch,
                 }
             }
-            ScoreWaitResult::Output(Ok(output)) => match state
-                .descriptor
-                .identity
-                .scoring
-                .verdict_for_scores(&output.scores)
-            {
-                Ok(verdict) => ResponsePayload::Verdict { verdict },
-                Err(ContractFailure::InvalidScore(ScoreFailureKind::Shape)) => {
-                    ResponsePayload::Failure {
-                        code: ServiceFailureCode::InvalidScoreShape,
+            ScoreWaitResult::Output(Ok(output)) => {
+                match product_verdict(&state.descriptor.identity.scoring, &output.projection) {
+                    Ok(verdict) => ResponsePayload::Verdict { verdict },
+                    Err(ContractFailure::InvalidScore(ScoreFailureKind::Shape)) => {
+                        ResponsePayload::Failure {
+                            code: ServiceFailureCode::InvalidScoreShape,
+                        }
                     }
-                }
-                Err(ContractFailure::InvalidScore(ScoreFailureKind::NonFinite)) => {
-                    ResponsePayload::Failure {
-                        code: ServiceFailureCode::NonFiniteScore,
+                    Err(ContractFailure::InvalidScore(ScoreFailureKind::NonFinite)) => {
+                        ResponsePayload::Failure {
+                            code: ServiceFailureCode::NonFiniteScore,
+                        }
                     }
-                }
-                Err(ContractFailure::InvalidScore(ScoreFailureKind::OutOfDomain)) => {
-                    ResponsePayload::Failure {
-                        code: ServiceFailureCode::ScoreOutOfDomain,
+                    Err(ContractFailure::InvalidScore(ScoreFailureKind::OutOfDomain)) => {
+                        ResponsePayload::Failure {
+                            code: ServiceFailureCode::ScoreOutOfDomain,
+                        }
                     }
+                    Err(_) => ResponsePayload::Failure {
+                        code: ServiceFailureCode::BackendFailed,
+                    },
                 }
-                Err(_) => ResponsePayload::Failure {
-                    code: ServiceFailureCode::BackendFailed,
-                },
-            },
+            }
         }
     };
     drop(admission_permit);
     write_response(writer, state, response).await;
+}
+
+/// Derives the product typed verdict from the observed projection.
+///
+/// The five-dimension arm uses the discrete §3 conjunction and never consults a
+/// threshold. A mode mismatch is a shape failure, not a score-domain failure.
+pub(crate) fn product_verdict(
+    scoring: &ScoringContract,
+    projection: &ScorerProjection,
+) -> Result<crate::Verdict, ContractFailure> {
+    match (scoring, projection) {
+        (ScoringContract::Scalar(identity), ScorerProjection::Scalar { scores }) => {
+            identity.verdict_for_scores(scores)
+        }
+        (
+            ScoringContract::FiveDimension(identity),
+            ScorerProjection::FiveDimension { decisions },
+        ) => Ok(identity.verdict_for_decisions(decisions)),
+        (ScoringContract::Scalar(_), ScorerProjection::FiveDimension { .. })
+        | (ScoringContract::FiveDimension(_), ScorerProjection::Scalar { .. }) => {
+            Err(ContractFailure::InvalidScore(ScoreFailureKind::Shape))
+        }
+    }
 }
 
 async fn peer_closed(reader: &mut OwnedReadHalf) {

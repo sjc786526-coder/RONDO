@@ -1,6 +1,7 @@
+use crate::CloudFiveDimensionDecisions;
 use crate::ModelIdentity;
 use crate::PublicationPacket;
-use crate::ScoringIdentity;
+use crate::ScoringContract;
 use std::fmt;
 use tokio_util::sync::CancellationToken;
 
@@ -13,26 +14,47 @@ pub enum ScorerStatus {
     Loading,
     Ready {
         model: ModelIdentity,
-        scoring: Box<ScoringIdentity>,
+        scoring: Box<ScoringContract>,
     },
     Failed,
 }
 
-/// A backend result before the service validates identity, shape and score domain.
+/// The observed backend projection. Scalar scores still go through a threshold;
+/// five-dimension decisions never do.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ScorerProjection {
+    Scalar {
+        scores: Vec<f64>,
+    },
+    FiveDimension {
+        decisions: CloudFiveDimensionDecisions,
+    },
+}
+
+/// A backend result before the service validates identity and derives a verdict.
 #[derive(Clone, PartialEq)]
 pub struct RawScorerOutput {
     pub model: ModelIdentity,
-    pub scoring: ScoringIdentity,
-    pub scores: Vec<f64>,
+    pub scoring: ScoringContract,
+    pub projection: ScorerProjection,
 }
 
 impl fmt::Debug for RawScorerOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("RawScorerOutput")
-            .field("model", &self.model)
-            .field("scoring", &self.scoring)
-            .field("score_count", &self.scores.len())
-            .finish()
+        match &self.projection {
+            ScorerProjection::Scalar { scores } => f
+                .debug_struct("RawScorerOutput")
+                .field("model", &self.model)
+                .field("scoring", &self.scoring)
+                .field("score_count", &scores.len())
+                .finish(),
+            ScorerProjection::FiveDimension { .. } => f
+                .debug_struct("RawScorerOutput")
+                .field("model", &self.model)
+                .field("scoring", &self.scoring)
+                .field("projection", &"five_dimension")
+                .finish(),
+        }
     }
 }
 
@@ -42,11 +64,12 @@ pub enum ScorerError {
     BackendUnavailable,
 }
 
-/// Replaceable scalar scoring backend used by the Publication Critic service.
+/// Replaceable scoring backend used by the Publication Critic service.
 ///
-/// Implementations must return exactly one score, must not detach work, and
-/// must stop promptly when `cancellation` is cancelled. The service validates
-/// all observed output before it can become a product verdict.
+/// Scalar implementations return exactly one score. Five-dimension cloud
+/// implementations return typed decisions. Implementations must not detach
+/// work, and must stop promptly when `cancellation` is cancelled. The service
+/// validates all observed output before it can become a product verdict.
 pub trait PublicationScorer: Send + Sync + 'static {
     fn status(&self) -> ScorerStatus;
 

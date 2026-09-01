@@ -2,10 +2,12 @@
 
 import copy
 from contextlib import contextmanager
+from dataclasses import dataclass
 import hmac
 import json
 import math
 import os
+import re
 import secrets
 import socket
 import stat
@@ -33,6 +35,9 @@ _MAX_LEDGER_BYTES = 1024 * 1024
 _MAX_PROMPT_TOKENS = 500_000
 _MAX_COMPLETION_TOKENS = 32_768
 _SCHEMA = "rondo-publication-critic-plan097-cloud-budget-v1"
+_SCHEMA_NAME = re.compile(r"rondo-publication-critic-plan[0-9]{3}-cloud-budget-v[1-9][0-9]*\Z")
+_KEY_PREFIX = re.compile(r"rondo-plan[0-9]{3}-\Z")
+_THREAD_NAME = re.compile(r"rondo-plan[0-9]{3}-cloud-budget-proxy\Z")
 _ATTEMPT_FIELDS = {
     "attempt",
     "state",
@@ -47,7 +52,58 @@ class CloudBudgetProxyError(RuntimeError):
 
 
 class BudgetCapExceeded(CloudBudgetProxyError):
-    """Another upstream attempt cannot fit its 1 RMB reservation."""
+    """Another upstream attempt cannot fit its reservation."""
+
+
+@dataclass(frozen=True)
+class CloudBudgetIdentity:
+    """Fail-closed money identity for one plan's DeepSeek scorer ledger."""
+
+    schema: str
+    attempt_reservation_rmb: Decimal
+    unknown_charge_rmb: Decimal
+    downstream_key_prefix: str
+    thread_name: str
+    max_cap_rmb: Decimal = _MAX_CAP_RMB
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.schema, str) or _SCHEMA_NAME.fullmatch(self.schema) is None:
+            raise CloudBudgetProxyError("budget_identity_schema_invalid")
+        if (
+            not isinstance(self.downstream_key_prefix, str)
+            or _KEY_PREFIX.fullmatch(self.downstream_key_prefix) is None
+        ):
+            raise CloudBudgetProxyError("budget_identity_key_prefix_invalid")
+        if (
+            not isinstance(self.thread_name, str)
+            or _THREAD_NAME.fullmatch(self.thread_name) is None
+        ):
+            raise CloudBudgetProxyError("budget_identity_thread_name_invalid")
+        for field, value in (
+            ("attempt_reservation_rmb", self.attempt_reservation_rmb),
+            ("unknown_charge_rmb", self.unknown_charge_rmb),
+            ("max_cap_rmb", self.max_cap_rmb),
+        ):
+            if (
+                not isinstance(value, Decimal)
+                or not value.is_finite()
+                or value <= 0
+                or value > _MAX_CAP_RMB
+            ):
+                raise CloudBudgetProxyError(f"budget_identity_{field}_invalid")
+        if self.unknown_charge_rmb > self.attempt_reservation_rmb:
+            raise CloudBudgetProxyError("budget_identity_unknown_above_reservation")
+        if self.max_cap_rmb < self.attempt_reservation_rmb:
+            raise CloudBudgetProxyError("budget_identity_cap_below_reservation")
+
+
+PLAN097_CLOUD_BUDGET_IDENTITY = CloudBudgetIdentity(
+    schema=_SCHEMA,
+    attempt_reservation_rmb=ATTEMPT_RESERVATION_RMB,
+    unknown_charge_rmb=ATTEMPT_RESERVATION_RMB,
+    downstream_key_prefix="rondo-plan097-",
+    thread_name="rondo-plan097-cloud-budget-proxy",
+)
 
 
 class _NoRedirect(HTTPRedirectHandler):
@@ -62,11 +118,19 @@ class _LoopbackServer(ThreadingHTTPServer):
 
 
 class _PersistentLedger:
-    def __init__(self, path: Path, cap_rmb: Decimal) -> None:
+    def __init__(
+        self,
+        path: Path,
+        cap_rmb: Decimal,
+        identity: CloudBudgetIdentity = PLAN097_CLOUD_BUDGET_IDENTITY,
+    ) -> None:
         if not path.is_absolute():
             raise CloudBudgetProxyError("ledger_path_must_be_absolute")
+        if not isinstance(identity, CloudBudgetIdentity):
+            raise CloudBudgetProxyError("budget_identity_invalid")
         self.path = path
         self.cap_rmb = cap_rmb
+        self.identity = identity
         self._lock = threading.Lock()
         self._lock_path = path.with_name(f".{path.name}.lock")
         self._prepare_parent()
@@ -76,14 +140,16 @@ class _PersistentLedger:
     def reserve(self) -> int:
         with self._locked_document() as document:
             attempts = document["attempts"]
-            if _charged(attempts) + ATTEMPT_RESERVATION_RMB > self.cap_rmb:
+            if _charged(attempts) + self.identity.attempt_reservation_rmb > self.cap_rmb:
                 raise BudgetCapExceeded("budget_cap_exceeded")
             row = {
                 "attempt": len(attempts) + 1,
                 "state": "reserved",
                 "usage": None,
                 "actual_charge_rmb": None,
-                "conservative_charge_rmb": "1",
+                "conservative_charge_rmb": _decimal_text(
+                    self.identity.attempt_reservation_rmb
+                ),
             }
             updated = {**document, "attempts": [*attempts, row]}
             self._persist(updated)
@@ -95,7 +161,7 @@ class _PersistentLedger:
         except CloudQualityError:
             usage = None
             actual = None
-        if actual is not None and actual > ATTEMPT_RESERVATION_RMB:
+        if actual is not None and actual > self.identity.attempt_reservation_rmb:
             usage = None
             actual = None
         with self._locked_document() as document:
@@ -110,7 +176,9 @@ class _PersistentLedger:
                     state="unknown_usage_charged",
                     usage=None,
                     actual_charge_rmb=None,
-                    conservative_charge_rmb="1",
+                    conservative_charge_rmb=_decimal_text(
+                        self.identity.unknown_charge_rmb
+                    ),
                 )
             else:
                 charge = _decimal_text(actual)
@@ -128,7 +196,7 @@ class _PersistentLedger:
             attempts = copy.deepcopy(document["attempts"])
             charged = _charged(attempts)
         return {
-            "schema": _SCHEMA,
+            "schema": self.identity.schema,
             "cap_rmb": _decimal_text(self.cap_rmb),
             "conservative_charged_rmb": _decimal_text(charged),
             "remaining_rmb": _decimal_text(self.cap_rmb - charged),
@@ -180,10 +248,10 @@ class _PersistentLedger:
                 document = json.loads(self.path.read_text(encoding="utf-8"))
             except (OSError, UnicodeError, json.JSONDecodeError) as exc:
                 raise CloudBudgetProxyError("ledger_file_invalid") from exc
-            _validate_document(document, self.cap_rmb)
+            _validate_document(document, self.cap_rmb, self.identity)
             return document
         document = {
-            "schema": _SCHEMA,
+            "schema": self.identity.schema,
             "cap_rmb": _decimal_text(self.cap_rmb),
             "attempts": [],
         }
@@ -215,7 +283,7 @@ class _PersistentLedger:
 
 
 class CloudBudgetProxy:
-    """Single-purpose proxy for Plan 097 DeepSeek scorer attempts."""
+    """Single-purpose proxy for one plan's DeepSeek scorer attempts."""
 
     def __init__(
         self,
@@ -225,6 +293,7 @@ class CloudBudgetProxy:
         ledger_path: Path,
         cap_rmb: Decimal | str = DEFAULT_CAP_RMB,
         timeout_seconds: float = 90.0,
+        identity: CloudBudgetIdentity = PLAN097_CLOUD_BUDGET_IDENTITY,
         _opener: Any | None = None,
     ) -> None:
         self._upstream_endpoint = _upstream_endpoint(upstream_endpoint)
@@ -243,9 +312,18 @@ class CloudBudgetProxy:
             or not 0 < timeout_seconds <= 180
         ):
             raise CloudBudgetProxyError("timeout_invalid")
+        if not isinstance(identity, CloudBudgetIdentity):
+            raise CloudBudgetProxyError("budget_identity_invalid")
+        self._identity = identity
         self._upstream_api_key = upstream_api_key
-        self._downstream_api_key = "rondo-plan097-" + secrets.token_urlsafe(32)
-        self._ledger = _PersistentLedger(Path(ledger_path), _cap(cap_rmb))
+        self._downstream_api_key = identity.downstream_key_prefix + secrets.token_urlsafe(
+            32
+        )
+        self._ledger = _PersistentLedger(
+            Path(ledger_path),
+            _cap(cap_rmb, max_cap=identity.max_cap_rmb),
+            identity,
+        )
         self._timeout = float(timeout_seconds)
         self._opener = _opener or build_opener(_NoRedirect())
         self._server: _LoopbackServer | None = None
@@ -253,6 +331,7 @@ class CloudBudgetProxy:
         self._closing = threading.Event()
         self._lifecycle_lock = threading.Lock()
         self._started = False
+        self._request_shapes: list[dict[str, Any]] = []
 
     @property
     def base_url(self) -> str:
@@ -267,6 +346,10 @@ class CloudBudgetProxy:
 
     def snapshot(self) -> dict[str, Any]:
         return self._ledger.snapshot()
+
+    def request_shapes(self) -> list[dict[str, Any]]:
+        with self._lifecycle_lock:
+            return [dict(row) for row in self._request_shapes]
 
     def __enter__(self) -> Self:
         return self.start()
@@ -301,7 +384,7 @@ class CloudBudgetProxy:
         self._server = _LoopbackServer(("127.0.0.1", 0), Handler)
         self._thread = threading.Thread(
             target=self._server.serve_forever,
-            name="rondo-plan097-cloud-budget-proxy",
+            name=owner._identity.thread_name,
             daemon=True,
         )
         self._thread.start()
@@ -355,6 +438,7 @@ class CloudBudgetProxy:
                 if self._closing.is_set():
                     self._reject(handler, 503, "proxy_closing")
                     return
+                self._request_shapes.append(_request_shape(request_value))
                 attempt = self._ledger.reserve()
                 try:
                     upstream = self._opener.open(
@@ -423,14 +507,18 @@ class CloudBudgetProxy:
         _send(handler, status, body, "application/json")
 
 
-def _validate_document(document: Any, cap: Decimal) -> None:
+def _validate_document(
+    document: Any, cap: Decimal, identity: CloudBudgetIdentity
+) -> None:
     if not isinstance(document, dict) or set(document) != {"schema", "cap_rmb", "attempts"}:
         raise CloudBudgetProxyError("ledger_schema_invalid")
-    if document["schema"] != _SCHEMA or document["cap_rmb"] != _decimal_text(cap):
+    if document["schema"] != identity.schema or document["cap_rmb"] != _decimal_text(cap):
         raise CloudBudgetProxyError("ledger_identity_invalid")
     attempts = document["attempts"]
     if not isinstance(attempts, list):
         raise CloudBudgetProxyError("ledger_attempts_invalid")
+    reserved = identity.attempt_reservation_rmb
+    unknown = identity.unknown_charge_rmb
     for expected, row in enumerate(attempts, start=1):
         if not isinstance(row, dict) or set(row) != _ATTEMPT_FIELDS:
             raise CloudBudgetProxyError("ledger_attempt_invalid")
@@ -450,7 +538,18 @@ def _validate_document(document: Any, cap: Decimal) -> None:
                 raise CloudBudgetProxyError("ledger_attempt_invalid") from exc
             if actual != expected_charge or actual != conservative:
                 raise CloudBudgetProxyError("ledger_attempt_invalid")
-        elif row["usage"] is not None or row["actual_charge_rmb"] is not None or conservative != 1:
+        elif row["state"] == "reserved":
+            if (
+                row["usage"] is not None
+                or row["actual_charge_rmb"] is not None
+                or conservative != reserved
+            ):
+                raise CloudBudgetProxyError("ledger_attempt_invalid")
+        elif (
+            row["usage"] is not None
+            or row["actual_charge_rmb"] is not None
+            or conservative != unknown
+        ):
             raise CloudBudgetProxyError("ledger_attempt_invalid")
     if _charged(attempts) > cap:
         raise CloudBudgetProxyError("ledger_cap_exceeded")
@@ -556,12 +655,28 @@ def _upstream_endpoint(value: str) -> str:
     return value
 
 
-def _cap(value: Decimal | str) -> Decimal:
+def _request_shape(value: dict[str, Any]) -> dict[str, Any]:
+    thinking = value.get("thinking")
+    if thinking is None:
+        thinking_type = "absent"
+    elif isinstance(thinking, dict) and thinking.get("type") in {"disabled", "enabled"}:
+        thinking_type = thinking["type"]
+    else:
+        thinking_type = "invalid"
+    model = value.get("model")
+    return {
+        "thinking_type": thinking_type,
+        "model": model if isinstance(model, str) else None,
+        "has_messages": isinstance(value.get("messages"), list),
+    }
+
+
+def _cap(value: Decimal | str, *, max_cap: Decimal = _MAX_CAP_RMB) -> Decimal:
     try:
         cap = Decimal(str(value))
     except (InvalidOperation, ValueError) as exc:
         raise CloudBudgetProxyError("cap_invalid") from exc
-    if isinstance(value, bool) or not cap.is_finite() or not 0 < cap <= _MAX_CAP_RMB:
+    if isinstance(value, bool) or not cap.is_finite() or not 0 < cap <= max_cap:
         raise CloudBudgetProxyError("cap_invalid")
     return cap
 

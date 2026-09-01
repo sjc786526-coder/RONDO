@@ -6,10 +6,16 @@
 
 use crate::ComponentIdentity;
 use crate::ContractFailure;
+use crate::FiveDimensionScoringIdentity;
 use crate::ModelIdentity;
 use crate::ScoreDomain;
+use crate::ScoringContract;
 use crate::ScoringIdentity;
 use crate::ServiceDescriptor;
+use crate::cloud_template::CLOUD_FIVE_DIMENSION_PROJECTION_NAME;
+use crate::cloud_template::CLOUD_FIVE_DIMENSION_PROJECTION_REVISION;
+use crate::cloud_template::CLOUD_FIVE_DIMENSION_TEMPLATE_NAME;
+use crate::cloud_template::CLOUD_FIVE_DIMENSION_TEMPLATE_REVISION;
 use crate::cloud_template::CLOUD_PROJECTION_NAME;
 use crate::cloud_template::CLOUD_PROJECTION_REVISION;
 use crate::cloud_template::CLOUD_SCORE_DOMAIN_MAX;
@@ -274,6 +280,33 @@ pub fn cloud_reference_scoring_identity(
     )
 }
 
+/// Builds the frozen five-dimension scoring identity of one reference scorer.
+///
+/// The template and decision projection are fixed by the five-dimension product
+/// revision. There is no domain or threshold: the typed verdict is the discrete
+/// task-v2 §3 conjunction.
+pub fn cloud_five_dimension_scoring_identity(
+    definition_suffix: &str,
+    definition_revision: &str,
+) -> Result<ScoringContract, ContractFailure> {
+    Ok(ScoringContract::FiveDimension(
+        FiveDimensionScoringIdentity::new(
+            ComponentIdentity::new(
+                format!("{CLOUD_DEFINITION_PREFIX}{definition_suffix}"),
+                definition_revision,
+            )?,
+            ComponentIdentity::new(
+                CLOUD_FIVE_DIMENSION_TEMPLATE_NAME,
+                CLOUD_FIVE_DIMENSION_TEMPLATE_REVISION,
+            )?,
+            ComponentIdentity::new(
+                CLOUD_FIVE_DIMENSION_PROJECTION_NAME,
+                CLOUD_FIVE_DIMENSION_PROJECTION_REVISION,
+            )?,
+        ),
+    ))
+}
+
 /// Builds the model identity of a hosted model whose serving details cannot be verified.
 ///
 /// `model` must be the exact model id this backend will request; descriptor validation rejects any
@@ -350,18 +383,36 @@ fn validate_cloud_identity(
         return Err(CloudScorerConfigError::DishonestIdentity);
     }
     let scoring = &descriptor.identity.scoring;
-    if scoring.input_template.name() != CLOUD_TEMPLATE_NAME
-        || scoring.input_template.revision() != CLOUD_TEMPLATE_REVISION
-        || scoring.scalar_projection.name() != CLOUD_PROJECTION_NAME
-        || scoring.scalar_projection.revision() != CLOUD_PROJECTION_REVISION
-        || !scoring
-            .definition
-            .name()
-            .starts_with(CLOUD_DEFINITION_PREFIX)
-        || scoring.domain.min() != CLOUD_SCORE_DOMAIN_MIN
-        || scoring.domain.max() != CLOUD_SCORE_DOMAIN_MAX
-    {
-        return Err(CloudScorerConfigError::DishonestIdentity);
+    match scoring {
+        ScoringContract::Scalar(identity) => {
+            if identity.input_template.name() != CLOUD_TEMPLATE_NAME
+                || identity.input_template.revision() != CLOUD_TEMPLATE_REVISION
+                || identity.scalar_projection.name() != CLOUD_PROJECTION_NAME
+                || identity.scalar_projection.revision() != CLOUD_PROJECTION_REVISION
+                || !identity
+                    .definition
+                    .name()
+                    .starts_with(CLOUD_DEFINITION_PREFIX)
+                || identity.domain.min() != CLOUD_SCORE_DOMAIN_MIN
+                || identity.domain.max() != CLOUD_SCORE_DOMAIN_MAX
+            {
+                return Err(CloudScorerConfigError::DishonestIdentity);
+            }
+        }
+        ScoringContract::FiveDimension(identity) => {
+            if identity.input_template.name() != CLOUD_FIVE_DIMENSION_TEMPLATE_NAME
+                || identity.input_template.revision() != CLOUD_FIVE_DIMENSION_TEMPLATE_REVISION
+                || identity.decision_projection.name() != CLOUD_FIVE_DIMENSION_PROJECTION_NAME
+                || identity.decision_projection.revision()
+                    != CLOUD_FIVE_DIMENSION_PROJECTION_REVISION
+                || !identity
+                    .definition
+                    .name()
+                    .starts_with(CLOUD_DEFINITION_PREFIX)
+            {
+                return Err(CloudScorerConfigError::DishonestIdentity);
+            }
+        }
     }
     Ok(())
 }

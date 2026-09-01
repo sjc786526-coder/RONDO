@@ -1,6 +1,8 @@
 use super::*;
 use crate::QualificationIdentity;
 use crate::RuntimeLimits;
+use crate::ScoringContract;
+use crate::ScoringIdentity;
 use crate::ServiceIdentity;
 use pretty_assertions::assert_eq;
 
@@ -102,6 +104,8 @@ fn cloud_identity_cannot_claim_a_verified_tokenizer_or_local_template() {
         .service_descriptor
         .identity
         .scoring
+        .as_scalar_mut()
+        .expect("reference scoring is scalar")
         .input_template = local_render;
 
     let mut projection_claim = reference_descriptor();
@@ -109,6 +113,8 @@ fn cloud_identity_cannot_claim_a_verified_tokenizer_or_local_template() {
         .service_descriptor
         .identity
         .scoring
+        .as_scalar_mut()
+        .expect("reference scoring is scalar")
         .scalar_projection =
         ComponentIdentity::new("single-scalar", "v1").expect("component is valid");
 
@@ -117,33 +123,28 @@ fn cloud_identity_cannot_claim_a_verified_tokenizer_or_local_template() {
         .service_descriptor
         .identity
         .scoring
+        .as_scalar_mut()
+        .expect("reference scoring is scalar")
         .definition = ComponentIdentity::new("skywork-publication-critic-final", "v1")
         .expect("component is valid");
 
     let mut widened_domain = reference_descriptor();
+    let scalar = widened_domain
+        .service_descriptor
+        .identity
+        .scoring
+        .as_scalar()
+        .expect("reference scoring is scalar")
+        .clone();
     widened_domain.service_descriptor.identity.scoring = ScoringIdentity::new(
-        widened_domain
-            .service_descriptor
-            .identity
-            .scoring
-            .definition
-            .clone(),
-        widened_domain
-            .service_descriptor
-            .identity
-            .scoring
-            .input_template
-            .clone(),
-        widened_domain
-            .service_descriptor
-            .identity
-            .scoring
-            .scalar_projection
-            .clone(),
+        scalar.definition,
+        scalar.input_template,
+        scalar.scalar_projection,
         ScoreDomain::new(/*min*/ 0.0, /*max*/ 10.0).expect("domain is valid"),
         /*threshold*/ 5.0,
     )
-    .expect("scoring identity is valid");
+    .expect("scoring identity is valid")
+    .into();
 
     for descriptor in [
         tokenizer_claim,
@@ -287,6 +288,32 @@ fn provider_request_bounds_are_enforced() {
             Err(CloudScorerConfigError::InvalidDescriptor)
         );
     }
+}
+
+#[test]
+fn five_dimension_reference_identity_is_valid_and_rejects_scalar_claims() {
+    let mut descriptor = reference_descriptor();
+    descriptor.service_descriptor.identity.scoring =
+        cloud_five_dimension_scoring_identity("example-cloud-model", "v1")
+            .expect("five-dimension scoring identity is valid");
+    assert_eq!(descriptor.validate(), Ok(()));
+    let encoded = serde_json::to_value(&descriptor.service_descriptor.identity.scoring)
+        .expect("five-dimension identity must serialize");
+    assert!(encoded.get("threshold").is_none());
+    assert!(encoded.get("domain").is_none());
+    assert!(encoded.get("scalar_projection").is_none());
+
+    let mut stolen_template = descriptor.clone();
+    if let ScoringContract::FiveDimension(identity) =
+        &mut stolen_template.service_descriptor.identity.scoring
+    {
+        identity.input_template = ComponentIdentity::new("rondo-publication-cloud-template", "v1")
+            .expect("component is valid");
+    }
+    assert_eq!(
+        stolen_template.validate(),
+        Err(CloudScorerConfigError::DishonestIdentity)
+    );
 }
 
 #[test]

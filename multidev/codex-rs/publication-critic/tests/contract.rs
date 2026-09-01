@@ -250,7 +250,11 @@ fn enforces_prior_evidence_count_limits() {
 
 #[test]
 fn controlled_threshold_maps_rewrite_pass_and_equality() {
-    let scoring = controlled_test_identity().scoring;
+    let scoring = controlled_test_identity()
+        .scoring
+        .as_scalar()
+        .expect("controlled test identity stays scalar")
+        .clone();
 
     assert_eq!(scoring.threshold(), 0.5);
     assert_eq!(scoring.verdict_for_scores(&[0.25]), Ok(Verdict::Rewrite));

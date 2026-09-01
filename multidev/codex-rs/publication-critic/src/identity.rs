@@ -1,3 +1,4 @@
+use crate::CloudFiveDimensionDecisions;
 use crate::ContractFailure;
 use crate::ScoreFailureKind;
 use crate::Verdict;
@@ -277,6 +278,111 @@ impl ScoringIdentity {
     }
 }
 
+/// Discrete five-head conjunction. This identity has no domain, threshold, or
+/// scalar projection: the typed verdict is exactly the task-v2 §3 gate.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FiveDimensionPassRule {
+    DiscreteNonCompensatingConjunction,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct FiveDimensionScoringIdentity {
+    pub definition: ComponentIdentity,
+    pub input_template: ComponentIdentity,
+    pub decision_projection: ComponentIdentity,
+    pub pass_rule: FiveDimensionPassRule,
+}
+
+impl FiveDimensionScoringIdentity {
+    pub fn new(
+        definition: ComponentIdentity,
+        input_template: ComponentIdentity,
+        decision_projection: ComponentIdentity,
+    ) -> Self {
+        Self {
+            definition,
+            input_template,
+            decision_projection,
+            pass_rule: FiveDimensionPassRule::DiscreteNonCompensatingConjunction,
+        }
+    }
+
+    pub fn validate(&self) -> Result<(), ContractFailure> {
+        Ok(())
+    }
+
+    pub fn verdict_for_decisions(&self, decisions: &CloudFiveDimensionDecisions) -> Verdict {
+        decisions.product_verdict()
+    }
+}
+
+/// Product scoring contract. Untagged so a historical scalar identity stays
+/// byte-identical; the five-dimension variant cannot carry a threshold.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(untagged)]
+pub enum ScoringContract {
+    FiveDimension(FiveDimensionScoringIdentity),
+    Scalar(ScoringIdentity),
+}
+
+impl ScoringContract {
+    pub fn validate(&self) -> Result<(), ContractFailure> {
+        match self {
+            Self::FiveDimension(identity) => identity.validate(),
+            Self::Scalar(identity) => identity.validate(),
+        }
+    }
+
+    pub fn as_scalar(&self) -> Option<&ScoringIdentity> {
+        match self {
+            Self::Scalar(identity) => Some(identity),
+            Self::FiveDimension(_) => None,
+        }
+    }
+
+    pub fn as_scalar_mut(&mut self) -> Option<&mut ScoringIdentity> {
+        match self {
+            Self::Scalar(identity) => Some(identity),
+            Self::FiveDimension(_) => None,
+        }
+    }
+
+    pub fn as_five_dimension(&self) -> Option<&FiveDimensionScoringIdentity> {
+        match self {
+            Self::FiveDimension(identity) => Some(identity),
+            Self::Scalar(_) => None,
+        }
+    }
+
+    pub fn definition(&self) -> &ComponentIdentity {
+        match self {
+            Self::FiveDimension(identity) => &identity.definition,
+            Self::Scalar(identity) => &identity.definition,
+        }
+    }
+
+    pub fn input_template(&self) -> &ComponentIdentity {
+        match self {
+            Self::FiveDimension(identity) => &identity.input_template,
+            Self::Scalar(identity) => &identity.input_template,
+        }
+    }
+}
+
+impl From<ScoringIdentity> for ScoringContract {
+    fn from(value: ScoringIdentity) -> Self {
+        Self::Scalar(value)
+    }
+}
+
+impl From<FiveDimensionScoringIdentity> for ScoringContract {
+    fn from(value: FiveDimensionScoringIdentity) -> Self {
+        Self::FiveDimension(value)
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ServiceIdentity {
@@ -284,7 +390,7 @@ pub struct ServiceIdentity {
     pub implementation: ComponentIdentity,
     pub qualification: QualificationIdentity,
     pub model: ModelIdentity,
-    pub scoring: ScoringIdentity,
+    pub scoring: ScoringContract,
 }
 
 impl ServiceIdentity {
@@ -292,8 +398,9 @@ impl ServiceIdentity {
         implementation: ComponentIdentity,
         qualification: QualificationIdentity,
         model: ModelIdentity,
-        scoring: ScoringIdentity,
+        scoring: impl Into<ScoringContract>,
     ) -> Result<Self, ContractFailure> {
+        let scoring = scoring.into();
         scoring.validate()?;
         Ok(Self {
             protocol: ProtocolVersion::RondoPublicationCriticV1,
@@ -324,7 +431,7 @@ pub fn controlled_test_identity() -> ServiceIdentity {
             model: ComponentIdentity::trusted_literal("rondo-controlled-test-scorer", "v1"),
             tokenizer: ComponentIdentity::trusted_literal("rondo-controlled-test-tokenizer", "v1"),
         },
-        scoring: ScoringIdentity {
+        scoring: ScoringContract::Scalar(ScoringIdentity {
             definition: ComponentIdentity::trusted_literal("controlled-test-scalar", "v1"),
             input_template: ComponentIdentity::trusted_literal(
                 "rondo-publication-packet-render",
@@ -337,6 +444,6 @@ pub fn controlled_test_identity() -> ServiceIdentity {
             },
             threshold: FiniteValue::trusted_literal(/*value*/ 0.5),
             pass_rule: PassRule::ScoreGreaterThanOrEqualToThreshold,
-        },
+        }),
     }
 }

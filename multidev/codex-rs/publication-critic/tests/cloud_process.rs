@@ -24,6 +24,7 @@ use codex_publication_critic::ServiceIdentity;
 use codex_publication_critic::StartupAnnouncement;
 use codex_publication_critic::TargetKind;
 use codex_publication_critic::Verdict;
+use codex_publication_critic::cloud_five_dimension_scoring_identity;
 use codex_publication_critic::cloud_reference_scoring_identity;
 use codex_publication_critic::controlled_test_descriptor;
 use codex_publication_critic::provider_managed_model_identity;
@@ -53,6 +54,7 @@ use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
 use wiremock::Mock;
 use wiremock::MockServer;
+use wiremock::Respond;
 use wiremock::ResponseTemplate;
 use wiremock::matchers::method;
 use wiremock::matchers::path;
@@ -71,6 +73,12 @@ type TestResult<T = ()> = Result<T, Box<dyn Error + Send + Sync>>;
 static NEXT_TEMP_ID: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone, Copy)]
+enum ProductScoring {
+    Scalar,
+    FiveDimension,
+}
+
+#[derive(Clone, Copy)]
 struct DescriptorOptions {
     job_timeout: Duration,
     request_timeout: Duration,
@@ -80,6 +88,7 @@ struct DescriptorOptions {
     queue_capacity: u16,
     served_model: &'static str,
     threshold: f64,
+    product_scoring: ProductScoring,
 }
 
 impl Default for DescriptorOptions {
@@ -93,11 +102,29 @@ impl Default for DescriptorOptions {
             queue_capacity: 4,
             served_model: "echoed",
             threshold: 0.5,
+            product_scoring: ProductScoring::Scalar,
+        }
+    }
+}
+
+impl DescriptorOptions {
+    fn five_dimension() -> Self {
+        Self {
+            product_scoring: ProductScoring::FiveDimension,
+            ..Self::default()
         }
     }
 }
 
 fn service_descriptor(options: DescriptorOptions) -> TestResult<ServiceDescriptor> {
+    let scoring = match options.product_scoring {
+        ProductScoring::Scalar => {
+            cloud_reference_scoring_identity(PROVIDER_MODEL, "v1", options.threshold)?.into()
+        }
+        ProductScoring::FiveDimension => {
+            cloud_five_dimension_scoring_identity(PROVIDER_MODEL, "v1")?
+        }
+    };
     let identity = ServiceIdentity::new(
         ComponentIdentity::new("rondo-publication-critic-cloud-service", "v1")?,
         QualificationIdentity::new(
@@ -105,7 +132,7 @@ fn service_descriptor(options: DescriptorOptions) -> TestResult<ServiceDescripto
             ComponentIdentity::new("rondo-publication-qualification", "v1")?,
         ),
         provider_managed_model_identity(PROVIDER_MODEL)?,
-        cloud_reference_scoring_identity(PROVIDER_MODEL, "v1", options.threshold)?,
+        scoring,
     )?;
     Ok(ServiceDescriptor::new(
         identity,
@@ -202,6 +229,22 @@ impl FakeProvider {
         .await;
     }
 
+    async fn mount_five_dimension(&self, content: &str) {
+        self.mount(ResponseTemplate::new(200).set_body_json(completion(PROVIDER_MODEL, content)))
+            .await;
+    }
+
+    async fn mount_five_dimension_sequence(&self, contents: &[&str]) {
+        Mock::given(method("POST"))
+            .and(path(PROVIDER_PATH))
+            .respond_with(SequentialFiveDimension {
+                contents: contents.iter().map(|value| (*value).to_string()).collect(),
+                next: AtomicU64::new(0),
+            })
+            .mount(&self.server)
+            .await;
+    }
+
     async fn requests(&self) -> Vec<wiremock::Request> {
         self.server.received_requests().await.unwrap_or_default()
     }
@@ -219,6 +262,36 @@ impl FakeProvider {
         .map_err(|_| format!("provider did not receive {count} requests"))?;
         Ok(())
     }
+}
+
+struct SequentialFiveDimension {
+    contents: Vec<String>,
+    next: AtomicU64,
+}
+
+impl Respond for SequentialFiveDimension {
+    fn respond(&self, _: &wiremock::Request) -> ResponseTemplate {
+        let index = usize::try_from(self.next.fetch_add(1, Ordering::Relaxed))
+            .unwrap_or(self.contents.len());
+        let content = self
+            .contents
+            .get(index)
+            .map(String::as_str)
+            .unwrap_or(r#"{"useful_state_transfer":"FAIL","honest_uncertainty":"FAIL","conditional_continuity":"FAIL","scope_and_signal":"FAIL","internal_consistency":"FAIL"}"#);
+        ResponseTemplate::new(200).set_body_json(completion(PROVIDER_MODEL, content))
+    }
+}
+
+fn five_dimension_content(
+    useful: &str,
+    honest: &str,
+    continuity: &str,
+    scope: &str,
+    consistency: &str,
+) -> String {
+    format!(
+        r#"{{"useful_state_transfer":"{useful}","honest_uncertainty":"{honest}","conditional_continuity":"{continuity}","scope_and_signal":"{scope}","internal_consistency":"{consistency}"}}"#
+    )
 }
 
 fn completion(model: &str, content: &str) -> Value {
@@ -613,6 +686,150 @@ async fn cloud_backend_reaches_ready_and_produces_both_verdicts() -> TestResult 
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn five_dimension_product_path_closes_thinking_and_emits_both_verdicts() -> TestResult {
+    let provider = FakeProvider::start().await;
+    provider
+        .mount_sequence(
+            ResponseTemplate::new(200).set_body_json(completion(
+                PROVIDER_MODEL,
+                &five_dimension_content("PASS", "PASS", "N/A", "PASS", "PASS"),
+            )),
+            ResponseTemplate::new(200).set_body_json(completion(
+                PROVIDER_MODEL,
+                &five_dimension_content("PASS", "FAIL", "PASS", "PASS", "PASS"),
+            )),
+        )
+        .await;
+    let fixture = Fixture::new(&provider.base_url(), DescriptorOptions::five_dimension())?;
+    let service = CloudService::spawn(&fixture, Duration::from_millis(500)).await?;
+
+    assert_probe_success(
+        &service
+            .probe(&["review", "--packet", path_text(&fixture.packet_path)?])
+            .await?,
+        "\"result\":\"pass\"",
+    );
+    assert_probe_success(
+        &service
+            .probe(&["review", "--packet", path_text(&fixture.packet_path)?])
+            .await?,
+        "\"result\":\"rewrite\"",
+    );
+
+    let requests = provider.requests().await;
+    assert_eq!(requests.len(), 2);
+    let body: Value = serde_json::from_slice(&requests[0].body)?;
+    assert_eq!(body["thinking"]["type"], json!("disabled"));
+    assert!(body.get("reasoning_effort").is_none());
+    let system = body["messages"][0]["content"]
+        .as_str()
+        .ok_or("system message must be a string")?;
+    assert!(system.contains("exactly these five keys"));
+    assert!(!system.contains(r#"{"quality": 0.42}"#));
+
+    assert_probe_success(
+        &service.probe(&["shutdown"]).await?,
+        "\"result\":\"accepted\"",
+    );
+    let (status, _, _) = service.finish().await?;
+    assert!(
+        status.success(),
+        "five-dimension cloud service failed: {status}"
+    );
+    Ok(())
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn five_dimension_product_path_uses_existing_typed_failure_and_does_not_retry() -> TestResult
+{
+    let provider = FakeProvider::start().await;
+    let invalid = r#"{"useful_state_transfer":"PASS","honest_uncertainty":"PASS","conditional_continuity":"N/A","scope_and_signal":"PASS","internal_consistency":"PASS","gate":"PASS"}"#;
+    provider.mount_five_dimension(invalid).await;
+    let fixture = Fixture::new(&provider.base_url(), DescriptorOptions::five_dimension())?;
+    let service = CloudService::spawn(&fixture, Duration::from_millis(500)).await?;
+    assert_probe_failure(
+        &service
+            .probe(&["review", "--packet", path_text(&fixture.packet_path)?])
+            .await?,
+        "code=backend",
+    );
+    assert_eq!(provider.requests().await.len(), 1);
+    assert_probe_success(
+        &service.probe(&["shutdown"]).await?,
+        "\"result\":\"accepted\"",
+    );
+    let _ = service.finish().await?;
+    Ok(())
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn five_dimension_product_path_enumerates_section3_verdicts_through_the_service() -> TestResult
+{
+    let mut contents = Vec::with_capacity(48);
+    let mut expected = Vec::with_capacity(48);
+    for useful in ["PASS", "FAIL"] {
+        for honest in ["PASS", "FAIL"] {
+            for scope in ["PASS", "FAIL"] {
+                for consistency in ["PASS", "FAIL"] {
+                    for continuity in ["PASS", "FAIL", "N/A"] {
+                        contents.push(five_dimension_content(
+                            useful,
+                            honest,
+                            continuity,
+                            scope,
+                            consistency,
+                        ));
+                        let applicable_fail = useful == "FAIL"
+                            || honest == "FAIL"
+                            || scope == "FAIL"
+                            || consistency == "FAIL"
+                            || continuity == "FAIL";
+                        expected.push(if applicable_fail { "rewrite" } else { "pass" });
+                    }
+                }
+            }
+        }
+    }
+    assert_eq!(contents.len(), 48);
+    assert_eq!(expected.iter().filter(|value| **value == "pass").count(), 2);
+
+    let provider = FakeProvider::start().await;
+    let borrowed: Vec<&str> = contents.iter().map(String::as_str).collect();
+    provider.mount_five_dimension_sequence(&borrowed).await;
+    let fixture = Fixture::new(
+        &provider.base_url(),
+        DescriptorOptions {
+            max_attempts: 1,
+            ..DescriptorOptions::five_dimension()
+        },
+    )?;
+    let service = CloudService::spawn(&fixture, Duration::from_millis(500)).await?;
+    for (index, result) in expected.iter().enumerate() {
+        assert_probe_success(
+            &service
+                .probe(&["review", "--packet", path_text(&fixture.packet_path)?])
+                .await?,
+            &format!("\"result\":\"{result}\""),
+        );
+        assert_eq!(
+            provider.requests().await.len(),
+            index + 1,
+            "combination {index} must make exactly one provider call"
+        );
+    }
+    assert_probe_success(
+        &service.probe(&["shutdown"]).await?,
+        "\"result\":\"accepted\"",
+    );
+    let (status, _, _) = service.finish().await?;
+    assert!(
+        status.success(),
+        "five-dimension enumeration service failed: {status}"
+    );
+    Ok(())
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn eval_entry_point_preserves_scalar_model_and_cache_usage_without_reasoning() -> TestResult {
     let provider = FakeProvider::start().await;
     provider
@@ -814,9 +1031,10 @@ async fn diagnostic_message_renderer_is_offline_and_matches_the_paid_request() -
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn diagnostic_thinking_flag_is_runtime_and_does_not_change_the_product_path() -> TestResult {
-    let provider = FakeProvider::start().await;
-    provider
+async fn diagnostic_thinking_flag_is_runtime_and_unselected_five_dimension_keeps_scalar_product_path()
+-> TestResult {
+    let diagnostic_provider = FakeProvider::start().await;
+    diagnostic_provider
         .mount(
             ResponseTemplate::new(200).set_body_json(detailed_completion(
                 PROVIDER_MODEL,
@@ -825,10 +1043,13 @@ async fn diagnostic_thinking_flag_is_runtime_and_does_not_change_the_product_pat
             )),
         )
         .await;
-    let fixture = Fixture::new(&provider.base_url(), DescriptorOptions::default())?;
-    let input = std::fs::read(&fixture.packet_path)?;
+    let diagnostic_fixture = Fixture::new(
+        &diagnostic_provider.base_url(),
+        DescriptorOptions::default(),
+    )?;
+    let input = std::fs::read(&diagnostic_fixture.packet_path)?;
     let output = run_cloud_diagnostic_with_thinking(
-        &fixture,
+        &diagnostic_fixture,
         "scalar",
         &input,
         DiagnosticMode::Evaluate,
@@ -840,11 +1061,43 @@ async fn diagnostic_thinking_flag_is_runtime_and_does_not_change_the_product_pat
         "thinking-enabled diagnostic failed: {}",
         output.stderr
     );
-    let requests = provider.requests().await;
-    assert_eq!(requests.len(), 1);
-    let body: Value = serde_json::from_slice(&requests[0].body)?;
-    assert_eq!(body["thinking"]["type"], json!("enabled"));
-    assert_eq!(body["temperature"], json!(0.0));
+    let diagnostic_requests = diagnostic_provider.requests().await;
+    assert_eq!(diagnostic_requests.len(), 1);
+    let diagnostic_body: Value = serde_json::from_slice(&diagnostic_requests[0].body)?;
+    assert_eq!(diagnostic_body["thinking"]["type"], json!("enabled"));
+
+    let product_provider = FakeProvider::start().await;
+    product_provider.mount_quality(0.83).await;
+    let product_fixture = Fixture::new(&product_provider.base_url(), DescriptorOptions::default())?;
+    let service = CloudService::spawn(&product_fixture, Duration::from_millis(500)).await?;
+    assert_probe_success(
+        &service
+            .probe(&[
+                "review",
+                "--packet",
+                path_text(&product_fixture.packet_path)?,
+            ])
+            .await?,
+        "\"result\":\"pass\"",
+    );
+    let product_requests = product_provider.requests().await;
+    assert_eq!(product_requests.len(), 1);
+    let product_body: Value = serde_json::from_slice(&product_requests[0].body)?;
+    assert!(
+        product_body.get("thinking").is_none(),
+        "unselected five-dimension product path must still omit thinking"
+    );
+    assert!(product_body.get("reasoning_effort").is_none());
+    let system = product_body["messages"][0]["content"]
+        .as_str()
+        .ok_or("product system message must be a string")?;
+    assert!(system.contains(r#"{"quality": 0.42}"#));
+    assert!(!system.contains("exactly these five keys"));
+    assert_probe_success(
+        &service.probe(&["shutdown"]).await?,
+        "\"result\":\"accepted\"",
+    );
+    let _ = service.finish().await?;
     Ok(())
 }
 

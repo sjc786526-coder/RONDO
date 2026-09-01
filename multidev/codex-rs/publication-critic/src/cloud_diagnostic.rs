@@ -1,9 +1,12 @@
-//! Eval-only output contracts for the Plan 100/101 cloud diagnostic.
+//! Five-dimension output contracts shared by the Plan 100/101 diagnostic and the
+//! Plan 102 product five-dimension cloud path.
 //!
-//! All three arms receive the same serialized [`PublicationPacket`] and the same common rubric.
-//! The only model-visible difference is the final output contract selected here. None of these
-//! types are used by the product service or its wire protocol. Output-contract examples are
-//! illegal templates so a model cannot obtain a valid reply by copying them.
+//! All three diagnostic arms receive the same serialized [`PublicationPacket`] and the same
+//! common rubric. The only model-visible difference is the final output contract selected here.
+//! The product service consumes [`CloudFiveDimensionDecisions`] and [`local_verdict`] when the
+//! cloud descriptor selects the five-dimension scoring contract; scalar and direct-gate arms
+//! remain diagnostic-only. Output-contract examples are illegal templates so a model cannot
+//! obtain a valid reply by copying them.
 
 use serde::Deserialize;
 use serde::Serialize;
@@ -63,10 +66,10 @@ pub enum CloudDiagnosticTask {
     FiveDimension,
 }
 
-/// Eval-only thinking switch for the Plan 101 diagnostic path.
+/// Thinking switch for the Plan 101 diagnostic path and the product five-dimension path.
 ///
-/// Product scoring omits this field entirely. Diagnostic requests always send an explicit
-/// `thinking.type` so the provider default cannot silently enable reasoning.
+/// Diagnostic requests always send an explicit `thinking.type`. The product five-dimension
+/// path always sends `disabled`. The unselected scalar product path still omits this field.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CloudDiagnosticThinking {
@@ -194,6 +197,14 @@ impl CloudFiveDimensionDecisions {
             CloudDiagnosticVerdict::Pass
         } else {
             CloudDiagnosticVerdict::Rewrite
+        }
+    }
+
+    /// Product typed verdict. Same discrete rule as [`Self::local_verdict`]; no threshold.
+    pub fn product_verdict(&self) -> crate::Verdict {
+        match self.local_verdict() {
+            CloudDiagnosticVerdict::Pass => crate::Verdict::Pass,
+            CloudDiagnosticVerdict::Rewrite => crate::Verdict::Rewrite,
         }
     }
 }

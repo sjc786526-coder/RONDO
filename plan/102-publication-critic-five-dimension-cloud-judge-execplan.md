@@ -372,17 +372,26 @@ service.rs: verdict_for_scores(&output.scores) → typed verdict
   据此完整发布链路改为必做项，两笔预算分账写入 §3.1/§3.5/§4.1。
 - 2026-08-31：产出执行者启动提示词
   `plan/102-publication-critic-five-dimension-cloud-judge-executor-prompt.md`。
+- 2026-08-31：审查者裁定走拓宽接缝；执行者采纳为决策 001，并落地 `ScoringContract` /
+  `ScorerProjection`、云端五维产品路径（thinking 关闭）、48 组合服务层穷举与
+  `cloud_process` 产品用例。未调用真实 API。
+- 2026-08-31：阶段 A 门禁 `just test -p codex-publication-critic` 77/77 通过（离线）。
+- 2026-08-31：建立 Plan 102 独立预算身份与 campaign，不改写 Plan 097 合同数值。
+- 2026-08-31：阶段 B1 判官段真实打通（`plan102-b1-r1`）：3 次 `deepseek-v4-flash`，
+  观察到 typed `rewrite` + `pass`，thinking 均为 `disabled`，completion tokens 42–44。
+- 2026-08-31：阶段 B1 写作者段 `plan102-b1-producer-r1`：首次 `team_publish` 得 `rewrite_required`，
+  并发起第二次尝试（第二次 dispatch 失败）。B1 §4.4.6 按“REWRITE 后第二次尝试”记为打通。
+- 2026-08-31：阶段 B2 五轮 e2e（`plan102-b2-r1`…`r5`）均未形成 canonical commit，全部披露为废弃轮。
+  Producer v1 ledger 的 6 个 run slot 已用尽。
 
 ### 当前工作
 
-- 等待执行者按 §5.5 进入阶段 A。
+- 阶段 A 已完成。阶段 B1 判官段与 Producer 最小往返已完成。阶段 B2 正式 canonical 尚未取得，已停止继续付费，交给审查者。
 
 ### 本任务剩余步骤
 
-- 阶段 A 离线实现与定向测试。
-- 阶段 B1 真实打通与配置冻结。
-- 阶段 B2 干净端到端正式轮与回执/账本。
-- 收口：状态更新、WBS 最小登记、agent_log、提交任务分支。
+- 审查者验收。B2 若要求继续取得 canonical commit，需另开 Producer ledger 身份（当前 v1 `max_runs=6` 已用尽）。
+- 合并与推送等待用户批准。
 
 ### 阻塞项
 
@@ -391,8 +400,12 @@ service.rs: verdict_for_scores(&output.scores) → typed verdict
 ### 当前验收状态
 
 - 规划：`COMPLETE / FROZEN`。
-- 阶段 A / B1 / B2：`NOT_STARTED`。
-- 判官段累计结算 `0 RMB` / 上限 `10 RMB`；写作者段累计结算 `0 USD` / 上限 `50 USD`。
+- 阶段 A：`COMPLETE`（离线门禁）。
+- 阶段 B1：`COMPLETE`（真实 API；判官双 verdict + thinking off + Producer REWRITE 后二次尝试）。
+- 阶段 B2：`INCOMPLETE`（无正式 canonical 轮；r1–r5 均废弃）。
+- 判官段累计结算 `0.0075277 RMB` / 上限 `10 RMB`，剩余 `9.9924723 RMB`。
+- 写作者段累计结算 `0.752782 USD` / 上限 `50 USD`，剩余 `49.247218 USD`。
+- ignored 证据：`/home/sjc/desktop/RONDO/eval-data/publication-critic/plan102/`，约 `220K`。
 
 ### 交接边界
 
@@ -409,7 +422,7 @@ service.rs: verdict_for_scores(&output.scores) → typed verdict
 
 | 编号 | 决策 | 原因 | 影响范围 | 状态 |
 |---|---|---|---|---|
-| 001 | 标量形状的产品接缝与离散合取 verdict 之间如何弥合（薄适配 / 拓宽接缝 / 其它） | 这是本任务唯一的核心架构分叉，直接决定改动面与后续可维护性 | trait、identity、service、测试 | **待执行者决定并记录** |
+| 001 | 走拓宽接缝，不走薄适配。实现形状：保留既有 `ScoringIdentity` 标量结构体与其 JSON 字节；新增 `FiveDimensionScoringIdentity`（只有 `definition` / `input_template` / `decision_projection` / `pass_rule=discrete_non_compensating_conjunction`，没有 domain、threshold、scalar_projection）和 untagged `ScoringContract`。`ServiceIdentity.scoring`、`RawScorerOutput`、`ScorerStatus` 改为合同枚举；`RawScorerOutput` 用 `ScorerProjection::{Scalar, FiveDimension}` 表达输出。服务按合同变体分派：标量仍走 `verdict_for_scores`，五维走 `decisions.product_verdict()`（复用 `local_verdict()`），路径上不存在 threshold。云端产品路径由 descriptor 里的 scoring 变体显式选择；未选五维时仍发标量模板且省略 thinking。 | 合同要求“没有任何自由 threshold 能改变 verdict”。薄适配下这个不变量只靠纪律维持，阈值仍在代码里，后人一调就破约；拓宽之后它是结构性的。另外 ScoringIdentity 的 scalar_projection / domain / threshold 会进 classify_backend 做身份比对，薄适配等于让身份系统去认证一份它并不实现的标量声明——身份系统正是最不该被塞进假声明的地方。 | trait、identity、service、cloud scorer、测试 | **已采纳** |
 | 002 | Plan 102 是工程接入，不是质量测评或资格判定 | 用户定位为“工程上通了即可”；质量与资格属于后续独立任务与独立授权 | 验收标准、结果、交付 | 已采纳 |
 | 003 | 复用 Plan 100/101 已验证的五维合同、解析与 thinking 开关，不重写 | 这些设施已在真实 API 下跑过 `810` 次调用，重写只会引入新风险 | 实现路线 | 已采纳 |
 | 004 | 旧标量路径保留为历史身份与可复算路径，不删除、不改写 | Plan 095/096/097 的历史结果必须仍能按原身份复算 | 兼容性、历史证据 | 已采纳 |
@@ -418,3 +431,4 @@ service.rs: verdict_for_scores(&output.scores) → typed verdict
 | 007 | missing-usage 兜底由 Plan 101 的 `1 RMB/次` 下调为 `0.1 RMB/次` | 原值明显高于实测约 `0.008 RMB/次` 的单次成本，过度保守会挤占有限预算 | 费用账本 | 已采纳 |
 | 008 | Plan 102 建立自己的预算身份，不复用 Plan 097 的合同数值 | `_validate_budgets` 把 `6/24/7.5/30` 硬编码为身份，`10 RMB / 50 USD` 塞不进去；改写它会破坏 Plan 097 历史证据的可复算性 | 预算合同、campaign 入口 | 已采纳 |
 | 009 | 判官段上限确定为 `10 RMB` | 用户 `2026-08-31` 明确确认按 `10 RMB`；判官段实测约 `0.003–0.008 RMB/次`，该额度已远超所需 | 预算 | 已采纳 |
+| 010 | Plan 102 自建 `plan102_contract` / `plan102_campaign` 与独立 ledger schema `rondo-publication-critic-plan102-cloud-budget-v1`；`CloudBudgetProxy` 加法参数化，Plan 097 默认不变。五维 scoring identity 不含 threshold。Producer 用既有 `PersistentBudgetLedger`，batch `plan102-producer-terra-v1`。 | 097 的 `6/24/7.5/30` 是身份，不能塞进 `10 RMB / 50 USD`；改写会毁掉 097 可复算性。缺 usage 按 `0.1 RMB` 入账。 | 预算合同、campaign | 已采纳 |

@@ -1,0 +1,125 @@
+{
+  "schema": "rondo-publication-critic-plan102-engineering-contract-v1",
+  "purpose": "five_dimension_cloud_seam_engineering",
+  "product_default": "off",
+  "quality_evaluation": "not_in_scope",
+  "qualification": "not_in_scope",
+  "backend": {
+    "descriptor": "eval/locks/publication-critic-plan102-cloud-descriptor-v1.json",
+    "client_call_timeout_ms": 150000,
+    "client_startup_timeout_ms": 30000
+  },
+  "budgets": {
+    "judge_rmb": "10",
+    "producer_usd": "50",
+    "judge_missing_usage_rmb": "0.1",
+    "judge_reservation_rmb": "1",
+    "thinking_off_completion_token_max": 512
+  },
+  "producer": {
+    "model_alias": "terra",
+    "reasoning_effort": "low",
+    "run_timeout_seconds": 600,
+    "max_runs": 6,
+    "run_cap_usd": "15",
+    "usage_envelope": {
+      "max_input_tokens": 32000,
+      "max_output_tokens": 2000
+    }
+  },
+  "direct_cases": [
+    {
+      "case_id": "synthetic-obviously-incomplete-v1",
+      "packet": {
+        "qualification": {
+          "packet_schema": {
+            "name": "rondo-publication-packet",
+            "revision": "v1"
+          },
+          "rubric": {
+            "name": "rondo-publication-qualification",
+            "revision": "v1"
+          }
+        },
+        "actor_role": "member",
+        "target_kind": "new_event",
+        "local_scope": {
+          "title": "Bound synthetic shutdown result"
+        },
+        "candidate": {
+          "summary": "Work was attempted.",
+          "handoff": null
+        },
+        "continuity": {
+          "state": "not_applicable"
+        },
+        "evidence_v1": {
+          "semantic_entailment": "not_evaluated",
+          "candidate_window": "not_frozen_before_commit"
+        }
+      }
+    },
+    {
+      "case_id": "synthetic-complete-bounded-v1",
+      "packet": {
+        "qualification": {
+          "packet_schema": {
+            "name": "rondo-publication-packet",
+            "revision": "v1"
+          },
+          "rubric": {
+            "name": "rondo-publication-qualification",
+            "revision": "v1"
+          }
+        },
+        "actor_role": "member",
+        "target_kind": "new_event",
+        "local_scope": {
+          "title": "Bound synthetic shutdown result"
+        },
+        "candidate": {
+          "summary": "Completed the bounded synthetic shutdown change: new work is rejected after shutdown begins, the in-flight worker drains, and the focused cancellation and no-leak checks pass.",
+          "handoff": null
+        },
+        "continuity": {
+          "state": "not_applicable"
+        },
+        "evidence_v1": {
+          "semantic_entailment": "not_evaluated",
+          "candidate_window": "not_frozen_before_commit"
+        }
+      }
+    },
+    {
+      "case_id": "synthetic-complete-bounded-v2",
+      "packet": {
+        "qualification": {
+          "packet_schema": {
+            "name": "rondo-publication-packet",
+            "revision": "v1"
+          },
+          "rubric": {
+            "name": "rondo-publication-qualification",
+            "revision": "v1"
+          }
+        },
+        "actor_role": "member",
+        "target_kind": "new_event",
+        "local_scope": {
+          "title": "Bound synthetic shutdown result"
+        },
+        "candidate": {
+          "summary": "The bounded synthetic shutdown path is complete. It rejects late work, drains the active worker, and passes focused checks for cancellation, final wakeup, and task-owned process cleanup.",
+          "handoff": null
+        },
+        "continuity": {
+          "state": "not_applicable"
+        },
+        "evidence_v1": {
+          "semantic_entailment": "not_evaluated",
+          "candidate_window": "not_frozen_before_commit"
+        }
+      }
+    }
+  ]
+}

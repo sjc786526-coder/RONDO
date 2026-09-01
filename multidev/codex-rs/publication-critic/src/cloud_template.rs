@@ -17,6 +17,17 @@ pub(crate) const CLOUD_TEMPLATE_REVISION: &str = "v1";
 pub(crate) const CLOUD_PROJECTION_NAME: &str = "rondo-cloud-json-quality-scalar";
 pub(crate) const CLOUD_PROJECTION_REVISION: &str = "v1";
 
+/// Identity of the product five-dimension prompt. It reuses the Plan 100/101
+/// five-dimension system message and is a distinct template from the scalar one.
+pub(crate) const CLOUD_FIVE_DIMENSION_TEMPLATE_NAME: &str =
+    "rondo-publication-cloud-five-dimension-template";
+pub(crate) const CLOUD_FIVE_DIMENSION_TEMPLATE_REVISION: &str = "v1";
+
+/// Identity of the projection from one provider reply to five hard decisions.
+pub(crate) const CLOUD_FIVE_DIMENSION_PROJECTION_NAME: &str =
+    "rondo-cloud-json-five-dimension-decisions";
+pub(crate) const CLOUD_FIVE_DIMENSION_PROJECTION_REVISION: &str = "v1";
+
 /// The declared domain of the projection. A descriptor cannot widen it.
 pub(crate) const CLOUD_SCORE_DOMAIN_MIN: f64 = 0.0;
 pub(crate) const CLOUD_SCORE_DOMAIN_MAX: f64 = 1.0;

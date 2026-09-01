@@ -28,7 +28,8 @@ struct Args {
     descriptor: PathBuf,
     #[arg(long)]
     task: CloudDiagnosticTask,
-    /// Eval-only thinking switch. Product scoring never uses this flag.
+    /// Diagnostic thinking switch. The product five-dimension path always sends disabled;
+    /// the unselected scalar product path still omits this field.
     #[arg(long, default_value = "disabled")]
     thinking: CloudDiagnosticThinking,
     /// Render the exact provider-visible messages without loading credentials or sending HTTP.

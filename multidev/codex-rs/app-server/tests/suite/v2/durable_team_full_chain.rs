@@ -178,7 +178,7 @@ impl PublicationScorer for PassingCritic {
         Ok(RawScorerOutput {
             model: self.descriptor.identity.model.clone(),
             scoring: self.descriptor.identity.scoring.clone(),
-            scores: vec![0.75],
+            projection: codex_publication_critic::ScorerProjection::Scalar { scores: vec![0.75] },
         })
     }
 }
