@@ -347,6 +347,8 @@ validation 的 27 candidates / 12 pairs。它是**测评（eval）而非资格�
 - **必须复用主工作区既有 target `.codex/cargo-target/rondo-multi`，不得新建 target 目录。**
 
 **仍未授权**：训练、GPU/RunPod、真实本地模型加载与推理、上传、充值、产品默认启用与发布、qualification 与 v9 test 正文。
+另：发布链路 Producer 段使用的付费模型 `gpt-5.6-terra`（Plan 097 合同别名 `terra`）不在本次授权内，
+因此 Plan 102 的真实 API 覆盖默认只到判官段；是否追加该授权由用户决定。
 
 **当前状态**：已授权，ExecPlan 已建立，未启动。合同见
 `plan/102-publication-critic-five-dimension-cloud-judge-execplan.md`。

@@ -55,8 +55,11 @@ Plan 100/101 已经在**诊断路径**上实现并验证过五维输出合同、
       `REWRITE = 任一 applicable head 为 FAIL`；`N/A` 只排除该 head，**不提供正分**。
 - [ ] §4.3 的穷举等价测试通过：五维 `2×2×3×2×2 = 48` 种合法组合全部覆盖，派生 verdict 与 §3 规则逐条相等。
 - [ ] 五维模式下，**没有任何自由 threshold 能改变 verdict**；typed verdict 只由离散合取规则产生（见 §3.3）。
-- [ ] 真实 API 端到端跑通**一次完整发布链路**，得到 typed `PASS` 与 `REWRITE` 两种外部结果，
-      并留下可复算回执与费用账本。**不接受只有 fake/loopback 绿**。
+- [ ] 用真实 `deepseek-v4-flash` 跑通**判官接缝的端到端路径**：`PublicationScorer → service → typed client`
+      在同一次服务运行中得到 typed `PASS` 与 `REWRITE` 两种外部结果，并留下可复算回执与费用账本。
+      **不接受只有 fake/离线绿**。
+- [ ] （**待用户决定，见 §4.2**）若用户另行授权 Producer 侧付费模型，则再补跑一次含 `team_publish`
+      与 Producer 重写的完整发布链路；未获该授权时，本条不做，并在结果中如实写明未覆盖范围。
 - [ ] 默认关闭姿态、`team_publish` 语义、Producer 重写、canonical commit、infra fallback、取消、
       Root/Team State 不变量全部未变，并有测试守住。
 - [ ] 旧标量路径仍可按**原身份**复算：既有 scalar identity、模板字节、解析与阈值语义不变，
@@ -114,10 +117,13 @@ Plan 100/101 已经在**诊断路径**上实现并验证过五维输出合同、
    必要的重型 Cargo 构建与 Docker，仍走共享构建锁与看门狗；必须复用 `.codex/cargo-target/rondo-multi`。
 2. **仍未授权**：训练、GPU/RunPod、真实本地模型加载与推理、上传、充值、产品默认启用与发布、
    qualification 与 v9 test 正文。任一项都不得因“为了把链路跑通”而突破。
-3. **只授权了一个付费模型。** 本任务的付费外发对象**只有** `deepseek-v4-flash`。
-   端到端链路中 Producer 侧若需要模型，只能使用**不产生费用**的既有 loopback/scripted 路径
-   （Plan 097 的 `LoopbackResponsesProxy` 即为此设计）。
-   若执行者判定必须引入第二个付费模型才能跑通发布链路，**停止并向用户申请单独授权**，不得先花钱再报告。
+3. **只授权了一个付费模型。** 本任务的付费外发对象**只有** `deepseek-v4-flash`，上限 `10 RMB`。
+   Plan 097 发布链路中的 Producer 使用**另一个付费模型** `gpt-5.6-terra`（合同别名 `terra`，按美元计价，
+   Plan 097 为其单列 `producer_rmb = 24 RMB`）。该模型**不在本任务授权内**。
+   注意 `LoopbackResponsesProxy` **不是离线假件**：它是短命本地代理，持真实 key 转发到真实付费上游并计量扣账，
+   走它一样花钱。因此在未获追加授权前，**不得以任何方式发起 Producer 侧付费调用**，
+   包括为了"把链路跑通"而临时改配置或复用 Plan 097 的既有 ledger。
+   需要该覆盖时按 §4.2 停下来向用户申请，不得先花钱再报告。
 4. **不得新建 target 目录。** `CARGO_TARGET_DIR` 只能是 `.codex/cargo-target/rondo-multi`，
    且必须位于受监控的 RONDO 项目根内。不直接调用 Cargo 跑正式重型任务。
 
@@ -186,14 +192,38 @@ Plan 100/101 已经在**诊断路径**上实现并验证过五维输出合同、
   但仍须在每次可能计费动作前完成 §3.15 的预检。
 - 费用账本落在 task-owned ignored namespace，并在阶段与最终汇报中如实列出已结算金额与剩余额度。
 
-### 4.2 端到端链路的范围
+### 4.2 端到端链路的范围与那笔没被授权的钱
 
-完成标准中的“完整发布链路”指 `PublicationScorer → service → typed client → team_publish`，
-覆盖 typed `PASS` 与 `REWRITE` 两种外部结果，以及 Producer 重写与 canonical commit 行为。
+完整发布链路 `PublicationScorer → service → typed client → team_publish` 由两段构成，**分别花不同的钱**：
 
-本任务的真实 API 覆盖**只包括云端 backend 这一路**：真实本地模型加载与推理未授权，
-因此 local backend 与 OFF 分支只用既有离线/loopback 设施守住不回归，不做真实模型运行。
-这一范围差异必须在结果与汇报中写清楚，不得表述为“三态都做了真实验证”。
+| 段 | 覆盖内容 | 付费模型 | Plan 097 实际花费 |
+|---|---|---|---|
+| 判官段（direct case） | `service.review(packet)` → typed `pass`/`rewrite` | 云端 scorer（本任务为 `deepseek-v4-flash`） | `0.0741636 RMB` / 24 次（约 `0.003 RMB` 一次） |
+| 写作者段（Producer） | 真实 agent 调 `team_publish`、被判 REWRITE 后重写、canonical commit | `gpt-5.6-terra` | `21.3455550 RMB` / 172 次（约 `0.124 RMB` 一次） |
+
+Plan 097 总花费 `21.4197186 RMB` 中，**99.65% 花在 Producer 段**，判官段几乎不要钱。
+本任务的 `10 RMB` 只授权给 `deepseek-v4-flash`，**没有覆盖 Producer 段**。
+
+因此本任务的默认范围是：
+
+- **做**：判官段的真实端到端。同一次服务运行内取得 typed `PASS` 与 `REWRITE`，
+  证明五维接缝在真实 provider 下真通。这一段完全落在已授权预算内，且成本可忽略。
+- **不做**：Producer 段的真实运行。`team_publish` 语义、Producer 重写、canonical commit、fallback、取消、
+  Team State 不变量改由既有离线/进程级测试守住不回归，**并如实标注为非真实模型证据**。
+- **不得**：为了凑出"完整链路"而动用 Plan 097 的 Producer 路径或其 ledger。
+
+工程上还有一个现成障碍：`engineering/campaign.py` 的 `_execute_backend` 无条件调用 `_run_producer`，
+没有"只跑 direct case"的模式（`skip_direct_cases` 给的是相反的 producer-only，且只允许 commissioning）。
+执行者可在 §2 允许的范围内为该 harness 增加一个不含 Producer 的模式，或另择更合适的落点。
+
+**待用户决定**：若用户希望本任务也覆盖 Producer 段，需要追加一笔 `gpt-5.6-terra` 授权。
+参考量级：单次请求约 `0.124 RMB`；一次干净的云端 backend Producer 运行约十几到二十几次请求，
+加上打通阶段的失败重试，`6–8 RMB` 是一个够用且不宽松的口径（Plan 097 的 172 次里包含两个 backend、
+多轮 commissioning 与七代废弃 ledger，不能直接类比）。在拿到该授权前，本节"不做"一栏保持不变。
+
+另外，真实本地模型加载与推理同样未授权，因此 local backend 与 OFF 分支也只做离线守护。
+最终汇报必须把"真实 API 覆盖了哪一段、哪些只有离线证据"写清楚，
+不得表述为"完整发布链路已真实验证"或"三态都做了真实验证"。
 
 ### 4.3 穷举 gate 等价测试
 
@@ -259,8 +289,10 @@ tracked 代码、测试、合同、结果与文档变动仍然全部落在 102 w
 - **provider 接缝**：`cloud_scorer.rs` 的 `call` / `build_request` / `attempt` / 重试策略 / usage 捕获 /
   served-model 校验对两种投影是共用的；`ResponseProjection` 已经是“同一请求路径、不同输出投影”的分叉点。
 - **端到端 harness**：`eval/rondo_eval/publication_critic/engineering/`（Plan 097）已经具备
-  service runtime、producer runtime、可续跑 write-once 回执、`PersistentBudgetLedger` 与 loopback Responses proxy，
-  是完成标准第 3 条最自然的落点。
+  service runtime、producer runtime、可续跑 write-once 回执、`PersistentBudgetLedger` 与
+  `CloudBudgetProxy` / `LoopbackResponsesProxy`，是判官段端到端最自然的落点。
+  注意其中的 direct case（`service.review(packet)`）与 Producer 运行是**两段不同花费**的东西，
+  两个 proxy 也都是**真实付费转发**而非离线假件；按 §4.2 只复用判官段。
 - **费用口径**：`structured_diagnostic/cost.py` 已有 `UNKNOWN_ACTUAL_ATTEMPT_RMB = Decimal("0.1")`，
   与本任务要求的兜底值一致。
 - **集成测试**：`multidev/codex-rs/publication-critic/tests/cloud_process.rs` 已覆盖 ready、双 verdict、
@@ -334,9 +366,9 @@ service.rs: verdict_for_scores(&output.scores) → typed verdict
 
 ### 阻塞项
 
-- 无。未授权项与 `10 RMB` 上限见 §3.1 与 §3.5。
-- 待用户确认项：若执行者判定端到端链路必须引入**第二个付费模型**（Producer 侧），
-  按 §3.3 停止并单独申请授权。
+- 不阻塞阶段 A/B1/B2 的默认范围。未授权项与 `10 RMB` 上限见 §3.1 与 §3.5。
+- **待用户决定（决策 008）**：是否追加 `gpt-5.6-terra` 授权以覆盖 Producer 段。
+  未获授权时按 §4.2 的默认范围执行并如实标注未覆盖部分，不因此停工。
 
 ### 当前验收状态
 
@@ -362,5 +394,6 @@ service.rs: verdict_for_scores(&output.scores) → typed verdict
 | 003 | 复用 Plan 100/101 已验证的五维合同、解析与 thinking 开关，不重写 | 这些设施已在真实 API 下跑过 `810` 次调用，重写只会引入新风险 | 实现路线 | 已采纳 |
 | 004 | 旧标量路径保留为历史身份与可复算路径，不删除、不改写 | Plan 095/096/097 的历史结果必须仍能按原身份复算 | 兼容性、历史证据 | 已采纳 |
 | 005 | 真实 API 覆盖只包括云端 backend；local/OFF 分支用离线设施守不回归 | 真实本地模型加载与推理在本任务中未授权 | 端到端范围、汇报口径 | 已采纳 |
-| 006 | 付费外发只允许 `deepseek-v4-flash`；Producer 侧走不产生费用的 loopback 路径 | 用户只授权了这一个付费模型与 `10 RMB`；Plan 097 的 Producer 另有 USD 计费预算，不在本次授权内 | 预算、端到端配置 | 已采纳 |
+| 006 | 付费外发只允许 `deepseek-v4-flash`；**Producer 段不做真实运行**，改由离线证据守护并如实标注 | Producer 用的是另一个付费模型 `gpt-5.6-terra`，不在本次授权内；Plan 097 的钱 99.65% 花在这一段 | 预算、端到端范围、验收标准 | 已采纳 |
 | 007 | missing-usage 兜底由 Plan 101 的 `1 RMB/次` 下调为 `0.1 RMB/次` | 原值明显高于实测约 `0.008 RMB/次` 的单次成本，过度保守会挤占有限预算 | 费用账本 | 已采纳 |
+| 008 | 是否追加 `gpt-5.6-terra` 授权以覆盖 Producer 段（参考 `6–8 RMB`） | 用户的完成标准原文要求“完整发布链路”，但该段超出现有授权，只能由用户决定是否加钱 | 端到端范围、预算 | **待用户决定** |
