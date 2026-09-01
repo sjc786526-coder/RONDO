@@ -11,7 +11,7 @@ Plan 097 的 `M3_D_DUAL_BACKEND_ENGINEERING_PASS / FINAL_REVIEW_ACCEPTED / INTEG
 `CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH`、Plan 095 最终验收、Plan 094 有效负向研究终态和 Plan 093 Linux 全 workspace 正确性基线
 均保持有效；Plan 100 独立诊断以 `TASK_EXECUTABILITY_INSUFFICIENT / FINAL_REVIEW_ACCEPTED / INTEGRATED / PUSHED` 收口。
 Plan 101 对比测评已完成，据此把五维 hard decision 固定为云端判官接缝的后续方向、单标量云端接缝标注废弃，
-下一工作包为 Plan 102 五维云端判官实验性工程接入（执行中：阶段 A/B1 已完成，B2 正式 canonical 未取得）；新路线不自动解锁产品质量、默认启用或生产）
+下一工作包为 Plan 102 五维云端判官实验性工程接入（执行中：阶段 A/B1 已完成，B2 跑满 17 轮仍未取得 canonical，卡点在 Producer 侧模型行为而非接缝，待用户就是否继续投轮次或调 `reasoning_effort` 拍板）；新路线不自动解锁产品质量、默认启用或生产）
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段指针、跨方向关系、
 稳定工程边界和授权门；已完成成果与验收见 `doc/WBS-COMPLETED.md`，单次任务合同见 `plan/`，执行细节见

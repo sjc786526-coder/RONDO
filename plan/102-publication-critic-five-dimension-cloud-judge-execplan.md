@@ -397,26 +397,53 @@ service.rs: verdict_for_scores(&output.scores) → typed verdict
 
 ### 当前工作
 
-- 阶段 A 与 B1 判官段已接受。r3 已定性并补诊断。按批复停在此处，不进入 B2 正式付费轮，等待审查者看完第 1 条结论。
+- 阶段 A 完成并由接手者独立复跑门禁；B1 判官段完成。B2 已跑满 17 个 Producer run，
+  仍未取得 canonical commit，卡点已定性为 Producer 侧模型行为而非接缝缺陷（见下）。
 
 ### 本任务剩余步骤
 
-- 审查者确认 r3 定性后，再开 `plan102-producer-terra-v2` ledger（新身份，不是新授权）跑 B2。
+- B2 canonical 轮待定：需用户就下列取舍拍板（见「B2 卡点」）。
 - 合并与推送等待用户批准。
+
+### B2 卡点（17 轮实测结论）
+
+- **每一轮的第一次 `team_publish` 都被正常评审并返回 `rewrite_required`，带合法
+  `next_review_cycle_sha1`；接缝、判官、typed verdict、thinking off 全部逐轮成立。**
+- 失败恒定发生在第二次 `team_publish`，三种形态：
+  1. 不再发起第二次 publish（`publish_attempt_count=1`，多数轮）；
+  2. 发起但**不带** `review_cycle_id`（`continuation_matches_previous=None`，如 r6）；
+  3. 发起但带了**对不上**的 id（`continuation_matches_previous=False`，如 r13）。
+  后两种被 core 以 typed `cycle_mismatch` 正确拒绝，错误也确实回给了模型
+  （`error_returned_to_model=true`），模型随后自行结束（`followup tools: []`）。
+- 已排除：接缝返回不可用 cycle id（publication-critic crate 内 `review_cycle_id` 出现 0 次，
+  该 UUID 由未改动的 `publication_review` 生成）；模型看不到评审结果
+  （`redacts_tool_bodies` 只影响 hook 载荷与开发者日志，不影响模型可见输出）；
+  cell 间状态不共享（code-mode 为 persistent remote session）。
+- Plan 097 在**相同** Producer 配置（`terra` / `low` / 同超时同包络）下最终成功，且其留有
+  attempt 投影的轮次中 19 次 dispatch 全部 `completed`，未出现过本任务这种 dispatch 失败。
+  差异未能完全解释，但 Plan 097 自身也用了 18 轮 commissioning 才走通。
+- 尚未动用的杠杆：合同锁把 `reasoning_effort` 钉死为 `low`，调高需改 Plan 102 合同身份与预算外推，
+  属于需用户批准的范围，接手者未擅自更改。
 
 ### 阻塞项
 
-- 无。两笔预算与未授权项见 §3.1 与 §3.5，均已由用户确认。
+- 无技术阻塞。B2 是否继续投轮次，或改 `reasoning_effort`，需用户决定。
 
 ### 当前验收状态
 
 - 规划：`COMPLETE / FROZEN`。
-- 阶段 A：`COMPLETE`（离线门禁）。
-- 阶段 B1：`COMPLETE`（真实 API；判官双 verdict + thinking off + Producer REWRITE 后二次尝试）。写作者回执**不干净**：`error_code: trace_wire_binding_invalid`，`status: rewrite_observed_canonical_not_required`。§4.4.6 仍算通过（`rewrite_then_retry: true`、两次 publish），但“通过”≠“回执干净”。
-- 阶段 B2：`INCOMPLETE`（无正式 canonical 轮；r1–r5 均废弃）。r3 已离线定性；失败侧诊断已补；未再付费。
-- 判官段累计结算 `0.0075277 RMB` / 上限 `10 RMB`，剩余 `9.9924723 RMB`。
-- 写作者段累计结算 `0.752782 USD` / 上限 `50 USD`，剩余 `49.247218 USD`。
-- ignored 证据：`/home/sjc/desktop/RONDO/eval-data/publication-critic/plan102/`，约 `220K`。
+- 阶段 A：`COMPLETE`。接手者复跑：`test-with-codex-v8-conservative -p codex-publication-critic` 79/79；
+  产品构建图 `-p codex-core --lib -E 'test(publish)'` 6/6；eval 定向 24/24。
+- 阶段 B1：`COMPLETE`（真实 API；判官双 verdict + thinking off + Producer REWRITE 后二次尝试）。
+  写作者回执**不干净**：`error_code: trace_wire_binding_invalid`、`status: rewrite_observed_canonical_not_required`；
+  该码实为 Plan 097 严格证据校验要求的 `team_inspect` dump/log 未发生所致（`inspect_actions: []`），
+  是 Producer 未完成导致 Root 未被正常唤醒的连锁结果，不是 wire 绑定缺陷。§4.4.6 仍算通过。
+- 阶段 B2：`INCOMPLETE`（无 canonical 轮）。真实跑过并全部披露为废弃：`plan102-b2-r1`…`r16`
+  （加 B1 共 17 个 Producer run）。
+- 判官段累计结算 `0.0191452 RMB` / 上限 `10 RMB`，剩余 `9.9808548 RMB`，65 次调用。
+- 写作者段累计结算 `2.585289 USD` / 上限 `50 USD`，剩余 `47.414711 USD`，17 个 run。
+  三代 ledger 的 cap 依次 `50` → `49.247218` → `48.265400`，逐代只继承剩余额度。
+- ignored 证据：`/home/sjc/desktop/RONDO/eval-data/publication-critic/plan102/`，约 `596K`。
 
 ### 交接边界
 
