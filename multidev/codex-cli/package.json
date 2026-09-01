@@ -1,7 +1,8 @@
 {
-  "name": "@openai/codex",
+  "name": "rondo-multi-cli",
+  "private": true,
   "version": "0.0.0-dev",
-  "description": "Codex CLI is a coding agent from OpenAI that runs locally on your computer.",
+  "description": "RONDO Multi — a research fork of OpenAI Codex CLI. Not published to npm; see the GitHub Releases page for prebuilt packages.",
   "license": "Apache-2.0",
   "bin": {
     "codex": "bin/codex.js"
@@ -15,8 +16,8 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/openai/codex.git",
-    "directory": "codex-cli"
+    "url": "git+https://github.com/sjc786526-coder/RONDO.git",
+    "directory": "multidev/codex-cli"
   },
   "packageManager": "pnpm@10.33.0+sha512.10568bb4a6afb58c9eb3630da90cc9516417abebd3fabbe6739f0ae795728da1491e9db5a544c76ad8eb7570f5c4bb3d6c637b2cb41bfdcdb47fa823c8649319"
 }

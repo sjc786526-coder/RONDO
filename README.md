@@ -293,6 +293,7 @@ cargo build --release --manifest-path multidev/codex-rs/Cargo.toml \
 
 ```text
 RONDO/
+├── .github/      # RONDO 自己的 CI / Release 工作流（唯一会被 GitHub 执行的一份）
 ├── mydev/        # 产品源码：RONDO Local（方向 1、2）
 ├── multidev/     # 产品源码：RONDO Multi（方向 3）
 ├── eval/         # 两条产品线共用的测评设施
@@ -302,6 +303,12 @@ RONDO/
 ├── plan/         # 每次任务的冻结 ExecPlan
 └── agent_log/    # 执行日志
 ```
+
+> **关于 `mydev/.github/` 与 `multidev/.github/`**：这两份是从上游 Codex 原样继承下来的**惰性文件**。
+> GitHub Actions 只执行仓库根的 `.github/workflows/`，子目录里的同名文件**不会被触发**。
+> 它们被保留而不是删除，一是因为产品自身的构建脚本仍引用其中的内容
+> （如 `justfile` 的 `test-github-scripts` 依赖 `.github/scripts/`），
+> 二是本项目刻意保持产品树与上游可直接 `diff` 比较，删掉只会增加无意义的差异噪音。
 
 未纳入版本控制的目录：`codex-source-code/`（上游只读快照，用于比较）、`eval-data/`（本地重资产与私有运行数据）、
 `test-data/`（历史测试数据）、模型权重与训练输出。

@@ -58,6 +58,16 @@ PACKAGE_VARIANTS: dict[str, PackageVariant] = {
         cargo_bin="codex-app-server",
         executable_stem="codex-app-server",
     ),
+    # RONDO release variant. The Cargo bin name stays "codex" so that the in-tree
+    # [[bin]] name and the frozen eval identity are untouched; only the packaged
+    # entrypoint filename differs. Build the entrypoint separately and pass it via
+    # --entrypoint-bin: source_binaries_for_target() builds by cargo_bin but looks
+    # the artifact up by entrypoint_name(), so the default path cannot find it.
+    "rondo": PackageVariant(
+        name="rondo",
+        cargo_bin="codex",
+        executable_stem="rondo",
+    ),
 }
 
 

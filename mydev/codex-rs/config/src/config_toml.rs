@@ -467,9 +467,10 @@ pub struct ConfigToml {
     #[serde(default)]
     pub project_root_markers: Option<Vec<String>>,
 
-    /// When `true`, checks for Codex updates on startup and surfaces update prompts.
-    /// Set to `false` only if your Codex updates are centrally managed.
-    /// Defaults to `true`.
+    /// When `true`, checks for updates on startup and surfaces update prompts.
+    /// Defaults to `false` in RONDO: the upstream check queries the `openai/codex`
+    /// releases API and can prompt for `@openai/codex`, which a fork must not do.
+    /// Set to `true` to opt back into upstream update prompts.
     pub check_for_update_on_startup: Option<bool>,
 
     /// When true, disables burst-paste detection for typed input entirely.

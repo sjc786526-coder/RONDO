@@ -4004,7 +4004,11 @@ impl Config {
 
         let review_model = override_review_model.or(cfg.review_model);
 
-        let check_for_update_on_startup = cfg.check_for_update_on_startup.unwrap_or(true);
+        // RONDO defaults this off (upstream defaults it on). The startup check
+        // queries the `openai/codex` releases API and can prompt the user to
+        // install `@openai/codex`; a fork must not steer its users to the
+        // upstream product. Users can still opt back in via config.toml.
+        let check_for_update_on_startup = cfg.check_for_update_on_startup.unwrap_or(false);
         let model_catalog = load_model_catalog(cfg.model_catalog_json.clone())?;
 
         let log_dir = cfg
