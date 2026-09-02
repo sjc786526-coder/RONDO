@@ -45,20 +45,20 @@
 
 ### 完成/验收标准
 
-- [ ] **A1** 根 `.github/workflows/ci.yml` 存在，push/PR 到 `main` 时触发，按 path filter 只跑受影响产品线
-- [ ] **A2** CI 包含至少三个门禁：`cargo fmt --check`、目标 crate 子集 `cargo build`、目标 crate 子集测试；任一失败则 CI 红
-- [ ] **A3** CI 在缓存命中时单次总时长 ≤ 30 分钟；冷启动 ≤ 90 分钟（超出则按 KD-006 缩小范围并记录实测值）
-- [ ] **A4** 根 `.github/workflows/release.yml` 存在，由 `local-v*` / `multi-v*` tag 分流触发
-- [ ] **A5** Release 产物为 `build_codex_package.py` 生成的**完整产品包**（含 `codex-code-mode-host`、`bwrap`、`rg`、`codex-package.json`），目标为 `x86_64-unknown-linux-musl`，并附 `SHA256SUMS`
-- [ ] **A6** 归档内入口可执行文件名为 `rondo`（Local）/ `rondo-multi`（Multi），且归档含 `LICENSE`、对应 `NOTICE` 与 `THIRD-PARTY-LICENSES/`（覆盖随包的 bwrap / rg / zsh **以及两个最终二进制的 Cargo 依赖闭包与 V8/ICU 原生闭包**）
-- [ ] **A7** 产物在**干净环境**（未安装 RONDO 的机器或容器）中通过 smoke test：`--version`、一条触碰 arg0/sandbox 的命令、一条依赖附属组件（`rg` 或 `code-mode-host`）的功能
-- [ ] **A8** 仓库 visibility 为 `PUBLIC`，且转换前完成密钥历史复核（见硬约束 H4）
-- [ ] **A9** `local-v0.1.0` 与 `multi-v0.1.0` 两个 Release 均已发布，Release notes 明确标注实验性质与"无性能承诺"
-- [ ] **A10** `doc/WBS.md` 增加发布工程条目；`CLAUDE.md` / `AGENTS.md` 中"不使用 CI 和 PR"的规则已更新为与本任务一致
-- [ ] **A11** 全程未改变 workspace 版本号、crate 名与 `[[bin]]` 名；产品运行时语义除已批准的窄例外 E-X1 / E-X2 外未改变
-- [ ] **A12** 执行前后 `eval/rondo_eval/binary_freeze.py` 的冻结断言仍然成立（见硬约束 H1）
-- [ ] **A13** 发布物默认不再向用户提示上游 Codex 更新（窄例外 E-X2，已获批准）
-- [ ] **A14** Linux 包通过 **bwrap 篡改测试（可判定版）**：向包内 `codex-resources/bwrap` **尾部追加一字节**（摘要变化但 ELF 仍可执行）→ 先确认该文件**自身仍能运行** → 再经产品触发 bundled bwrap → 必须观察到 `bundled bubblewrap digest mismatch` 这一**具体错误**（H12）
+- [x] **A1** 根 `.github/workflows/ci.yml` 存在，push/PR 到 `main` 时触发，按 path filter 只跑受影响产品线
+- [x] **A2** CI 包含至少三个门禁：`cargo fmt --check`、目标 crate 子集 `cargo build`、目标 crate 子集测试；任一失败则 CI 红
+- [x] **A3** CI 在缓存命中时单次总时长 ≤ 30 分钟；冷启动 ≤ 90 分钟（超出则按 KD-006 缩小范围并记录实测值）
+- [x] **A4** 根 `.github/workflows/release.yml` 存在，由 `local-v*` / `multi-v*` tag 分流触发
+- [x] **A5** Release 产物为 `build_codex_package.py` 生成的**完整产品包**（含 `codex-code-mode-host`、`bwrap`、`rg`、`codex-package.json`），目标为 `x86_64-unknown-linux-musl`，并附 `SHA256SUMS`
+- [x] **A6** 归档内入口可执行文件名为 `rondo`（Local）/ `rondo-multi`（Multi），且归档含 `LICENSE`、对应 `NOTICE` 与 `THIRD-PARTY-LICENSES/`（覆盖随包的 bwrap / rg / zsh **以及两个最终二进制的 Cargo 依赖闭包与 V8/ICU 原生闭包**）
+- [x] **A7** 产物在**干净环境**（未安装 RONDO 的机器或容器）中通过 smoke test：`--version`、一条触碰 arg0/sandbox 的命令、一条依赖附属组件（`rg` 或 `code-mode-host`）的功能
+- [x] **A8** 仓库 visibility 为 `PUBLIC`，且转换前完成密钥历史复核（见硬约束 H4）
+- [x] **A9** `local-v0.1.0` 与 `multi-v0.1.0` 两个 Release 均已发布，Release notes 明确标注实验性质与"无性能承诺"
+- [x] **A10** `doc/WBS.md` 增加发布工程条目；`CLAUDE.md` / `AGENTS.md` 中"不使用 CI 和 PR"的规则已更新为与本任务一致
+- [x] **A11** 全程未改变 workspace 版本号、crate 名与 `[[bin]]` 名；产品运行时语义除已批准的窄例外 E-X1 / E-X2 外未改变
+- [x] **A12** 执行前后 `eval/rondo_eval/binary_freeze.py` 的冻结断言仍然成立（见硬约束 H1）
+- [x] **A13** 发布物默认不再向用户提示上游 Codex 更新（窄例外 E-X2，已获批准）
+- [x] **A14** Linux 包通过 **bwrap 篡改测试（可判定版）**：向包内 `codex-resources/bwrap` **尾部追加一字节**（摘要变化但 ELF 仍可执行）→ 先确认该文件**自身仍能运行** → 再经产品触发 bundled bwrap → 必须观察到 `bundled bubblewrap digest mismatch` 这一**具体错误**（H12）
 
 ### 非目标（明确不做）
 
@@ -757,7 +757,7 @@ V8 按 `$TARGET` 取产物、bwrap 摘要顺序全部一次通过）。实际失
 **同时确认了 verify job 那道守卫的必要性**：本机 PATH 上有 system `bwrap 0.9.0`，
 按 `launcher.rs` 的优先级根本不会走 bundled 路径——若 runner 上也有，A14 会在错误的代码路径上"通过"。
 
-### 当前工作
+### 执行中间快照（历史）
 
 **终审后的用户决策与收口（2026-09-01）：**
 
@@ -774,13 +774,13 @@ V8 按 `$TARGET` 取产物、bwrap 摘要顺序全部一次通过）。实际失
 **规划阶段已完成并通过终审（2026-09-01）。** 用户已批准 KD-012（窄例外 E-X2）与 KD-007
 （现仓库整体转 public），并同意先在 private 仓库用 `multi-v0.1.0-rc1` 实跑验证。
 
-**当前进度（2026-09-02）**：阶段 A、B、C 已完成并实跑验证；阶段 D 的四项只读复核已做完
+**执行中间进度（2026-09-02，历史快照）**：阶段 A、B、C 已完成并实跑验证；阶段 D 的四项只读复核已做完
 （结论见下），E 的文档回写已完成（含 README 的两个固定 tag 下载链接）。
 
-**远端仓库仍为 `PRIVATE`。** 已存在 `multi-v0.1.0-rc1`…`rc6` 与 `local-v0.1.0-rc1` 共 7 个 RC tag；
+**当时远端仓库仍为 `PRIVATE`。** 已存在 `multi-v0.1.0-rc1`…`rc6` 与 `local-v0.1.0-rc1` 共 7 个 RC tag；
 两条发布轨均已实跑全绿。经用户 2026-09-02 批复：不再补跑 RC，直接在 private 状态下发布正式版本。
 
-### 阶段 D 的四项复核结论（只读，已完成，等用户批准后才动手）
+### 阶段 D 的四项复核结论（历史快照；当时已完成只读复核、尚待用户批准）
 
 | 项 | 结论 | 建议动作 |
 |---|---|---|
@@ -797,7 +797,7 @@ V8 按 `$TARGET` 取产物、bwrap 摘要顺序全部一次通过）。实际失
 不能称为"完全无对外后果"；但在 `prerelease=true`、`make_latest=false` 且仓库仍为 `PRIVATE` 的前提下
 风险足够低，验证价值高于继续静态审查。
 
-### 本任务剩余步骤
+### 本任务收口步骤（历史执行记录）
 
 阶段 A、B、C 已收口，D 的只读部分已完成。外部复审（2026-09-01 / 09-02）累计落地四项整改
 （KD-016 / KD-017 / KD-018 / KD-019，见 §7）。RC 已重跑并全绿；用户 2026-09-02 批复
@@ -835,14 +835,14 @@ V8 按 `$TARGET` 取产物、bwrap 摘要顺序全部一次通过）。实际失
    公网取回的 `SHA256SUMS` 与本机已复验产物**逐位一致**；`releases/latest` = `multi-v0.1.0`。
    **不要求 latest 为空**——那是平台展示状态，不解释为任一产品线的版本权威。
 
-### 阻塞项
+### 历史授权门（已解除）
 
-**规划层已无阻塞项**（KD-007、KD-012 均已获批）。仅保留一个**执行时的授权门**：
+**规划层没有阻塞项。** 执行期间曾保留以下授权门，现已在上方步骤 7 完成并解除：
 
-- **D-5｜转 public 的执行确认**：方向已由用户批准，但 H4 要求在**实际切换前**先完成四项复核
+- **D-5｜转 public 的执行确认（已完成）**：实际切换前已按 H4 完成四项复核
   （重跑密钥扫描、邮箱知情、`doc/development-environment.md` 脱敏决定、再分发边界），
-  并就复核结论与不可逆性取得用户当场确认。该确认不含在一次性执行授权内，
-  这是一个执行时的最终确认，不是尚未决定的规划问题。
+  并就复核结论与不可逆性取得用户当场确认；仓库随后转为 public 并通过未认证访问复验。
+  该门只是执行时的不可逆操作授权控制，不是当前阻塞项。
 
 ### 当前验收状态
 
