@@ -264,6 +264,14 @@ cgroup 报告 OOM kill。短时 1–3GiB swap 只削峰，不会被当作故障�
 - 日常 Cargo 默认使用 `jobs=2` 与 GNU/Linux LLD 单线程，机器级 rustc 槽也默认为 2。要求尽量一次跑完的
   完整 workspace 使用产品 Justfile 的 `test-with-codex-v8-conservative`，它是受跟踪的 `jobs=1` 备选且继续
   继承 LLD 单线程、共享 target、全局锁和 watchdog；不要在临时命令中拼接并发设置。
+- 该 conservative 入口同时设 `CARGO_INCREMENTAL=0`，与 CI 的取值一致（`.github/workflows/ci.yml`，理由见
+  `doc/ci-pipeline.md`）。一次跑完的验证轮不会复用增量缓存，缓存在这里只是净成本：它同时抬高 target 峰值
+  与编译期内存。2026-09-02 实测共享 multi target 的 `debug/incremental` 单独占 43.3 GiB，足以把一次全量推过
+  Windows `C:` 停机线。Cargo 只对 workspace 成员启用增量，registry 依赖不受影响、fingerprint 不变、继续复用；
+  日常窄入口保持增量开启，编辑后重编的内循环正是它划算的地方。增量与否只改编译策略，不改被编译的源码、
+  features、profile 或测试语义。
+- 构建方式差异需要如实记录：Plan 093 的 `14660/14660` 全 workspace 基线是在**增量开启**下建立的。今后用本
+  conservative 入口重建基线时，证据 manifest 应写明这一差异，不要默认两次构建方式相同。
 - 脚本启动前拒绝已有 `cargo` / `rustc` / `rust-lld` / `nextest`；运行中若发现 scope 外第二个构建，
   会停止受控构建。rustc wrapper 只保证跨入口最多 2 个 rustc，不等于 Cargo 互斥锁。
 - 直接 Cargo、Windows just 分支和 Bazel 不自动进入该 scope；这是明确未覆盖面。本机尚未安装 Bazel。

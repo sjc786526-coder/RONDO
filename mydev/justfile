@@ -124,9 +124,14 @@ test-with-codex-v8 *args:
 # Conservative full-workspace fallback for runs that must finish in one pass.
 # LLD stays at the repository default of one thread; this tracked entry lowers
 # Cargo jobs to one without requiring an operator-supplied command override.
+# CARGO_INCREMENTAL=0 for the reason CI sets it (doc/ci-pipeline.md): a one-pass
+# run never reuses the incremental cache, so it is pure cost -- it raises both
+# the peak target size and compile-time memory. Cargo only builds workspace
+# members incrementally, so registry dependencies in deps/ keep their
+# fingerprints and stay reusable. Daily narrow entries leave incremental on.
 [unix]
 test-with-codex-v8-conservative *args:
-    CARGO_BUILD_JOBS=1 RONDO_BUILD_CARGO_PRODUCT={{ cargo_product }} RUST_MIN_STACK={{ rust_min_stack }} NEXTEST_PROFILE=local {{ python }} ../scripts/with_codex_v8_artifacts.py -- {{ watchdog }} cargo nextest run --no-fail-fast "$@"
+    CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 RONDO_BUILD_CARGO_PRODUCT={{ cargo_product }} RUST_MIN_STACK={{ rust_min_stack }} NEXTEST_PROFILE=local {{ python }} ../scripts/with_codex_v8_artifacts.py -- {{ watchdog }} cargo nextest run --no-fail-fast "$@"
 
 # Run from the repository root so scripts that resolve paths from `cwd` see
 # the same layout they use in GitHub Actions.
