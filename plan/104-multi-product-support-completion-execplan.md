@@ -115,16 +115,25 @@ Guardian 与 Multi 的 RONDO 配置指南及清楚入口。本任务不新增产
   Multi 配置结构、`/status` 现有实现与相邻测试。
 - 已从干净 `main@3f22453c` 建立专用工作树
   `.claude/worktrees/106-multi-product-support` 和分支 `worktree-106-multi-product-support`。
-- 已冻结本 ExecPlan；产品实现尚未开始。
+- 已冻结本 ExecPlan。
+- **M-1**：`.github/workflows/ci.yml` 的 Multi `TEST_PACKAGES` 加入 `-p codex-team-state`；
+  `doc/ci-pipeline.md` 同步不变量 1 的措辞、package 表、Multi 本地复现命令块，并标注既有耗时数据
+  形成于该 crate 入 CI 之前、尚未实测。
+- **M-2**：新增 `multidev/codex-rs/tui/src/status/guardian.rs`（`card.rs` 已 945 行，超过
+  `multidev/AGENTS.md` 的 800 行门槛，故新开模块而非继续堆入），`card.rs` 增加
+  `guardian_config: Option<String>` 字段、标签与渲染行。三态断言与一份代表性快照落在既有
+  `status/tests.rs`，复用 `test_config`。
+- **M-3**：新增 `doc/rondo-config.md`（公共 Guardian 增量 + Multi 增量，链接上游通用配置文档）；
+  `README.md` 在"从源码构建"与仓库结构树两处提供入口。
 
 ### 当前工作
 
-- 等待执行者依据本计划实施任务包一。
+- 定向验证与工作树提交。
 
 ### 本任务剩余步骤
 
-- 实现 M-1 / M-2 / M-3，并完成范围内的文档、测试和快照同步。
-- 在共享 target 与资源门禁下完成最终定向验证，检查差异与意外生成物，提交工作树分支。
+- 完成 `codex-tui` 定向测试与快照人工确认、`codex-team-state` 实跑、格式与 lint 检查。
+- 检查最终差异与意外生成物，写精炼 `agent_log`，提交工作树分支。
 - 由审查者验收工作树提交；取得用户明确批准后再合并 `main`、推送并观察轻量 CI。
 - 核对 `codex-team-state` 的非零测试数、CI 结果和耗时说明；如需窄修则在同一任务内修复、复验并重新提交审查。
 - CI 与最终差异通过后，精炼同步任务完成记录并冻结本计划。
@@ -136,8 +145,8 @@ Guardian 与 Multi 的 RONDO 配置指南及清楚入口。本任务不新增产
 
 ### 当前验收状态
 
-- `PLAN_READY / IMPLEMENTATION_NOT_STARTED`。
-- 尚未运行本任务的格式、Rust 测试、快照或 CI，不得表述为通过。
+- `IMPLEMENTATION_DONE / LOCAL_VERIFICATION_IN_PROGRESS`。
+- 推送后的轻量 CI 尚未触发，`codex-team-state` 在 Actions 中的非零测试数尚未核对，不得表述为通过。
 
 ### 交接边界
 
@@ -154,3 +163,6 @@ Guardian 与 Multi 的 RONDO 配置指南及清楚入口。本任务不新增产
 | 003 | `/status` 只展示显式已加载 override 与 reviewer 选择，不展示推断的实际运行身份 | 配置加载不等于某次审批实际使用 | Multi TUI | 已采纳 |
 | 004 | 工作树提交与 `main` 合并/推送分开授权，推送后 CI 仍是任务最终验收的一部分 | 遵守本次用户指定的审查流程，同时保留完整宏观验收 | Git 流程、CI | 已采纳 |
 | 005 | 本任务没有必须在主工作区直接编辑的 git-ignored 交付物；本地构建只复用根共享 target 与锁 | 所有产品、CI 和文档变更均为受跟踪文件，共享 target 只是既有执行设施 | 工作树、构建设施 | 已采纳 |
+| 006 | Guardian 摘要逻辑放新模块 `status/guardian.rs`，而非继续写进 `card.rs` | `card.rs` 已 945 行，超过 `multidev/AGENTS.md` 的 800 行门槛；本计划 §2 也允许同模块下的小型专用文件 | Multi TUI | 已采纳 |
+| 007 | 状态行措辞定为 `loaded for reviewer auto_review (...)` / `loaded, unused by reviewer user (...)`，用 config 里的字面值指代 reviewer | 两态对称且都点名 reviewer，满足 WBS "显示 reviewer 与已加载 override"；`loaded` 只陈述加载事实，不声称某次 review 用过该模型（实际 slug 还要过 catalog 与回退） | Multi TUI、`doc/rondo-config.md` | 已采纳 |
+| 008 | 每项 override 值按 48 列上限截断 | 值来自自由文本配置，而 transcript 渲染宽度是 `u16::MAX`，不截断会让一条长路径撑爆整块记录 | Multi TUI | 已采纳 |

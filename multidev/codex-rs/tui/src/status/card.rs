@@ -34,6 +34,7 @@ use super::account::StatusAccountDisplay;
 use super::format::FieldFormatter;
 use super::format::push_label;
 use super::format::truncate_line_to_width;
+use super::guardian::guardian_config_summary;
 use super::helpers::compose_account_display;
 use super::helpers::compose_model_display;
 use super::helpers::format_directory_display;
@@ -108,6 +109,7 @@ struct StatusHistoryCell {
     model_details: Vec<String>,
     directory: PathBuf,
     permissions: String,
+    guardian_config: Option<String>,
     agents_summary: Arc<RwLock<String>>,
     collaboration_mode: Option<String>,
     model_provider: Option<String>,
@@ -357,6 +359,7 @@ impl StatusHistoryCell {
                 model_details,
                 directory: config.cwd.to_path_buf(),
                 permissions,
+                guardian_config: guardian_config_summary(config),
                 collaboration_mode: collaboration_mode.map(ToString::to_string),
                 model_provider,
                 remote_connection: remote_connection.cloned(),
@@ -751,6 +754,9 @@ impl HistoryCell for StatusHistoryCell {
         if self.model_provider.is_some() {
             push_label(&mut labels, &mut seen, "Model provider");
         }
+        if self.guardian_config.is_some() {
+            push_label(&mut labels, &mut seen, "Guardian config");
+        }
         if account_value.is_some() {
             push_label(&mut labels, &mut seen, "Account");
         }
@@ -828,6 +834,10 @@ impl HistoryCell for StatusHistoryCell {
         }
         lines.push(formatter.line("Directory", vec![Span::from(directory_value)]));
         lines.push(formatter.line("Permissions", vec![Span::from(self.permissions.clone())]));
+        if let Some(guardian_config) = self.guardian_config.as_ref() {
+            lines
+                .push(formatter.line("Guardian config", vec![Span::from(guardian_config.clone())]));
+        }
         lines.push(formatter.line("Agents.md", vec![Span::from(agents_summary)]));
 
         if let Some(account_value) = account_value {

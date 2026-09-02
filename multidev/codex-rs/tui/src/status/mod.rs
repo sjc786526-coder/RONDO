@@ -9,6 +9,7 @@
 mod account;
 mod card;
 mod format;
+mod guardian;
 mod helpers;
 mod rate_limits;
 pub(crate) mod remote_connection;

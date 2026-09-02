@@ -28,7 +28,7 @@
 真正导致 doctor 测试漏跑的原因是两条叠加：
 
 - Gate 3a 的 `TEST_PACKAGES` **根本没有选 `codex-cli`**（只有 `codex-config`、`codex-features`，
-  Multi 多一个 `codex-publication-critic`）
+  Multi 多 `codex-team-state` 和 `codex-publication-critic`）
 - Gate 2 是 `cargo build`，普通构建**不编译 `#[cfg(test)]`**
 
 于是写在 `cli/src/doctor/` 里的测试既不会运行，也不会被类型检查。Gate 3c 为此存在：
@@ -155,10 +155,14 @@ CI 的所有 job 都不需要写权限，也**不得引用任何 repository secr
 | 产品线 | `PRODUCT_DIR` | `TEST_PACKAGES` |
 |---|---|---|
 | local | `mydev` | `-p codex-config -p codex-features` |
-| multi | `multidev` | `-p codex-config -p codex-features -p codex-publication-critic` |
+| multi | `multidev` | `-p codex-config -p codex-features -p codex-team-state -p codex-publication-critic` |
 
-Multi 多一个 `codex-publication-critic`：它是方向 3 的核心 crate，且很轻
-（只依赖 http-client/serde/tokio/url，不碰 V8、不碰 core）。
+Multi 多两个方向 3 的 crate，两个都很轻，不碰 V8、不碰 core：
+
+| crate | 作用 | 依赖 |
+|---|---|---|
+| `codex-team-state` | Event 驱动团队世界状态的 canonical 实现 | protocol/serde/sha2/tokio/uuid |
+| `codex-publication-critic` | Publication Critic 的客户端接缝 | http-client/serde/tokio/url |
 
 ---
 
@@ -174,6 +178,10 @@ Multi 多一个 `codex-publication-critic`：它是方向 3 的核心 crate，�
 | detect changed | ~8s | ~8s |
 
 **预算**：冷 90 分钟（`timeout-minutes: 90`）、热 30 分钟。余量充足。
+
+> 这批数字实测于 `codex-team-state` 进入 Multi `TEST_PACKAGES` **之前**。该 crate 只依赖
+> protocol/serde/sha2/tokio/uuid，增量预期在分钟级以内，但**尚未实测**；下一次 Multi 跑完后
+> 若与上表明显不符，以实测为准更新本节。
 
 **缓存**：local 1983 MB + multi 2058 MB，合计远低于 GitHub 单仓库 10 GB 上限。
 缓存 key 按产品线分开，两个 workspace 不会互相挤掉对方的产物。
@@ -269,11 +277,21 @@ just --justfile mydev/justfile fmt-check      # 或 multidev/justfile
 **`--locked` 必须自己显式传**：CI 的四条命令都带 `--locked`，而 justfile 配方**不会自动补**，
 不传就可能用上与 `Cargo.lock` 不一致的依赖，复现的就不是 CI 跑的那次：
 
+**两条产品线的 Gate 3a 选包不同，别照抄错**（见上面的 `TEST_PACKAGES` 表）：
+
 ```bash
+# RONDO Local
 just --justfile mydev/justfile build-codex-cli --locked
 just --justfile mydev/justfile test --locked -p codex-config -p codex-features
 just --justfile mydev/justfile test --locked -p codex-core --lib config::
 just --justfile mydev/justfile test --locked -p codex-cli --bin codex doctor::updates
+
+# RONDO Multi（Gate 3a 多 codex-team-state 与 codex-publication-critic）
+just --justfile multidev/justfile build-codex-cli --locked
+just --justfile multidev/justfile test --locked \
+  -p codex-config -p codex-features -p codex-team-state -p codex-publication-critic
+just --justfile multidev/justfile test --locked -p codex-core --lib config::
+just --justfile multidev/justfile test --locked -p codex-cli --bin codex doctor::updates
 ```
 
 注意 `just test` 用的是 **nextest**，过滤器是位置参数；CI 用的是 `cargo test`，

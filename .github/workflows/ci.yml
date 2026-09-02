@@ -132,9 +132,11 @@ jobs:
               ;;
             multi)
               echo "PRODUCT_DIR=multidev" >> "$GITHUB_ENV"
-              # codex-publication-critic is the direction-3 crate and is cheap:
-              # it depends only on http-client/serde/tokio/url, no V8, no core.
-              echo "TEST_PACKAGES=-p codex-config -p codex-features -p codex-publication-critic" >> "$GITHUB_ENV"
+              # codex-team-state and codex-publication-critic are the direction-3
+              # crates and are both cheap: team-state depends only on
+              # protocol/serde/sha2/tokio/uuid, publication-critic only on
+              # http-client/serde/tokio/url. Neither reaches V8 or codex-core.
+              echo "TEST_PACKAGES=-p codex-config -p codex-features -p codex-team-state -p codex-publication-critic" >> "$GITHUB_ENV"
               ;;
             *)
               echo "unknown product ${{ matrix.product }}" >&2
