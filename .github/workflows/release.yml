@@ -508,6 +508,37 @@ jobs:
           echo "$out" | grep -E 'search.*bundled' \
             || { echo "::error::doctor did not resolve the bundled ripgrep"; exit 1; }
 
+      # A13, proven on the shipped binary rather than in a unit test: with no
+      # config.toml at all -- i.e. on RONDO's defaults -- doctor must not reach
+      # the upstream releases API or report an upstream version as an upgrade.
+      # The runner has working network, so a skipped probe is a real result.
+      #
+      # This is not hypothetical. The same command on the rc5 artifact, with
+      # `check_for_update_on_startup = false` set explicitly, still returned
+      # "latest version": "0.152.1" / "newer version is available".
+      - name: Smoke test - no upstream update advertising (A13)
+        shell: bash
+        run: |
+          set -euo pipefail
+          export CODEX_HOME="${RUNNER_TEMP}/codex-home-defaults"
+          mkdir -p "$CODEX_HOME"
+          # doctor exits non-zero when not logged in; capture first, judge after.
+          set +e
+          "${PKG}/bin/${VARIANT}" doctor --json > "${RUNNER_TEMP}/doctor.json" 2>&1
+          status=$?
+          set -e
+          echo "doctor --json exit=${status}"
+          jq '.checks[] | select(.id == "updates.status")' "${RUNNER_TEMP}/doctor.json"
+
+          probe="$(jq -r '.checks[] | select(.id == "updates.status")
+                          | .details["latest version"] // "<absent>"' \
+                   "${RUNNER_TEMP}/doctor.json")"
+          echo "latest version detail: ${probe}"
+          case "$probe" in
+            "not checked"*) echo "ok  the upstream probe was skipped on defaults" ;;
+            *) echo "::error::doctor probed upstream on default config: ${probe}"; exit 1 ;;
+          esac
+
       # Ubuntu 24.04 restricts unprivileged user namespaces through AppArmor,
       # and bubblewrap needs CLONE_NEWUSER. Without this the bundled sandbox
       # cannot start at all, so the checks below would be testing the
