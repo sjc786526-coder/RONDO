@@ -1,5 +1,14 @@
 name: release
 
+# ==> READ doc/cd-release-pipeline.md BEFORE CHANGING THIS FILE. <==
+# Several things here are load-bearing security or compliance controls: the
+# frozen build order, the explicit --*-bin arguments, and the absence of
+# --archive-output. Breaking them usually does NOT fail where you broke it --
+# a downstream self-check (the post-archive byte comparison, the required-file
+# assertions, or A14) goes red instead, pointing at the symptom rather than the
+# cause. A few have no automated backstop at all. That document grades every
+# invariant by what actually happens when you violate it.
+#
 # Tag-triggered release for the two RONDO product lines.
 #
 #   local-vX.Y.Z[-rcN]  ->  builds and publishes mydev/    (RONDO Local)
@@ -86,8 +95,12 @@ jobs:
   #
   # Single-entry matrix on purpose. The first release ships only
   # x86_64-unknown-linux-musl -- shipping a platform we cannot verify ourselves
-  # is worse than not shipping it (plan 103, KD-009). Adding a target later is a
-  # one-line matrix change, not a restructure.
+  # is worse than not shipping it (plan 103, KD-009).
+  #
+  # Adding a target is NOT a one-line matrix change: verify and publish hardcode
+  # the artifact name and TARGET, SHA256SUMS naming would collide, and
+  # compose-release-notes.sh hardcodes the triple in its package-layout section.
+  # See "加一个发布目标平台" in doc/cd-release-pipeline.md for the full list.
   # ---------------------------------------------------------------------------
   build:
     name: Build ${{ needs.validate.outputs.variant }} (${{ matrix.target }})

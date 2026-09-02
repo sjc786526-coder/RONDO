@@ -48,6 +48,11 @@ Plan 103 **已完成并冻结**（2026-09-02）。它只交付发布工程能力
 [`multi-v0.1.0`](https://github.com/sjc786526-coder/RONDO/releases/tag/multi-v0.1.0)，
 均以未认证访问复验通过。
 
+**使用与维护文档**：CI 见 [`doc/ci-pipeline.md`](ci-pipeline.md)，
+发布流水线见 [`doc/cd-release-pipeline.md`](cd-release-pipeline.md)。
+两篇都以不变量清单开头（CD 篇按"静默失效 / 延迟间接失败 / 明确失败"三档标注后果），
+改动流水线前必读。
+
 **当前能力**（已落地并实跑验证）：
 
 - 根 `.github/workflows/ci.yml`：push 到 `main` 触发，按三类路径分流到受影响产品线，

@@ -324,6 +324,7 @@ cargo build --release --manifest-path multidev/codex-rs/Cargo.toml \
 ```text
 RONDO/
 ├── .github/      # RONDO 自己的 CI / Release 工作流（唯一会被 GitHub 执行的一份）
+│                 #   说明见 doc/ci-pipeline.md 与 doc/cd-release-pipeline.md
 ├── mydev/        # 产品源码：RONDO Local（方向 1、2）
 ├── multidev/     # 产品源码：RONDO Multi（方向 3）
 ├── eval/         # 两条产品线共用的测评设施

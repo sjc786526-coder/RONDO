@@ -1,5 +1,11 @@
 name: ci
 
+# ==> READ doc/ci-pipeline.md BEFORE CHANGING THIS FILE. <==
+# Note in particular that a gate only covers packages it actually selects, and
+# that a filtered `cargo test` matching zero tests still exits 0 -- so a gate
+# can look green while running nothing. Gate 3c exists because codex-cli is not
+# in TEST_PACKAGES at all, not because Cargo skips bin targets (it does not).
+#
 # RONDO's own CI. This is the ONLY workflow directory GitHub executes:
 # `mydev/.github/` and `multidev/.github/` are inert files inherited from the
 # frozen upstream Codex tree (kept so the product trees stay diffable against
