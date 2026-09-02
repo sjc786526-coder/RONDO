@@ -56,4 +56,5 @@ RONDO Local（`mydev/`）是独立产品线，有独立的发布轨与独立的
 - 归档为**完整产品包**（含 `codex-code-mode-host`、`bwrap`、`rg`、`codex-package.json`），
   不是裸二进制；入口可执行文件名为 `rondo-multi`。
 - 不发布到 npm。`codex-cli/package.json` 已标记 `private`。
-- 默认不再检查上游 Codex 的版本更新（fork 不应引导用户去安装上游产品）。
+- 默认不再检查上游 Codex 的版本更新：启动提示与 `doctor` 受同一开关控制，关闭时不发起请求，
+  也不输出上游版本（fork 不应引导用户去安装上游产品）。

@@ -85,20 +85,11 @@ pub(super) fn updates_check(config: &Config) -> DoctorCheck {
         }
     }
 
-    match fetch_latest_version(&install_context) {
-        Ok(latest_version) => {
-            details.push(format!("latest version: {latest_version}"));
-            if is_newer(&latest_version, env!("CARGO_PKG_VERSION")) == Some(true) {
-                details.push("latest version status: newer version is available".to_string());
-            } else {
-                details.push("latest version status: current version is not older".to_string());
-            }
-        }
-        Err(err) => {
-            status = status.max(CheckStatus::Warning);
-            details.push(format!("latest version probe: {err}"));
-        }
-    }
+    push_latest_version_details(
+        probe_latest_version(config.check_for_update_on_startup, &install_context),
+        &mut status,
+        &mut details,
+    );
 
     let mut check = DoctorCheck::new("updates.status", "updates", status, summary).details(details);
     if let Some(remediation) = remediation {
@@ -137,6 +128,56 @@ fn update_action_label(context: &InstallContext) -> &'static str {
         InstallMethod::Brew => "brew upgrade --cask codex",
         InstallMethod::Standalone { .. } => "standalone installer",
         InstallMethod::Other => "manual or unknown",
+    }
+}
+
+/// Outcome of the upstream latest-version probe.
+///
+/// Upstream ran the probe unconditionally. RONDO gates it on
+/// `check_for_update_on_startup` -- the same flag the startup banner in
+/// `tui/src/updates.rs` already honours -- so turning update checks off really
+/// stops the request to the `openai/codex` releases API instead of only
+/// silencing the banner. A fork must not advertise upstream releases as
+/// upgrades for itself.
+#[derive(Debug, Eq, PartialEq)]
+enum LatestVersionProbe {
+    Disabled,
+    Fetched(String),
+    Failed(String),
+}
+
+/// Returns `Disabled` without any network access when update checks are off.
+fn probe_latest_version(enabled: bool, context: &InstallContext) -> LatestVersionProbe {
+    if !enabled {
+        return LatestVersionProbe::Disabled;
+    }
+    match fetch_latest_version(context) {
+        Ok(latest_version) => LatestVersionProbe::Fetched(latest_version),
+        Err(err) => LatestVersionProbe::Failed(err),
+    }
+}
+
+fn push_latest_version_details(
+    probe: LatestVersionProbe,
+    status: &mut CheckStatus,
+    details: &mut Vec<String>,
+) {
+    match probe {
+        LatestVersionProbe::Disabled => {
+            details.push("latest version: not checked (update checks are disabled)".to_string());
+        }
+        LatestVersionProbe::Fetched(latest_version) => {
+            details.push(format!("latest version: {latest_version}"));
+            if is_newer(&latest_version, env!("CARGO_PKG_VERSION")) == Some(true) {
+                details.push("latest version status: newer version is available".to_string());
+            } else {
+                details.push("latest version status: current version is not older".to_string());
+            }
+        }
+        LatestVersionProbe::Failed(err) => {
+            *status = (*status).max(CheckStatus::Warning);
+            details.push(format!("latest version probe: {err}"));
+        }
     }
 }
 
@@ -214,6 +255,54 @@ mod tests {
         assert_eq!(is_newer("1.2.4", "1.2.3"), Some(true));
         assert_eq!(is_newer("1.2.3", "1.2.4"), Some(false));
         assert_eq!(is_newer("1.2.3-beta.1", "1.2.2"), None);
+    }
+
+    /// `fetch_latest_version` is the only caller of the upstream release APIs,
+    /// so proving the probe returns before reaching it proves `codex doctor`
+    /// makes no upstream request. This test runs offline and deterministically.
+    #[test]
+    fn probe_is_skipped_for_every_install_method_when_update_checks_are_off() {
+        for method in [
+            InstallMethod::Npm,
+            InstallMethod::Bun,
+            InstallMethod::Pnpm,
+            InstallMethod::Brew,
+            InstallMethod::Other,
+        ] {
+            let context = InstallContext {
+                method,
+                package_layout: None,
+            };
+            assert_eq!(
+                probe_latest_version(false, &context),
+                LatestVersionProbe::Disabled
+            );
+        }
+    }
+
+    #[test]
+    fn disabled_probe_states_the_reason_and_stays_ok() {
+        let mut status = CheckStatus::Ok;
+        let mut details = Vec::new();
+        push_latest_version_details(LatestVersionProbe::Disabled, &mut status, &mut details);
+        assert_eq!(status, CheckStatus::Ok);
+        assert_eq!(
+            details,
+            vec!["latest version: not checked (update checks are disabled)"]
+        );
+    }
+
+    #[test]
+    fn failed_probe_degrades_the_row_to_a_warning() {
+        let mut status = CheckStatus::Ok;
+        let mut details = Vec::new();
+        push_latest_version_details(
+            LatestVersionProbe::Failed("curl timed out".to_string()),
+            &mut status,
+            &mut details,
+        );
+        assert_eq!(status, CheckStatus::Warning);
+        assert_eq!(details, vec!["latest version probe: curl timed out"]);
     }
 
     #[test]

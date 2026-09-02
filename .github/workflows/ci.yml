@@ -183,6 +183,16 @@ jobs:
         working-directory: ${{ env.PRODUCT_DIR }}/codex-rs
         run: "cargo test --locked -p codex-core --lib -- config::"
 
+      # Gate 3c: the doctor update-probe tests. `mod doctor` is declared in
+      # src/main.rs, so these live in the `codex` bin target and neither gate 3a
+      # (codex-cli is not in TEST_PACKAGES) nor gate 2 (a non-test build never
+      # compiles #[cfg(test)]) would reach them. They cover the RONDO change
+      # that stops `codex doctor` from querying the upstream releases API, so
+      # like gate 3b they must not be dropped.
+      - name: cargo test (doctor update probe)
+        working-directory: ${{ env.PRODUCT_DIR }}/codex-rs
+        run: "cargo test --locked -p codex-cli --bin codex -- doctor::updates"
+
   # ---------------------------------------------------------------------------
   # Packaging scripts are Python and cost seconds; always run them.
   # ---------------------------------------------------------------------------
