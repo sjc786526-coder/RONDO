@@ -40,6 +40,11 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 LICENSE_SRC="${REPO_ROOT}/.github/licenses"
 CODEX_RS="${REPO_ROOT}/${PRODUCT_DIR}/codex-rs"
 
+# The `v8` submodule pinned by rusty_v8 v150.4.0, i.e. the exact V8 source the
+# prebuilt archive was compiled from. Bump this together with the `v8` crate
+# version and re-vendor the texts under .github/licenses/vendor/.
+V8_REVISION="ac1e23989121713ca642f6650b34deff7b686896"
+
 if [[ ! -d "$CODEX_RS" ]]; then
   echo "no such product workspace: $CODEX_RS" >&2
   exit 1
@@ -64,13 +69,18 @@ cp "$bwrap_copying" "${OUT_DIR}/bubblewrap-0.11.2-COPYING"
 # <product>/scripts/codex_package/. Their license texts are vendored under
 # .github/licenses/vendor/ so a release never depends on a third-party host
 # being reachable.
-for f in ripgrep-15.2.0-LICENSE-MIT ripgrep-15.2.0-UNLICENSE zsh-77045ef8-LICENCE; do
-  if [[ ! -f "${LICENSE_SRC}/vendor/${f}" ]]; then
-    echo "missing vendored license text: ${LICENSE_SRC}/vendor/${f}" >&2
-    exit 1
-  fi
-  cp "${LICENSE_SRC}/vendor/${f}" "${OUT_DIR}/${f}"
-done
+copy_vendored() {
+  local f
+  for f in "$@"; do
+    if [[ ! -s "${LICENSE_SRC}/vendor/${f}" ]]; then
+      echo "missing or empty vendored license text: ${LICENSE_SRC}/vendor/${f}" >&2
+      exit 1
+    fi
+    cp "${LICENSE_SRC}/vendor/${f}" "${OUT_DIR}/${f}"
+  done
+}
+
+copy_vendored ripgrep-15.2.0-LICENSE-MIT ripgrep-15.2.0-UNLICENSE zsh-77045ef8-LICENCE
 
 # --- 3. Cargo dependency closure, per shipped binary ------------------------
 # Generated against the committed lock file and filtered to the release target,
@@ -131,7 +141,20 @@ emit_cargo_closure code-mode-host codex-code-mode-host
 emit_cargo_closure bwrap bwrap
 
 # --- 4. Native V8 / ICU closure ---------------------------------------------
+# The prebuilt librusty_v8 archive is fetched outside Cargo, so cargo-about
+# cannot see the V8 engine or the ICU data linked in through it. BSD-3-Clause
+# and the Unicode license both require the notice to be reproduced *with the
+# binary distribution*, so the texts travel in the package; a link would not
+# discharge the obligation. The V8 texts are taken from the exact submodule
+# revision that rusty_v8 v150.4.0 pins.
 cp "${LICENSE_SRC}/v8-icu-NOTICE.md" "${OUT_DIR}/v8-icu-NOTICE.md"
+copy_vendored \
+  "v8-${V8_REVISION:0:12}-LICENSE" \
+  "v8-${V8_REVISION:0:12}-LICENSE.fdlibm" \
+  "v8-${V8_REVISION:0:12}-LICENSE.strongtalk" \
+  "v8-${V8_REVISION:0:12}-LICENSE.v8" \
+  rusty_v8-150.4.0-LICENSE \
+  icu4c-LICENSE
 
 # --- 5. Index ---------------------------------------------------------------
 cat > "${OUT_DIR}/README.md" <<EOF
@@ -146,9 +169,14 @@ by the \`LICENSE\` and \`NOTICE\` files at the root of this archive.
 |---|---|---|---|---|
 | bubblewrap | 0.11.2 | C source compiled into the \`bwrap\` Rust wrapper | LGPL-2.0-or-later | \`bubblewrap-0.11.2-COPYING\` |
 | ripgrep (\`codex-path/rg\`) | 15.2.0 | prebuilt binary | MIT or Unlicense | \`ripgrep-15.2.0-LICENSE-MIT\`, \`ripgrep-15.2.0-UNLICENSE\` |
-| patched zsh (\`codex-resources/zsh\`) | commit \`77045ef8\` + Codex patch | prebuilt binary | zsh license (MIT-like) | \`zsh-77045ef8-LICENCE\` |
+| patched zsh (\`codex-resources/zsh/bin/zsh\`) | commit \`77045ef8\` + Codex patch | prebuilt binary | zsh license (MIT-like) | \`zsh-77045ef8-LICENCE\` |
 | Cargo dependency closure | per \`Cargo.lock\` | statically linked | permissive; see reports | \`rust-dependencies-*.md\` |
-| V8 engine + ICU data | rusty_v8 150.4.0 / deno_core_icudata 0.77.0 | prebuilt static archive | BSD-3-Clause / Unicode | \`v8-icu-NOTICE.md\` |
+| V8 engine | submodule \`${V8_REVISION:0:12}\` pinned by rusty_v8 150.4.0 | prebuilt static archive | BSD-3-Clause | \`v8-${V8_REVISION:0:12}-LICENSE\`, \`.fdlibm\`, \`.strongtalk\`, \`.v8\` |
+| \`rusty_v8\` bindings | 150.4.0 | prebuilt static archive | MIT | \`rusty_v8-150.4.0-LICENSE\` |
+| ICU locale data | via \`deno_core_icudata\` 0.77.0 | linked data | Unicode License V3 | \`icu4c-LICENSE\` |
+
+The three rows above are **not** covered by the \`rust-dependencies-*.md\` reports;
+see \`v8-icu-NOTICE.md\` for why Cargo tooling cannot see them.
 
 ## bubblewrap: corresponding source
 

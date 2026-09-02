@@ -27,14 +27,27 @@ dependencies**, none of which are Cargo packages. A `cargo-about` report is
 therefore necessarily incomplete on its own, and must not be presented as the
 full closure.
 
-## Components
+## Components, and where their license text lives
 
-| Component | Version | Origin | License |
-|---|---|---|---|
-| `rusty_v8` (Rust bindings, `v8` crate) | 150.4.0 | [denoland/rusty_v8](https://github.com/denoland/rusty_v8) | MIT |
-| **V8 JavaScript engine** (inside the prebuilt archive) | as vendored by rusty_v8 v150.4.0 | [v8/v8](https://chromium.googlesource.com/v8/v8) via rusty_v8's recursive submodules | BSD-3-Clause |
-| V8's bundled third-party code (inside the prebuilt archive) | as vendored by rusty_v8 v150.4.0 | V8's `third_party/` tree | BSD-3-Clause, MIT, Apache-2.0 and other permissive licenses; see the `LICENSE` and `LICENSE.*` files in the V8 source tree for the corresponding tag |
-| `deno_core_icudata` (ICU locale data) | 0.77.0 | [denoland/deno_core](https://github.com/denoland/deno_core) | MIT (crate); the embedded ICU data is covered by the [Unicode License](https://www.unicode.org/license.txt) |
+BSD-3-Clause and the Unicode License both require the notice to be reproduced
+**in binary redistributions**, not merely linked. The texts below therefore
+ship inside this directory rather than being referenced by URL.
+
+| Component | Version | Origin | License | Text in this directory |
+|---|---|---|---|---|
+| `rusty_v8` (Rust bindings, `v8` crate) | 150.4.0 | [denoland/rusty_v8](https://github.com/denoland/rusty_v8) | MIT | `rusty_v8-150.4.0-LICENSE` |
+| **V8 JavaScript engine** (inside the prebuilt archive) | submodule `ac1e23989121` | [denoland/v8](https://github.com/denoland/v8), pinned by rusty_v8 v150.4.0 | BSD-3-Clause | `v8-ac1e23989121-LICENSE` |
+| V8's externally maintained libraries (fdlibm, Strongtalk, and the PCRE/WebKit test material named in V8's `LICENSE`) | same revision | V8 source tree | BSD-3-Clause and other permissive terms | `v8-ac1e23989121-LICENSE.fdlibm`, `-LICENSE.strongtalk`, `-LICENSE.v8` |
+| ICU locale data, linked via `deno_core_icudata` | 0.77.0 | [unicode-org/icu](https://github.com/unicode-org/icu) | Unicode License V3 | `icu4c-LICENSE` |
+
+`v8-ac1e23989121-LICENSE` is V8's top-level license: it enumerates the
+externally maintained libraries in the tree and grants BSD-3-Clause terms to
+everything else. The three `LICENSE.*` files it refers to are shipped alongside
+it, so the set is complete for V8 proper.
+
+The `deno_core_icudata` crate itself is MIT and *does* appear in the
+`rust-dependencies-*.md` reports; the ICU data it embeds is separately covered
+by the Unicode License and is reproduced here.
 
 The prebuilt archive itself is produced by the upstream Codex
 `rusty-v8-release.yml` workflow, which checks out `denoland/rusty_v8` with
@@ -43,7 +56,7 @@ and publishes the resulting archive to the `openai/codex` releases page.
 
 ## Obtaining the corresponding source
 
-To obtain the exact V8 source that corresponds to a given release, check out
-`denoland/rusty_v8` at tag `v150.4.0` with `--recurse-submodules`; the `v8/`
-submodule pin identifies the exact V8 revision, and V8's own `LICENSE` and
-`third_party/` tree carry the full notices for the code inside the archive.
+Check out `denoland/rusty_v8` at tag `v150.4.0` with `--recurse-submodules`. Its
+`v8/` submodule pins commit
+`ac1e23989121713ca642f6650b34deff7b686896`, which is the exact V8 source the
+archive in this package was compiled from.
