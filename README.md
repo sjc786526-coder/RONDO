@@ -166,7 +166,37 @@ RONDO 是一个基于 [OpenAI Codex CLI](https://github.com/openai/codex) 源码
 
 ## 快速开始
 
-> 目前只提供源码构建。预编译二进制会随首个 Release 提供。
+### 下载预编译产品包
+
+只提供 `x86_64-unknown-linux-musl` 一个目标。**不提供 macOS / Windows 产物**——没有可验证的
+环境，发一个自己无法验证的平台产物比不发更糟。
+
+两条产品线各有独立的发布轨，链接固定指向各自的 tag：
+
+```bash
+# RONDO Multi
+curl -fLO https://github.com/sjc786526-coder/RONDO/releases/download/multi-v0.1.0/rondo-multi-0.1.0-x86_64-unknown-linux-musl.tar.gz
+tar xzf rondo-multi-0.1.0-x86_64-unknown-linux-musl.tar.gz
+./rondo-multi-0.1.0-x86_64-unknown-linux-musl/bin/rondo-multi --version
+
+# RONDO Local
+curl -fLO https://github.com/sjc786526-coder/RONDO/releases/download/local-v0.1.0/rondo-0.1.0-x86_64-unknown-linux-musl.tar.gz
+tar xzf rondo-0.1.0-x86_64-unknown-linux-musl.tar.gz
+./rondo-0.1.0-x86_64-unknown-linux-musl/bin/rondo --version
+```
+
+每个 Release 另附 `SHA256SUMS`，校验：`sha256sum -c SHA256SUMS`。
+
+> **不要把 `bin/` 下的可执行文件单独拷出来。** 附属组件按包内相对路径解析，
+> 拷出来就找不到了。把整个解压目录留在原地，或把 `bin/` 加入 `PATH`。
+
+> **版本号说明**：`--version` 输出 `0.147.0`，那是被冻结的上游基线版本号，全程不改，
+> 以支持与原始 Codex 的字节级公平对比。**产品版本以 Release tag 为准。**
+
+> 本仓库同时发布两条独立产品线，GitHub 的仓库级 "Latest" 指针只有一个，
+> 让任一条占用都会误导，因此**两条都不占用**。请始终使用上面的固定 tag 链接。
+
+### 从源码构建
 
 需要 Rust 工具链（版本见各产品线的 `codex-rs/rust-toolchain.toml`）。
 
