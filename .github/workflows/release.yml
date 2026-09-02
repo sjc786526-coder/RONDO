@@ -391,16 +391,39 @@ jobs:
             NOTICE \
             codex-package.json \
             codex-path/rg \
+            codex-resources/zsh/bin/zsh \
             THIRD-PARTY-LICENSES/README.md \
             THIRD-PARTY-LICENSES/v8-icu-NOTICE.md \
             THIRD-PARTY-LICENSES/bubblewrap-0.11.2-COPYING \
             "THIRD-PARTY-LICENSES/rust-dependencies-${VARIANT}.md" \
             THIRD-PARTY-LICENSES/rust-dependencies-codex-code-mode-host.md \
-            THIRD-PARTY-LICENSES/rust-dependencies-bwrap.md
+            THIRD-PARTY-LICENSES/rust-dependencies-bwrap.md \
+            THIRD-PARTY-LICENSES/v8-ac1e23989121-LICENSE \
+            THIRD-PARTY-LICENSES/v8-ac1e23989121-LICENSE.fdlibm \
+            THIRD-PARTY-LICENSES/v8-ac1e23989121-LICENSE.strongtalk \
+            THIRD-PARTY-LICENSES/v8-ac1e23989121-LICENSE.v8 \
+            THIRD-PARTY-LICENSES/rusty_v8-150.4.0-LICENSE \
+            THIRD-PARTY-LICENSES/icu4c-LICENSE
           do
-            test -f "${root}/${required}" || { echo "::error::archive is missing ${required}"; exit 1; }
+            test -s "${root}/${required}" || { echo "::error::archive is missing or has an empty ${required}"; exit 1; }
             echo "ok  ${required}"
           done
+
+          # Presence is not enough for a notice file: the obligation is to
+          # reproduce the *text*. Assert a distinctive phrase from each grant so
+          # a stub, a symlink target or an HTML error page cannot pass.
+          assert_contains() {
+            grep -qF "$2" "${root}/THIRD-PARTY-LICENSES/$1" \
+              || { echo "::error::${1} does not contain the expected license text ($2)"; exit 1; }
+            echo "ok  ${1} carries its license text"
+          }
+          assert_contains v8-ac1e23989121-LICENSE.v8 \
+            "Redistributions in binary form must reproduce the above"
+          assert_contains rusty_v8-150.4.0-LICENSE "MIT License"
+          assert_contains icu4c-LICENSE "UNICODE LICENSE"
+          # bubblewrap ships the *Library* GPL v2 text (SPDX LGPL-2.0-or-later),
+          # which is titled "LIBRARY", not "LESSER".
+          assert_contains bubblewrap-0.11.2-COPYING "GNU LIBRARY GENERAL PUBLIC LICENSE"
 
       - name: Upload release artifacts
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
@@ -636,11 +659,15 @@ jobs:
             --notes-file "$NOTES"
             --verify-tag
           )
+          # Neither track claims the repository-level "latest" pointer. This
+          # repo publishes two independent product lines (local-v*, multi-v*)
+          # from one tag namespace, but GitHub has exactly one such pointer, so
+          # whichever line published most recently would silently present itself
+          # as the repo's current release and demote the other. The README links
+          # to explicit tags instead.
+          args+=(--latest=false)
           if [[ "$PRERELEASE" == "true" ]]; then
-            # A release candidate must never become the repository's "latest".
-            args+=(--prerelease --latest=false)
-          else
-            args+=(--latest=true)
+            args+=(--prerelease)
           fi
 
           gh release create "${args[@]}" dist/*
@@ -665,21 +692,32 @@ jobs:
             exit 1
           fi
 
-          # A release candidate must never become the repository's "latest".
-          # A 404 here is normal (no non-prerelease exists yet). gh prints the
-          # error body on stdout, so branch on the exit status instead of
-          # letting it contaminate the value.
-          if latest_json="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" 2>/dev/null)"; then
-            latest_tag="$(jq -r '.tag_name' <<<"$latest_json")"
-          else
-            latest_tag="<none>"
+          # No release of either track may own the repository-level "latest"
+          # pointer. A 404 from releases/latest is the healthy state and means
+          # nothing claims it. gh prints the error body on stdout, so branch on
+          # the exit status instead of letting it contaminate the value.
+          latest_tag() {
+            local json
+            if json="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" 2>/dev/null)"; then
+              jq -r '.tag_name' <<<"$json"
+            else
+              echo "<none>"
+            fi
+          }
+
+          # Enforce rather than merely observe: going red on an already-public
+          # release helps nobody, so take the pointer back if GitHub handed it
+          # over despite --latest=false.
+          if [[ "$(latest_tag)" == "$TAG" ]]; then
+            echo "${TAG} claimed the shared latest pointer; clearing it"
+            gh api -X PATCH \
+              "repos/${GITHUB_REPOSITORY}/releases/$(jq -r '.id' <<<"$published")" \
+              -f make_latest=false >/dev/null
           fi
-          echo "latest release is now: ${latest_tag}"
-          if [[ "$PRERELEASE" == "true" && "$latest_tag" == "$TAG" ]]; then
-            echo "::error::a prerelease must not be marked latest"
-            exit 1
-          fi
-          if [[ "$PRERELEASE" == "false" && "$latest_tag" != "$TAG" ]]; then
-            echo "::error::a formal release should be latest, but latest is ${latest_tag}"
+
+          final_latest="$(latest_tag)"
+          echo "repository-level latest is now: ${final_latest}"
+          if [[ "$final_latest" == "$TAG" ]]; then
+            echo "::error::${TAG} still owns the repository-level latest pointer, which both product lines share"
             exit 1
           fi
