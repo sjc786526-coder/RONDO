@@ -148,11 +148,20 @@ emit_cargo_closure bwrap bwrap
 # discharge the obligation. The V8 texts are taken from the exact submodule
 # revision that rusty_v8 v150.4.0 pins.
 cp "${LICENSE_SRC}/v8-icu-NOTICE.md" "${OUT_DIR}/v8-icu-NOTICE.md"
+# V8's own LICENSE enumerates four externally maintained libraries. Two of them
+# (the PCRE test suite and the WebKit layout tests) live under test/mjsunit/ and
+# are not compiled into the archive. The other two -- the Valgrind client API
+# header and the Wasm C/C++ API headers -- are, and V8 keeps their texts in
+# third_party/<name>/LICENSE rather than at the tree root, so they are vendored
+# under those names here. The Valgrind file is the BSD grant covering
+# valgrind.h alone; it is not the GPL that covers the rest of Valgrind.
 copy_vendored \
   "v8-${V8_REVISION:0:12}-LICENSE" \
   "v8-${V8_REVISION:0:12}-LICENSE.fdlibm" \
   "v8-${V8_REVISION:0:12}-LICENSE.strongtalk" \
   "v8-${V8_REVISION:0:12}-LICENSE.v8" \
+  "v8-${V8_REVISION:0:12}-LICENSE.valgrind" \
+  "v8-${V8_REVISION:0:12}-LICENSE.wasm-api" \
   rusty_v8-150.4.0-LICENSE \
   icu4c-LICENSE
 
@@ -172,6 +181,8 @@ by the \`LICENSE\` and \`NOTICE\` files at the root of this archive.
 | patched zsh (\`codex-resources/zsh/bin/zsh\`) | commit \`77045ef8\` + Codex patch | prebuilt binary | zsh license (MIT-like) | \`zsh-77045ef8-LICENCE\` |
 | Cargo dependency closure | per \`Cargo.lock\` | statically linked | permissive; see reports | \`rust-dependencies-*.md\` |
 | V8 engine | submodule \`${V8_REVISION:0:12}\` pinned by rusty_v8 150.4.0 | prebuilt static archive | BSD-3-Clause | \`v8-${V8_REVISION:0:12}-LICENSE\`, \`.fdlibm\`, \`.strongtalk\`, \`.v8\` |
+| Valgrind client API header (\`valgrind.h\`) | as vendored in V8 \`${V8_REVISION:0:12}\` | header used by V8 | BSD (this one file only; the rest of Valgrind is GPL-2 and is **not** included) | \`v8-${V8_REVISION:0:12}-LICENSE.valgrind\` |
+| Wasm C/C++ API headers (\`wasm.h\`, \`wasm.hh\`) | as vendored in V8 \`${V8_REVISION:0:12}\` | headers behind \`src/wasm/c-api.cc\` | Apache-2.0 | \`v8-${V8_REVISION:0:12}-LICENSE.wasm-api\` |
 | \`rusty_v8\` bindings | 150.4.0 | prebuilt static archive | MIT | \`rusty_v8-150.4.0-LICENSE\` |
 | ICU locale data | via \`deno_core_icudata\` 0.77.0 | linked data | Unicode License V3 | \`icu4c-LICENSE\` |
 

@@ -1,9 +1,10 @@
 # Plan 103：发布工程与 CI/CD 流水线
 
-> **状态：阶段 A–C 已完成并实跑验证；D/E 待用户决定**（2026-09-01）
-> CI 与 Release 两条流水线均已建成并实跑；`multi-v0.1.0-rc5` 是首次端到端全绿的发布。
-> 仓库仍为 `PRIVATE`，尚无正式版本。剩余三件事都需要用户决定：
-> KD-016（`codex doctor` 绕过更新检查，影响 A13）、D-5 转 public、D-6 正式 tag。
+> **状态：阶段 A–C 已完成并实跑验证；D/E 待用户决定**（2026-09-02）
+> CI 与 Release 两条流水线均已建成并实跑。两条发布轨都已验证：`multi-v0.1.0-rc6` 与
+> `local-v0.1.0-rc1`（后者为 `local-v*` 轨首次实跑）四个 job 全绿。
+> KD-016（`codex doctor` 绕过更新检查）**已修复**，A13 由单元测试与发布物级断言双重覆盖。
+> 仓库仍为 `PRIVATE`，尚无正式版本。剩余需要用户决定的是：D-5 转 public、D-6/D-7 正式 tag。
 
 > 本计划是任务的稳定约束文档。
 > 除"当前状态"和"关键决策记录"外，其他部分在执行期间默认不得修改。
@@ -369,7 +370,7 @@ Release notes 另给出该源码链接与显著许可说明。不建复杂合规
 
 | 形态 | 正则 | Release 属性 |
 |---|---|---|
-| 正式版 | `^(local\|multi)-v(0\|[1-9][0-9]*)\.(0\|[1-9][0-9]*)\.(0\|[1-9][0-9]*)$` | `prerelease=false`，`make_latest=true` |
+| 正式版 | `^(local\|multi)-v(0\|[1-9][0-9]*)\.(0\|[1-9][0-9]*)\.(0\|[1-9][0-9]*)$` | `prerelease=false`，`make_latest=false`（见 KD-018：仓库级 latest 指针只有一个，两条产品线都不占用） |
 | 预发布 | `^(local\|multi)-v(0\|[1-9][0-9]*)\.(0\|[1-9][0-9]*)\.(0\|[1-9][0-9]*)-rc[1-9][0-9]*$` | `prerelease=true`，`make_latest=false` |
 
 核心版本段用 `(0|[1-9][0-9]*)` 而不是 `[0-9]+`，否则 `local-v01.2.3`、`multi-v1.02.3` 这类前导零会被接受
@@ -730,7 +731,7 @@ V8 按 `$TARGET` 取产物、bwrap 摘要顺序全部一次通过）。实际失
    Local 冷构建改用 `CARGO_PROFILE_DEV_DEBUG=0`（target 仅 6.5 GB）；Multi 复用既有缓存、
    **不加该变量**，否则会因指纹变化触发全量重建。
 7. **`codex doctor` 的更新检查不受 `check_for_update_on_startup` 约束**（见下方 KD-016）。
-   这是实测发现，直接影响 A13 的判定，**需要用户决定是否扩大窄例外**。
+   这是实测发现，直接影响 A13 的判定。**已于 2026-09-02 修复并经 CI 与发布物级断言验证**。
 
 ### 实施期的本地实测（用真实二进制，先于 rc1 降风险）
 
@@ -792,8 +793,8 @@ V8 按 `$TARGET` 取产物、bwrap 摘要顺序全部一次通过）。实际失
 
 ### 本任务剩余步骤
 
-阶段 A、B、C 已收口，D 的只读部分已完成。外部复审（2026-09-01）后又落地了三项整改
-（KD-016 / KD-017 / KD-018，见 §7），因此正式发布前必须重跑 RC。
+阶段 A、B、C 已收口，D 的只读部分已完成。外部复审（2026-09-01 / 09-02）累计落地四项整改
+（KD-016 / KD-017 / KD-018 / KD-019，见 §7），RC 已按要求重跑。
 
 1. ~~重跑两条 RC~~ **已完成（2026-09-02，均全绿）**：`multi-v0.1.0-rc6` 与
    `local-v0.1.0-rc1`（该轨首次实跑，一次通过）。
@@ -877,6 +878,7 @@ V8 按 `$TARGET` 取产物、bwrap 摘要顺序全部一次通过）。实际失
 | KD-016 | **`codex doctor` 仍会查询并提示上游 Codex 版本**，`check_for_update_on_startup` 管不到它 | 实测：即使显式写入 `check_for_update_on_startup = false`，`codex doctor` 仍输出 `↑ updates 0.152.0 available (current 0.147.0)`。读代码确认 `cli/src/doctor/updates.rs:88` **无条件**调用 `fetch_latest_version()` → `curl https://api.github.com/repos/openai/codex/releases/latest`；该文件只在第 36–40 行把配置值当作一条 detail **打印**出来，从不用它做门禁。对 fork 而言这条输出具有误导性：它把上游 Codex 的版本当作"你该升级到的版本" | **A13 的判定**；修复涉及 `doctor/updates.rs` | **已修复**（2026-09-01）。改动是把探测门控到 `config.check_for_update_on_startup`，与 `tui/src/updates.rs:28,151` 已有的门控完全一致——属于把既有开关补全到唯一漏网的调用点，不是新增逻辑或改文案，因此落在 E-X2 的意图之内。同时补 3 个确定性单元测试与 CI Gate 3c；两份 CHANGELOG 原本已声称"默认不再检查上游更新"，修复前该表述不成立 |
 | KD-017 | **V8 / ICU 许可必须随包分发原文，不能只给外链** | BSD-3-Clause 与 Unicode License 都要求在**二进制再分发**中复制通知原文；原先 `v8-icu-NOTICE.md` 只有组件表和链接，A6 的"完整许可材料"不成立。已 vendor rusty_v8 v150.4.0 所 pin 的 V8 submodule（`ac1e23989121`）的 `LICENSE` 及其 `LICENSE.fdlibm/.strongtalk/.v8`、rusty_v8 的 MIT、ICU 的 Unicode License V3，并在 release 校验中加内容断言（只查存在会被空文件、symlink stub 或 HTML 错误页骗过——ICU 首次抓取就返回了 10 字节的 symlink 目标）。**不收集 V8 `third_party/` 全树**：V8 自身 `LICENSE` 已枚举那些外部库并指向随包的三个 `LICENSE.*`，扩到全树是合规系统建设，超出本任务 | `.github/licenses/`、collect 脚本、`release.yml` | 已采纳 |
 | KD-018 | **两条产品线都不占用仓库级 `latest` 指针** | GitHub 每个仓库只有一个 `latest`，而本仓库从同一命名空间发两条独立产品线。原实现给每个正式版本设 `--latest=true` 并断言"正式版必须是 latest"，后发布的一条会静默把另一条挤下去，让访客以为仓库当前版本只有一条线。改为两轨都 `--latest=false`；校验从"观察"改为"强制"（若 GitHub 仍指派则 PATCH 收回再断言），避免重演 rc4 那种"Release 已公开、job 却红"的情况 | `release.yml` publish job；E-0 必须用固定 tag 链接 | 已采纳 |
+| KD-019 | **V8 的 valgrind 与 wasm-api 两项外部库许可原文也必须随包** | KD-017 只补到 V8 根目录的 `LICENSE.*`，漏了 V8 `LICENSE` 正文枚举的另外两项：`third_party/valgrind/valgrind.h`（BSD）与 `third_party/wasm-api/wasm.{h,hh}`（Apache-2.0）——它们的原文放在各自子目录的 `LICENSE` 里，不在根目录。已按固定 revision 取回随包。同表列的 PCRE 测试套件与 WebKit layout tests 位于 `test/mjsunit/`，**不进归档**，故不复制。valgrind 那份必须是"仅适用于 valgrind.h"的 BSD 全文，**不是** Valgrind 主体的 GPL-2；已加断言锁定这一点 | `.github/licenses/`、collect 脚本、`release.yml` | 已采纳 |
 | KD-015 | Publication Critic 在所有对外文档中必须表述为**有界改写机制**，不得表述为发布门或安全审批 | 已核实产品合同与实现（`publication_review.rs:469` `Some(Verdict::Rewrite) if attempt.review_index < 2`）：第三次审查非阻断，即使 `REWRITE` 也提交；服务故障时 fail-open 提交当前稿并记为"审核未完成" | README（已改）、Release notes | 已采纳 |
 
 ---

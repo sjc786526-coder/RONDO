@@ -402,6 +402,8 @@ jobs:
             THIRD-PARTY-LICENSES/v8-ac1e23989121-LICENSE.fdlibm \
             THIRD-PARTY-LICENSES/v8-ac1e23989121-LICENSE.strongtalk \
             THIRD-PARTY-LICENSES/v8-ac1e23989121-LICENSE.v8 \
+            THIRD-PARTY-LICENSES/v8-ac1e23989121-LICENSE.valgrind \
+            THIRD-PARTY-LICENSES/v8-ac1e23989121-LICENSE.wasm-api \
             THIRD-PARTY-LICENSES/rusty_v8-150.4.0-LICENSE \
             THIRD-PARTY-LICENSES/icu4c-LICENSE
           do
@@ -421,6 +423,12 @@ jobs:
             "Redistributions in binary form must reproduce the above"
           assert_contains rusty_v8-150.4.0-LICENSE "MIT License"
           assert_contains icu4c-LICENSE "UNICODE LICENSE"
+          # The Valgrind grant must be the BSD one covering valgrind.h alone.
+          # Shipping Valgrind's GPL instead would misstate what is in the
+          # package, so assert the scoping sentence, not just "Valgrind".
+          assert_contains v8-ac1e23989121-LICENSE.valgrind \
+            "applies to this one"
+          assert_contains v8-ac1e23989121-LICENSE.wasm-api "Apache License"
           # bubblewrap ships the *Library* GPL v2 text (SPDX LGPL-2.0-or-later),
           # which is titled "LIBRARY", not "LESSER".
           assert_contains bubblewrap-0.11.2-COPYING "GNU LIBRARY GENERAL PUBLIC LICENSE"

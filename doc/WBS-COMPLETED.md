@@ -2736,8 +2736,10 @@ INTEGRATED / NOT_PUSHED`。clean formal source 为 `0ae9623`，执行者交付�
   `bundled bubblewrap digest mismatch`，且 expected 值与构建期导出的 `CODEX_BWRAP_SHA256` 一致。
   这证明冻结构建顺序确实把摘要编进了发布二进制。
 - **验收状态**：A1–A7、A10（部分）、A11、A12、A14 达成。
-  **A13 未达成**：实测 `codex doctor` 无条件查询上游 `openai/codex` releases API，
-  不受 `check_for_update_on_startup` 约束（plan KD-016），修复超出 E-X2 已批准范围，待用户决定。
+  **A13 当时未达成**：实测 `codex doctor` 无条件查询上游 `openai/codex` releases API，
+  不受 `check_for_update_on_startup` 约束（plan KD-016）。**已于 2026-09-02 修复**：
+  探测改为与 TUI 启动提示同一开关门控，CI Gate 3c 两条产品线各 5 tests passed，
+  并加了发布物级断言（`doctor --json`）。A13 达成。
   A8、A9 待转 public 与正式 tag。
 - **实跑证据**：`multi-v0.1.0-rc1`…`rc5` 五轮。rc5 整条链首次全绿
   （validate 2s → build 1h22m38s → 干净 runner verify 18s → publish 27s）。

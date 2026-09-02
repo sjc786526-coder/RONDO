@@ -37,13 +37,21 @@ ship inside this directory rather than being referenced by URL.
 |---|---|---|---|---|
 | `rusty_v8` (Rust bindings, `v8` crate) | 150.4.0 | [denoland/rusty_v8](https://github.com/denoland/rusty_v8) | MIT | `rusty_v8-150.4.0-LICENSE` |
 | **V8 JavaScript engine** (inside the prebuilt archive) | submodule `ac1e23989121` | [denoland/v8](https://github.com/denoland/v8), pinned by rusty_v8 v150.4.0 | BSD-3-Clause | `v8-ac1e23989121-LICENSE` |
-| V8's externally maintained libraries (fdlibm, Strongtalk, and the PCRE/WebKit test material named in V8's `LICENSE`) | same revision | V8 source tree | BSD-3-Clause and other permissive terms | `v8-ac1e23989121-LICENSE.fdlibm`, `-LICENSE.strongtalk`, `-LICENSE.v8` |
+| fdlibm and the Strongtalk assembler | same revision | V8 source tree | BSD-3-Clause / permissive | `v8-ac1e23989121-LICENSE.fdlibm`, `-LICENSE.strongtalk`, `-LICENSE.v8` |
+| Valgrind client API header (`third_party/valgrind/valgrind.h`) | same revision | V8 source tree | BSD — **this one file only**; the rest of Valgrind is GPL-2 and is not part of this package | `v8-ac1e23989121-LICENSE.valgrind` |
+| Wasm C/C++ API headers (`third_party/wasm-api/wasm.{h,hh}`) | same revision | V8 source tree | Apache-2.0 | `v8-ac1e23989121-LICENSE.wasm-api` |
 | ICU locale data, linked via `deno_core_icudata` | 0.77.0 | [unicode-org/icu](https://github.com/unicode-org/icu) | Unicode License V3 | `icu4c-LICENSE` |
 
-`v8-ac1e23989121-LICENSE` is V8's top-level license: it enumerates the
-externally maintained libraries in the tree and grants BSD-3-Clause terms to
-everything else. The three `LICENSE.*` files it refers to are shipped alongside
-it, so the set is complete for V8 proper.
+`v8-ac1e23989121-LICENSE` is V8's top-level license: it grants BSD-3-Clause
+terms to everything in V8 that is not an externally maintained library, and
+enumerates the four that are. Two of those four — the PCRE test suite and the
+WebKit-derived layout tests — live under `test/mjsunit/` and are **not** compiled
+into the prebuilt archive, so their texts are not reproduced here. The other
+two, Valgrind and the Wasm C API headers, are shipped above; V8 keeps their
+texts in `third_party/<name>/LICENSE` rather than at the tree root.
+
+Together with `LICENSE.fdlibm` and `LICENSE.strongtalk`, that is the complete
+set for the V8 code in this package.
 
 The `deno_core_icudata` crate itself is MIT and *does* appear in the
 `rust-dependencies-*.md` reports; the ICU data it embeds is separately covered
