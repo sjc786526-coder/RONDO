@@ -504,3 +504,29 @@ GitHub 静默忽略 `make_latest=false`。
 Multi 必须包含上述 workflow 修复，因此必然位于新 SHA，而已发布的 `local-v0.1.0` tag
 不得移动。改为要求**产品源码一致**，打 Multi tag 前须确认 `git diff --quiet
 local-v0.1.0..HEAD -- mydev multidev` 为空。
+
+### `multi-v0.1.0`：四个 job 全绿
+
+方案 B 落地后，Multi 正式版一次通过。复验：校验和 OK；`bin/rondo-multi --version` → `0.147.0`；
+许可树 17 个文件（含 valgrind/wasm-api）；三份 Cargo 闭包报告 HTML 实体计数全为 0、
+`PROVIDED "AS IS"` 逐字 233 次；notes 含 Publication Critic 专属节。
+
+两条正式版**不在同一 commit**（Multi 必须包含 latest 修复），但产品源码一致，
+`git diff --quiet local-v0.1.0 multi-v0.1.0 -- mydev multidev` 为空。
+
+`local-v0.1.0` → `3784994f`，`multi-v0.1.0` → `ce63cc1d`。
+
+### 清理 4 个旧 RC Release
+
+删除 `multi-v0.1.0-rc4/rc5/rc6` 与 `local-v0.1.0-rc1` 的 **Release 对象**。
+理由：它们都早于许可整改，作为公开可下载物缺必需许可原文（rc4/rc5 更是完全没有 V8/ICU 原文），
+且 `local-v0.1.0-rc1` 带着产品线错配的发布说明。
+
+`gh release delete` 的 `--cleanup-tag` 是可选项，不传即保留 tag。删除后逐个复核：
+7 个 RC tag 全部完好且指向未变，7 条 RC 相关 Actions 记录仍在。**只删了 Release 对象**。
+
+### 最终 latest 状态
+
+`multi-v0.1.0` 显示为 latest（它是最近创建的正式版），`local-v0.1.0` 为 false，
+四个 RC 在删除前均为 false。这是平台行为，不解释为版本权威——
+两条产品线的权威入口是 README 里各自的固定 tag 链接。

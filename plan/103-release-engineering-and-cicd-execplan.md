@@ -811,12 +811,11 @@ V8 按 `$TARGET` 取产物、bwrap 摘要顺序全部一次通过）。实际失
    ```bash
    git diff --quiet local-v0.1.0..HEAD -- mydev multidev
    ```
-4. **清理旧 RC Release**：删除 `multi-v0.1.0-rc4/rc5/rc6` 与 `local-v0.1.0-rc1` 四个
-   Release 对象（用户批准的选项 a）。理由是它们均早于许可整改，作为公开可下载物**缺必需许可原文**；
-   rc4/rc5 更是完全没有 V8/ICU 原文。**必须保留对应 git tag、提交历史与 Actions 记录**，
-   不使用删除 tag 的选项。
-5. 回写 Plan / WBS / agent_log 最终状态并推送。
-6. 对公开候选 HEAD 重跑既定密钥扫描。
+4. ~~清理旧 RC Release~~ **已完成**：`multi-v0.1.0-rc4/rc5/rc6` 与 `local-v0.1.0-rc1`
+   四个 Release 对象已删除（选项 a）。删除后复核：**7 个 RC tag 全部完好且指向未变**、
+   7 条 RC 相关 Actions 记录仍在——只删了 Release 对象，未使用 `--cleanup-tag`。
+5. ~~回写 Plan / WBS / agent_log 最终状态并推送~~ **进行中**。
+6. **对公开候选 HEAD 重跑既定密钥扫描**。
 7. **D-5 转 public**：仍需用户在完成第 6 步后单独确认。第 3 项脱敏 diff 已应用，
    但**只清理当前文件，不改写 Git 历史**——旧提交仍可查到该 Windows 用户名与两个邮箱。
 8. 转公开后验证 README 里两个固定 tag 下载链接可用、两个正式 Release 可见。
@@ -849,7 +848,7 @@ V8 按 `$TARGET` 取产物、bwrap 摘要顺序全部一次通过）。实际失
 | A6 入口名与许可材料 | ✅ | rc6 真实产物复验：16 个许可文件、V8/rusty_v8/ICU 原文在包内、HTML 实体 0、`PROVIDED "AS IS"` 逐字 233 处、rc5 的模板注释泄漏已消除（KD-017） |
 | A7 干净环境 smoke test | ✅ | 独立 verify job，含 `--version`、bundled rg、arg0/sandbox |
 | A8 仓库 public | ⏸ | 待用户在密钥复扫与历史身份知情确认后单独批准（D-5 授权门） |
-| A9 两条正式 Release | 🔶 | `local-v0.1.0` 已发布并复验通过（publish job 因 KD-018 的错误断言记录为红，产物无缺陷）；`multi-v0.1.0` 待发 |
+| A9 两条正式 Release | ✅ | `local-v0.1.0`（→`3784994f`）与 `multi-v0.1.0`（→`ce63cc1d`）均已发布并下载复验：校验和、入口、17 个许可文件、产品线专属 notes 全部正确。Local 的 publish job 记录为红——原因是发布**之后**那条基于错误 GitHub 语义的 latest 断言（KD-018），产物无缺陷，按批复保留该记录不重建 |
 | A10 文档同步 | ✅ | WBS / CLAUDE.md / AGENTS.md / WBS-COMPLETED 已更新；README 安装节已换为两个固定 tag 下载链接 |
 | A11 产品语义只动两处窄例外 | ✅ | `Cargo.toml`/`Cargo.lock`/`eval/` 零改动 |
 | A12 冻结断言成立 | ✅ | `binary_freeze._validate_workspace_manifests()` 两条产品线均 OK |
