@@ -569,3 +569,26 @@ local-v0.1.0..HEAD -- mydev multidev` 为空。
 **同时修掉一处自己造成的泄漏**：plan 第 517 行在描述"建议如何脱敏"时，
 把待脱敏的 Windows 用户名原样抄了进去——和本文件早先记过的教训一模一样。
 当前树已清理，历史仍有。
+
+## 转 public（2026-09-02，Plan 103 收口）
+
+用户逐项知情接受公开内容后批准切换：两个提交邮箱、历史提交中的 Windows 用户名、
+`/home/sjc` 路径、loopback 代理端口、4 个 RunPod 卷 ID。
+用户另确认那些网络卷本身已在 RunPod 侧删除，该项彻底失效。
+
+切换后**全部以未认证访问**复验（不带任何 token，模拟外部访客）：
+
+| 项 | 结果 |
+|---|---|
+| 仓库 | `private=false`、`visibility=public` |
+| Release | `multi-v0.1.0`、`local-v0.1.0`，均 `prerelease=false`/`draft=false`、各 2 个资产 |
+| README 两个固定 tag 链接 | 4 个资产全部 HTTP 206，字节数与 API 报告一致 |
+| 校验和 | 公网取回的 `SHA256SUMS` 与本机已复验产物**逐位一致** |
+| latest | `multi-v0.1.0`——平台展示状态，不解释为版本权威 |
+
+**一处刻意保留的"不好看"**：`local-v0.1.0` 的 publish job 是红的。
+原因是发布**之后**那条基于错误 GitHub 语义的 latest 断言，产物本身无缺陷。
+按用户批复保留该记录，不为美化而重建 Release——红色记录本身就是这次
+"未验证的假设 + 未验证的兜底"教训的证据。
+
+Plan 103 至此完成并冻结。后续发布节奏与版本策略只在 `doc/WBS.md` 维护。

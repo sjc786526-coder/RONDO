@@ -37,11 +37,16 @@ Plan 102 五维云端判官实验性工程接入已以 `ENGINEERING_SEAM_PASS` �
 为 `14660/14660` passed、0 failure/error/timeout，另有 1/1 setup passed；24 个 skip 不计 passed。正式证据和精确边界见
 `doc/WBS/multi-agent-trusted-evidence.md` 与 `doc/WBS-COMPLETED.md`。
 
-### 发布工程（跨方向，当前唯一在办工作包）
+### 发布工程（跨方向，已完成）
 
-Plan 103 实施中。它只交付发布工程能力，**不推进任何方向的产品功能、性能或质量资格**，
-不解锁方向 3 工作包四。合同、验收标准与硬约束见
-`plan/103-release-engineering-and-cicd-execplan.md`。
+Plan 103 **已完成并冻结**（2026-09-02）。它只交付发布工程能力，
+**不推进任何方向的产品功能、性能或质量资格**，不解锁方向 3 工作包四。
+合同、验收标准与硬约束见 `plan/103-release-engineering-and-cicd-execplan.md`。
+
+**仓库已公开**，两条产品线各有首个正式版本：
+[`local-v0.1.0`](https://github.com/sjc786526-coder/RONDO/releases/tag/local-v0.1.0) 与
+[`multi-v0.1.0`](https://github.com/sjc786526-coder/RONDO/releases/tag/multi-v0.1.0)，
+均以未认证访问复验通过。
 
 **当前能力**（已落地并实跑验证）：
 
@@ -60,12 +65,13 @@ Plan 103 实施中。它只交付发布工程能力，**不推进任何方向的
 E-X2（`check_for_update_on_startup` 默认值改 `false`，并把 `doctor` 的上游探测门控到同一开关）。
 二者均不改动 workspace 版本号、crate 名与 `[[bin]]` 名，冻结二进制身份与公平对比设施不变。
 
-**两条正式版已发布**（仓库仍为 private）：`local-v0.1.0` 与 `multi-v0.1.0`，
-均已下载复验（校验和、入口、17 个第三方许可文件、产品线专属发布说明）。
+两个正式版均已下载复验（校验和、入口、17 个第三方许可文件、产品线专属发布说明），
+公开后又以未认证访问复验一次，公网 `SHA256SUMS` 与本机产物逐位一致。
 两者不在同一 commit（Multi 含 latest 策略修复），但产品源码一致。
 RC 阶段的 4 个 Release 对象已清理，7 个 RC tag 与全部 Actions 记录保留。
 
-**未决**：转 public 仍需用户在密钥复扫与历史身份知情确认后单独批准。
+**后续发布**：新版本走同一条流水线，打 `local-v*` / `multi-v*` tag 即可。
+README 的下载链接是固定 tag，发新版本时需同步更新。
 
 ### 方向命名口径
 
