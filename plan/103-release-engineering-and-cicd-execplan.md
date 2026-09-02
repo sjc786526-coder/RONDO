@@ -795,9 +795,12 @@ V8 按 `$TARGET` 取产物、bwrap 摘要顺序全部一次通过）。实际失
 阶段 A、B、C 已收口，D 的只读部分已完成。外部复审（2026-09-01）后又落地了三项整改
 （KD-016 / KD-017 / KD-018，见 §7），因此正式发布前必须重跑 RC。
 
-1. **重跑两条 RC**（自同一个 CI 绿色 SHA）：`multi-v0.1.0-rc6` 与 `local-v0.1.0-rc1`。
-   rc5 构建自 `1a734d7e`，其许可树仍带模板注释泄漏（已在本地 rc5 产物中确认），
-   **不能代表待发布源码**；`local-v*` 轨则从未实跑过。两条都通过后才进入公开与正式发布。
+1. ~~重跑两条 RC~~ **已完成（2026-09-02，均全绿）**：`multi-v0.1.0-rc6` 与
+   `local-v0.1.0-rc1`（该轨首次实跑，一次通过）。
+   **遗留**：这两个 tag 早于最后两个提交，因此 release notes 的产品线分支与 verify job 的
+   A13 断言尚未被 RC 覆盖——`local-v0.1.0-rc1` 已发布的 notes 里仍带着 Multi 专属的
+   "判官后端不在包内"一节。两者均已在本机用真实数据验证。建议正式发布前再跑一轮 RC 覆盖；
+   即使直接发正式版，verify job 也在 publish 之前执行，A13 断言失败会挡在发布之前。
 2. **D-5 转 public**：批准后执行可见性切换。第 3 项脱敏 diff 已应用，
    但**只清理当前文件，不改写 Git 历史**——旧提交仍可查到该 Windows 用户名。
 3. **D-6/D-7 正式发布**：打 `multi-v0.1.0` 与 `local-v0.1.0`，下载正式产物复跑 smoke test。
@@ -827,19 +830,22 @@ V8 按 `$TARGET` 取产物、bwrap 摘要顺序全部一次通过）。实际失
 | A3 时长预算 | ✅ | 冷 23m24s/23m40s、热 12m02s/13m50s |
 | A4 release 按 tag 分流 | ✅ | 严格 SemVer 校验 job |
 | A5 完整产品包 + SHA256SUMS | ✅ | rc5 产物复验 |
-| A6 入口名与许可材料 | 🔶 | `bin/rondo-multi` + 16 个许可文件。原先 V8/ICU 只有组件表与外链，**不满足二进制再分发的复制义务**；KD-017 已补入 V8/rusty_v8/ICU 许可原文并加内容断言，**待 rc6 实跑确认** |
+| A6 入口名与许可材料 | ✅ | rc6 真实产物复验：16 个许可文件、V8/rusty_v8/ICU 原文在包内、HTML 实体 0、`PROVIDED "AS IS"` 逐字 233 处、rc5 的模板注释泄漏已消除（KD-017） |
 | A7 干净环境 smoke test | ✅ | 独立 verify job，含 `--version`、bundled rg、arg0/sandbox |
 | A8 仓库 public | ⏸ | 待用户确认（D-5 授权门） |
 | A9 两条正式 Release | ⏸ | 待 A8 |
 | A10 文档同步 | 🔶 | WBS / CLAUDE.md / AGENTS.md / WBS-COMPLETED 已更新；README 安装节待 A9 后回写 |
 | A11 产品语义只动两处窄例外 | ✅ | `Cargo.toml`/`Cargo.lock`/`eval/` 零改动 |
 | A12 冻结断言成立 | ✅ | `binary_freeze._validate_workspace_manifests()` 两条产品线均 OK |
-| **A13 默认不提示上游更新** | 🔶 | KD-016 已修复：`doctor` 的上游探测改为与 TUI 启动提示同一开关门控，并补了 3 个确定性单元测试 + CI Gate 3c。**待 CI 实跑确认** |
+| **A13 默认不提示上游更新** | ✅ | KD-016 已修复并经 CI 实跑：两条产品线 Gate 3c 各 `5 passed`（按测试名确认真的执行）。另加了发布物级断言（`doctor --json`），已用 rc5 真实产物确认该断言会红、用修复后结构确认会绿 |
 | A14 bwrap 篡改测试 | ✅ | 真实发布产物上命中具体错误，expected 值与构建期摘要一致 |
 
-**A13 与 A6 的代码/脚本改动已落地，但本地重型构建被看门狗按 365GB 主动停线拦下
-（`rondo-multi` 目标目录单独占 296.8GB），因此这两项由 CI 与 rc6 实跑作为验收证据，
-在此之前不得表述为"已通过"。**
+**本机重型构建被看门狗按 365GB 主动停线拦下（`rondo-multi` 目标目录单独占 296.8GB），
+未删除任何缓存；Rust 侧的编译与测试证据全部来自 CI 与两条 RC 实跑。**
+
+**两条 RC 均全绿（2026-09-02）**：`multi-v0.1.0-rc6` 与 `local-v0.1.0-rc1` 四个 job 各自通过。
+`local-v*` 轨为首次实跑，一次通过。两条 release 均 `prerelease=true`/`draft=false`/2 资产，
+且 `releases/latest` 返回 404（KD-018 成立）。
 
 ### 交接边界
 

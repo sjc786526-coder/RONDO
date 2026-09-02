@@ -399,3 +399,64 @@ project=365130043392  (主动停线 365GB)
 
 **注意**：本次 `local-v0.1.0-rc1` 是在该修复之前打的 tag，它发布的 notes 仍是错的；
 修复已在 main 上，正式发布或后续 RC 才会带上。
+
+## 整改后的实跑验证（2026-09-02）
+
+### CI（run 33588375300，两条产品线全绿）
+
+新增的 Gate 3c 确认**真的在跑**，不是零匹配空过：
+
+```
+running 5 tests
+test doctor::updates::tests::probe_is_skipped_for_every_install_method_when_update_checks_are_off ... ok
+test doctor::updates::tests::disabled_probe_states_the_reason_and_stays_ok ... ok
+test doctor::updates::tests::failed_probe_degrades_the_row_to_a_warning ... ok
+test result: ok. 5 passed; 0 failed; ... 234 filtered out
+```
+
+Local 与 Multi 各 5 passed。CI 全程 15m51s。
+
+### 两条 RC 均全绿
+
+| | tag | 结果 |
+|---|---|---|
+| Multi | `multi-v0.1.0-rc6` | validate → build → 干净 runner verify → publish 全绿 |
+| Local | `local-v0.1.0-rc1` | **首次实跑该轨，一次通过**，四个 job 全绿 |
+
+`local-v*` 轨此前从未跑过，这次证明它可用：tag 正确解析为 `mydev` + `rondo` 变体，
+产出 `rondo-0.1.0-rc1-x86_64-unknown-linux-musl.tar.gz`（149,322,955 字节）。
+
+两条 release 的 `prerelease=true`、`draft=false`、各 2 个资产；
+`repos/.../releases/latest` 返回 **404**——KD-018 成立，两条产品线都没占用仓库级 latest 指针。
+
+### 许可闭包在真实产物上复验（rc6）
+
+下载 rc6 归档，`sha256sum -c` 通过，解包后：
+
+- 16 个许可文件齐全，V8/rusty_v8/ICU 原文均在包内
+- 三份 Cargo 闭包报告的 HTML 实体计数 **全部为 0**
+- `PROVIDED "AS IS"` 逐字出现 **233 次**，被转义的变体 **0 次**
+- rc5 里那条泄漏的 handlebars 注释**已消失**
+
+构建日志里 4 条 `carries its license text` 断言两条产品线都通过。
+
+### 一次自己差点骗自己的记录
+
+第一次复验时写成 `if grep -c ... | head -3; then`。管道的退出码取自 `head`，
+恒为 0，于是"检查"永远报告有问题；更早一次 `gh release download` 失败被
+`2>&1 >/dev/null` 吞掉，后面的 grep 对着不存在的目录跑，反而输出了"none (fixed)"这种
+**假阳性通过**。两次都重写后才拿到上面的真实数字。
+和 rc3 那次 `set -e` 吞诊断是同一类错误：**验证脚本本身也需要被验证**。
+
+### 尚未被实跑覆盖的两处（如实说明）
+
+以下两个提交晚于上面两条 RC 的 tag，因此**没有**被这轮 RC 覆盖：
+
+1. `fix(103)` release notes 按产品线分支——`local-v0.1.0-rc1` 已发布的 notes 里
+   仍然带着"判官后端不在包内 / Publication Critic"一节（已在线确认，正文第 63–65 行）。
+2. `test(103)` verify job 的 A13 断言（`doctor --json` 读 `updates.status`）。
+
+两者都已在本机用真实数据验证：notes 对两条产品线各渲染一遍确认正确；
+A13 断言拿 rc5 真实产物（读出 `0.152.1`）确认会红、拿修复后的结构确认会绿。
+正式发布前建议再跑一轮 RC 把这两处也覆盖上——verify job 在 publish 之前执行，
+所以即使直接发正式版，A13 断言失败也会挡在发布之前。
