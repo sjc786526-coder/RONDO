@@ -384,3 +384,18 @@ project=365130043392  (主动停线 365GB)
 `doc/development-environment.md:22` 的 Windows 用户名已替换为 `<Windows 用户名>`。
 复审正确指出这**只清理当前文件**：该字符串已存在于早期提交，转 public 后旧提交仍可查到。
 两个邮箱同理。是否接受这部分历史永久公开，仍是用户的决定，不是可以由脱敏 diff 解决的问题。
+
+### 八、Release notes 会给 RONDO Local 写上它没有的功能
+
+趁两条 RC 在跑，复查了从未实跑过的 `local-v*` 轨。构建侧没问题
+（`mydev` 有 `rondo` 变体，`cli`/`code-mode-host`/`bwrap` 三个 crate 齐全），
+但 `compose-release-notes.sh` 无条件输出"判官后端不在包内 / Publication Critic"一节——
+而 `publication-critic` crate **只存在于 `multidev`**。
+也就是说 RONDO Local 的 Release notes 会描述一个它根本没有的子系统。
+
+这类 bug RC 抓不到：它不会让任何 job 变红，只是把错的文字发出去。
+已改为按 `PRODUCT_DIR` 分支，Local 换成对应的"本地审批模型不在包内"（方向 2，未采用）。
+本地对两条产品线各渲染一遍确认无误。
+
+**注意**：本次 `local-v0.1.0-rc1` 是在该修复之前打的 tag，它发布的 notes 仍是错的；
+修复已在 main 上，正式发布或后续 RC 才会带上。

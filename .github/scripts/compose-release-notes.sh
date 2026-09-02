@@ -94,9 +94,28 @@ fi
   printf '**不要**把 `bin/%s` 单独拷出来——附属组件是按包内相对路径解析的。\n\n' "$VARIANT"
   printf '校验：`sha256sum -c SHA256SUMS`\n\n'
 
-  printf '### 判官后端不在包内\n\n'
-  printf 'Publication Critic 的打分服务是独立二进制，**不随本 Release 分发**，需要自行从源码构建。\n'
-  printf '本地后端依赖未分发的模型权重与推理运行时，云端后端需要你自备凭据。详见 README。\n\n'
+  # The two product lines have different experimental subsystems, and neither
+  # exists in the other tree: `publication-critic` is only under multidev/, and
+  # the Guardian approval model is a RONDO Local topic. Emitting the wrong one
+  # would describe a feature the package does not contain.
+  case "$PRODUCT_DIR" in
+    multidev)
+      printf '### 判官后端不在包内\n\n'
+      printf 'Publication Critic 的打分服务是独立二进制，**不随本 Release 分发**，需要自行从源码构建。\n'
+      printf '本地后端依赖未分发的模型权重与推理运行时，云端后端需要你自备凭据。详见 README。\n\n'
+      ;;
+    mydev)
+      printf '### 本地审批模型不在包内\n\n'
+      printf '可插拔的本地推理审批模型**不随本 Release 分发**，也不是下载即用：\n'
+      printf '它依赖未随仓库分发的模型权重与本地推理运行时，需要你自行准备并通过\n'
+      printf 'OpenAI-compatible 接口接入。该方向的结论是**保留为实验、未采用**，\n'
+      printf '产品默认值不变。详见 README 的"诚实的结果"。\n\n'
+      ;;
+    *)
+      echo "unknown product dir for release notes: ${PRODUCT_DIR}" >&2
+      exit 1
+      ;;
+  esac
 
   printf '### bubblewrap 源码与许可\n\n'
   printf '包内 `codex-resources/bwrap` 是把 `%s/codex-rs/vendor/bubblewrap/`\n' "$PRODUCT_DIR"
