@@ -1,6 +1,6 @@
 # RONDO 长程规划（WBS）
 
-最后更新：2026-09-01（方向 3 Publication Critic 三期在 Plan 097 双 backend 工程闭环后正式进入质量重构路线；原定串行为
+最后更新：2026-09-02（方向 3 Publication Critic 三期在 Plan 097 双 backend 工程闭环后正式进入质量重构路线；原定串行为
 “任务合同重构 → v8 后继数据改造与有限扩充 → 一次主方案训练 → 模型资格验收与横评”。Plan 098 已为前两个工作包建立同一两阶段
 ExecPlan；Plan 098 的任务合同、v9/v10/qualification、formal decoder、pair-aware margin selection 与 direct-dependency identity 已全部
 通过最终复验并冻结完成。工作包三 Plan 099 已完成阶段 B：commissioning 通过，clean formal 固定完成 16 次 update 和
@@ -11,7 +11,8 @@ Plan 097 的 `M3_D_DUAL_BACKEND_ENGINEERING_PASS / FINAL_REVIEW_ACCEPTED / INTEG
 `CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH`、Plan 095 最终验收、Plan 094 有效负向研究终态和 Plan 093 Linux 全 workspace 正确性基线
 均保持有效；Plan 100 独立诊断以 `TASK_EXECUTABILITY_INSUFFICIENT / FINAL_REVIEW_ACCEPTED / INTEGRATED / PUSHED` 收口。
 Plan 101 对比测评已完成，据此把五维 hard decision 固定为云端判官接缝的后续方向、单标量云端接缝标注废弃，
-Plan 102 五维云端判官实验性工程接入已以 `ENGINEERING_SEAM_PASS` 完成并合入推送，方向 3 当前无 active 工作包；该方向不自动解锁产品质量、默认启用或生产）
+Plan 102 五维云端判官实验性工程接入已以 `ENGINEERING_SEAM_PASS` 完成并合入推送，方向 3 当前无 active 工作包；该方向不自动解锁产品质量、默认启用或生产。
+跨方向的 Plan 103 发布工程已完成并冻结，仓库转 public 且两条产品线各发首个正式版；全部云端资源已清空，见下方「云端资源终态」）
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段指针、跨方向关系、
 稳定工程边界和授权门；已完成成果与验收见 `doc/WBS-COMPLETED.md`，单次任务合同见 `plan/`，执行细节见
@@ -36,6 +37,18 @@ Plan 102 五维云端判官实验性工程接入已以 `ENGINEERING_SEAM_PASS` �
 方向 3 当前 Linux 正确性基线由 Plan 093 建立：default features、standard local Nextest、checksum-verified V8 的完整 workspace
 为 `14660/14660` passed、0 failure/error/timeout，另有 1/1 setup passed；24 个 skip 不计 passed。正式证据和精确边界见
 `doc/WBS/multi-agent-trusted-evidence.md` 与 `doc/WBS-COMPLETED.md`。
+
+### 云端资源终态
+
+2026-09-02 实测：RunPod 账户 **0 Pod、0 网络卷**，compute 与存储费率均为 `$0/h`；最后一笔存储计费落在
+2026-08-31，此后账单为 0。**本项目当前不持有任何云端资源，也没有持续费用。**
+
+历次任务记录中由用户决定保留的网络卷 `mwemzrn33y`（Plan 082 → 087 → 090 → 094 → 099 依次使用并扩容至 100GB）
+**已不存在**。因此只存在于该卷上的大型 checkpoint 与权重不再可恢复；本地保留的是各任务当时已逐对象校验回传的证据。
+下文各 Plan 条目中"卷保留"一类表述均指该任务完成时点的历史事实，不是当前状态。
+
+这不改变任何已冻结的任务终态与结论——那些结论由已回传并校验的证据支撑，不依赖卷上权重。
+任何重建云资源、恢复训练或重跑历史轨迹都须另立任务并重新授权。
 
 ### 发布工程（跨方向，已完成）
 
@@ -161,8 +174,8 @@ README 的下载链接是固定 tag，发新版本时需同步更新。
 Plan 100 的负向诊断本身不自动启动后续路线。Plan 081 已取得 `LOCAL_TRAINING_READINESS_PASS`；三期 Plan 082 已获用户付费批准并完成
 真实 commissioning、正式 freeze、干净 formal 和新进程恢复，终态为 `VALID_NO_IMPROVEMENT`。保留 Pod 的 GPU 专项验收已经通过，
 唯一训练 Pod 已释放并确认持续 compute 费率为 0；保留卷所在 `US-TX-3` 不提供 S3 API，故按用户一次性授权使用单个 transfer Pod
-只读回传冻结 39 对象。全部对象完成本地 bytes/SHA-256 校验后 transfer Pod 已删除；最终验收通过。用户本人随后明确决定继续保留
-网络卷 `mwemzrn33y`，该卷当前仍未删除，状态为 `FINAL_REVIEW_ACCEPTED / ZERO_POD / VOLUME_RETAINED_BY_USER_DECISION`。
+只读回传冻结 39 对象。全部对象完成本地 bytes/SHA-256 校验后 transfer Pod 已删除；最终验收通过。用户本人随后明确决定在当时继续保留
+网络卷 `mwemzrn33y`，Plan 082 终态为 `FINAL_REVIEW_ACCEPTED / ZERO_POD / VOLUME_RETAINED_BY_USER_DECISION`。
 Plan 087 已完成 exact BF16 1.7B 的 A–O 15 条自适应路线并保留 Route O。Plan 090 随后冻结该九张量/`33,558,784` 原参数配方，
 从 exact base 在独立空间完成两次 clean BF16 execution；两次均通过整体 rubric，取得相同的 raw Boundary `+0.00390625`、projected
 Boundary `+0.00086113`、projected Within-PASS `+0.00013894` 与 ROC AUC `+0.00140056`，第二候选经不同进程恢复。正式路径没有
@@ -170,12 +183,12 @@ shuffle、有效 dropout 或其它 seed-sensitive consumer，因此该结果只�
 `seed_sensitive_stability_tested=false`，不证明随机 seed 稳定或独立 cohort 泛化。条件性完整 FP32 参数训练对照已执行，raw Boundary
 `-0.00659415`、projected Boundary `+0.00620638`，只支持精度路径敏感性诊断，不构成严格 update-only 因果反证。
 Plan 090 保守费用 `$0.71`，低于 `$6` 硬上限；任务 Pod 已删除并实时复核 0 Pod、compute `$0/h`。只保留恢复合格的第二 BF16
-checkpoint 于既有 57GB 卷 `mwemzrn33y`，卷未扩容或删除并继续按 `$0.006/h` 计费。Plan 087/090 的剩余预算与外部授权均不向后续转移。
+checkpoint 于当时既有的 57GB 卷 `mwemzrn33y`；Plan 090 期间未扩容或删除该卷，按 `$0.006/h` 计费。Plan 087/090 的剩余预算与外部授权均不向后续转移。
 Plan 090 最终独立验收已通过，其授权已经关闭。Plan 094 阶段 B 已在唯一 Secure US-TX-3 L40S 上完成 commissioning 和 clean formal；
 Plan 090 guarded import 因历史 cursor 不兼容按合同拒绝，正式轮使用预冻结 exact-base fallback 干净重建。四个 checkpoint-first 观察点均无
 material/strict/operating event，step 4 按预冻结平台规则形成 `ROUTE_O_VALID_NO_MATERIAL_IMPROVEMENT`；step 2/3 均由新进程恢复并继续。
 三份保留 checkpoint 已在挂载卷上深读资格化，小型证据已回传，大型权重保留在 70GB 既有卷。预释放审查通过后，唯一 Pod 已精确 stop/delete；
-账户 0 Pod、compute `$0/h` 与本地 finalizer 均完成，账户只剩卷费 `$0.007/h`。该任务仍只使用开发 validation，不回答独立 cohort 或产品资格；
+账户 0 Pod、compute `$0/h` 与本地 finalizer 均完成，Plan 094 完成时账户只剩卷费 `$0.007/h`。该任务仍只使用开发 validation，不回答独立 cohort 或产品资格；
 M3-D 的质量/产品价值门继续锁定。
 Plan 095 已完成并进入主线：复用 Plan 055/057/068 服务、typed verdict 与发布接缝，增加显式选择、default-off 的云端 reference scorer，
 合成 packet 的真实 API commissioning/clean smoke、全部窄修与最终验收均通过。Plan 096 已在保持产品默认、local worker、Team State 与
@@ -240,11 +253,11 @@ OFF/fallback/cancel 和资源终态闭合；累计保守费用 `21.4197186 RMB /
   Plan 082 已从 exact base 完成冻结的 score-head 四步正式训练；boundary pair mean margin 从 `0.8252560622` 逐步轻微回落至
   `0.8252007961`，而 ROC AUC、strict win rate 与 balanced accuracy 不变，故诚实形成 `VALID_NO_IMPROVEMENT`。step 2 已由新进程
   恢复并继续更新，step 2 与 step 4 两份完整 checkpoint、正式/commissioning 原始 observations、输入和日志在 Plan 082 完成时保留于
-  40GB 任务卷，任务根实际占用约 31.21GB；Plan 087 后续将同一卷扩至 57GB 并保留候选。当前卷按用户决定继续保留，不删除大 checkpoint；
+  40GB 任务卷，任务根实际占用约 31.21GB；Plan 087 后续将同一卷扩至 57GB 并保留候选。该卷当时按用户决定继续保留，不删除大 checkpoint；
   任何再次扩容须由新任务重新授权。
   冻结 bootstrap 的 39 个正式对象也已完整回传到项目 ignored 目录并逐对象验证；正式对象共 `13,797,142,360` bytes，加 bootstrap 后
-  `13,797,156,884` bytes。最终验收确认 formal/retention/receipt 与本地 exact-tree 闭合；transfer Pod 已删除并确认 0 Pod，网络卷继续
-  保留；用户本人已经明确决定继续保留，卷 `mwemzrn33y` 当前仍未删除。
+  `13,797,156,884` bytes。最终验收确认 formal/retention/receipt 与本地 exact-tree 闭合；transfer Pod 已删除并确认 0 Pod；
+  用户本人在当时明确决定继续保留卷 `mwemzrn33y`。
   Plan 082 训练活动受 12 小时/15 USD 上限约束，训练与后续资源保留/无 Pod 回传费用分账报告，总累计达到 10 USD 时非阻断告警；
   详细结果与后续边界见三期子 WBS。
 - Plan 087 接续 Plan 082 的 `VALID_NO_IMPROVEMENT`，保持 exact 1.7B、冻结 v8/pair/input、unseen 隔离和非 PEFT/非量化边界，
@@ -326,7 +339,8 @@ RONDO/
 
 - 重型 Cargo 构建与测试必须经仓库根共享 `scripts/with-build-lock.sh` 或已接入它的 `just` 配方。受支持 Unix 入口按产品把
   主工作区和 linked worktree 路由到物理仓库根的 `.codex/cargo-target/rondo-local` 或 `rondo-multi`；两产品叶子隔离，
-  `CARGO_TARGET_DIR` 必须位于项目根内并受看门狗监督。当前只保留已建立基线的 `rondo-multi`，`rondo-local` 当前不存在。
+  `CARGO_TARGET_DIR` 必须位于项目根内并受看门狗监督。两个产品叶子当前都存在：`rondo-multi` 持有 Plan 093 全 workspace 基线，
+  `rondo-local` 也已建立构建缓存。两者都是可重建的构建产物且体积很大，是否清理由用户按当时的宿主容量决定。
 - 日常 Cargo 默认 `jobs=2`、GNU/Linux LLD 单线程、机器级 rustc 槽为 2；要求尽量一次跑完的完整 workspace 使用产品 Justfile 的
   `test-with-codex-v8-conservative`（`jobs=1`、LLD 单线程）。两套产品的重型构建、Docker、真实本地模型加载/推理仍全局串行。
   除具体 ExecPlan 已获得一次性授权外，后续重型批次不自动排队，须由用户逐批明确批准并人工决定运行时机；历史授权不转移。
@@ -370,11 +384,12 @@ RONDO/
 `AGENTS.md` 为准。
 
 Plan 097 的一次性本地模型、DeepSeek scorer、正常 Producer 与 30 RMB 真实 API 授权已随最终验收关闭，余额不转移。用户已批准并完成本地
-main 合并和随 Plan 098 主线更新推送；分支归档或 worktree 删除继续等待用户批准。任何后续真实模型/API、质量测量、产品价值验证或生产动作都须
+main 合并和随 Plan 098 主线更新推送；相关 worktree 已删除、分支已归档为 `zz-done/`。任何后续真实模型/API、质量测量、产品价值验证或生产动作都须
 服从对应新任务授权。
 Plan 099 阶段 A 已通过独立验收，阶段 B 唯一冻结主方案已完成 commissioning 与 clean formal 并形成有效训练 `NO-GO`。用户随后将资源收口
-改为轻量 evidence-first：核心证据完整回传后立即释放 compute，不为 queue 审查保留 GPU。当前全部任务 Pod 已删除、compute `$0/h`，100GB
-既有卷保留；有效 `NO-GO` 接受后 Plan 099 外部动作授权关闭，任何后续 GPU、恢复、新路线、资格测试或卷变更都须另立任务并重新授权。
+改为轻量 evidence-first：核心证据完整回传后立即释放 compute，不为 queue 审查保留 GPU。Plan 099 完成时全部任务 Pod 已删除、
+compute `$0/h`，100GB 既有卷保留（该卷此后已不存在，见「云端资源终态」）；有效 `NO-GO` 接受后 Plan 099 外部动作授权关闭，
+任何后续 GPU、恢复、新路线、资格测试或卷变更都须另立任务并重新授权。
 工作包四的真实推理、冻结测试和付费横评仍需再次独立授权。
 Plan 100 阶段 B 已在独立 20 RMB 硬上限内完成 B1 commissioning 与 B2 clean formal，唯一使用 `deepseek-v4-flash`，task-wide
 `0.0396094 RMB` 已结算且停止 API；最终验收后本任务 API 授权关闭，剩余预算不转移。qualification/v9 test、训练、GPU/RunPod/Docker、

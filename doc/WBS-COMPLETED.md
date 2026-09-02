@@ -2708,6 +2708,8 @@ INTEGRATED / NOT_PUSHED`。clean formal source 为 `0ae9623`，执行者交付�
 
 ## Plan 103 · 发布工程与 CI/CD 流水线（阶段 A–C 完成，2026-09-01）
 
+> 阶段 D–E（转 public 与两条正式版发布）的收口见下一条「Plan 103 · 阶段 D–E」。
+
 为两条产品线建立可重复的发布能力。**只交付发布工程本身**，不推进任何方向的功能、性能或质量资格，
 不解锁方向 3 工作包四。转 public 与正式 `v0.1.0` 仍待用户确认，不在本条范围内。
 
@@ -2747,4 +2749,50 @@ INTEGRATED / NOT_PUSHED`。clean formal source 为 `0ae9623`，执行者交付�
   bwrap 摘要顺序都是一次通过），而是 runner 磁盘、cargo-about 的 feature gate、
   以及两处我自己写的测试/校验代码。
 - 合同见 `plan/103-release-engineering-and-cicd-execplan.md`，执行见
+  `agent_log/2026-09-01-plan103-release-engineering-execution.md`。
+
+## Plan 103 · 阶段 D–E：转 public 与首次正式发布（完成并冻结，2026-09-02）
+
+Plan 103 的收口。仓库转为公开，两条产品线各发出首个正式版本，A8/A9/A13 全部达成，
+**Plan 103 到此完整完成并冻结**。这一条同样只交付发布工程能力，不推进任何方向的功能、
+性能或质量资格，不解锁方向 3 工作包四。
+
+- **阶段 D 转 public**：用户 2026-09-02 批复改为"private 下先发正式版并验证，再转 public"，
+  因此不再补跑 RC。仓库随后转为 **PUBLIC**，并以**未认证访问**对两个正式版复验一次：
+  公网 `SHA256SUMS` 与本机留存产物**逐位一致**。
+- **阶段 E 两条正式版**：
+  - `local-v0.1.0`（tag → `3784994f`，2026-09-02T09:55:33Z）
+  - `multi-v0.1.0`（tag → `ce63cc1d`，2026-09-02T12:20:08Z）
+
+  两者**不在同一 commit**——Multi 必须包含 KD-018 的 workflow 修复，故位于新 SHA，已发布的
+  `local-v0.1.0` tag 未移动。改为要求**产品源码一致**，打 tag 前已用 `git diff --quiet
+  local-v0.1.0..HEAD -- mydev multidev` 确认为空。
+- **`local-v0.1.0` 的 publish job 记录为红，这是已知且保留的**：失败发生在 Release **创建之后**
+  那条基于错误 GitHub 语义的 latest 断言上，**产物本身无缺陷**（build / 19 项许可检查 / A13 / A14 /
+  干净 runner 验证全过）。按用户批复保留该红色记录，不为美化而重建 Release。`multi-v0.1.0`
+  的四个 job 全绿。看 Actions 历史时不要把这条红误判为发布物有问题。
+- **KD-018 与 `latest` 指针**：GitHub 每仓库只有一个 `latest`，而本仓库从同一命名空间发两条独立产品线。
+  第一版整改（两轨都 `--latest=false` + PATCH 收回）建立在错误的平台语义假设上，已被 `local-v0.1.0`
+  实测推翻——平台不允许**唯一**的非 prerelease 版本退出该指针。最终方案（用户批准的方案 B）：
+  `--latest=false` 只用在它确实生效的 prerelease 上并保留硬断言（**RC 绝不占用 `latest`**）；
+  正式版不传该标志、只记录不判定。该指针被重新定义为**展示状态而非版本权威**，
+  两条产品线的对外权威入口是 README 里各自的**固定 tag 链接**。
+- **A13 达成（KD-016 修复）**：`codex doctor` 的上游探测已门控到与 TUI 启动提示同一开关
+  `check_for_update_on_startup`。CI Gate 3c 两条产品线各 `5 passed`（按测试名确认真的执行），
+  另加发布物级断言（`doctor --json`），并已用 rc5 真实产物确认该断言会红、用修复后结构确认会绿。
+- **发布物复验**：两个正式版均已下载复验——归档校验和、入口名、17 个第三方许可文件、
+  产品线专属 Release notes 全部正确。产物为 `x86_64-unknown-linux-musl` 完整产品包 +
+  第三方许可材料（含 Cargo 依赖闭包与 V8/ICU 原生闭包说明）+ `SHA256SUMS`，
+  发布前另在独立干净 runner 上验证。首发只发这一个目标（KD-009）。
+- **RC 清理**：RC 阶段的 4 个 Release 对象已删除；**7 个 RC tag 与全部 Actions 记录保留**，
+  作为流水线建设过程的证据。
+- **产品侧只有两处已批准窄例外**：E-X1（打包变体新增条目）、E-X2（`check_for_update_on_startup`
+  默认改 `false` 并把 `doctor` 探测门控到同一开关）。二者均不改动 workspace 版本号、crate 名与
+  `[[bin]]` 名，冻结二进制身份与公平对比设施不变。
+- **使用与维护文档**：`doc/ci-pipeline.md` 与 `doc/cd-release-pipeline.md`，两篇都以不变量清单开头
+  （CD 篇按"静默失效 / 延迟间接失败 / 明确失败"三档标注违反后果），改流水线前必读。
+  两个 workflow 文件顶部也加了指向它们的强制阅读提示。
+- **后续发布**：走同一条流水线，打 `local-v*` / `multi-v*` tag 即可；README 的下载链接是固定 tag，
+  发新版本时需同步更新。发布节奏、版本策略与是否补平台只在 `doc/WBS.md` 的发布工程条目维护。
+- 合同（已冻结）见 `plan/103-release-engineering-and-cicd-execplan.md`，执行见
   `agent_log/2026-09-01-plan103-release-engineering-execution.md`。

@@ -1,6 +1,6 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
-最后更新：2026-09-01 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
+最后更新：2026-09-02 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
 状态：**第一期、第二期、第四期已完成；Publication Critic 三期 Plan 097 已完成并闭合双 backend 工程 E2E 与可替换接缝。质量重构原定串行为
 “任务合同重构 → v8 后继数据改造与有限扩充 → 一次主方案训练 → 模型资格验收与横评”；前三个工作包已执行，第四个因无候选未解锁。Plan 098 已把
 前两个工作包规划为严格串行的两个阶段；Plan 098 的 v2/v9/v10/qualification 主体与此前方向性整改保留，formal
@@ -268,8 +268,8 @@ checkpoint 等其他大型资产留在网络卷；核心任务提交并经审查
 
 **当前结果**：阶段 A 已通过独立验收；阶段 B commissioning 与从 exact base/空 namespace 开始的 16-update clean formal 均已完成，step 8
 经 fresh process 恢复复现。正式轨迹有效但未达到预冻结开发准入门，冻结为 `VALID_FORMAL_NO_GO`，没有 best checkpoint 或 candidate。
-两个任务 Pod 均已删除并复核 0 Pod / compute `$0/h`；100GB 网络卷 `mwemzrn33y` 保留 step 8/16 checkpoint 与大型环境资产。Plan 099
-外部动作授权关闭，`NO_FURTHER_COMPUTE`。
+两个任务 Pod 均已删除并复核 0 Pod / compute `$0/h`；100GB 网络卷 `mwemzrn33y` 当时保留 step 8/16 checkpoint 与大型环境资产
+（该卷此后已不存在，见 `doc/WBS.md` 的「云端资源终态」）。Plan 099 外部动作授权关闭，`NO_FURTHER_COMPUTE`。
 
 #### Plan 100：DS-V4-Flash 五维任务合同诊断（最终验收通过）
 
@@ -604,7 +604,7 @@ A40 48GB 首选、L40S 48GB 备选，实际训练活动不超过 12 小时/15 US
 需要 GPU/Pod 才能关闭的高/中等级 correctness/functionality finding；唯一 Pod 已释放并确认 0 Pod、持续 compute 费率为 0，任务卷在
 Plan 082 完成时为 40GB。`US-TX-3` 不在 provider 当前 S3 API 支持列表，故按用户一次性授权使用一个 Secure RTX 4090 transfer Pod 只读回传；冻结
 bootstrap 的 39 对象已在本地完成逐对象 bytes/SHA-256、exact-tree 与权限校验。transfer Pod 随后删除并确认 0 Pod/compute 止费；
-最终验收通过。Plan 087 后续将同一卷扩至 57GB 并保留候选；用户本人明确决定继续保留网络卷 `mwemzrn33y`，该卷当前仍未删除，状态为
+最终验收通过。Plan 087 后续将同一卷扩至 57GB 并保留候选；用户本人在当时明确决定继续保留网络卷 `mwemzrn33y`，Plan 082 终态为
 `FINAL_REVIEW_ACCEPTED / VOLUME_RETAINED_BY_USER_DECISION`。
 
 **目标与边界**：付费阶段在正式创建/启动前同时刷新 A40 48GB 与 L40S 48GB 的库存、价格和网络卷兼容性；使用一张 A40（首选）
@@ -612,8 +612,8 @@ bootstrap 的 39 对象已在本地完成逐对象 bytes/SHA-256、exact-tree �
 训练活动不超过 12 小时、对应外部费用不超过 15 USD；训练完成后的 GPU 审查等待、无 Pod 回传和删卷等待费用分开持续报告，任务总累计
 费用首次达到 10 USD 时非阻断告警。正式 Pod 保留到 GPU 专项审查关闭所有合理可预见的 Pod 依赖后立即释放；无需 GPU 的代码/交接/文档
 问题留到最终验收。大型资产不在 GPU 审查期回传，优先在 0 Pod 且不占用共享磁盘和宿主容量的安全窗口通过任务网络卷
-S3-compatible API manifest 驱动续传并校验；本轮因 US-TX-3 不受支持，按用户一次性授权使用最小 transfer Pod。网络卷继续保留，
-删除须用户本人另行明确人工批准。正式终态为
+S3-compatible API manifest 驱动续传并校验；本轮因 US-TX-3 不受支持，按用户一次性授权使用最小 transfer Pod。网络卷在本任务范围内
+继续保留，删除须用户本人另行明确人工批准。正式终态为
 `TRAINING_IMPROVEMENT_FOUND`、`VALID_NO_IMPROVEMENT`
 或诚实的 `INCONCLUSIVE`；前两个都完成研究目标，均不直接授予产品资格或解锁 M3-D。
 
@@ -625,7 +625,8 @@ S3-compatible API manifest 驱动续传并校验；本轮因 US-TX-3 不受支�
 以一次 full-cohort 原参数更新取得 raw boundary margin `+0.00390625`、projected boundary `+0.00086113`、projected within-PASS
 `+0.00013894` 与 ROC AUC `+0.00140056`，关键 operating 指标未退化；精确 checkpoint 已由不同 OS 进程 no-update 恢复。
 任务终态为 `PROMISING_CANDIDATE_RETAINED / FINAL_REVIEW_ACCEPTED / ZERO_POD`，保守费用 `$3.009`，低于冻结的
-`$8.9852646939` 上限。全部 Pod 已删除并确认 compute `$0/h`；57GB 卷 `mwemzrn33y` 保留，完整 checkpoint/权重仍只在卷上。
+`$8.9852646939` 上限。全部 Pod 已删除并确认 compute `$0/h`；57GB 卷 `mwemzrn33y` 当时保留，完整 checkpoint/权重只在卷上
+（该卷此后已不存在，这些未回传的权重不再可恢复）。
 
 **边界与交接**：Route O 是任务合同内的有潜力研究候选，不是效果可靠结论。15 条路线共用同一 validation 自适应选择，且只有一次更新、
 没有 clean reproduction；AUC 增量只对应一个跨类 ordering，raw within-PASS 仍轻微回退，strict/threshold 指标不变。后续须另行立项、
@@ -663,7 +664,7 @@ Boundary `+0.00620638`，未通过同一 rubric；该单条完整精度路径对
 看到正式结果前冻结；训练强度、观察/checkpoint 密度和调度不在 WBS 锁死。
 
 **终态与授权**：实际终态为 `ROUTE_O_VALID_NO_MATERIAL_IMPROVEMENT / ZERO_POD / VOLUME_RETAINED / FINAL_REVIEW_ACCEPTED`，完成研究目标。
-阶段 B 外部动作授权已随全部任务 Pod释放而关闭，剩余预算不转移；网络卷继续保留。后续训练、扩容/新建/删除云资源、独立 cohort、unseen、
+阶段 B 外部动作授权已随全部任务 Pod释放而关闭，剩余预算不转移；网络卷在任务完成时保留。后续训练、扩容/新建/删除云资源、独立 cohort、unseen、
 发布或产品动作均须另立任务并重新授权，本任务不授予产品资格或 M3-D 解锁。
 
 #### Plan 095：云端参考 Scorer 后端接入（最终验收通过，已集成本地 main）
@@ -773,10 +774,11 @@ local/cloud 各 3/3 fixture 的 `PASS + REWRITE`、正常 Producer 两次重写/
   完成时保留的网络卷按用户提供的最新查询已返回 404、当前不再作为可用或持续计费资源。
 - Plan 081 已在独立 worktree 内完成 Publication Critic Python/训练合同与三期 WBS，不运行 Cargo、Docker、真实模型/GPU或云计算，
   不写/清理共享 Cargo target，也不以 Plan 079 卷为前置。Plan 082 已完成真实正式轮、GPU 专项验收和大型资产交接，训练 Pod 与一次性
-  transfer Pod 均已释放并确认 compute 止费；最终验收已通过，用户本人决定继续保留网络卷 `mwemzrn33y`，该卷当前仍未删除。
-- Plan 087/090 均已结束并释放全部 Pod，当前不占本地 Cargo build lock、Docker、真实本地模型或云 compute。用户决定保留的
-  `mwemzrn33y` 网络卷已由 Plan 099 因 quota 扩到 100GB并继续计费，未经授权不得删除；Plan 082/087/090/094 既有根保持只读，Plan 099
-  step 8/16 checkpoint 与环境资产按终态保留。
+  transfer Pod 均已释放并确认 compute 止费；最终验收已通过，用户本人在当时决定继续保留网络卷 `mwemzrn33y`。
+- Plan 087/090 均已结束并释放全部 Pod，当前不占本地 Cargo build lock、Docker、真实本地模型或云 compute。用户当时决定保留的
+  `mwemzrn33y` 网络卷曾由 Plan 099 因 quota 扩到 100GB；**该卷此后已不存在**，见 `doc/WBS.md` 的「云端资源终态」。
+  Plan 082/087/090/094 既有根与 Plan 099 step 8/16 checkpoint 中未回传的部分随卷一并消失、不再可恢复；已逐对象校验回传的
+  证据保留在本地 ignored 目录。
   真实本地模型、Docker 与重型 Cargo 仍按根 `AGENTS.md` 全局串行。
 - Plan 095 未使用 GPU、RunPod、真实本地模型、Docker 或既有训练卷，只用付费 API 与本地 Cargo；Cargo 全部从 095 worktree 经正式入口
   复用主物理根 `.codex/cargo-target/rondo-multi`，未在 worktree 另建 target。
@@ -889,10 +891,10 @@ local/cloud 各 3/3 fixture 的 `PASS + REWRITE`、正常 Producer 两次重写/
   Docker、GPU、RunPod、unseen、训练、产品启用、远端发布或数据/权重上传。正式终态不是 `CLOUD_SCORER_QUALIFIED`，因此不授予任何质量或产品资格。
 - Plan 068、Plan 071 与 Plan 073 的一次性授权已随本地交接、真实推理、资格/联合横评、独立验收和 exact winner 卷删除全部完成，
   不向后续任务延伸。Plan 097 的 exact base/8GB GPU、DeepSeek scorer、正常 Producer 与 30 RMB 真实 API 授权也已随最终验收关闭，余额不转移；
-  用户已批准并完成本地 main 合并，相关主线随后随 Plan 098 集成一并推送；当前保留 097 分支、worktree 与既有证据，归档/worktree 删除等待
-  用户批准。后续真实模型/API、validation/unseen、产品价值或生产动作须服从对应新任务授权。
+  用户已批准并完成本地 main 合并，相关主线随后随 Plan 098 集成一并推送；097 分支已归档为 `zz-done/`、worktree 已删除，既有证据保留。
+  后续真实模型/API、validation/unseen、产品价值或生产动作须服从对应新任务授权。
 - Plan 099 阶段 A 与阶段 B 已执行完成，唯一主方案形成 `VALID_FORMAL_NO_GO`；两个任务 Pod 已删除并确认 compute `$0/h`，100GB 网络卷
-  `mwemzrn33y` 按用户决定保留。Plan 099 全部外部动作授权已关闭，不得沿用本任务重建 Pod、恢复训练、调参、追求正向结果、读取冻结测试或
+  `mwemzrn33y` 按用户决定在当时保留（此后已不存在）。Plan 099 全部外部动作授权已关闭，不得沿用本任务重建 Pod、恢复训练、调参、追求正向结果、读取冻结测试或
   变更网络卷。任何后续 GPU、恢复、新路线、资格测试或卷处置都须另立任务并重新授权。
 - Plan 100 使用独立授权与 20 RMB 账本，不继承 Plan 095/096/097/099 的余额、请求或数据权限。阶段 B 唯一使用 `deepseek-v4-flash`
   完成 B1/B2，task-wide 结算 `0.0396094 RMB` 后停止 API；外发只含 bounded public v10 packet、必要无监督 synthetic packet 与冻结指令。
