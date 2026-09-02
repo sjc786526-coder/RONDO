@@ -12,7 +12,9 @@ Plan 097 的 `M3_D_DUAL_BACKEND_ENGINEERING_PASS / FINAL_REVIEW_ACCEPTED / INTEG
 均保持有效；Plan 100 独立诊断以 `TASK_EXECUTABILITY_INSUFFICIENT / FINAL_REVIEW_ACCEPTED / INTEGRATED / PUSHED` 收口。
 Plan 101 对比测评已完成，据此把五维 hard decision 固定为云端判官接缝的后续方向、单标量云端接缝标注废弃，
 Plan 102 五维云端判官实验性工程接入已以 `ENGINEERING_SEAM_PASS` 完成并合入推送，方向 3 当前无 active 工作包；该方向不自动解锁产品质量、默认启用或生产。
-跨方向的 Plan 103 发布工程已完成并冻结，仓库转 public 且两条产品线各发首个正式版；全部云端资源已清空，见下方「云端资源终态」）
+跨方向的 Plan 103 发布工程已完成并冻结，仓库转 public 且两条产品线各发首个正式版；全部云端资源已清空，见下方「云端资源终态」。
+2026-09-02 另完成一次两条产品线的配套核对，并据此排定「先 Multi 收口、再 Local 收口」的两阶段路线，
+见下方「产品线配套补齐与逐条收口」；该路线未立项、未授权，只补配套呈现与文档，不解锁任何方向）
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段指针、跨方向关系、
 稳定工程边界和授权门；已完成成果与验收见 `doc/WBS-COMPLETED.md`，单次任务合同见 `plan/`，执行细节见
@@ -91,6 +93,109 @@ RC 阶段的 4 个 Release 对象已清理，7 个 RC tag 与全部 Actions 记�
 **后续发布**：新版本走同一条流水线，打 `local-v*` / `multi-v*` tag 即可。
 README 的下载链接是固定 tag，发新版本时需同步更新。
 
+### 产品线配套补齐与逐条收口（跨方向，待启动）
+
+2026-09-02 对两条产品线做了一次配套核对，方法是只读比对冻结上游快照 `codex-source-code/`，
+覆盖 `/status` 呈现、Guardian 配置字段、产品文档与 CI test 子集四处。
+**本次核查未发现新的功能实现缺口，确认存在以下配套呈现、文档与持续测试缺口**；
+核查范围不足以支撑"功能内核整体齐备"这类更强的判断。核对到的事实：
+
+- 两条线的 `tui/src/status/card.rs` 与上游逐字节相同；`codex-rs/config.md` 与 `docs/`（各 15 个文件）同样逐字节相同。
+- `/status` **已经**显示 reviewer 选择：`status_approval_label()` 在 `AskForApproval::OnRequest` 下按
+  `ApprovalsReviewer` 显示 `Approve for me` / `Ask for approval`。未呈现的是另外四个 override 字段——
+  两条线的 `Config` 都带 `guardian_model_config` / `guardian_model_provider_config` /
+  `guardian_reasoning_effort_config` / `guardian_evidence_dir`，配置了也无处可见。
+- 是否路由给 Guardian 由 `routes_approval_policy_to_guardian()` 按审批策略与 reviewer 共同决定；
+  实际 review 模型要到 Guardian session 创建时才按"显式配置 → catalog override → provider 默认"解析。
+  因此**状态面板只能反映已加载的配置，不能证明某次 review 运行时确实用了该模型**。
+- Multi 已有自建 TUI 面板（`/sessions`、`/session-control`，三个 default-off 的 `Stage::Experimental`
+  feature，带 UI 快照）与 `codex-rs/app-server/README.md` 的 v2 方法文档；Local 的 TUI 差异全部是测试基建，
+  面向用户的产品文档里 RONDO 自撰的只有根 `CHANGELOG.md`，`README.md`、`docs/` 与 `codex-rs/` 内均无
+  （`AGENTS.md` 是开发规则，不计入产品文档）。
+- CI 的 test 子集不含 `codex-tui`；Multi 的 `codex-team-state` 同样不在其中，尽管它已是该线 `codex-core`
+  的直接依赖（`multidev/codex-rs/core/Cargo.toml`），发布入口构建本来就会编译它。
+
+**本工作包只补配套呈现与文档，不新增产品能力、不改任何默认值、不解锁任何方向的工作包，
+也不产生质量或资格结论。**
+
+#### 路线：先 Multi 收口，再 Local 收口
+
+两条线串行推进；每条线在全量测试前必须另开独立的空间整理/释放任务，通过空间门后再以
+"全量测试 → 必要修复与复验 → 最终全量通过 → 功能冻结 → 发布"收尾。
+若全量测试发现问题，修复并完成定向复验后必须重跑同一全量门禁，直至最终发布候选通过；不得以修复前的结果
+冻结修复后的代码。串行而非并行的原因是重型 Cargo 全局互斥（见 4.3），且删除前一条线的构建缓存正是为
+后一条线的全量测试腾出宿主容量。
+
+```text
+阶段一 Multi：M-1 → M-2 → M-3
+              → [独立空间整理/释放任务：AI 只读盘点并给出释放建议；任何删除须用户明确授权]
+              → [禁用 incremental 的全 workspace 测试；失败则修复、定向复验并重跑，直至通过]
+              → 冻结 Multi 实质代码与功能 → 发 multi-v* → 删除 rondo-multi 构建缓存（仍须用户明确授权）
+        ↓
+阶段二 Local：L-1 → L-2
+              → [独立空间整理/释放任务：AI 只读盘点并给出释放建议；任何删除须用户明确授权]
+              → [禁用 incremental 的全 workspace 测试；失败则修复、定向复验并重跑，直至通过]
+              → 冻结 Local 实质代码与功能 → 发 local-v*
+```
+
+**全量前空间门**：每次全量测试前必须单独开启空间整理/释放任务。该任务默认只允许 AI 只读盘点项目专用
+构建缓存、项目占用与宿主容量，并针对明确对象给出预计可释放空间、影响、可恢复性和建议顺序；不得自行删除、
+移动、清空、裁剪、覆盖或执行 `prune`。任何实际释放动作都必须由用户针对明确目标另行明确授权，未授权时该任务
+只交付盘点结果与建议；获得授权后也只处理获批的精确对象，并记录操作前后占用。本 WBS 的排程不构成删除授权。
+
+**阶段一（Multi）工作项**
+
+| 序 | 工作项 | 边界 |
+|---|---|---|
+| M-1 | Multi CI test 子集增加 `-p codex-team-state` | 除 `.github/workflows/ci.yml` 外，须同步 `doc/ci-pipeline.md` 的 `TEST_PACKAGES` 表格与本地复现命令块两处；首次实跑后判断该文档记录的耗时数字是否需要修订 |
+| M-2 | Multi `/status` 增加 Guardian override 行 | 落点 `multidev/codex-rs/tui/src/status/card.rs`，语义见下方三态约定 |
+| M-3 | 新建根 `doc/rondo-config.md` | 按"共用 Guardian / Multi"分节；同步更新 `README.md` 指向各产品线 `docs/config.md` 的配置入口，避免孤儿文档 |
+
+**阶段二（Local）工作项**
+
+| 序 | 工作项 | 边界 |
+|---|---|---|
+| L-1 | Local `/status` 增加 Guardian override 行 | 落点 `mydev/codex-rs/tui/src/status/card.rs`，与 M-2 同一语义 |
+| L-2 | 在根 `doc/rondo-config.md` 补 Local 节 | 阶段二只补 Local 内容，不实质性改动已冻结的 Multi 代码、功能或文档语义，因此不使 Multi 的最终全量结果失效 |
+
+**M-2 / L-1 的显示语义**（三态，实施时不得放宽）：
+
+- reviewer 为 `AutoReview`：显示 reviewer 与已加载的显式 override。
+- reviewer 为 `User` 但存在 override：显示"未选用，已有配置"，不得暗示其生效。
+- reviewer 为 `User` 且无 override：不增加任何行，既有上游快照保持不变。
+
+措辞只能声明"已加载的配置"，不得声称运行时 review 已使用该模型。
+
+**冻结口径**：本节的"冻结"是该产品线不再实质性修改代码与功能，使最终通过的全量测试结果持续适用于
+发布候选；它不是全树逐字节冻结。发布所需的对应产品 `CHANGELOG.md`、发布后 README 固定链接以及 WBS / 完成记录
+仍可按既有流程更新，阶段二也可修改 Local 源码和只属于 Local 的文档内容。任何发生在冻结后的实质性代码或功能
+改动都会使冻结失效，必须重新执行受影响验证，并重跑最终全量门禁后才能发布。
+
+**收尾动作**：全量测试在各线默认共享产品 target 上，用各线 `justfile` 的
+`test-with-codex-v8-conservative` 运行完整 workspace；该入口固定 `CARGO_BUILD_JOBS=1` 与
+`CARGO_INCREMENTAL=0`，这里的"禁用 incremental"不表示清空 target 或进行零缓存冷构建。入口同时继承受跟踪的
+根 `.cargo/config.toml`、根 `AGENTS.md` 与 `scripts/with-build-lock.sh` 的约束，包括 GNU/Linux LLD 单线程、
+全局构建互斥和资源看门狗。全量测试由用户安排时机并逐批批准；发布走 Plan 103 既有流水线，发版前补对应产品的
+`CHANGELOG.md`，打 `multi-v*` / `local-v*` tag，完成发布复验后同步 README 的固定 tag 下载链接。
+Multi 发布后的构建缓存删除只针对 `.codex/cargo-target/rondo-multi` 这一确定对象；实际执行前仍须取得用户对该
+精确目标的明确删除授权，删除时机由用户按当时宿主容量决定。
+
+M-1/M-2/M-3 与 L-1/L-2 之间无技术依赖，阶段内顺序可调；**阶段一与阶段二之间的先后是硬顺序**。
+本节不预先给出各项工时或性价比排序——尚未测量。
+
+**明确不做**（本轮减法；将来改主意须另行立项）：
+
+- 不给 Local 新建 TUI 面板：Local 没有需要交互管理的持久对象，Guardian 随审批流走，一行 status 足够。
+- **不在产品树 `docs/` 下新建配置文档**：两条线的 `AGENTS.md` 都禁止向 `docs/` 增加通用产品或用户文档
+  （唯一例外是 app-server API 文档）。因此 M-3 落在仓库根 `doc/`，不落在 `mydev/docs/` 或 `multidev/docs/`。
+- 不改上游 `docs/` 既有文件与 `codex-rs/config.md`：会增加与 `codex-source-code/` 的 diff 噪音，
+  违反产品树保持可直接比较的自我约束。
+- 不在 `/status` 单列 Publication Critic：它 default-off 且判官质量未过关，给它独立位置会误示为可用发布门。
+  Multi 至多显示 `multi_agent_v2` 总开关。
+- 不把 Team Lens 迁入产品树：它是 `eval/rondo_eval/team_lens/` 的离线分析工具，不随 release 包分发，维持现状。
+- 不把 `codex-tui` 纳入 CI：快照测试对 16 GB runner 偏重，收益不明确。
+- 不提升 `exec_command_repeat_guidance` 的 Stage：方向 1 已收口，不再引导使用。
+
 ### 方向命名口径
 
 - 后续规划、任务与汇报统一使用“方向 1”和“方向 3”，不再使用“Local 方向”指代方向 1。
@@ -99,6 +204,11 @@ README 的下载链接是固定 tag，发新版本时需同步更新。
   本地审批模型研究。
 
 ## 2. 下一工作包与顺序
+
+当前唯一排队待启动的是跨方向的「产品线配套补齐与逐条收口」（见 1 节同名小节），尚未立项与授权：
+先做完 Multi 侧工作项，再单独完成仅限只读盘点和释放建议的空间任务，然后以全量测试、冻结、发布及经用户
+明确授权的该线构建缓存删除收尾；之后才整体转入 Local 侧，并同样在全量测试前先完成独立空间任务。
+两个阶段之间是硬顺序，阶段内工作项顺序可调。各方向本身当前均无 active 工作包。
 
 方向 3 三期原定路线如下；前三个工作包已串行完成，Plan 099 没有形成候选，因此本轮在工作包三停止，工作包四未解锁：
 
