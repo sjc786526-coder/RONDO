@@ -792,13 +792,17 @@ V8 按 `$TARGET` 取产物、bwrap 摘要顺序全部一次通过）。实际失
 
 ### 本任务剩余步骤
 
-阶段 A、B、C 已收口，D 的只读部分已完成。剩余全部需要用户决定：
+阶段 A、B、C 已收口，D 的只读部分已完成。外部复审（2026-09-01）后又落地了三项整改
+（KD-016 / KD-017 / KD-018，见 §7），因此正式发布前必须重跑 RC。
 
-1. **KD-016 决定**：`codex doctor` 的上游更新查询是否修复（影响 A13）。
-2. **D-5 转 public**：批准后执行可见性切换（含第 3 项脱敏 diff 的应用）。
+1. **重跑两条 RC**（自同一个 CI 绿色 SHA）：`multi-v0.1.0-rc6` 与 `local-v0.1.0-rc1`。
+   rc5 构建自 `1a734d7e`，其许可树仍带模板注释泄漏（已在本地 rc5 产物中确认），
+   **不能代表待发布源码**；`local-v*` 轨则从未实跑过。两条都通过后才进入公开与正式发布。
+2. **D-5 转 public**：批准后执行可见性切换。第 3 项脱敏 diff 已应用，
+   但**只清理当前文件，不改写 Git 历史**——旧提交仍可查到该 Windows 用户名。
 3. **D-6/D-7 正式发布**：打 `multi-v0.1.0` 与 `local-v0.1.0`，下载正式产物复跑 smoke test。
-   注意 `local-v*` 轨从未实跑过，首次会是 `mydev/` 的第一次 release 构建。
-4. **E-0**：README 安装一节换成真实下载链接。
+4. **E-0**：README 安装一节换成真实下载链接。**必须用各自 tag 的固定链接**，
+   不得使用 `releases/latest`（KD-018：两条产品线都不占用仓库级 latest 指针）。
 
 ### 阻塞项
 
@@ -823,17 +827,19 @@ V8 按 `$TARGET` 取产物、bwrap 摘要顺序全部一次通过）。实际失
 | A3 时长预算 | ✅ | 冷 23m24s/23m40s、热 12m02s/13m50s |
 | A4 release 按 tag 分流 | ✅ | 严格 SemVer 校验 job |
 | A5 完整产品包 + SHA256SUMS | ✅ | rc5 产物复验 |
-| A6 入口名与许可材料 | ✅ | `bin/rondo-multi` + 10 个许可文件；两层依赖闭包齐备 |
+| A6 入口名与许可材料 | 🔶 | `bin/rondo-multi` + 16 个许可文件。原先 V8/ICU 只有组件表与外链，**不满足二进制再分发的复制义务**；KD-017 已补入 V8/rusty_v8/ICU 许可原文并加内容断言，**待 rc6 实跑确认** |
 | A7 干净环境 smoke test | ✅ | 独立 verify job，含 `--version`、bundled rg、arg0/sandbox |
 | A8 仓库 public | ⏸ | 待用户确认（D-5 授权门） |
 | A9 两条正式 Release | ⏸ | 待 A8 |
 | A10 文档同步 | 🔶 | WBS / CLAUDE.md / AGENTS.md / WBS-COMPLETED 已更新；README 安装节待 A9 后回写 |
 | A11 产品语义只动两处窄例外 | ✅ | `Cargo.toml`/`Cargo.lock`/`eval/` 零改动 |
 | A12 冻结断言成立 | ✅ | `binary_freeze._validate_workspace_manifests()` 两条产品线均 OK |
-| **A13 默认不提示上游更新** | ❌ | **未达成**，见 KD-016：`codex doctor` 无条件查询上游 releases API |
+| **A13 默认不提示上游更新** | 🔶 | KD-016 已修复：`doctor` 的上游探测改为与 TUI 启动提示同一开关门控，并补了 3 个确定性单元测试 + CI Gate 3c。**待 CI 实跑确认** |
 | A14 bwrap 篡改测试 | ✅ | 真实发布产物上命中具体错误，expected 值与构建期摘要一致 |
 
-**A13 是唯一未达成且非"待授权"的验收项**，需要用户就 KD-016 做决定。
+**A13 与 A6 的代码/脚本改动已落地，但本地重型构建被看门狗按 365GB 主动停线拦下
+（`rondo-multi` 目标目录单独占 296.8GB），因此这两项由 CI 与 rc6 实跑作为验收证据，
+在此之前不得表述为"已通过"。**
 
 ### 交接边界
 
@@ -862,7 +868,9 @@ V8 按 `$TARGET` 取产物、bwrap 摘要顺序全部一次通过）。实际失
 | KD-012 | **窄例外 E-X2**：把 `check_for_update_on_startup` 默认值改为 `false` | 这是**发布级缺陷**而非观感问题：`updates.rs` 会查询 `api.github.com/repos/openai/codex/releases/latest`，`update_action.rs` 会提示用户执行 `npm install -g @openai/codex` / `brew upgrade --cask codex`。发布一个引导用户去装上游产品的 fork 不可接受。已确认该行为受配置控制且默认为 `true`（`config/mod.rs:4007 unwrap_or(true)`），翻默认值是最小改动，不触碰 H1/H2 | 窄例外 E-X2；需跑 config 与快照测试 | **已采纳**（用户 2026-09-01 批准该窄例外；本轮只记录，不实施） |
 | KD-013 | 判官后端**不随 Release 分发**，只在文档中给出源码构建方式 | scorer 是独立二进制（`codex-publication-critic-{service,real-service,cloud-service}`），不在主 CLI 内。但本地后端依赖未分发的模型权重与运行时、云端后端需用户自备凭据，**即使打包也不是下载即用**；而且本地模型 `NO-GO`、云端 `NOT_QUALIFIED`，主动分发会暗示可用性 | README、Release notes；H11 | 已采纳 |
 | KD-014 | 对外文档必须把 **RONDO Multi 产品** 与 **Publication Critic 子系统** 分层表述 | 混为一谈会让读者误以为整个 Multi 未获验收，既不准确（Multi 有 14,660 全量通过的正确性基线）也低估了项目价值；分层后既更诚实也更有说服力 | README（已改）、Release notes | 已采纳 |
-| KD-016 | **`codex doctor` 仍会查询并提示上游 Codex 版本**，`check_for_update_on_startup` 管不到它 | 实测：即使显式写入 `check_for_update_on_startup = false`，`codex doctor` 仍输出 `↑ updates 0.152.0 available (current 0.147.0)`。读代码确认 `cli/src/doctor/updates.rs:88` **无条件**调用 `fetch_latest_version()` → `curl https://api.github.com/repos/openai/codex/releases/latest`；该文件只在第 36–40 行把配置值当作一条 detail **打印**出来，从不用它做门禁。对 fork 而言这条输出具有误导性：它把上游 Codex 的版本当作"你该升级到的版本" | **A13 的判定**；如需修复，涉及 `doctor/updates.rs`，超出 E-X2 已批准范围（§2 明确"不得顺带改动更新提示的其他逻辑"） | **待用户决定**（建议见下） |
+| KD-016 | **`codex doctor` 仍会查询并提示上游 Codex 版本**，`check_for_update_on_startup` 管不到它 | 实测：即使显式写入 `check_for_update_on_startup = false`，`codex doctor` 仍输出 `↑ updates 0.152.0 available (current 0.147.0)`。读代码确认 `cli/src/doctor/updates.rs:88` **无条件**调用 `fetch_latest_version()` → `curl https://api.github.com/repos/openai/codex/releases/latest`；该文件只在第 36–40 行把配置值当作一条 detail **打印**出来，从不用它做门禁。对 fork 而言这条输出具有误导性：它把上游 Codex 的版本当作"你该升级到的版本" | **A13 的判定**；修复涉及 `doctor/updates.rs` | **已修复**（2026-09-01）。改动是把探测门控到 `config.check_for_update_on_startup`，与 `tui/src/updates.rs:28,151` 已有的门控完全一致——属于把既有开关补全到唯一漏网的调用点，不是新增逻辑或改文案，因此落在 E-X2 的意图之内。同时补 3 个确定性单元测试与 CI Gate 3c；两份 CHANGELOG 原本已声称"默认不再检查上游更新"，修复前该表述不成立 |
+| KD-017 | **V8 / ICU 许可必须随包分发原文，不能只给外链** | BSD-3-Clause 与 Unicode License 都要求在**二进制再分发**中复制通知原文；原先 `v8-icu-NOTICE.md` 只有组件表和链接，A6 的"完整许可材料"不成立。已 vendor rusty_v8 v150.4.0 所 pin 的 V8 submodule（`ac1e23989121`）的 `LICENSE` 及其 `LICENSE.fdlibm/.strongtalk/.v8`、rusty_v8 的 MIT、ICU 的 Unicode License V3，并在 release 校验中加内容断言（只查存在会被空文件、symlink stub 或 HTML 错误页骗过——ICU 首次抓取就返回了 10 字节的 symlink 目标）。**不收集 V8 `third_party/` 全树**：V8 自身 `LICENSE` 已枚举那些外部库并指向随包的三个 `LICENSE.*`，扩到全树是合规系统建设，超出本任务 | `.github/licenses/`、collect 脚本、`release.yml` | 已采纳 |
+| KD-018 | **两条产品线都不占用仓库级 `latest` 指针** | GitHub 每个仓库只有一个 `latest`，而本仓库从同一命名空间发两条独立产品线。原实现给每个正式版本设 `--latest=true` 并断言"正式版必须是 latest"，后发布的一条会静默把另一条挤下去，让访客以为仓库当前版本只有一条线。改为两轨都 `--latest=false`；校验从"观察"改为"强制"（若 GitHub 仍指派则 PATCH 收回再断言），避免重演 rc4 那种"Release 已公开、job 却红"的情况 | `release.yml` publish job；E-0 必须用固定 tag 链接 | 已采纳 |
 | KD-015 | Publication Critic 在所有对外文档中必须表述为**有界改写机制**，不得表述为发布门或安全审批 | 已核实产品合同与实现（`publication_review.rs:469` `Some(Verdict::Rewrite) if attempt.review_index < 2`）：第三次审查非阻断，即使 `REWRITE` 也提交；服务故障时 fail-open 提交当前稿并记为"审核未完成" | README（已改）、Release notes | 已采纳 |
 
 ---

@@ -58,7 +58,7 @@ ripgrep 与 zsh 的许可原文**入库**而不是发布期下载，避免一次
 `mydev/codex-rs/core/src/config/config_loader_tests.rs:285` 有一处 RONDO 自己写的格式漂移。
 仓库此前没有格式门禁，所以一直没人发现。multidev 侧本来就是干净的。
 
-### 四、`codex doctor` 的更新检查绕过了 `check_for_update_on_startup`（未解决，待用户决定）
+### 四、`codex doctor` 的更新检查绕过了 `check_for_update_on_startup`（当时未解决；同日已修复，见文末"外部复审后的整改"一）
 
 实测：即使显式写 `check_for_update_on_startup = false`，`codex doctor` 仍输出
 `↑ updates 0.152.0 available (current 0.147.0)`。
@@ -288,3 +288,99 @@ runner 上若也有，A14 会在错误的代码路径上"通过"。
   由 `gpt-5.6-sol` 生成，DATA_CARD 明确写了隐私边界；`eval/results/` 67 个文件只有聚合指标与哈希，
   **没有任何** `prompt`/`instruction`/`transcript` 类字段，全库最长字符串是我们自己的 500 字符
   `operator_reason`。两者均无第三方受限材料，可公开再分发。
+
+---
+
+## 外部复审后的整改（2026-09-01，同日追加）
+
+一次外部复审（GPT）提了 5 条。逐条核对源码后：3 条确认为真问题并已整改，
+1 条是我已经报给用户的既有事实，1 条判断为过度设计、未采纳。
+
+### 一、`codex doctor` 的上游查询（KD-016，已修复）
+
+复审的判断与我自己的结论一致，但它多指出一点：两份 CHANGELOG 已经写着
+"默认不再检查上游 Codex 的版本更新"，而代码不是这样——**文档在替代码许诺**。这条足以阻断正式发布。
+
+修法是把探测门控到 `config.check_for_update_on_startup`，与 `tui/src/updates.rs:28,151`
+已有的门控写法完全一致。之所以认为这仍在 E-X2 意图之内：开关本来就存在、语义也已定义，
+`doctor` 是唯一漏网的调用点，补齐它不是新增逻辑，也没有改任何提示文案。
+
+为了让"关闭时不发网络请求"可被机械验证，把逻辑拆成 `probe_latest_version(enabled, ctx)`
+与 `push_latest_version_details(...)`：前者在 `!enabled` 时直接返回 `Disabled`，
+`fetch_latest_version` 是全模块唯一的上游 API 调用者（已 grep 确认），
+所以"返回早于它"就等于"没有网络访问"。新增 3 个离线确定性测试。
+
+**这里有个更值得记的坑**：写完测试才发现它们根本不会被跑。
+`mod doctor` 声明在 `cli/src/main.rs`，属于 `codex` bin target；而 CI 的 `TEST_PACKAGES`
+不含 `codex-cli`，Gate 2 的 `cargo build` 又不编译 `#[cfg(test)]`。
+也就是说这三个测试既不会运行、连类型检查都过不了。补了 Gate 3c
+（`cargo test -p codex-cli --bin codex -- doctor::updates`）才真正接上。
+**"写了测试"和"测试会跑"是两回事**，这次差点自己骗自己。
+
+### 二、V8 / ICU 只有外链，没有原文（KD-017，已修复）
+
+复审说得对。BSD-3-Clause 和 Unicode License 都要求在**二进制再分发**里复制通知原文，
+而 `v8-icu-NOTICE.md` 当时只有组件表和链接——A6 的"完整许可材料"不成立。
+
+已 vendor：rusty_v8 v150.4.0 所 pin 的 V8 submodule（`ac1e23989121`）的 `LICENSE`
+及其 `LICENSE.fdlibm/.strongtalk/.v8`、rusty_v8 的 MIT、ICU 的 Unicode License V3。
+submodule 指针是从 GitHub contents API 取的，不是猜的版本号。
+
+**没有**采纳"收集 V8`third_party/` 全树"：V8 自己的 `LICENSE` 已枚举那些外部库并指向
+随包的三个 `LICENSE.*`，扩到全树属于建设合规系统，超出本任务且违背项目的轻量取向。
+
+抓取时 ICU 的 `icu4c/LICENSE` 返回了 **10 字节**——那是个 symlink，raw 接口给的是
+指向目标的文本 `../LICENSE`。这直接说明"文件存在"不等于"许可齐备"，
+所以 release 校验里 `test -f` 改成 `test -s`，并对四份许可各加一条 `grep -qF` 内容断言。
+写断言时又抓到自己一个错：bubblewrap 的 `COPYING` 是 **LIBRARY** GPL v2（SPDX `LGPL-2.0-or-later`），
+标题不是 "LESSER"，第一版断言写错了词。
+
+### 三、两条产品线争抢仓库级 `latest`（KD-018，已修复）
+
+这条是我漏掉的。原实现给每个正式版本设 `--latest=true` 并断言"正式版必须是 latest"。
+GitHub 每个仓库只有一个 `latest` 指针，两条线从同一命名空间发布，
+后发的会静默把先发的挤下去——不会让 job 变红，但访客看到的"当前版本"是错的。
+
+改为两轨都 `--latest=false`。校验从"观察"改成"强制"：若 GitHub 仍指派，
+先 PATCH 收回再断言。理由是 rc4 已经证明"Release 已经公开、job 却红"是会发生的，
+在产物已对外可见之后才失败，除了留下一个红叉没有任何用处。
+
+### 四、未采纳：先建 draft 再公开
+
+复审建议改成 draft → 校验 → 公开。不采纳：verify job 已经在**发布之前**于干净 runner 上跑完，
+publish 只在其后执行；rc4 的红是我自己断言命令写错了字段名，不是产物问题。
+再加一层 draft 状态机只会引入"draft 悬挂"这一新失败模式，与项目的轻量取向相反。
+
+### 五、本地重型验证被磁盘门禁拦下（如实记录）
+
+想在本机跑 `just test -p codex-cli doctor` 做提交前验证，被看门狗按主动停线拦下：
+
+```
+[rondo] proactive stop: project_reached_proactive_stop
+project=365130043392  (主动停线 365GB)
+```
+
+复测：项目 365.8GB，其中 `.codex/cargo-target/rondo-multi` 单独占 **296.8GB**、
+`rondo-local` 20.6GB。**没有**删除任何缓存——297GB 的构建缓存虽可重建，
+但重建成本以小时计，且可能影响用户或并行任务，不属于我能自己决定的清理。
+
+因此 Rust 改动的编译与测试证据来自 CI，不来自本机。
+本机只做了不需要构建的验证：`rustfmt --check`（两棵树均已合规）、
+许可脚本的离线冒烟（用桩 `cargo-about`）、以及把 release.yml 的整段校验逻辑
+拿真实 rc5 产物树重放一遍——17 项必需文件 + 4 条内容断言全过。
+**在 CI 变绿之前，A13 与 A6 不表述为"已通过"。**
+
+### 六、rc5 不能代表待发布源码（已用产物确认）
+
+复审提出 rc5 构建自 `1a734d7e` 而当时 main 已到 `54c8a59e`。核对本机留存的 rc5 产物，
+其 `rust-dependencies-*.md` 第 15 行确实还带着 handlebars 注释泄漏
+（`... not HTML. }}`）——该修复在 rc5 之后才合入。许可原文本身是干净的
+（转义修复在 rc5 之前已生效），但结论成立：**必须重跑 RC**。
+叠加本轮 doctor 与许可整改，正式发布前需自同一个 CI 绿色 SHA 跑
+`multi-v0.1.0-rc6` 与 `local-v0.1.0-rc1`（后者从未实跑过）。
+
+### 七、脱敏已应用（但不改写历史）
+
+`doc/development-environment.md:22` 的 Windows 用户名已替换为 `<Windows 用户名>`。
+复审正确指出这**只清理当前文件**：该字符串已存在于早期提交，转 public 后旧提交仍可查到。
+两个邮箱同理。是否接受这部分历史永久公开，仍是用户的决定，不是可以由脱敏 diff 解决的问题。

@@ -49,16 +49,18 @@ Plan 103 实施中。它只交付发布工程能力，**不推进任何方向的
   跑 fmt / build / test 三门禁。冷跑约 23 分钟、热跑约 12–14 分钟。
   **只跑 crate 子集**，全量门禁仍在本地（标准 runner 16 GB，本地全量需 21 GB）。
 - 根 `.github/workflows/release.yml`：`local-v*` / `multi-v*` 两条发布轨互不夹带，
-  tag 经严格 SemVer 校验（拒前导零，`-rcN` 标为 prerelease 且不置 latest），
-  产出 `x86_64-unknown-linux-musl` 的**完整产品包** + 完整第三方许可材料 + `SHA256SUMS`，
-  并在独立的干净 runner 上做发布前验证。首发只发这一个目标（见 plan KD-009）。
+  tag 经严格 SemVer 校验（拒前导零，`-rcN` 标为 prerelease）。两轨都不占用仓库级 `latest`
+  指针——仓库只有一个，两条线会互相覆盖（plan KD-018），对外链接一律用固定 tag。
+  产出 `x86_64-unknown-linux-musl` 的**完整产品包** + 第三方许可材料（含 Cargo 闭包与
+  V8/ICU 原文）+ `SHA256SUMS`，并在独立的干净 runner 上做发布前验证。
+  首发只发这一个目标（见 plan KD-009）。
 
 **两处已批准的产品侧窄例外**：E-X1（打包变体新增条目）、
-E-X2（`check_for_update_on_startup` 默认值改 `false`）。二者均不改动 workspace 版本号、
-crate 名与 `[[bin]]` 名，冻结二进制身份与公平对比设施不变。
+E-X2（`check_for_update_on_startup` 默认值改 `false`，并把 `doctor` 的上游探测门控到同一开关）。
+二者均不改动 workspace 版本号、crate 名与 `[[bin]]` 名，冻结二进制身份与公平对比设施不变。
 
-**未决**：转 public 与正式 `v0.1.0` 仍需用户在执行时单独确认；
-`codex doctor` 绕过更新检查配置这一项（plan KD-016）是否修复，待用户决定。
+**未决**：转 public 与正式 `v0.1.0` 仍需用户在执行时单独确认。正式发布前还需自同一个 CI 绿色 SHA
+重跑 `multi-v0.1.0-rc6` 与 `local-v0.1.0-rc1`——rc5 早于许可与 doctor 整改，`local-v*` 轨从未实跑过。
 
 ### 方向命名口径
 

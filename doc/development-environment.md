@@ -19,7 +19,7 @@ GPU RTX4060 laptop
 
 - Windows 主机运行 Docker Desktop 和 Clash Verge（开启TUN模式）。
 - WSL 发行版为 Ubuntu 24.04，内核为 Microsoft WSL2 `6.6.87.2`，架构为 `x86_64`。
-- Windows 的 `C:\Users\35283\.wslconfig` 使用以下 WSL2 网络配置：
+- Windows 的 `C:\Users\<Windows 用户名>\.wslconfig` 使用以下 WSL2 网络配置：
 
   ```ini
   [wsl2]
