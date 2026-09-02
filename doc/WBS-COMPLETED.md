@@ -2705,3 +2705,44 @@ INTEGRATED / NOT_PUSHED`。clean formal source 为 `0ae9623`，执行者交付�
   不解锁工作包四。
 - 合同见 `plan/102-publication-critic-five-dimension-cloud-judge-execplan.md`，执行见
   `agent_log/2026-08-31-plan102-five-dimension-cloud-judge.md`。
+
+## Plan 103 · 发布工程与 CI/CD 流水线（阶段 A–C 完成，2026-09-01）
+
+为两条产品线建立可重复的发布能力。**只交付发布工程本身**，不推进任何方向的功能、性能或质量资格，
+不解锁方向 3 工作包四。转 public 与正式 `v0.1.0` 仍待用户确认，不在本条范围内。
+
+- **发布身份（阶段 A）**：两条 `codex-cli/package.json` 改名并置 `private`；两份 CHANGELOG 从
+  "见上游 releases 页"重写为 RONDO 自己的记录；README 说明 `mydev/.github`、`multidev/.github`
+  是不会被执行的惰性继承文件。
+- **两处窄例外**：E-X1 在 `PACKAGE_VARIANTS` 纯追加一个变体（`cargo_bin` 保持 `"codex"`，
+  只改打包出的入口文件名）；E-X2 把 `check_for_update_on_startup` 默认值改为 `false`，
+  并重新生成两份 `config.schema.json`。**workspace 版本号、crate 名、`[[bin]]` 名与 `eval/` 零改动**，
+  `binary_freeze._validate_workspace_manifests()` 对两条产品线仍返回 OK。
+- **CI（阶段 B）**：根 `.github/workflows/ci.yml`，三类路径分流 + fmt/build/test 三门禁。
+  冷跑 23m24s（Local）/ 23m40s（Multi），热跑 12m02s / 13m50s，缓存约 2.0 GB/条。
+  只跑 crate 子集，全量门禁仍在本地并在工作流注释里写明取舍理由。
+  路径分流的"共享类"与"仅 mydev"两类已实跑验证。
+- **Release（阶段 C）**：根 `.github/workflows/release.yml`，`local-v*` / `multi-v*` 两轨互不夹带，
+  tag 经严格 SemVer 校验（拒前导零；`-rcN` → prerelease 且不置 latest）。
+  构建顺序被冻结为 V8（按 `$TARGET` 取）→ bwrap → strip → 摘要 → 导出 → 构建入口，
+  三个预构建产物全部显式传给打包器使其内部 `cargo build` 被跳过；
+  许可材料注入在归档之前，归档后再解包复验。
+- **发布物**：`x86_64-unknown-linux-musl` 完整产品包 + `SHA256SUMS`，
+  入口名 `rondo-multi`，含 `LICENSE`、`NOTICE` 与 `THIRD-PARTY-LICENSES/`
+  （bubblewrap LGPL 全文、ripgrep、zsh、三份按目标平台生成的 Cargo 依赖闭包报告、
+  以及 cargo-about 覆盖不到的 V8/ICU 原生闭包说明）。
+- **A14 已在真实发布产物上取得实证**：向包内 `bwrap` 尾部追加一字节 → 摘要改变 →
+  确认该文件**自身仍可执行**（排除假阳性）→ 经产品触发 → 命中
+  `bundled bubblewrap digest mismatch`，且 expected 值与构建期导出的 `CODEX_BWRAP_SHA256` 一致。
+  这证明冻结构建顺序确实把摘要编进了发布二进制。
+- **验收状态**：A1–A7、A10（部分）、A11、A12、A14 达成。
+  **A13 未达成**：实测 `codex doctor` 无条件查询上游 `openai/codex` releases API，
+  不受 `check_for_update_on_startup` 约束（plan KD-016），修复超出 E-X2 已批准范围，待用户决定。
+  A8、A9 待转 public 与正式 tag。
+- **实跑证据**：`multi-v0.1.0-rc1`…`rc5` 五轮。rc5 整条链首次全绿
+  （validate 2s → build 1h22m38s → 干净 runner verify 18s → publish 27s）。
+  值得记的是**五轮失败没有一次落在事前评估的高风险处**（musl 交叉编译、V8 按 target 取产物、
+  bwrap 摘要顺序都是一次通过），而是 runner 磁盘、cargo-about 的 feature gate、
+  以及两处我自己写的测试/校验代码。
+- 合同见 `plan/103-release-engineering-and-cicd-execplan.md`，执行见
+  `agent_log/2026-09-01-plan103-release-engineering-execution.md`。

@@ -81,6 +81,12 @@ if ! command -v cargo-about >/dev/null 2>&1; then
   exit 1
 fi
 
+# about.hbs deliberately contains no handlebars comments and uses triple braces
+# throughout. Double braces HTML-escape, which turned `PROVIDED "AS IS"` into
+# `PROVIDED &quot;AS IS&quot;` and corrupted every reproduced license; a notice
+# file has to be verbatim, and the output is Markdown, not HTML. A `{{! .. }}`
+# comment is no good either -- one that mentions `}}` terminates early and the
+# rest leaks into the generated file.
 emit_cargo_closure() {
   local crate_dir="$1" binary_name="$2"
   local manifest="${CODEX_RS}/${crate_dir}/Cargo.toml"

@@ -214,6 +214,39 @@ H12 不是纸面约束。
 例如 `THE SOFTWARE IS PROVIDED &quot;AS IS&quot;`。原因是 handlebars 的 `{{ }}` 默认转义，
 而许可全文必须逐字复制。模板已全部改为 `{{{ }}}`。
 
+改完之后 rc5 的报告确认逐字正确了，但**又冒出一个**：我写在模板里的 `{{! ... }}` 注释
+被原样输出进了许可文件。因为那段注释里本身含 `}}`，handlebars 提前判定注释结束，剩下的当正文渲染。
+最终处理是**模板里一条注释都不留**，说明全部搬进收集脚本——许可文件不该承载任何可能泄漏的散文。
+这一处纯属观感，不影响许可全文的正确性，正式发布时复验。
+
+**rc4：构建 + verify 全绿，publish 在"创建之后"失败。**
+
+verify job 在干净 runner 上**全部通过**，包括 sandbox 冒烟与 **A14 篡改测试**——
+证明 Ubuntu 24.04 的 userns 判断是对的。
+
+publish 的失败很有意思：`gh release create` **成功了**（Release 已建、prerelease、双 asset、
+`releases/latest` 返回 404 即未被标为 latest），失败的是紧随其后的
+`gh release view --json tagName,isPrerelease,isLatest,assets`——`isLatest` 与 `assets`
+**不是该子命令的合法字段**。等于说：真正的动作成功了，我用来"确认它成功"的那行把 job 弄红了。
+
+顺手把它从"打印"改成"断言"：改走 REST API，逐项校验 prerelease 与 tag 要求一致、
+不是 draft、两个 asset 都在、以及 **prerelease 绝不能成为 latest / 正式版必须是 latest**。
+新写法先拿 rc4 这个真实 Release 在本机跑通再提交。
+
+**rc5：整条流水线首次全绿。**
+
+`Validate tag 2s → Build 1h22m38s → Verify（干净 runner）18s → Publish 27s`。
+发布结果复验：`prerelease=true`、`draft=false`、
+资产为 `rondo-multi-0.1.0-rc5-…tar.gz`（151,646,825 B）与 `SHA256SUMS`，
+`releases/latest` 仍为 `<none>`——RC 没有污染 latest。
+
+### 阶段 C 的一处自评
+
+五轮 rc 里，**没有一次失败发生在事前评估为高风险的地方**（musl 交叉编译、V8 按 target 取产物、
+bwrap 摘要顺序全部一次通过）。四次失败分别是：runner 磁盘、
+cargo-about 的 feature gate、我自己的测试脚本吞掉诊断、我自己的验证命令写错字段。
+**三次半是工具/自己的问题，不是产品问题。**
+
 ### 本机预跑（先于 rc1 降风险）
 
 用 multidev 既有 debug 产物 + 新建 `bwrap`，走 C-3 的准确路径打了一个本机包：
@@ -233,10 +266,25 @@ runner 上若也有，A14 会在错误的代码路径上"通过"。
 - **D-1 密钥全量扫描**：14,305 个 blob / 1,289 个 commit，13 类凭据模式。
   10 处命中**全部**位于 `mydev/codex-rs/` 的上游文件，且这些文件与
   `codex-source-code/` 快照**逐字节相同**；命中字面量本身就是占位符
-  （`sk-abcdefghijklmnopqrstuvwxyz123456`、`AKIAABCDEFGHIJKLMNOP`）；
+  （OpenAI 那条是 `sk-` 后面直接跟一串字母表，AWS 那条是 `AKIA` 后面跟 `ABCDEFG…`。
+  这里**故意不抄全文**——把占位符原样写进自有目录，会让以后每次扫描都在自己的文档里假阳性，
+  "自有目录零命中"这个不变量就废了）；
   历史 blob 由基线导入提交引入。RONDO 自有目录零命中。
+  转 public 前的复跑（14,319 blob）另有 2 个命中，落在**本文件自己的历史版本**上——
+  当时我把占位符原文抄进了日志。已改写为不抄全文；旧 blob 仍在历史里，
+  但内容是上游公开的占位符，不是凭据。
 - **D-2**：`eval-data/`、`test-data/`、`reference-agent-harness/`、`rondo-backup-20260827/`、
   `codex-source-code/`、`.codex/` 的 tracked 文件数均为 **0**；
   `.env.local` 与 `rondo.local.toml` **从未**出现在任何历史提交中。
 - **提交身份**：全历史 author/committer 只有 `3528349734@qq.com` 与 `sjc786526@gmail.com`，
   author name 只有 `sjc`。
+- **个人环境信息**：全仓库跟踪文件里，真正的个人标识只有一处——
+  `doc/development-environment.md:22` 的 Windows 用户名。脱敏 diff 已备好，未应用，等用户批准。
+  代理相关内容（`127.0.0.1:7897`、Clash TUN fake-IP 导致 11–20 项测试失败的分析）建议**保留**：
+  loopback 端口不是凭据，而那段 fake-IP DNS 的排查本身是有价值的工程内容。
+  `/home/sjc/...` 出现在 106 个文件里，建议**保留**：用户名 `sjc` 本就随提交历史公开，
+  脱敏会破坏可直接复制的命令。
+- **再分发边界**：`training/` 全部 600 行均为 `"origin":"synthetic"`、模板展开、
+  由 `gpt-5.6-sol` 生成，DATA_CARD 明确写了隐私边界；`eval/results/` 67 个文件只有聚合指标与哈希，
+  **没有任何** `prompt`/`instruction`/`transcript` 类字段，全库最长字符串是我们自己的 500 字符
+  `operator_reason`。两者均无第三方受限材料，可公开再分发。

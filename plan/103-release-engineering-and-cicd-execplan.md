@@ -1,9 +1,9 @@
 # Plan 103：发布工程与 CI/CD 流水线
 
-> **状态：审查通过，待实施**（2026-09-01）
-> 经五轮独立审查，全部阻塞项已复核并整改，规划层无待决问题。下一步从阶段 A-2 开始实施。
-> 阶段 C 先用 `multi-v0.1.0-rc1` 预发布 tag 在 private 仓库实跑验证；
-> 转 public（D-5）仍保留单独确认门。
+> **状态：阶段 A–C 已完成并实跑验证；D/E 待用户决定**（2026-09-01）
+> CI 与 Release 两条流水线均已建成并实跑；`multi-v0.1.0-rc5` 是首次端到端全绿的发布。
+> 仓库仍为 `PRIVATE`，尚无正式版本。剩余三件事都需要用户决定：
+> KD-016（`codex doctor` 绕过更新检查，影响 A13）、D-5 转 public、D-6 正式 tag。
 
 > 本计划是任务的稳定约束文档。
 > 除"当前状态"和"关键决策记录"外，其他部分在执行期间默认不得修改。
@@ -664,7 +664,38 @@ C-3 必须实测这条准确路径，不得假设默认路径可用。
    改动面仅限 §2 允许清单加两处窄例外
 4. n/a（第 2 项成立，无需回退）
 
-### 阶段 B / C｜已落地待实跑
+### 阶段 B｜已完成（实测）
+
+| 项 | 结果 |
+|---|---|
+| 冷跑 | `check (local)` 23m24s、`check (multi)` 23m40s（预算 90 min） |
+| 热跑 | 12m02s / 13m50s（预算 30 min） |
+| 缓存 | 1983 MB + 2058 MB（GitHub 单仓库上限 10 GB） |
+| path filter 共享类 | 改 `.github/**` → 两条都跑 ✅ |
+| path filter `mydev/**` | 只跑 local ✅ |
+| path filter `multidev/**` | 逻辑与 mydev 对称，尚无"只改 multidev"的推送可验 |
+| 门禁能变红 | 首次运行即因真实格式漂移变红，修复后转绿 ✅ |
+
+### 阶段 C｜已完成（rc5 整条链全绿）
+
+五轮 rc 实跑，rc5 为首次端到端全绿：
+`Validate tag 2s → Build 1h22m38s → Verify（干净 runner）18s → Publish 27s`。
+
+发布结果复验：`prerelease=true`、`draft=false`、两个 asset 齐全、
+`releases/latest` 为 `<none>`（RC 未污染 latest）。
+
+**A14 已在真实发布产物上取得实证**（先于 rc4 在本机用 rc3 产物验证，rc4/rc5 在干净 runner 复现）：
+尾部追加一字节 → 摘要改变 → 篡改后的 bwrap **自身仍可执行** → 经产品触发 →
+命中 `bundled bubblewrap digest mismatch`，且 expected 值与构建期导出的
+`CODEX_BWRAP_SHA256` 完全一致。
+
+**四次失败的分布值得记**：没有一次落在事前评估的高风险处（musl 交叉编译链、
+V8 按 `$TARGET` 取产物、bwrap 摘要顺序全部一次通过）。实际失败是
+① runner 磁盘耗尽；② `cargo-about` 的 binary 被 `required-features = ["cli"]` 挡住而
+`cargo install` 仍返回 0；③ 我自己的冒烟脚本被 `set -e` 吞掉诊断；
+④ 我自己的发布后校验命令用了不存在的 `--json` 字段。
+
+### 阶段 B / C 的产出
 
 已写出并通过本地可验证部分：
 
@@ -678,10 +709,7 @@ C-3 必须实测这条准确路径，不得假设默认路径可用。
 - `.github/licenses/`：`about.toml`、`about.hbs`、`v8-icu-NOTICE.md`、
   `vendor/`（ripgrep 15.2.0 与 zsh `77045ef8` 的许可原文，**入库避免发布期依赖第三方站点可达**）
 
-**本地已验证**：两份工作流 YAML 可解析；`compose-release-notes.sh` 实跑产出正确；
-`collect-third-party-licenses.sh` 的文件搬运与 fail-closed 行为正确。
-**待 rc1 实跑验证**：musl 交叉编译链、V8 按 target 取产物、cargo-about 的实际 flag、
-`codex sandbox` 在 runner 上的可用性、A14 篡改测试。
+以上全部经 rc1–rc5 实跑验证。
 
 ### 实施期的新发现（均已落地，不改变计划契约）
 
@@ -739,9 +767,20 @@ C-3 必须实测这条准确路径，不得假设默认路径可用。
 **规划阶段已完成并通过终审（2026-09-01）。** 用户已批准 KD-012（窄例外 E-X2）与 KD-007
 （现仓库整体转 public），并同意先在 private 仓库用 `multi-v0.1.0-rc1` 实跑验证。
 
-**当前进度（2026-09-01）**：阶段 A 已完成并验证；阶段 B/C 的工作流与脚本已写出，待实跑。
-`check_for_update_on_startup` 默认值已改为 `false`（E-X2 已实施并验证）。
-**远端仓库仍为 `PRIVATE`，尚未打任何 tag，尚未创建任何 Release。**
+**当前进度（2026-09-01）**：阶段 A、B、C 已完成并实跑验证；阶段 D 的四项只读复核也已做完
+（结论见下），E 的文档回写除 README 安装节外已完成。
+
+**远端仓库仍为 `PRIVATE`。** 已存在 `multi-v0.1.0-rc1`…`rc5` 五个 tag，
+其中 rc4、rc5 有对应的 **prerelease**（均未被标为 latest）；**尚未发布任何正式版本**。
+
+### 阶段 D 的四项复核结论（只读，已完成，等用户批准后才动手）
+
+| 项 | 结论 | 建议动作 |
+|---|---|---|
+| 1 密钥历史 | 14,319 blob / 1,289 commit / 13 类模式全量扫描。命中全部为上游 Codex 自带占位符（相关文件与 `codex-source-code/` 逐字节相同），**无任何真实凭据** | 无需动作 |
+| 2 提交身份 | 全历史只有 `3528349734@qq.com`、`sjc786526@gmail.com`，author name `sjc` | **需用户知情确认**；不接受只能改写全历史，本任务不做 |
+| 3 个人环境信息 | 全仓库真正的个人标识**只有一处**：`doc/development-environment.md:22` 的 Windows 用户名 | 建议只脱敏这一行；代理内容与 `/home/sjc` 路径建议保留（理由见 agent_log） |
+| 4 再分发边界 | `training/` 600 行全为 `origin: synthetic`；`eval/results/` 67 个文件只有聚合指标与哈希，无任何 prompt/transcript 字段 | 无需动作，可公开再分发 |
 
 **实施时的一个已知落地点**（终审提示，非计划阻塞）：C-3 第①步的 V8 脚本必须把
 `RUSTY_V8_ARCHIVE` 与 `RUSTY_V8_SRC_BINDING_PATH` **真正写入 `$GITHUB_ENV`**，
@@ -753,8 +792,13 @@ C-3 必须实测这条准确路径，不得假设默认路径可用。
 
 ### 本任务剩余步骤
 
-阶段 A 已收口。剩余：B-4/B-5（CI 实测时长并据此定范围）→ C 的 rc1 实跑与迭代 →
-D（四项复核 + 用户确认 + 转 public + 正式 tag）→ E（文档回写）。
+阶段 A、B、C 已收口，D 的只读部分已完成。剩余全部需要用户决定：
+
+1. **KD-016 决定**：`codex doctor` 的上游更新查询是否修复（影响 A13）。
+2. **D-5 转 public**：批准后执行可见性切换（含第 3 项脱敏 diff 的应用）。
+3. **D-6/D-7 正式发布**：打 `multi-v0.1.0` 与 `local-v0.1.0`，下载正式产物复跑 smoke test。
+   注意 `local-v*` 轨从未实跑过，首次会是 `mydev/` 的第一次 release 构建。
+4. **E-0**：README 安装一节换成真实下载链接。
 
 ### 阻塞项
 
@@ -767,10 +811,29 @@ D（四项复核 + 用户确认 + 转 public + 正式 tag）→ E（文档回写
 
 ### 当前验收状态
 
-**规划验收：通过。** 五轮独立审查累计提出的全部阻塞项均已逐条复核证据并整改，
-无遗留规划问题；两处窄例外（E-X1、E-X2）与可见性方案（KD-007）均已获批。
+**规划验收：通过。** 五轮独立审查累计提出的全部阻塞项均已逐条复核证据并整改；
+两处窄例外（E-X1、E-X2）与可见性方案（KD-007）均已获批。
 
-**实施验收：A1–A14 全部未达成**，尚未开始。A-1（README 对外门面版）已完成，但不单独构成验收项。
+**实施验收（2026-09-01）：**
+
+| | 状态 | 证据 |
+|---|---|---|
+| A1 CI 存在并按路径分流 | ✅ | 三类路径中两类已实跑验证 |
+| A2 三门禁 | ✅ | fmt/build/test，首次运行即抓到真实格式漂移 |
+| A3 时长预算 | ✅ | 冷 23m24s/23m40s、热 12m02s/13m50s |
+| A4 release 按 tag 分流 | ✅ | 严格 SemVer 校验 job |
+| A5 完整产品包 + SHA256SUMS | ✅ | rc5 产物复验 |
+| A6 入口名与许可材料 | ✅ | `bin/rondo-multi` + 10 个许可文件；两层依赖闭包齐备 |
+| A7 干净环境 smoke test | ✅ | 独立 verify job，含 `--version`、bundled rg、arg0/sandbox |
+| A8 仓库 public | ⏸ | 待用户确认（D-5 授权门） |
+| A9 两条正式 Release | ⏸ | 待 A8 |
+| A10 文档同步 | 🔶 | WBS / CLAUDE.md / AGENTS.md / WBS-COMPLETED 已更新；README 安装节待 A9 后回写 |
+| A11 产品语义只动两处窄例外 | ✅ | `Cargo.toml`/`Cargo.lock`/`eval/` 零改动 |
+| A12 冻结断言成立 | ✅ | `binary_freeze._validate_workspace_manifests()` 两条产品线均 OK |
+| **A13 默认不提示上游更新** | ❌ | **未达成**，见 KD-016：`codex doctor` 无条件查询上游 releases API |
+| A14 bwrap 篡改测试 | ✅ | 真实发布产物上命中具体错误，expected 值与构建期摘要一致 |
+
+**A13 是唯一未达成且非"待授权"的验收项**，需要用户就 KD-016 做决定。
 
 ### 交接边界
 
