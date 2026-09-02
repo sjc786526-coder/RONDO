@@ -49,8 +49,9 @@ Plan 103 实施中。它只交付发布工程能力，**不推进任何方向的
   跑 fmt / build / test 三门禁。冷跑约 23 分钟、热跑约 12–14 分钟。
   **只跑 crate 子集**，全量门禁仍在本地（标准 runner 16 GB，本地全量需 21 GB）。
 - 根 `.github/workflows/release.yml`：`local-v*` / `multi-v*` 两条发布轨互不夹带，
-  tag 经严格 SemVer 校验（拒前导零，`-rcN` 标为 prerelease）。两轨都不占用仓库级 `latest`
-  指针——仓库只有一个，两条线会互相覆盖（plan KD-018），对外链接一律用固定 tag。
+  tag 经严格 SemVer 校验（拒前导零，`-rcN` 标为 prerelease）。RC **绝不占用**仓库级 `latest`
+  指针（硬门禁）；正式版则接受 GitHub 的指派——平台不允许唯一的正式版退出该指针（plan KD-018）。
+  该指针只是展示状态，**不代表任一产品线的版本权威**；对外入口一律用 README 里各自的固定 tag 链接。
   产出 `x86_64-unknown-linux-musl` 的**完整产品包** + 第三方许可材料（含 Cargo 闭包与
   V8/ICU 原文）+ `SHA256SUMS`，并在独立的干净 runner 上做发布前验证。
   首发只发这一个目标（见 plan KD-009）。

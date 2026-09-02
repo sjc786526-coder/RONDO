@@ -698,15 +698,20 @@ jobs:
             --notes-file "$NOTES"
             --verify-tag
           )
-          # Neither track claims the repository-level "latest" pointer. This
-          # repo publishes two independent product lines (local-v*, multi-v*)
-          # from one tag namespace, but GitHub has exactly one such pointer, so
-          # whichever line published most recently would silently present itself
-          # as the repo's current release and demote the other. The README links
-          # to explicit tags instead.
-          args+=(--latest=false)
+          # A prerelease can and must stay out of the repository-level "latest"
+          # pointer -- proven by rc4..rc6, where releases/latest stayed 404.
+          #
+          # A formal release cannot. GitHub always designates one non-prerelease
+          # release as latest and will not let the only full release opt out:
+          # local-v0.1.0 was created with --latest=false and then PATCHed with
+          # make_latest=false, and isLatest stayed true through both. So the
+          # flag is passed only where it actually works, and formal releases
+          # accept the platform's behaviour instead of fighting it.
+          #
+          # This is display state, not version authority. Each product line's
+          # authoritative entry point is its own fixed tag link in the README.
           if [[ "$PRERELEASE" == "true" ]]; then
-            args+=(--prerelease)
+            args+=(--prerelease --latest=false)
           fi
 
           gh release create "${args[@]}" dist/*
@@ -731,32 +736,21 @@ jobs:
             exit 1
           fi
 
-          # No release of either track may own the repository-level "latest"
-          # pointer. A 404 from releases/latest is the healthy state and means
-          # nothing claims it. gh prints the error body on stdout, so branch on
-          # the exit status instead of letting it contaminate the value.
-          latest_tag() {
-            local json
-            if json="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" 2>/dev/null)"; then
-              jq -r '.tag_name' <<<"$json"
-            else
-              echo "<none>"
-            fi
-          }
-
-          # Enforce rather than merely observe: going red on an already-public
-          # release helps nobody, so take the pointer back if GitHub handed it
-          # over despite --latest=false.
-          if [[ "$(latest_tag)" == "$TAG" ]]; then
-            echo "${TAG} claimed the shared latest pointer; clearing it"
-            gh api -X PATCH \
-              "repos/${GITHUB_REPOSITORY}/releases/$(jq -r '.id' <<<"$published")" \
-              -f make_latest=false >/dev/null
+          # A 404 from releases/latest means no full release exists yet. gh
+          # prints the error body on stdout, so branch on the exit status
+          # instead of letting it contaminate the value.
+          if latest_json="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" 2>/dev/null)"; then
+            latest_tag="$(jq -r '.tag_name' <<<"$latest_json")"
+          else
+            latest_tag="<none>"
           fi
+          echo "repository-level latest is now: ${latest_tag}"
 
-          final_latest="$(latest_tag)"
-          echo "repository-level latest is now: ${final_latest}"
-          if [[ "$final_latest" == "$TAG" ]]; then
-            echo "::error::${TAG} still owns the repository-level latest pointer, which both product lines share"
+          # Hard gate, but only where the platform lets us hold the invariant:
+          # a release candidate must never be presented as the repo's current
+          # release. For formal releases the pointer is GitHub's to assign and
+          # is recorded above for the log, not asserted.
+          if [[ "$PRERELEASE" == "true" && "$latest_tag" == "$TAG" ]]; then
+            echo "::error::prerelease ${TAG} must not own the repository-level latest pointer"
             exit 1
           fi

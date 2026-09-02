@@ -370,7 +370,7 @@ Release notes 另给出该源码链接与显著许可说明。不建复杂合规
 
 | 形态 | 正则 | Release 属性 |
 |---|---|---|
-| 正式版 | `^(local\|multi)-v(0\|[1-9][0-9]*)\.(0\|[1-9][0-9]*)\.(0\|[1-9][0-9]*)$` | `prerelease=false`，`make_latest=false`（见 KD-018：仓库级 latest 指针只有一个，两条产品线都不占用） |
+| 正式版 | `^(local\|multi)-v(0\|[1-9][0-9]*)\.(0\|[1-9][0-9]*)\.(0\|[1-9][0-9]*)$` | `prerelease=false`；**不传 `--latest`**，接受 GitHub 的仓库级 latest（见 KD-018：平台不允许唯一的正式版退出该指针） |
 | 预发布 | `^(local\|multi)-v(0\|[1-9][0-9]*)\.(0\|[1-9][0-9]*)\.(0\|[1-9][0-9]*)-rc[1-9][0-9]*$` | `prerelease=true`，`make_latest=false` |
 
 核心版本段用 `(0|[1-9][0-9]*)` 而不是 `[0-9]+`，否则 `local-v01.2.3`、`multi-v1.02.3` 这类前导零会被接受
@@ -800,8 +800,17 @@ V8 按 `$TARGET` 取产物、bwrap 摘要顺序全部一次通过）。实际失
 顺序（每步失败即停，不移动或重建已有正式 tag）：
 
 1. ~~README 固定下载链接 + Plan 状态同步~~ **已完成**。
-2. **D-6 `local-v0.1.0`**：同一最终 SHA 打 tag，四个 job 全绿后下载归档复验。
-3. **D-7 `multi-v0.1.0`**：**不产生中间提交**，同一 SHA 打 tag，同样下载复验。
+2. ~~**D-6 `local-v0.1.0`**~~ **已发布并复验通过**（tag 指向 `3784994f`）。
+   build / 19 项许可检查 / A13 / A14 / 干净 runner 验证全过；归档校验和、入口、17 个许可文件、
+   产品线专属 notes 均已复验。**publish job 记录为红**——原因是发布**之后**那条基于错误 GitHub
+   语义的 latest 断言，产物无缺陷。按用户批复：保留该红色记录，不为美化而重建 Release。
+3. **D-7 `multi-v0.1.0`**：Multi 必须包含上述 workflow 修复，因此**位于新 SHA**；
+   **不得移动已发布的 `local-v0.1.0` tag**。两条正式版不要求同一 commit，改为要求
+   **产品源码一致**，打 tag 前必须确认为空：
+
+   ```bash
+   git diff --quiet local-v0.1.0..HEAD -- mydev multidev
+   ```
 4. **清理旧 RC Release**：删除 `multi-v0.1.0-rc4/rc5/rc6` 与 `local-v0.1.0-rc1` 四个
    Release 对象（用户批准的选项 a）。理由是它们均早于许可整改，作为公开可下载物**缺必需许可原文**；
    rc4/rc5 更是完全没有 V8/ICU 原文。**必须保留对应 git tag、提交历史与 Actions 记录**，
@@ -810,7 +819,9 @@ V8 按 `$TARGET` 取产物、bwrap 摘要顺序全部一次通过）。实际失
 6. 对公开候选 HEAD 重跑既定密钥扫描。
 7. **D-5 转 public**：仍需用户在完成第 6 步后单独确认。第 3 项脱敏 diff 已应用，
    但**只清理当前文件，不改写 Git 历史**——旧提交仍可查到该 Windows 用户名与两个邮箱。
-8. 转公开后验证两个固定下载链接可用、正式 Release 可见、`releases/latest` 仍为空。
+8. 转公开后验证 README 里两个固定 tag 下载链接可用、两个正式 Release 可见。
+   **不再要求 `releases/latest` 为空**——GitHub 会把最近发布的正式版显示为 latest，
+   那是平台展示状态，不解释为任一产品线的版本权威。
 
 ### 阻塞项
 
@@ -838,7 +849,7 @@ V8 按 `$TARGET` 取产物、bwrap 摘要顺序全部一次通过）。实际失
 | A6 入口名与许可材料 | ✅ | rc6 真实产物复验：16 个许可文件、V8/rusty_v8/ICU 原文在包内、HTML 实体 0、`PROVIDED "AS IS"` 逐字 233 处、rc5 的模板注释泄漏已消除（KD-017） |
 | A7 干净环境 smoke test | ✅ | 独立 verify job，含 `--version`、bundled rg、arg0/sandbox |
 | A8 仓库 public | ⏸ | 待用户在密钥复扫与历史身份知情确认后单独批准（D-5 授权门） |
-| A9 两条正式 Release | 🔶 | 用户 2026-09-02 批准在 private 状态下发布；执行中 |
+| A9 两条正式 Release | 🔶 | `local-v0.1.0` 已发布并复验通过（publish job 因 KD-018 的错误断言记录为红，产物无缺陷）；`multi-v0.1.0` 待发 |
 | A10 文档同步 | ✅ | WBS / CLAUDE.md / AGENTS.md / WBS-COMPLETED 已更新；README 安装节已换为两个固定 tag 下载链接 |
 | A11 产品语义只动两处窄例外 | ✅ | `Cargo.toml`/`Cargo.lock`/`eval/` 零改动 |
 | A12 冻结断言成立 | ✅ | `binary_freeze._validate_workspace_manifests()` 两条产品线均 OK |
@@ -850,7 +861,8 @@ V8 按 `$TARGET` 取产物、bwrap 摘要顺序全部一次通过）。实际失
 
 **两条 RC 均全绿（2026-09-02）**：`multi-v0.1.0-rc6` 与 `local-v0.1.0-rc1` 四个 job 各自通过。
 `local-v*` 轨为首次实跑，一次通过。两条 release 均 `prerelease=true`/`draft=false`/2 资产，
-且 `releases/latest` 返回 404（KD-018 成立）。
+且 `releases/latest` 返回 404——**这条只对 prerelease 成立**，也正是 KD-018 最终保留的那条硬门禁；
+正式版不适用（同见 KD-018）。
 
 ### 交接边界
 
@@ -881,7 +893,7 @@ V8 按 `$TARGET` 取产物、bwrap 摘要顺序全部一次通过）。实际失
 | KD-014 | 对外文档必须把 **RONDO Multi 产品** 与 **Publication Critic 子系统** 分层表述 | 混为一谈会让读者误以为整个 Multi 未获验收，既不准确（Multi 有 14,660 全量通过的正确性基线）也低估了项目价值；分层后既更诚实也更有说服力 | README（已改）、Release notes | 已采纳 |
 | KD-016 | **`codex doctor` 仍会查询并提示上游 Codex 版本**，`check_for_update_on_startup` 管不到它 | 实测：即使显式写入 `check_for_update_on_startup = false`，`codex doctor` 仍输出 `↑ updates 0.152.0 available (current 0.147.0)`。读代码确认 `cli/src/doctor/updates.rs:88` **无条件**调用 `fetch_latest_version()` → `curl https://api.github.com/repos/openai/codex/releases/latest`；该文件只在第 36–40 行把配置值当作一条 detail **打印**出来，从不用它做门禁。对 fork 而言这条输出具有误导性：它把上游 Codex 的版本当作"你该升级到的版本" | **A13 的判定**；修复涉及 `doctor/updates.rs` | **已修复**（2026-09-01）。改动是把探测门控到 `config.check_for_update_on_startup`，与 `tui/src/updates.rs:28,151` 已有的门控完全一致——属于把既有开关补全到唯一漏网的调用点，不是新增逻辑或改文案，因此落在 E-X2 的意图之内。同时补 3 个确定性单元测试与 CI Gate 3c；两份 CHANGELOG 原本已声称"默认不再检查上游更新"，修复前该表述不成立 |
 | KD-017 | **V8 / ICU 许可必须随包分发原文，不能只给外链** | BSD-3-Clause 与 Unicode License 都要求在**二进制再分发**中复制通知原文；原先 `v8-icu-NOTICE.md` 只有组件表和链接，A6 的"完整许可材料"不成立。已 vendor rusty_v8 v150.4.0 所 pin 的 V8 submodule（`ac1e23989121`）的 `LICENSE` 及其 `LICENSE.fdlibm/.strongtalk/.v8`、rusty_v8 的 MIT、ICU 的 Unicode License V3，并在 release 校验中加内容断言（只查存在会被空文件、symlink stub 或 HTML 错误页骗过——ICU 首次抓取就返回了 10 字节的 symlink 目标）。**不收集 V8 `third_party/` 全树**：V8 自身 `LICENSE` 已枚举那些外部库并指向随包的三个 `LICENSE.*`，扩到全树是合规系统建设，超出本任务 | `.github/licenses/`、collect 脚本、`release.yml` | 已采纳 |
-| KD-018 | **两条产品线都不占用仓库级 `latest` 指针** | GitHub 每个仓库只有一个 `latest`，而本仓库从同一命名空间发两条独立产品线。原实现给每个正式版本设 `--latest=true` 并断言"正式版必须是 latest"，后发布的一条会静默把另一条挤下去，让访客以为仓库当前版本只有一条线。改为两轨都 `--latest=false`；校验从"观察"改为"强制"（若 GitHub 仍指派则 PATCH 收回再断言），避免重演 rc4 那种"Release 已公开、job 却红"的情况 | `release.yml` publish job；E-0 必须用固定 tag 链接 | 已采纳 |
+| KD-018 | **RC 绝不占用仓库级 `latest`（硬门禁）；正式版接受 GitHub 的指派** | GitHub 每个仓库只有一个 `latest`，而本仓库从同一命名空间发两条独立产品线。原实现给正式版设 `--latest=true` 并断言"正式版必须是 latest"，后发布的一条会静默把另一条挤下去。**第一版整改（两轨都 `--latest=false` + PATCH 收回）建立在错误的 GitHub 语义假设上，已被 `local-v0.1.0` 实测推翻**：创建时传 `--latest=false`、随后 `PATCH make_latest=false`（返回 200），`isLatest` 始终为 `true`——平台不允许**唯一**的非 prerelease 版本退出该指针。最终方案（用户 2026-09-02 批准的方案 B）：`--latest=false` 只用在它确实生效的 prerelease 上并保留硬断言；正式版不传该标志、只记录不判定。该指针被重新定义为**展示状态而非版本权威**，两条产品线的权威入口是 README 里各自的固定 tag 链接 | `release.yml` publish job；README 固定 tag 链接 | 已采纳（方案 B） |
 | KD-019 | **V8 的 valgrind 与 wasm-api 两项外部库许可原文也必须随包** | KD-017 只补到 V8 根目录的 `LICENSE.*`，漏了 V8 `LICENSE` 正文枚举的另外两项：`third_party/valgrind/valgrind.h`（BSD）与 `third_party/wasm-api/wasm.{h,hh}`（Apache-2.0）——它们的原文放在各自子目录的 `LICENSE` 里，不在根目录。已按固定 revision 取回随包。同表列的 PCRE 测试套件与 WebKit layout tests 位于 `test/mjsunit/`，**不进归档**，故不复制。valgrind 那份必须是"仅适用于 valgrind.h"的 BSD 全文，**不是** Valgrind 主体的 GPL-2；已加断言锁定这一点 | `.github/licenses/`、collect 脚本、`release.yml` | 已采纳 |
 | KD-015 | Publication Critic 在所有对外文档中必须表述为**有界改写机制**，不得表述为发布门或安全审批 | 已核实产品合同与实现（`publication_review.rs:469` `Some(Verdict::Rewrite) if attempt.review_index < 2`）：第三次审查非阻断，即使 `REWRITE` 也提交；服务故障时 fail-open 提交当前稿并记为"审核未完成" | README（已改）、Release notes | 已采纳 |
 

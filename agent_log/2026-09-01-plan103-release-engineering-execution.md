@@ -460,3 +460,47 @@ Local 与 Multi 各 5 passed。CI 全程 15m51s。
 A13 断言拿 rc5 真实产物（读出 `0.152.1`）确认会红、拿修复后的结构确认会绿。
 正式发布前建议再跑一轮 RC 把这两处也覆盖上——verify job 在 publish 之前执行，
 所以即使直接发正式版，A13 断言失败也会挡在发布之前。
+
+## 正式发布（2026-09-02）
+
+### `local-v0.1.0`：产物全绿，publish job 记录为红
+
+四个 job 里 build、干净 runner verify 全过，Release 正常创建
+（`draft=false`、`prerelease=false`、2 个资产）。红的是**发布之后**的最后一条断言。
+
+复验（本机下载真实归档）：校验和 OK；`bin/rondo --version` → `0.147.0`（冻结基线，符合设计）；
+许可树 17 个文件，含本轮新补的 valgrind 与 wasm-api；发布说明第 61 行是
+"本地审批模型不在包内"，**没有**再出现 Multi 专属的 Publication Critic 一节——
+产品线分支修复在真实发布物上生效。
+
+按用户批复：**保留这条红色 workflow 记录**，不为美化而重建 Release。它记录的是一个
+发布后不可满足的错误断言，不是产品缺陷。
+
+### KD-018 的第一版整改建立在错误的 GitHub 语义上
+
+我原先假设"两条产品线都可以不占用仓库级 latest"。实测三次推翻：
+
+| 动作 | 结果 |
+|---|---|
+| 创建时 `--latest=false` | 仍被设为 latest |
+| 兜底 `PATCH make_latest=false`（HTTP 200） | GraphQL `isLatest` 仍为 `true` |
+| 手动重放同一 PATCH | 仍为 `true` |
+
+原因：**正式版里必须有一个是 latest**，仓库只有一个非 prerelease 版本时，
+GitHub 静默忽略 `make_latest=false`。
+
+这条正是我上一轮明确标记过的"唯一未被实跑覆盖的路径"。它按设计炸在了正确的位置——
+构建、许可、A13、A14 四道门禁都在 publish **之前**跑完，没有任何产物被绕过。
+但也说明一件事：**我给它写了"兜底自纠"，而那个兜底本身同样没被验证过**，
+所以它没有起到兜底作用。给未验证的逻辑加未验证的兜底，不增加可靠性。
+
+最终方案（用户批准的方案 B）：`--latest=false` 只用在它确实生效的 prerelease 上，
+并保留"RC 绝不能是 latest"这条硬断言（rc4–rc6 已证明可满足）；正式版不传该标志，
+只打印不判定。latest 被重新定义为**展示状态而非版本权威**，
+两条产品线的权威入口是 README 里各自的固定 tag 链接。
+
+### 两条正式 tag 不再要求同一 commit
+
+Multi 必须包含上述 workflow 修复，因此必然位于新 SHA，而已发布的 `local-v0.1.0` tag
+不得移动。改为要求**产品源码一致**，打 Multi tag 前须确认 `git diff --quiet
+local-v0.1.0..HEAD -- mydev multidev` 为空。
