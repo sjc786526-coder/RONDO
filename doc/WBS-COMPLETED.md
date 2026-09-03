@@ -2875,9 +2875,9 @@ FINAL_REVIEW_ACCEPTED / INTEGRATED / PUSHED / CI_PASS`。
   `agent_log/2026-09-03-plan106-release-and-cache-gate-review.md`，最终独立验收见
   `agent_log/2026-09-03-plan106-final-review.md`。
 
-## Plan 107 · Local 产品配套补齐（实现完成，首次审查整改已闭合，2026-09-03）
+## Plan 107 · Local 产品配套补齐（工作树交付通过最终审查，2026-09-03）
 
-**状态**：`IMPLEMENTED / TARGETED_GATE_PASS / REVIEW_FINDINGS_REMEDIATED / RE_REVIEW_PENDING /
+**状态**：`IMPLEMENTED / TARGETED_GATE_PASS / REVIEW_FINDINGS_REMEDIATED / FINAL_REVIEW_ACCEPTED /
 MERGE_PUSH_NOT_AUTHORIZED`。**不是** Local 全量通过、功能冻结或发布就绪。
 
 - L-1：Local `/status` 增加 Guardian 显式 override 摘要行，与 Multi 同一用户语义。新增
@@ -2915,6 +2915,10 @@ MERGE_PUSH_NOT_AUTHORIZED`。**不是** Local 全量通过、功能冻结或发�
   故未自行删除，而是取得用户对该精确路径的单独授权后执行：删除前复核非符号链接且内容仅
   `.rustc_info.json`（1718 B）与空 `nextest/local/`，只对该完整字面路径操作；删除后该路径不存在，
   `.codex/cargo-target/rondo-local` 前后同为 `31,499,597,846` bytes 且仍存在，工作树内再无其他 `target`。
+- 最终窄复验确认两项整改闭合且没有新问题：整改没有改 Rust、快照或测试，既有 60/60 与独立 4/4 定向证据
+  继续有效；完整差异 `git diff --check` 通过、无 `*.snap.new`，Multi、CI、Local 配置核心和依赖零差异。
+  工作树交付已通过独立审查，仍等待用户批准合并、推送与 Local 轻量 CI 集成终验。
 - 合同见 `plan/107-local-product-support-completion-execplan.md`，实施见
   `agent_log/2026-09-03-plan107-local-product-support.md`，首次独立审查见
-  `agent_log/2026-09-03-plan107-independent-review.md`。
+  `agent_log/2026-09-03-plan107-independent-review.md`，最终审查见
+  `agent_log/2026-09-03-plan107-final-review.md`。

@@ -154,11 +154,11 @@ Local 专属配置说明，并同步 README 入口与必要的当前规划记录
   删除前复核非符号链接、内容仅 `.rustc_info.json`（1718 B）与空 `nextest/local/`；只对该完整字面路径操作。
   删除后该路径不存在，`.codex/cargo-target/rondo-local` 前后同为 `31,499,597,846` bytes 且仍存在，
   工作树内再无其他 `target` 目录。
+- 最终窄复验已通过：两项整改闭合且没有引入新问题，当前工作树候选获独立审查接受。
 
 ### 本任务剩余步骤
 
-- 由计划制定者窄复验整改提交，确认文档、范围、快照与意外产物问题闭合。
-- 审查通过后等待用户明确批准合并与推送；获批后完成主线合入、推送与 Local 轻量 CI 终验，再据实关闭任务。
+- 等待用户明确批准合并与推送；获批后完成主线合入、推送与 Local 轻量 CI 终验，再据实关闭任务。
 
 ### 阻塞项
 
@@ -167,7 +167,7 @@ Local 专属配置说明，并同步 README 入口与必要的当前规划记录
 
 ### 当前验收状态
 
-- `IMPLEMENTED / TARGETED_GATE_PASS / REVIEW_FINDINGS_REMEDIATED / RE_REVIEW_PENDING /
+- `IMPLEMENTED / TARGETED_GATE_PASS / REVIEW_FINDINGS_REMEDIATED / FINAL_REVIEW_ACCEPTED /
   MERGE_PUSH_NOT_AUTHORIZED`。
 
 ### 交付中记录、留待另行立项的事项
@@ -175,6 +175,7 @@ Local 专属配置说明，并同步 README 入口与必要的当前规划记录
 - 首次独立审查裁决：`[auto_review].model_provider` 的 project-local 限制直接影响新 Local provider 示例，
   必须在本任务窄修；`check_for_update_on_startup` 默认改 `false` 的公共说明继续延期，不阻断本任务。
 - 首次独立审查报告：`agent_log/2026-09-03-plan107-independent-review.md`。
+- 最终审查报告：`agent_log/2026-09-03-plan107-final-review.md`。
 
 ### 交接边界
 
