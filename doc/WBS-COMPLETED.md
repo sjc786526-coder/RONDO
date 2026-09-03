@@ -2875,10 +2875,10 @@ FINAL_REVIEW_ACCEPTED / INTEGRATED / PUSHED / CI_PASS`。
   `agent_log/2026-09-03-plan106-release-and-cache-gate-review.md`，最终独立验收见
   `agent_log/2026-09-03-plan106-final-review.md`。
 
-## Plan 107 · Local 产品配套补齐（工作树交付通过最终审查，2026-09-03）
+## Plan 107 · Local 产品配套补齐（完成并集成，2026-09-03）
 
-**状态**：`IMPLEMENTED / TARGETED_GATE_PASS / REVIEW_FINDINGS_REMEDIATED / FINAL_REVIEW_ACCEPTED /
-MERGE_PUSH_NOT_AUTHORIZED`。**不是** Local 全量通过、功能冻结或发布就绪。
+**状态**：`COMPLETED / FINAL_REVIEW_ACCEPTED / GOAL_COMPLETED / INTEGRATED / PUSHED / CI_PASS`。
+**不是** Local 全量通过、功能冻结或发布就绪。
 
 - L-1：Local `/status` 增加 Guardian 显式 override 摘要行，与 Multi 同一用户语义。新增
   `mydev/codex-rs/tui/src/status/guardian.rs`（`card.rs` 已 945 行，超过 800 行门槛，故不内联），
@@ -2917,7 +2917,14 @@ MERGE_PUSH_NOT_AUTHORIZED`。**不是** Local 全量通过、功能冻结或发�
   `.codex/cargo-target/rondo-local` 前后同为 `31,499,597,846` bytes 且仍存在，工作树内再无其他 `target`。
 - 最终窄复验确认两项整改闭合且没有新问题：整改没有改 Rust、快照或测试，既有 60/60 与独立 4/4 定向证据
   继续有效；完整差异 `git diff --check` 通过、无 `*.snap.new`，Multi、CI、Local 配置核心和依赖零差异。
-  工作树交付已通过独立审查，仍等待用户批准合并、推送与 Local 轻量 CI 集成终验。
+  工作树交付通过独立审查后经用户批准合入并推送：merge `8fe3c6d6`，`58ed2f03..8fe3c6d6`，13 个文件
+  +834/−20，`multidev/` 与 `.github/` 零改动；分支归档为 `zz-done/worktree-110-local-product-support`。
+- 集成终验：该 exact SHA 触发的 Local 轻量 CI run `33749595924` 全绿——packaging scripts 9s、
+  变更分类 5s、`check (local)` 10m51s，路径分流只跑 Local 选包（`-p codex-config -p codex-features`），
+  未夹带 Multi。四个测试门禁均非零执行：产品 crate `234 passed` + `34 passed`、core config loader
+  `472 passed`（1728 filtered）、doctor update probe `5 passed`（234 filtered），合计 **745 passed、0 failed**，
+  另有 `cargo fmt --check` 与 release build 通过。`codex-tui` 按既定策略不在 CI 选包内，
+  Local TUI 正确性仍由本地 60/60 证明，轻量 CI 不替代该证据。
 - 合同见 `plan/107-local-product-support-completion-execplan.md`，实施见
   `agent_log/2026-09-03-plan107-local-product-support.md`，首次独立审查见
   `agent_log/2026-09-03-plan107-independent-review.md`，最终审查见

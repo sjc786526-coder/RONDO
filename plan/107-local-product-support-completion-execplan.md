@@ -154,21 +154,23 @@ Local 专属配置说明，并同步 README 入口与必要的当前规划记录
   删除前复核非符号链接、内容仅 `.rustc_info.json`（1718 B）与空 `nextest/local/`；只对该完整字面路径操作。
   删除后该路径不存在，`.codex/cargo-target/rondo-local` 前后同为 `31,499,597,846` bytes 且仍存在，
   工作树内再无其他 `target` 目录。
-- 最终窄复验已通过：两项整改闭合且没有引入新问题，当前工作树候选获独立审查接受。
+- 最终窄复验已通过：两项整改闭合且没有引入新问题，工作树候选获独立审查接受。
+- 已按用户批准合入并推送：merge `8fe3c6d6`（`58ed2f03..8fe3c6d6`），分支归档为
+  `zz-done/worktree-110-local-product-support`，未推送 worktree 分支。
+- 集成终验通过：该 exact SHA 的 Local 轻量 CI run `33749595924` 全绿，`check (local)` 10m51s，
+  只跑 Local 选包；四个测试门禁合计 745 passed、0 failed，均非零执行。本任务据此关闭。
 
 ### 本任务剩余步骤
 
-- 等待用户明确批准合并与推送；获批后完成主线合入、推送与 Local 轻量 CI 终验，再据实关闭任务。
+- 无。Plan 107 已完成并冻结；后续路线只看 `doc/WBS.md` 的当前条目。
 
 ### 阻塞项
 
-- 无技术阻塞；两项审查发现均已闭合。
-- 合并和推送尚未授权，属于整改复验完成后的预定用户门。
+- 无。两项审查发现均已闭合，合并、推送与 CI 终验均已完成。
 
 ### 当前验收状态
 
-- `IMPLEMENTED / TARGETED_GATE_PASS / REVIEW_FINDINGS_REMEDIATED / FINAL_REVIEW_ACCEPTED /
-  MERGE_PUSH_NOT_AUTHORIZED`。
+- `COMPLETED / FINAL_REVIEW_ACCEPTED / GOAL_COMPLETED / INTEGRATED / PUSHED / CI_PASS`。
 
 ### 交付中记录、留待另行立项的事项
 
