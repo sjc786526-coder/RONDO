@@ -8,14 +8,14 @@ ExecPlan；Plan 098 的任务合同、v9/v10/qualification、formal decoder、pa
 没有候选。任务 compute Pod 已全部删除并复核 `$0/h`，既有网络卷扩至 100GB 后保留完整 checkpoint/cache；Plan 099 外部动作授权已关闭，
 最终文档整改复验已通过，Plan 099 以“验收通过 / 任务目标失败”完整收口、合入本地 `main` 并推送；工作包四未解锁。
 Plan 097 的 `M3_D_DUAL_BACKEND_ENGINEERING_PASS / FINAL_REVIEW_ACCEPTED / INTEGRATED / PUSHED`、Plan 096 的
-`CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH`、Plan 095 最终验收、Plan 094 有效负向研究终态和 Plan 093 Linux 全 workspace 正确性基线
+`CLOUD_SCORER_NOT_QUALIFIED_HEADROOM_HIGH`、Plan 095 最终验收、Plan 094 有效负向研究终态和 Plan 093 已入主线的 Linux 全 workspace 正确性基线
 均保持有效；Plan 100 独立诊断以 `TASK_EXECUTABILITY_INSUFFICIENT / FINAL_REVIEW_ACCEPTED / INTEGRATED / PUSHED` 收口。
 Plan 101 对比测评已完成，据此把五维 hard decision 固定为云端判官接缝的后续方向、单标量云端接缝标注废弃，
 Plan 102 五维云端判官实验性工程接入已以 `ENGINEERING_SEAM_PASS` 完成并合入推送，方向 3 当前无 active 工作包；该方向不自动解锁产品质量、默认启用或生产。
 跨方向的 Plan 103 发布工程已完成并冻结，仓库转 public 且两条产品线各发首个正式版；全部云端资源已清空，见下方「云端资源终态」。
 2026-09-02 另完成一次两条产品线的配套核对，并据此排定「先 Multi 收口、再 Local 收口」的两阶段路线，
-见下方「产品线配套补齐与逐条收口」；阶段一 Plan 104 已完成、合入并推送，轻量 CI 与 `codex-team-state`
-非零测试日志均已核验，仍只补配套呈现与文档，不解锁任何方向）
+见下方「产品线配套补齐与逐条收口」；阶段一 Plan 104 已完成、合入并推送，独立空间门已通过，Plan 105 最终
+全 workspace 与独立验收已完成，Multi 实质代码/功能冻结。107 分支仍待用户批准 main 集成与推送，随后才进入发布）
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段指针、跨方向关系、
 稳定工程边界和授权门；已完成成果与验收见 `doc/WBS-COMPLETED.md`，单次任务合同见 `plan/`，执行细节见
@@ -37,9 +37,11 @@ Plan 102 五维云端判官实验性工程接入已以 `ENGINEERING_SEAM_PASS` �
 | 2：本地审批模型 | **已收口，今后不再开启** | 最终结论为“保留为实验”；不改生产默认，不再规划后续工作包 |
 | 3：RONDO Multi | 第一、二期、第四期已完成；三期 Plan 099 有效 `NO-GO`；Plan 100 正式诊断最终验收通过；Plan 101 定方向、Plan 102 完成五维云端判官接缝接入（`ENGINEERING_SEAM_PASS`）。**当前无 active 工作包** | 工作包四仍未解锁。Plan 102 只交付工程接缝可用性，不含质量或资格结论；产品默认仍为 `OFF`，云端 backend 需显式选择。不读冻结测试、不训练、不改产品默认，不授予 qualification、产品价值或生产资格 |
 
-方向 3 当前 Linux 正确性基线由 Plan 093 建立：default features、standard local Nextest、checksum-verified V8 的完整 workspace
-为 `14660/14660` passed、0 failure/error/timeout，另有 1/1 setup passed；24 个 skip 不计 passed。正式证据和精确边界见
-`doc/WBS/multi-agent-trusted-evidence.md` 与 `doc/WBS-COMPLETED.md`。
+方向 3 已入主线的 Linux 正确性基线仍由 Plan 093 建立：`14660/14660` passed、0 failure/error/timeout，另有 1/1 setup passed。
+待集成的 Plan 105 发布候选在 default features、standard local Nextest、checksum-verified V8、`CARGO_INCREMENTAL=0` 的完整
+workspace 上取得 `14713/14713` passed、0 failure/error/timeout/retry，另有 1/1 setup passed；24 个 skip 不计 passed。
+Plan 105 已通过独立验收，实质代码与功能冻结，107 分支尚未合入或推送；正式证据和精确边界见
+`doc/WBS-COMPLETED.md` 与 `agent_log/2026-09-02-plan105-multi-final-full-workspace-review.md`。
 
 ### 云端资源终态
 
@@ -94,7 +96,7 @@ RC 阶段的 4 个 Release 对象已清理，7 个 RC tag 与全部 Actions 记�
 **后续发布**：新版本走同一条流水线，打 `local-v*` / `multi-v*` tag 即可。
 README 的下载链接是固定 tag，发新版本时需同步更新。
 
-### 产品线配套补齐与逐条收口（跨方向，阶段一已完成）
+### 产品线配套补齐与逐条收口（跨方向，Multi 全量已验收，待集成与发布）
 
 2026-09-02 对两条产品线做了一次配套核对，方法是只读比对冻结上游快照 `codex-source-code/`，
 覆盖 `/status` 呈现、Guardian 配置字段、产品文档与 CI test 子集四处。
@@ -115,6 +117,9 @@ README 的下载链接是固定 tag，发新版本时需同步更新。
   新建公共 Guardian / Multi 指南；Local 专属配置仍留待阶段二。
 - CI 仍不把 `codex-tui` 纳入轻量 test 子集。Plan 104 已把 `codex-team-state` 加入 Multi 选包；首次推送后的
   Multi check 10m38s 通过，该 crate 发现 160 个测试并得到 159 passed、1 ignored、0 failed。
+- Multi 独立空间门已释放两条产品 target 的 incremental 缓存并保留可复用构建主体；Plan 105 初始全量暴露的环境与
+  app-server 并发问题已闭合，最终 `14713/14713`、0 retry 通过并经独立验收。Multi 实质代码与功能现已冻结；
+  107 分支待用户批准集成与推送，尚未发布新版本。
 
 **本工作包只补配套呈现与文档，不新增产品能力、不改任何默认值、不解锁任何方向的工作包，
 也不产生质量或资格结论。**
@@ -206,11 +211,12 @@ M-1/M-2/M-3 与 L-1/L-2 之间无技术依赖，阶段内顺序可调；**阶段
 
 ## 2. 下一工作包与顺序
 
-当前没有 active 实施任务。跨方向「产品线配套补齐与逐条收口」阶段一 Plan 104（见 1 节同名小节）的
-Multi M-1 / M-2 / M-3 已完成、验收、合入并推送，轻量 CI 已核验通过。下一工作包是另立只读空间盘点与
-释放建议任务；之后再以全量测试、冻结、发布及经用户明确授权的该线构建缓存删除收尾，才整体转入 Local 侧，
-并同样在全量测试前先完成独立空间任务。
-两个阶段之间是硬顺序，阶段内工作项顺序可调。各方向本身当前均无 active 工作包。
+当前没有 active 实施任务。跨方向「产品线配套补齐与逐条收口」阶段一的 Plan 104、独立空间门和 Plan 105
+全量修复闭环均已完成，Plan 105 也已通过独立验收并使 Multi 实质代码/功能冻结；107 分支当前停在
+`MAIN_INTEGRATION_PENDING / NOT_PUSHED`。下一动作是经用户明确批准把 107 合入 `main` 并推送、核验轻量 CI；
+之后另立 Multi 发布任务。发布完成后，`.codex/cargo-target/rondo-multi` 的精确删除仍须用户单独授权，闭合后才整体转入
+Local 阶段，并同样在 Local 全量前先完成独立空间任务。两个阶段之间是硬顺序，阶段内工作项顺序可调；各方向本身
+当前均无 active 工作包。
 
 方向 3 三期原定路线如下；前三个工作包已串行完成，Plan 099 没有形成候选，因此本轮在工作包三停止，工作包四未解锁：
 
