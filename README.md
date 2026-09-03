@@ -38,27 +38,50 @@ RONDO 是一个基于 [OpenAI Codex CLI](https://github.com/openai/codex) 源码
 | 开发周期 | 2026-08-04 起 |
 | 许可证 | Apache-2.0（继承上游） |
 
-**相对上游基线的改动量**（统计于 commit `d82a07f1`）：
+**工作量**（统计于 commit `b4031298`）。已扣除四笔上游搬运提交（0.146.0 初始化、RONDO Multi 基线、
+0.147.0 升级、`codex-doc/` 官方文档快照），统一按「Markdown = 文档侧，其余 = 代码侧」拆分：
 
-| | 新增/改后行 | 删除/改前行 | 改动文件 | 新增条目 |
-|---|---|---|---|---|
-| RONDO Local (`mydev/codex-rs`) | +6,486 | −763 | 137 | 16 |
-| RONDO Multi (`multidev/codex-rs`) | +90,165 | −1,483 | 289 | 140 |
+*口径一 · cloc —— 当前快照，相对冻结上游的净产出*
 
-> 复现方法需要**两条命令**（`-rN` 不产生 `Files`/`Only in` 行，`-rq` 不产生逐行差异）：
+| | 文件 | 纯代码 | 注释 | 空行 | 物理总行 |
+|---|---:|---:|---:|---:|---:|
+| 代码侧 | 1,009 新建 + 392 改写 | 384,449 | 10,003 | 26,170 | 420,622 |
+| 文档侧 | 785 | 70,784 | — | 18,746 | 89,530 |
+| **合计** | 1,794 新建 + 392 改写 | **455,233** | **10,003** | **44,916** | **510,152** |
+
+*口径二 · git —— 提交历史累计*
+
+| | 新增行 | 删除行 | 净增 | 文件改动次数 | 涉及文件 |
+|---|---:|---:|---:|---:|---:|
+| 代码侧 | 451,807 | 30,926 | 420,881 | 4,408 | 1,485 |
+| 文档侧 | 107,773 | 18,597 | 89,176 | 2,895 | 798 |
+| **合计** | **559,580** | **49,523** | **510,057** | **7,303** | **2,283** |
+
+1,363 次提交（1,208 常规 + 155 合并），30 个活跃日，2026-08-04 → 2026-09-03。
+
+> 两个口径算法完全独立——cloc 数当前快照，git 数历史累计——合计相差 95 行（0.02%）。
+>
+> 代码侧含 54,651 行 JSON（`eval/` 的 locks/results/manifests 与 `training/` 数据集），是产物而非手写；
+> 剔除后纯手写代码 329,798 行。分产品线看，相对上游的代码侧净产出为 RONDO Local 6,320 行、
+> RONDO Multi 81,207 行——Local 是薄 fork，Multi 是主要改动面。
+>
+> 复现方法（`codex-source-code/` 是 git-ignored 的上游只读快照，需自行从上游 `rust-v0.147.0` 获取）：
 >
 > ```bash
-> SRC=codex-source-code/codex-rs; DST=<product>/codex-rs
-> # 增删行数
-> diff -rN -x target -x .git -x __pycache__ "$SRC" "$DST" \
->   | grep -c '^> '   # 新增/改后行；把 '^> ' 换成 '^< ' 得删除/改前行
-> # 改动文件数与新增条目数
-> diff -rq -x target -x .git -x __pycache__ "$SRC" "$DST" | grep -c '^Files '
-> diff -rq -x target -x .git -x __pycache__ "$SRC" "$DST" | grep -c '^Only in '"$DST"
+> # cloc 口径 · 两条产品线相对上游的 delta
+> cloc --diff --skip-uniqueness --timeout 0 codex-source-code mydev      # RONDO Local
+> cloc --diff --skip-uniqueness --timeout 0 codex-source-code multidev   # RONDO Multi
+> # cloc 口径 · 自研目录（默认会把两条产品线的同源文件去重，必须加 --skip-uniqueness）
+> git ls-files -- eval training scripts .github .cargo .gitignore .mailmap justfile 'rondo.*' \
+>   | grep -v '\.md$' > /tmp/f
+> cloc --list-file=/tmp/f --skip-uniqueness   # 代码侧合计 = 此结果 + 两条产品线的 delta
+> # git 口径 · 扣除四笔搬运提交后按 .md 拆分
+> git log --numstat --format='C:%H' --no-merges | awk '
+>   /^C:/{h=substr($0,3,7); skip=(h=="0fe9217"||h=="1001929"||h=="d2c1607"||h=="3b82de0"); next}
+>   /^[0-9]+\t[0-9]+\t/ && !skip {split($0,f,"\t");
+>     if (f[3] ~ /\.md$/) {ma+=f[1]; mdl+=f[2]} else {ca+=f[1]; cdl+=f[2]}}
+>   END{printf "docs +%d -%d\ncode +%d -%d\n", ma, mdl, ca, cdl}'
 > ```
->
-> "新增条目"含目录（`diff -rq` 对单侧目录只报一行，不展开）。
-> `codex-source-code/` 是 git-ignored 的上游只读快照，需自行从上游 `rust-v0.147.0` 获取后才能复现。
 
 **自建测评与测试设施：**
 
