@@ -221,7 +221,7 @@ cargo build --release --manifest-path mydev/codex-rs/Cargo.toml -p codex-cli
 
 > **RONDO 相对上游新增的配置**（公共 Guardian 的模型/provider/effort/证据目录，以及 Multi 的
 > Team State、Durable Team、Publication Critic）单独整理在 **[`doc/rondo-config.md`](doc/rondo-config.md)**。
-> 这些能力默认全部关闭。
+> Guardian 的 reviewer 默认仍为 `user`，四个 override 默认不设置；这里列出的 Multi 能力默认关闭。
 
 > **构建资源提示**：这是一个约 130 个 crate 的 Rust workspace（Multi 131、Local 129），完整构建吃内存也吃时间。
 > 本仓库的开发流程用 `scripts/with-build-lock.sh` 做单构建互斥和内存看门狗——那是为受限开发机准备的，

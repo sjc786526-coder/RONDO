@@ -14,7 +14,8 @@ Plan 101 对比测评已完成，据此把五维 hard decision 固定为云端�
 Plan 102 五维云端判官实验性工程接入已以 `ENGINEERING_SEAM_PASS` 完成并合入推送，方向 3 当前无 active 工作包；该方向不自动解锁产品质量、默认启用或生产。
 跨方向的 Plan 103 发布工程已完成并冻结，仓库转 public 且两条产品线各发首个正式版；全部云端资源已清空，见下方「云端资源终态」。
 2026-09-02 另完成一次两条产品线的配套核对，并据此排定「先 Multi 收口、再 Local 收口」的两阶段路线，
-见下方「产品线配套补齐与逐条收口」；该路线未立项、未授权，只补配套呈现与文档，不解锁任何方向）
+见下方「产品线配套补齐与逐条收口」；阶段一 Plan 104 已完成本地实现、定向验证、独立审查整改并合入本地 `main`，
+待另行授权推送后核验轻量 CI，仍只补配套呈现与文档，不解锁任何方向）
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段指针、跨方向关系、
 稳定工程边界和授权门；已完成成果与验收见 `doc/WBS-COMPLETED.md`，单次任务合同见 `plan/`，执行细节见
@@ -93,27 +94,27 @@ RC 阶段的 4 个 Release 对象已清理，7 个 RC tag 与全部 Actions 记�
 **后续发布**：新版本走同一条流水线，打 `local-v*` / `multi-v*` tag 即可。
 README 的下载链接是固定 tag，发新版本时需同步更新。
 
-### 产品线配套补齐与逐条收口（跨方向，待启动）
+### 产品线配套补齐与逐条收口（跨方向，阶段一待推送 CI）
 
 2026-09-02 对两条产品线做了一次配套核对，方法是只读比对冻结上游快照 `codex-source-code/`，
 覆盖 `/status` 呈现、Guardian 配置字段、产品文档与 CI test 子集四处。
-**本次核查未发现新的功能实现缺口，确认存在以下配套呈现、文档与持续测试缺口**；
-核查范围不足以支撑"功能内核整体齐备"这类更强的判断。核对到的事实：
+**本次核查未发现新的功能实现缺口，只确认了配套呈现、文档与持续测试缺口**；核查范围不足以支撑
+"功能内核整体齐备"这类更强的判断。下面同时保留 Plan 104 基线与当前状态：
 
-- 两条线的 `tui/src/status/card.rs` 与上游逐字节相同；`codex-rs/config.md` 与 `docs/`（各 15 个文件）同样逐字节相同。
-- `/status` **已经**显示 reviewer 选择：`status_approval_label()` 在 `AskForApproval::OnRequest` 下按
-  `ApprovalsReviewer` 显示 `Approve for me` / `Ask for approval`。未呈现的是另外四个 override 字段——
-  两条线的 `Config` 都带 `guardian_model_config` / `guardian_model_provider_config` /
-  `guardian_reasoning_effort_config` / `guardian_evidence_dir`，配置了也无处可见。
+- Plan 104 基线中，两条线的 `tui/src/status/card.rs` 与上游逐字节相同；产品树内的 `codex-rs/config.md` 与
+  `docs/`（各 15 个文件）也相同。当前 Multi 已增加 Guardian 配置摘要；产品树继承文档仍不改，RONDO 增量指南
+  只放在根 `doc/rondo-config.md`。
+- `/status` 原本只显示 reviewer 选择：`status_approval_label()` 在 `AskForApproval::OnRequest` 下按
+  `ApprovalsReviewer` 显示 `Approve for me` / `Ask for approval`。两条线的 `Config` 都带四个 Guardian override；
+  当前 Multi 已按三态呈现显式加载值，Local 仍留待阶段二。
 - 是否路由给 Guardian 由 `routes_approval_policy_to_guardian()` 按审批策略与 reviewer 共同决定；
   实际 review 模型要到 Guardian session 创建时才按"显式配置 → catalog override → provider 默认"解析。
   因此**状态面板只能反映已加载的配置，不能证明某次 review 运行时确实用了该模型**。
 - Multi 已有自建 TUI 面板（`/sessions`、`/session-control`，三个 default-off 的 `Stage::Experimental`
-  feature，带 UI 快照）与 `codex-rs/app-server/README.md` 的 v2 方法文档；Local 的 TUI 差异全部是测试基建，
-  面向用户的产品文档里 RONDO 自撰的只有根 `CHANGELOG.md`，`README.md`、`docs/` 与 `codex-rs/` 内均无
-  （`AGENTS.md` 是开发规则，不计入产品文档）。
-- CI 的 test 子集不含 `codex-tui`；Multi 的 `codex-team-state` 同样不在其中，尽管它已是该线 `codex-core`
-  的直接依赖（`multidev/codex-rs/core/Cargo.toml`），发布入口构建本来就会编译它。
+  feature，带 UI 快照）与 `codex-rs/app-server/README.md` 的 v2 方法文档。Plan 104 已在根 README 增加配置入口并
+  新建公共 Guardian / Multi 指南；Local 专属配置仍留待阶段二。
+- CI 仍不把 `codex-tui` 纳入轻量 test 子集。Plan 104 已把 `codex-team-state` 加入 Multi 选包，本地实跑非零；
+  GitHub Actions 的首次实际耗时和非零日志待推送后核验。
 
 **本工作包只补配套呈现与文档，不新增产品能力、不改任何默认值、不解锁任何方向的工作包，
 也不产生质量或资格结论。**
@@ -205,9 +206,10 @@ M-1/M-2/M-3 与 L-1/L-2 之间无技术依赖，阶段内顺序可调；**阶段
 
 ## 2. 下一工作包与顺序
 
-当前唯一排队待启动的是跨方向的「产品线配套补齐与逐条收口」（见 1 节同名小节），尚未立项与授权：
-先做完 Multi 侧工作项，再单独完成仅限只读盘点和释放建议的空间任务，然后以全量测试、冻结、发布及经用户
-明确授权的该线构建缓存删除收尾；之后才整体转入 Local 侧，并同样在全量测试前先完成独立空间任务。
+当前 active 的是跨方向「产品线配套补齐与逐条收口」阶段一 Plan 104（见 1 节同名小节）：Multi 的 M-1 / M-2 / M-3
+已完成本地实现、定向验证、独立审查整改并合入本地 `main`，待后续明确授权推送和核验轻量 CI 后正式收口。
+随后再单独完成仅限只读盘点和释放建议的空间任务，然后以全量测试、冻结、发布及经用户明确授权的该线构建缓存
+删除收尾；之后才整体转入 Local 侧，并同样在全量测试前先完成独立空间任务。
 两个阶段之间是硬顺序，阶段内工作项顺序可调。各方向本身当前均无 active 工作包。
 
 方向 3 三期原定路线如下；前三个工作包已串行完成，Plan 099 没有形成候选，因此本轮在工作包三停止，工作包四未解锁：

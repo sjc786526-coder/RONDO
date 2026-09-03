@@ -11,7 +11,8 @@
 配置文件位置、层级与优先级规则完全沿用上游，RONDO 没有改。
 
 > **口径**：本文所有字段以当前 `config/src/config_toml.rs`、`features/src/feature_configs.rs`
-> 与 `core/src/config/mod.rs` 的解析代码为准。RONDO 是研究项目，下面的实验性能力**默认全部关闭**。
+> 与 `core/src/config/mod.rs` 的解析代码为准。默认 reviewer 是 `user`，四个 Guardian override 默认不设置；
+> 本文列出的 Multi 能力默认关闭或缺省。
 
 ---
 
@@ -59,8 +60,9 @@ evidence_dir = "/private/guardian-evidence"   # RONDO 新增，必须是绝对�
 - **显式 provider 自带认证。** 一旦设了 `model_provider`，Guardian 就不再继承父会话的凭据管理器
   ——除非该 provider `requires_openai_auth` 或是 Amazon Bedrock。这是刻意的：避免把第一方凭据
   漏给一个本来就没配认证的 provider。
-- **配置了 `model` 不等于某次审批一定用了这个模型。** 最终 slug 还要经过目录查表与回退，
-  所以本项目的界面只说"配置已加载"，不声称"某次 review 用了它"。
+- **配置了 `model` 不等于某次审批已经使用了这个模型。** 显式值是最高优先级的 review slug，
+  但配置界面不知道某轮 review 是否发生、请求是否成功到达 provider。因此界面只说"配置已加载"，
+  不声称"某次 review 用了它"。
 
 ### 1.3 `evidence_dir` 的数据敏感性
 
@@ -168,8 +170,7 @@ startup_timeout_ms = 60000         # 可选，默认 60000
 
 ## 3. 不在本文范围内的
 
-- **RONDO Local 专属配置**：本文只写两条产品线公共的 Guardian 增量和 Multi 专属项。
-  Local 的本地推理审批桥接依赖未随仓库分发的模型权重与推理运行时，不是"配置一下就能用"的东西。
+- **RONDO Local 专属配置**：留待第二阶段补充，本文不展开。
 - **上游通用配置**：见本文开头的链接。
 - **开发与构建设施**：构建锁、资源看门狗、CI 与发布流水线分别见
   [`doc/development-environment.md`](development-environment.md)、

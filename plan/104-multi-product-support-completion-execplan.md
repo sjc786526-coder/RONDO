@@ -125,27 +125,30 @@ Guardian 与 Multi 的 RONDO 配置指南及清楚入口。本任务不新增产
   `status/tests.rs`，复用 `test_config`。
 - **M-3**：新增 `doc/rondo-config.md`（公共 Guardian 增量 + Multi 增量，链接上游通用配置文档）；
   `README.md` 在"从源码构建"与仓库结构树两处提供入口。
+- 本地最终门禁 `3602/3602` 通过，其中 `codex-team-state` 实跑 159 个测试；独立审查又以
+  `codex-team-state` 全包加 4 个新增 status 测试完成 `163/163` 窄复验。
+- 首次独立审查发现的配置回退解释、默认状态措辞、Local 范围和任务状态记录问题均已完成窄文档修订并复核；
+  产品代码无需整改。
 
 ### 当前工作
 
-- 定向验证与工作树提交。
+- 本地实现、验证与独立审查整改均已完成；本地 `main` 合并已获用户授权并在本轮交付执行。
+- 远端推送与 Actions 验收尚未获本轮授权、尚未执行。
 
 ### 本任务剩余步骤
 
-- 完成 `codex-tui` 定向测试与快照人工确认、`codex-team-state` 实跑、格式与 lint 检查。
-- 检查最终差异与意外生成物，写精炼 `agent_log`，提交工作树分支。
-- 由审查者验收工作树提交；取得用户明确批准后再合并 `main`、推送并观察轻量 CI。
-- 核对 `codex-team-state` 的非零测试数、CI 结果和耗时说明；如需窄修则在同一任务内修复、复验并重新提交审查。
+- 取得用户后续明确批准后推送 `main`，观察 Multi 轻量 CI。
+- 核对 Actions 中 `codex-team-state` 的非零测试数、CI 结果和耗时说明；如需窄修则在同一任务内修复、复验。
 - CI 与最终差异通过后，精炼同步任务完成记录并冻结本计划。
 
 ### 阻塞项
 
-- 工作树实现阶段无阻塞。
-- 合并、推送和推送后 CI 验收等待用户在审查通过后的单独明确批准。
+- 本地实现、验证、审查和合并无阻塞。
+- 推送和推送后 CI 验收等待用户后续明确批准。
 
 ### 当前验收状态
 
-- `IMPLEMENTATION_DONE / LOCAL_VERIFICATION_IN_PROGRESS`。
+- `LOCAL_REVIEW_ACCEPTED / INTEGRATED / PUSH_PENDING`。
 - 推送后的轻量 CI 尚未触发，`codex-team-state` 在 Actions 中的非零测试数尚未核对，不得表述为通过。
 
 ### 交接边界
@@ -164,5 +167,5 @@ Guardian 与 Multi 的 RONDO 配置指南及清楚入口。本任务不新增产
 | 004 | 工作树提交与 `main` 合并/推送分开授权，推送后 CI 仍是任务最终验收的一部分 | 遵守本次用户指定的审查流程，同时保留完整宏观验收 | Git 流程、CI | 已采纳 |
 | 005 | 本任务没有必须在主工作区直接编辑的 git-ignored 交付物；本地构建只复用根共享 target 与锁 | 所有产品、CI 和文档变更均为受跟踪文件，共享 target 只是既有执行设施 | 工作树、构建设施 | 已采纳 |
 | 006 | Guardian 摘要逻辑放新模块 `status/guardian.rs`，而非继续写进 `card.rs` | `card.rs` 已 945 行，超过 `multidev/AGENTS.md` 的 800 行门槛；本计划 §2 也允许同模块下的小型专用文件 | Multi TUI | 已采纳 |
-| 007 | 状态行措辞定为 `loaded for reviewer auto_review (...)` / `loaded, unused by reviewer user (...)`，用 config 里的字面值指代 reviewer | 两态对称且都点名 reviewer，满足 WBS "显示 reviewer 与已加载 override"；`loaded` 只陈述加载事实，不声称某次 review 用过该模型（实际 slug 还要过 catalog 与回退） | Multi TUI、`doc/rondo-config.md` | 已采纳 |
+| 007 | 状态行措辞定为 `loaded for reviewer auto_review (...)` / `loaded, unused by reviewer user (...)`，用 config 里的字面值指代 reviewer | 两态对称且都点名 reviewer，满足 WBS "显示 reviewer 与已加载 override"；显式 model 是最高优先级 slug，但 `loaded` 只陈述加载事实，不声称某次 review 已发生或 provider 已实际处理它 | Multi TUI、`doc/rondo-config.md` | 已采纳 |
 | 008 | 每项 override 值按 48 列上限截断 | 值来自自由文本配置，而 transcript 渲染宽度是 `u16::MAX`，不截断会让一条长路径撑爆整块记录 | Multi TUI | 已采纳 |

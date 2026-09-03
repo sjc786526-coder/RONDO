@@ -45,8 +45,9 @@
 ### 一、"配置已加载"和"某次审批用了它"必须分开说
 
 `core/src/guardian/review.rs` 里 review 模型的解析顺序是
-`[auto_review].model` → 模型目录 `auto_review_model_override` → provider 默认 review model，
-都没命中目录时还会退回父会话模型 slug。也就是说**配置里写的 slug 不一定是某次 review 实际用的模型**。
+`[auto_review].model` → 模型目录 `auto_review_model_override` → provider 默认 review model。
+显式配置是最高优先级的 slug，即使目录里没有对应 preset 也不会被目录回退替换；但配置加载本身不能证明
+某轮 review 已经发生、请求成功到达 provider 或 provider 最终处理了该模型。
 
 所以状态行的措辞只说 `loaded`（配置已加载）+ reviewer 是谁，不说"已生效""正在使用"。
 两态都点名 reviewer，用的是 config 里的字面值（`auto_review` / `user`），跟用户会写进 `config.toml`
@@ -71,10 +72,14 @@
 
 | 项 | 结果 |
 |---|---|
-| `just --justfile multidev/justfile fmt` | 通过 |
-| `just ... test -p codex-tui -p codex-team-state` | 见下方最终一轮 |
+| `just --justfile multidev/justfile fmt` / `fmt-check` | 通过 |
+| `just ... test -p codex-tui -p codex-team-state` | `3602/3602` 通过；其中 `codex-team-state` 实跑 `159` 个测试 |
 | `cargo insta pending-snapshots` | `No pending snapshots.` |
 | 新快照人工审读 | 已逐行确认：只新增一行，其余字段仅因标签列加宽 1 列而整体右移 |
+
+第一次全包 TUI 运行的 21 个 loopback 测试失败，根因是 shell 的 `http_proxy` 指向本机代理，而 `no_proxy`
+使用了 reqwest 不接受的 `127.*` 通配写法。清除代理变量后，先定向确认 `21/21` 通过，再完成上表最终全包门禁；
+该问题没有引出产品代码修改。
 
 **未运行 / 不在本次范围**：
 
