@@ -10,8 +10,10 @@
 - `README.md:149` 的 Multi 正确性基线 `14,660 / 14,660` 改为 `14,713 / 14,713`。这是与同文件
   `README.md:69` 的真实矛盾：`14,660` 是 Plan 093 在**增量开启**下建立的历史基线，`14,713` 才是 Plan 105
   建立的当前基线。`doc/development-environment.md` 中的 `14660` 有明确的 Plan 093 历史标注，**未改动**。
-- `README.md` 三个未锚定 commit 的计数器按当前现场更新：提交 `1272 → 1355`、执行日志 `558 → 581`、
-  任务合同 `97 → 98`（两处）。
+- `README.md` 的未锚定计数器分两种处理。**提交数与执行日志数直接删除**：它们在写入的那次提交本身发生时
+  就已失真（写日志、合并各再加一次），锚定不如移除，「开发周期」只保留起始日期，过程证据一句改为
+  「逐批执行日志（`agent_log/`）」。任务合同数按现场更新 `97 → 98`（两处）并保留——它只在立新 plan 时变动，
+  项目停更后稳定；同句的审计快照 5、研究报告 14、测评结果 67 三个数当前准确且同样不再变动，一并保留。
 - **未改动**「相对上游基线的改动量」表格：该表已显式锚定 commit `d82a07f1` 并附复现方法，属于有标注的
   历史快照。今日实测值为 Local `+6,855 / −786`、142 改动文件、11 新增条目（清理后）；
   Multi `+90,481 / −1,506`、292 改动文件、142 新增条目。若将来要更新应整行替换并标注新快照，
@@ -28,7 +30,7 @@
 
 | 对象 | 释放 | 依据 |
 |---|---|---|
-| `eval-data/envs/publication-critic-plan068` | `6,897,892,345` B | uv 创建的 CPython 3.12.3 venv（`pyvenv.cfg` 确认），`eval/uv.lock` 受跟踪，完全可再生 |
+| `eval-data/envs/publication-critic-plan068` | `6,897,892,345` B | uv 创建的 CPython 3.12.3 venv（`pyvenv.cfg` 确认），专属重建合同 `eval/environments/publication-critic-plan068/{pyproject.toml,uv.lock}` 受跟踪，完全可再生 |
 | `.claude/worktrees/115-plan109-final-review` | `151,647,968` B | Plan 109 收口审查自身遗留；clean、无 ignored/untracked、HEAD `a7f01abd` 是 `main` 祖先且与 `main` tree 零差异 |
 | `mydev/codex-rs/` 下 8 个空目录 | ~32 KB | 2026-08-07 测试残留，全部空且 untracked |
 
@@ -49,8 +51,9 @@
   `3,441,189,792` B 的候选权重，加 `model/` 的 exact base 共四份，inode 各异、抽样内容哈希互不相同，
   云端卷 `mwemzrn33y` 已不存在，**不可恢复**。
 - `eval-data/local-approval/l6/.../paired-gguf-02` 的两个 GGUF（约 9.7 GiB）。用户本轮明确不做可选删除。
-  若将来释放，只能删两个 `.gguf`，同目录 14 个 receipt/manifest/日志/转换工具必须保留。
-- `eval-data/bin` 的 8 个 RONDO runtime bundle（约 10.4 GB）。经核实 8 个 commit 各有 3–41 处受跟踪引用，
+  若将来释放，只能删两个 `.gguf`；同目录 12 个非 GGUF 文件必须保留——9 个顶层 receipt/manifest/日志，
+  加 `tooling/` 内 3 个转换工具（`convert_hf_to_gguf.py`、`llama-quantize`、`merge_adapter.py`）。
+- `eval-data/bin` 的 8 个 RONDO runtime bundle（约 10.4 GB）。经核实 8 个 commit 各有 2–41 处受跟踪引用，
   且 `doc/eval-data-layout.md` 将其定义为冻结 runtime bundle；当前占用远低于告警线，无释放压力。
 - 138 条 `zz-done/` 分支、`test-data/_retained-test-evidence/`、`reference-agent-harness/`。
 
