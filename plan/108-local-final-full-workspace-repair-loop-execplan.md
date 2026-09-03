@@ -179,24 +179,26 @@
 - 2026-09-03：最终轮与必要诊断/定向证据已轻量复制到主物理工作区
   `test-data/_retained-test-evidence/plan108-local-final-full-workspace/`；副本保留原始 JUnit、summary、metrics、Nextest 配置、
   console 和中性环境/运行脚本，不依赖 113 worktree 永久存在。
+- 2026-09-03：计划制定者完成独立验收，接受三项测试设施/调度修复及最终证据，无未关闭 correctness finding。最终轮的
+  residual cleanup 在任何修复前的首次完整轮已同样出现，且由既有 watchdog 于成功命令退出后只清理本轮 cgroup，判为非阻断；
+  113 内 `mydev/codex-rs/target/nextest/local/` 只有三个空目录、不是第二套 target，按无删除授权保留。没有重跑完整 workspace。
 
 ### 当前工作
 
-- 执行实现、最终完整 workspace、轻量证据保留与记录同步均已完成；113 分支只等待独立验收，不进行 main 集成。
+- 执行、最终完整 workspace、证据保留与独立验收均已完成；候选实质代码/测试口径冻结，等待用户批准 main 集成与推送。
 
 ### 本任务剩余步骤
 
-- 由计划制定者独立验收；如整改影响产品、测试、fixture、Cargo/Nextest 或正式口径，完成定向复验与新的最终完整轮。
 - 验收通过后等待用户批准 main 合并与推送；获批后完成 Local 轻量 CI 终验和正确的 WBS/完成记录收口。
 
 ### 阻塞项
 
-- 无执行阻塞。独立验收、main 合并和推送仍是后续停止点；当前没有这些动作的授权。
+- 无 correctness 阻塞。main 合并和推送仍是后续停止点；当前没有这些动作的授权。
 
 ### 当前验收状态
 
-- `IMPLEMENTED / TARGETED_GATES_PASS / FINAL_FULL_WORKSPACE_PASS / INDEPENDENT_REVIEW_PENDING /
-  MERGE_PUSH_NOT_AUTHORIZED`。
+- `IMPLEMENTED / TARGETED_GATES_PASS / FINAL_FULL_WORKSPACE_PASS / FINAL_REVIEW_ACCEPTED /
+  WORKTREE_GOAL_COMPLETED / LOCAL_CANDIDATE_FUNCTIONALLY_FROZEN / MERGE_PUSH_NOT_AUTHORIZED`。
 
 ### 交接边界
 
@@ -218,3 +220,5 @@
 | 008 | loopback allowlist fixture 先有界消费 HTTP request head，再响应并 half-close | 关闭带未读接收队列的 socket 会发 RST，使代理把已写出的 204 误判成 upstream failure | Local CLI 测试 fixture | 已采纳 |
 | 009 | sticky environment 测试给其私有不可达端点配置 50ms connect timeout，不扩大通用读预算 | 用例验证环境选择优先级，不验证产品默认 10s 连接预算；让预期失败快速发生比放宽外层 timeout 更准确 | Local app-server 测试 fixture | 已采纳 |
 | 010 | 仅把 `turn_start_shell_zsh_fork_` 路由到既有 `app_server_integration` 单线程组 | 两轮完整输出证明四路同波启动会耗尽初始化期限，隔离串行复验稳定；无需新机制或超时放宽 | Local Nextest 调度 | 已采纳 |
+| 011 | 接受最终轮成功后的 residual cleanup，不改 watchdog、不重跑完整 workspace | 首轮在修复前已有同一现象；既有 watchdog 只清理本轮 cgroup，命令/JUnit 成功且无重型残留 | 独立验收、资源 | 已采纳 |
+| 012 | 113 下三个空 `target/nextest/local` 目录保留到 worktree 后续获批释放 | 无文件或构建产物，不是第二套 Cargo target；主动删除无正确性收益且本任务无删除授权 | ignored 现场 | 已采纳 |
