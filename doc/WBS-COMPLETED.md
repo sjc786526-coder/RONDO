@@ -1618,6 +1618,24 @@ Publication Critic 产品语义；验收报告提交 `36a106c` 给出 `PASS`，�
   未发现新的功能性回归或冗余设施问题。未运行真实 API、Docker、本地模型、训练或费用任务。最终报告见
   `agent_log/2026-08-22-041330-plan052-third-remediation-acceptance.md`。
 
+## RONDO Multi 三期 M3-A2 数据/评价设施与基座测评（Plan 054，2026-08-22）
+
+> 本条于 2026-09-03 的文档收尾中从方向 3 子 WBS 补录，内容是该工作包冻结时的原始结论，未改写。
+
+**状态**：已完成。基座工程路径与 M3-B1a 数据建设 GO，未微调模型直接产品使用 NO-GO。
+
+- 冻结 Rust/Python PublicationPacket v1 机械约束 parity、control-token-safe render、exact tokenizer/scalar identity、
+  24 条代表/边界样本、两条产品 cap census case 和专用评价/归档设施。
+- exact Skywork 1.7B 在 CPU FP32 下通过全部 scored-row single/repeat/左右 padding/替代 batch composition parity
+  与独立 16,384-token smoke；正式 16 样本 v4 基座结果为 accuracy / balanced accuracy `0.6875`、ROC AUC `0.765625`、
+  atomic pair `7/8`，`16/16` 有效、零 typed failure，10 个冻结 error slice 均存在。
+- tracked v4 同时保留 8 条 calibration 投影、context 与两阶段 watchdog 资源事实，并区分真实 batch wall time
+  和 amortized compute。v1–v3 保留为 superseded 历史 attempt。
+- 边界：只建设 Publication Critic 必要设施和小规模代表性样本；未冻结正式训练数据，未启动付费训练，
+  未扩张为通用数据平台、审计系统或大型 benchmark。M3-A2 cohort 不得冒充 unseen test。
+- 正式身份、切片、资源和 go/no-go 见
+  `eval/results/publication-critic/skywork-reward-v2-qwen3-1.7b-baseline-v4.md`。
+
 ## RONDO Multi 三期 M3-B2a Publication Critic 本地服务（Plan 055，2026-08-22）
 
 **状态**：实现提交 `2c47adb` 与配置边界修复提交 `dbc1d7a` 曾被过早记录为完成；后续独立验收提交 `d216bfb` 发现最小 frame
@@ -2657,6 +2675,9 @@ INTEGRATED / NOT_PUSHED`。clean formal source 为 `0ae9623`，执行者交付�
 
 ## Publication Critic 五维云端判官实验性工程接入（Plan 102，2026-09-01）
 
+**状态**：`ENGINEERING_SEAM_PASS / INTEGRATED / PUSHED`。只交付工程接缝可用性，**不含任何质量或资格结论**；
+产品默认仍为 `OFF`，云端 backend 仍需显式选择，不解锁方向 3 工作包四。
+
 - 把 Plan 095/097 已打通的云端 scorer **产品接缝**从单标量改造为**五维 hard decision + 关闭思考**：
   `codex-publication-critic-cloud-service` 在同一服务边界取回五个 hard decision，本地按
   `rondo-publication-critic-task@v2` §3 的非补偿合取派生 typed verdict，产品外部消费的仍只有 `PASS/REWRITE`。
@@ -2797,6 +2818,27 @@ Plan 103 的收口。仓库转为公开，两条产品线各发出首个正式�
 - 合同（已冻结）见 `plan/103-release-engineering-and-cicd-execplan.md`，执行见
   `agent_log/2026-09-01-plan103-release-engineering-execution.md`。
 
+## 两条产品线配套核对与两阶段收口路线排定（2026-09-02）
+
+> 本条于 2026-09-03 的文档收尾中从 `doc/WBS.md` 补录，是 Plan 104–109 的立项依据。
+
+对两条产品线做了一次配套核对，方法是**只读比对**冻结上游快照 `codex-source-code/`，覆盖 `/status` 呈现、
+Guardian 配置字段、产品文档与 CI test 子集四处。
+
+- **核查结论**：未发现新的功能实现缺口，只确认了配套呈现、文档与持续测试缺口。核查范围**不足以支撑**
+  “功能内核整体齐备”这类更强的判断。
+- 核查基线事实：两条线的 `tui/src/status/card.rs` 与上游逐字节相同；产品树内的 `codex-rs/config.md` 与
+  `docs/`（各 15 个文件）也相同。`/status` 原本只显示 reviewer 选择——`status_approval_label()` 在
+  `AskForApproval::OnRequest` 下按 `ApprovalsReviewer` 显示 `Approve for me` / `Ask for approval`，
+  而两条线的 `Config` 都带四个 Guardian override，因此存在“配置已加载但不可见”的呈现缺口。
+- 一并冻结的语义限制：是否路由给 Guardian 由 `routes_approval_policy_to_guardian()` 按审批策略与 reviewer 共同决定，
+  实际 review 模型要到 Guardian session 创建时才按“显式配置 → catalog override → provider 默认”解析。
+  因此**状态面板只能反映已加载的配置，不能证明某次 review 运行时确实用了该模型**；措辞不得声称运行时已使用。
+- 据此排定「先 Multi 收口、再 Local 收口」的两阶段串行路线，每条线为
+  “配套补齐 → 独立空间门 → 禁用 incremental 的全 workspace 测试（失败则修复、定向复验并重跑）→ 功能冻结 → 发布”。
+  串行而非并行的原因是重型 Cargo 全局互斥，且删除前一条线的构建缓存正是为后一条线的全量测试腾出宿主容量。
+  该路线由 Plan 104–109 逐条执行完毕，两阶段均已关闭。
+
 ## Plan 104 · Multi 产品配套补齐（完成并冻结，2026-09-02）
 
 **状态**：`COMPLETED / FINAL_REVIEW_ACCEPTED / GOAL_COMPLETED / INTEGRATED / PUSHED / CI_PASS`。
@@ -2929,6 +2971,23 @@ FINAL_REVIEW_ACCEPTED / INTEGRATED / PUSHED / CI_PASS`。
   `agent_log/2026-09-03-plan107-local-product-support.md`，首次独立审查见
   `agent_log/2026-09-03-plan107-independent-review.md`，最终审查见
   `agent_log/2026-09-03-plan107-final-review.md`。
+
+## Local 独立空间门（通过，2026-09-03）
+
+> 本条于 2026-09-03 的文档收尾中从 `doc/WBS.md` 补录，是 Plan 108 全量测试的前置门。
+
+阶段二 Local 全量测试前的独立空间整理/释放任务，按「AI 只读盘点、用户逐对象授权后才释放」的规则执行。
+
+- 经用户授权归档并关闭两个已合入工作树（109、110，分支保留为 `zz-done/`）、释放
+  `rondo-local/debug/incremental`，共 **12.09 GB**；项目占用由 79.6 GB 降至 67.5 GB，
+  `rondo-local` target 降至 19.8 GB。`deps/` 热缓存与 `eval-data/` 全部保留。
+- 关闭工作树前，已把只存在于工作树、git-ignored 的 Plan 107 门禁证据（含 60/60 那一轮的 JUnit）
+  归档进主工作区 `.codex/build-watchdog/` 并逐字节校验。
+- 该 incremental 是 Multi 空间门删除后由 Plan 107 定向门禁重新长出的——`just test` 等日常窄入口按设计保留
+  incremental，只有 `test-with-codex-v8-conservative` 设 `CARGO_INCREMENTAL=0`，故全量后若再做定向复验它会再次增长。
+- 容量预测：以 Plan 105 的 Multi 实测锚定，Local 全量预计使项目占用达 **278–308 GB**，低于 350 GB 告警线；
+  WSL 增长落在 `ext4.vhdx` 已分配的 438.8 GB 内，`C:` 预期不变。空间门据此通过，Plan 108 获准启动。
+- 详见 `agent_log/2026-09-03-local-space-gate-release.md`。
 
 ## Plan 108 · Local 最终全 Workspace 测试与修复闭环（完成并集成，2026-09-03）
 
