@@ -22,8 +22,10 @@ workspace 闭环、Plan 106 的 `multi-v0.1.1` 发布与公开复验，以及用
 共 12.09 GB，项目占用降至 67.5 GB。**Plan 108 已完整收口**：clean candidate `fbe3484f` 通过禁用
 incremental 的 Local 全 workspace 正式门禁，`14122/14122` passed、23 skipped、零
 failure/error/timeout/retry/flaky；独立验收无 correctness finding，随后以 merge `44aca05c` 合入并推送，
-exact-main Local 轻量 CI run `33772990495` 全绿。Local 实质代码与功能现已冻结；下一工作包转为 Local `local-v0.1.1` 发布，
-但须另立 ExecPlan 并取得发布授权，本任务未打 tag 或发布。
+exact-main Local 轻量 CI run `33772990495` 全绿。Local 实质代码与功能已冻结。
+**Plan 109 第一阶段已完成**：`local-v0.1.1` 已发布并通过未认证公开复验，README 的 Local 固定链接已切到 0.1.1。
+当前停在计划规定的删除授权门，状态为 `LOCAL_RELEASE_VERIFIED / AWAITING_CLEANUP_AUTHORIZATION`：
+只读空间盘点已交付，任何删除都须由用户逐对象精确授权，本 WBS 的排程不构成删除授权。
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段指针、跨方向关系、
 稳定工程边界和授权门；已完成成果与验收见 `doc/WBS-COMPLETED.md`，单次任务合同见 `plan/`，执行细节见
@@ -70,10 +72,10 @@ Plan 103 **已完成并冻结**（2026-09-02）。它只交付发布工程能力
 合同、验收标准与硬约束见 `plan/103-release-engineering-and-cicd-execplan.md`。
 
 **仓库已公开**，两条产品线各有正式版本：Local 当前为
-[`local-v0.1.0`](https://github.com/sjc786526-coder/RONDO/releases/tag/local-v0.1.0)，
+[`local-v0.1.1`](https://github.com/sjc786526-coder/RONDO/releases/tag/local-v0.1.1)，
 Multi 当前为 [`multi-v0.1.1`](https://github.com/sjc786526-coder/RONDO/releases/tag/multi-v0.1.1)
-（首发 `multi-v0.1.0` 保留不变）。各版本均以未认证访问复验通过。
-GitHub 仓库级 `latest` 指针随最新正式版落在 `multi-v0.1.1`，它只是平台展示状态，不代表任一产品线的版本权威。
+（首发 `local-v0.1.0`、`multi-v0.1.0` 保留不变）。各版本均以未认证访问复验通过。
+GitHub 仓库级 `latest` 指针随最新正式版落在 `local-v0.1.1`，它只是平台展示状态，不代表任一产品线的版本权威。
 
 **使用与维护文档**：CI 见 [`doc/ci-pipeline.md`](ci-pipeline.md)，
 发布流水线见 [`doc/cd-release-pipeline.md`](cd-release-pipeline.md)。
@@ -161,6 +163,16 @@ README 的下载链接是固定 tag，发新版本时需同步更新。
   failure/error/timeout/retry/flaky，独立验收无未关闭 finding。merge `44aca05c` 已合入并推送，exact-main
   Local 轻量 CI run `33772990495` 全绿（`check (local)` 10m42s，745 passed、0 failed）。Local 实质代码与
   功能自此冻结；下一工作包是另行规划和授权的 Local `local-v0.1.1` 发布，本任务未打 tag、发布或删除共享 target。
+- Plan 109 第一阶段已在该冻结候选上发布 `local-v0.1.1`：候选为 merge `e560d33f`（相对 `d97b6c3a` 只增加
+  Local 0.1.1 CHANGELOG 与本任务 ExecPlan，未动产品代码、测试、依赖、workflow、打包器或许可材料，
+  故 Plan 108 的最终全量结果继续适用）。该 exact SHA 的轻量 CI run `33779415523` 全绿后才打 annotated tag，
+  tag peeled 到 `e560d33f`；release run `33780571720` 的 validate/build/verify/publish 四个 job 全部成功。
+  公开 Release 非 draft、非 prerelease，两个资产已以未认证访问下载复验：归档 SHA-256
+  `e3e7df4c0536e18d77189a0e1f9f1b87e5fb1caace57e16bb35a6f28141d30c6` 与公网 `SHA256SUMS` 一致，
+  包根/入口/`codex-package.json` 均为 Local 身份、无 Multi 内容，`bin/rondo --version` 仍报告冻结基线
+  `0.147.0`，17 个第三方许可文件齐备，Release notes 未出现质量或性能声明。README 的 Local 固定链接已切到 0.1.1，
+  并按 live 状态订正了仓库级 `latest` 说明（该指针必然落在最近发布的正式版，现为 `local-v0.1.1`）。
+  历史 `local-v0.1.0`、`multi-v0.1.0`、`multi-v0.1.1` 的 tag、Release 与资产均未改动。
 
 Plan 107 只补配套呈现与文档；Plan 108 只建立 Local 最终正确性基线并闭合实际测试问题。两者都不产生性能、
 模型质量或生产资格结论，也不解锁方向 3 的工作包四。
@@ -260,8 +272,12 @@ Plan 106 发布、公开复验与缓存删除）。**阶段二 Local 配套补�
 预测 Local 全量峰值 278–308 GB 低于 350 GB 告警线，`C:` 预期不变。
 **Plan 108 已完成并集成**：Local 最终全 workspace 为 `14122/14122` passed、23 skipped、零
 failure/error/timeout/retry/flaky；独立验收通过，merge `44aca05c` 已推送，exact-main Local 轻量 CI run
-`33772990495` 全绿。Local 实质代码与功能现已冻结。**下一工作包转为 Local `local-v0.1.1` 发布**；必须另立 ExecPlan、补 Local
-CHANGELOG、取得发布授权后才可打 `local-v*` tag 和发布，本任务未提前执行。各方向本身当前均无 active 工作包。
+`33772990495` 全绿。Local 实质代码与功能现已冻结。
+**Plan 109 第一阶段已完成**：`local-v0.1.1` 已发布（tag peeled `e560d33f`，release run `33780571720` 四 job 全绿）
+并通过未认证公开复验，README 已切到该固定 tag。**当前唯一 active 工作包是 Plan 109 的第二阶段收尾**，
+它停在删除授权门 `LOCAL_RELEASE_VERIFIED / AWAITING_CLEANUP_AUTHORIZATION`：只读盘点已交付，
+等待用户对精确路径逐对象授权；获批后只处置获批对象，随后才关闭 Local 阶段与两条产品线的收口路线。
+各方向本身当前均无 active 工作包。
 
 方向 3 三期原定路线如下；前三个工作包已串行完成，Plan 099 没有形成候选，因此本轮在工作包三停止，工作包四未解锁：
 
