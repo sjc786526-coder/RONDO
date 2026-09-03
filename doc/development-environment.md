@@ -48,6 +48,8 @@ Codex 的 `~/.codex/config.toml` 已启用 workspace-write 网络访问和 netwo
 
 注意：Codex 沙箱进程可能注入临时的本地代理端口。这不代表 `~/.bashrc` 中的 `7897` 配置失效；新开的普通 WSL 交互式 shell 仍应使用 `127.0.0.1:7897`。任意程序如果主动忽略代理变量，当前配置不会通过系统防火墙强制劫持其流量。
 
+（重要）跑本地测试套件前要清空这些代理变量和 `no_proxy`，并清空交互式工具注入的 `FORCE_COLOR`。测试全部是 offline/loopback：`no_proxy` 里的 `127.*` 是 curl 风格通配，reqwest 不解析，会把回环请求送进代理；`FORCE_COLOR` 则让 `codex exec` 头部即使输出到管道也带 ANSI 属性，断言纯文本子串的 exec 测试因此失败。两者都是 shell 环境条件，不是产品缺陷。
+
 ## 2. git-stats 与提交钩子
 
 ### 2.1 安装状态

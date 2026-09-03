@@ -78,9 +78,11 @@ filter = 'package(codex-app-server) & kind(test)'
 test-group = 'app_server_integration'
 
 [[profile.local.overrides]]
-# These tests copy and start app-server plus zsh subprocesses. Starting all four in one wave can
-# exhaust their 10-second initialization deadline under host I/O pressure.
-filter = 'package(codex-app-server) & test(turn_start_shell_zsh_fork_)'
+# These tests start app-server subprocesses (plus zsh for the fork cases). Starting all four in one
+# wave can exhaust their 10-second initialization deadline under host I/O pressure. The
+# fuzzy-file-search cases answer `initialize` in ~0.2s when the suite runs alone, but take 8-12s
+# when four app-servers start together during a full-workspace run.
+filter = 'package(codex-app-server) & (test(turn_start_shell_zsh_fork_) | test(suite::fuzzy_file_search::))'
 test-group = 'app_server_integration'
 
 [[profile.local.overrides]]
