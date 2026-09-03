@@ -14,8 +14,9 @@ Plan 101 对比测评已完成，据此把五维 hard decision 固定为云端�
 Plan 102 五维云端判官实验性工程接入已以 `ENGINEERING_SEAM_PASS` 完成并合入推送，方向 3 当前无 active 工作包；该方向不自动解锁产品质量、默认启用或生产。
 跨方向的 Plan 103 发布工程已完成并冻结，仓库转 public 且两条产品线各发首个正式版；全部云端资源已清空，见下方「云端资源终态」。
 2026-09-02 另完成一次两条产品线的配套核对，并据此排定「先 Multi 收口、再 Local 收口」的两阶段路线，
-见下方「产品线配套补齐与逐条收口」；阶段一 Plan 104、独立空间门与 Plan 105 最终全 workspace 闭环均已完成，
-Plan 105 已合入并推送且 main 轻量 CI 全绿，Multi 实质代码/功能冻结，下一动作是另立 Multi 发布任务。
+见下方「产品线配套补齐与逐条收口」；阶段一 Plan 104、独立空间门、Plan 105 最终全 workspace 闭环与
+Plan 106 的 `multi-v0.1.1` 发布均已完成，Release 已以未认证访问公开复验、README 固定链接已切换到 0.1.1。
+阶段一现停在 `.codex/cargo-target/rondo-multi` 的精确缓存删除授权门，获批并完成后才整体转入阶段二 Local。
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段指针、跨方向关系、
 稳定工程边界和授权门；已完成成果与验收见 `doc/WBS-COMPLETED.md`，单次任务合同见 `plan/`，执行细节见
@@ -61,10 +62,11 @@ Plan 103 **已完成并冻结**（2026-09-02）。它只交付发布工程能力
 **不推进任何方向的产品功能、性能或质量资格**，不解锁方向 3 工作包四。
 合同、验收标准与硬约束见 `plan/103-release-engineering-and-cicd-execplan.md`。
 
-**仓库已公开**，两条产品线各有首个正式版本：
-[`local-v0.1.0`](https://github.com/sjc786526-coder/RONDO/releases/tag/local-v0.1.0) 与
-[`multi-v0.1.0`](https://github.com/sjc786526-coder/RONDO/releases/tag/multi-v0.1.0)，
-均以未认证访问复验通过。
+**仓库已公开**，两条产品线各有正式版本：Local 当前为
+[`local-v0.1.0`](https://github.com/sjc786526-coder/RONDO/releases/tag/local-v0.1.0)，
+Multi 当前为 [`multi-v0.1.1`](https://github.com/sjc786526-coder/RONDO/releases/tag/multi-v0.1.1)
+（首发 `multi-v0.1.0` 保留不变）。各版本均以未认证访问复验通过。
+GitHub 仓库级 `latest` 指针随最新正式版落在 `multi-v0.1.1`，它只是平台展示状态，不代表任一产品线的版本权威。
 
 **使用与维护文档**：CI 见 [`doc/ci-pipeline.md`](ci-pipeline.md)，
 发布流水线见 [`doc/cd-release-pipeline.md`](cd-release-pipeline.md)。
@@ -96,7 +98,7 @@ RC 阶段的 4 个 Release 对象已清理，7 个 RC tag 与全部 Actions 记�
 **后续发布**：新版本走同一条流水线，打 `local-v*` / `multi-v*` tag 即可。
 README 的下载链接是固定 tag，发新版本时需同步更新。
 
-### 产品线配套补齐与逐条收口（跨方向，Multi 全量已验收、集成并通过 CI，待发布）
+### 产品线配套补齐与逐条收口（跨方向，Multi 已发布并公开复验，等待精确缓存删除授权）
 
 2026-09-02 对两条产品线做了一次配套核对，方法是只读比对冻结上游快照 `codex-source-code/`，
 覆盖 `/status` 呈现、Guardian 配置字段、产品文档与 CI test 子集四处。
@@ -118,8 +120,10 @@ README 的下载链接是固定 tag，发新版本时需同步更新。
 - CI 仍不把 `codex-tui` 纳入轻量 test 子集。Plan 104 已把 `codex-team-state` 加入 Multi 选包；首次推送后的
   Multi check 10m38s 通过，该 crate 发现 160 个测试并得到 159 passed、1 ignored、0 failed。
 - Multi 独立空间门已释放两条产品 target 的 incremental 缓存并保留可复用构建主体；Plan 105 初始全量暴露的环境与
-  app-server 并发问题已闭合，最终 `14713/14713`、0 retry 通过并经独立验收。Multi 实质代码与功能现已冻结；
-  merge `7d4bec37` 已合入并推送，`ci` run `33721472797` 全绿，尚未发布新版本。
+  app-server 并发问题已闭合，最终 `14713/14713`、0 retry 通过并经独立验收。Multi 实质代码与功能现已冻结。
+- Plan 106 已在该冻结候选上发布 `multi-v0.1.1`：tag peeled 到 `29fb953e`，发布前该 exact SHA 的轻量 CI
+  run `33723597611` 全绿，release run `33724503639` 的 validate/build/verify/publish 四个 job 全部成功。
+  公开 Release 非 draft、非 prerelease，两个资产已以未认证访问下载复验通过。README 的 Multi 固定链接已切到 0.1.1。
 
 **本工作包只补配套呈现与文档，不新增产品能力、不改任何默认值、不解锁任何方向的工作包，
 也不产生质量或资格结论。**
@@ -211,11 +215,11 @@ M-1/M-2/M-3 与 L-1/L-2 之间无技术依赖，阶段内顺序可调；**阶段
 
 ## 2. 下一工作包与顺序
 
-当前没有 active 实施任务。跨方向「产品线配套补齐与逐条收口」阶段一的 Plan 104、独立空间门和 Plan 105
-全量修复闭环均已完成；Plan 105 已通过独立验收、合入和推送，main 轻量 CI 全绿，Multi 实质代码/功能冻结。
-下一动作是另立 Multi 发布任务。发布完成后，`.codex/cargo-target/rondo-multi` 的精确删除仍须用户单独授权，闭合后才整体转入
-Local 阶段，并同样在 Local 全量前先完成独立空间任务。两个阶段之间是硬顺序，阶段内工作项顺序可调；各方向本身
-当前均无 active 工作包。
+当前 active 任务是跨方向「产品线配套补齐与逐条收口」阶段一的收尾 Plan 106。阶段一的 Plan 104、独立空间门、
+Plan 105 全量修复闭环与 `multi-v0.1.1` 发布及公开复验均已完成，Plan 106 现停在
+`.codex/cargo-target/rondo-multi` 的**精确缓存删除授权门**：本 WBS 的排程不构成删除授权，须用户针对该精确路径
+单独批准。该门闭合后阶段一收口，下一工作包正式转为**阶段二 Local 配套补齐**（L-1、L-2），并同样在 Local 全量前
+先完成独立空间任务。两个阶段之间是硬顺序，阶段内工作项顺序可调；各方向本身当前均无 active 工作包。
 
 方向 3 三期原定路线如下；前三个工作包已串行完成，Plan 099 没有形成候选，因此本轮在工作包三停止，工作包四未解锁：
 

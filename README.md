@@ -175,9 +175,9 @@ RONDO 是一个基于 [OpenAI Codex CLI](https://github.com/openai/codex) 源码
 
 ```bash
 # RONDO Multi
-curl -fLO https://github.com/sjc786526-coder/RONDO/releases/download/multi-v0.1.0/rondo-multi-0.1.0-x86_64-unknown-linux-musl.tar.gz
-tar xzf rondo-multi-0.1.0-x86_64-unknown-linux-musl.tar.gz
-./rondo-multi-0.1.0-x86_64-unknown-linux-musl/bin/rondo-multi --version
+curl -fLO https://github.com/sjc786526-coder/RONDO/releases/download/multi-v0.1.1/rondo-multi-0.1.1-x86_64-unknown-linux-musl.tar.gz
+tar xzf rondo-multi-0.1.1-x86_64-unknown-linux-musl.tar.gz
+./rondo-multi-0.1.1-x86_64-unknown-linux-musl/bin/rondo-multi --version
 
 # RONDO Local
 curl -fLO https://github.com/sjc786526-coder/RONDO/releases/download/local-v0.1.0/rondo-0.1.0-x86_64-unknown-linux-musl.tar.gz
