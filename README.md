@@ -35,7 +35,7 @@ RONDO 是一个基于 [OpenAI Codex CLI](https://github.com/openai/codex) 源码
 | 上游基线 | OpenAI Codex CLI `v0.147.0`（`rust-v0.147.0`，commit `be6e8eac`），全程冻结不升级 |
 | 主要语言 | Rust（产品源码）+ Python（测评设施） |
 | 产品线 | 两条并列：**RONDO Local**（`mydev/`）、**RONDO Multi**（`multidev/`） |
-| 开发周期 | 2026-08-04 起，1355 次提交 |
+| 开发周期 | 2026-08-04 起 |
 | 许可证 | Apache-2.0（继承上游） |
 
 **相对上游基线的改动量**（统计于 commit `d82a07f1`）：
@@ -318,7 +318,7 @@ cargo build --release --manifest-path multidev/codex-rs/Cargo.toml \
 5. **资源与安全边界前置**——重型构建互斥锁与内存/磁盘看门狗、密钥文件的只读存在性检查、
    云 GPU 与付费 API 的逐任务授权门和预算上限（每次任务的实际花费都有记录，精确到小数点后若干位）。
 
-完整的过程证据都在仓库里：**581 份**执行日志（`agent_log/`）、**98 份**任务合同（`plan/`）、
+完整的过程证据都在仓库里：逐批执行日志（`agent_log/`）、**98 份**任务合同（`plan/`）、
 **5 份**审计快照（`doc/audit-snapshots/`）、**14 份**研究报告（`doc/research/`）、
 **67 份**测评结果（`eval/results/`）。
 
