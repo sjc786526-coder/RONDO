@@ -249,7 +249,7 @@ fn reset_at_from(captured_at: &chrono::DateTime<chrono::Local>, seconds: i64) ->
         .timestamp()
 }
 
-fn permissions_text_for(config: &Config) -> Option<String> {
+fn status_field_text_for(config: &Config, label: &str, width: u16) -> Option<String> {
     let usage = TokenUsage::default();
     let captured_at = chrono::Local
         .with_ymd_and_hms(2024, 1, 2, 3, 4, 5)
@@ -271,17 +271,28 @@ fn permissions_text_for(config: &Config) -> Option<String> {
         /*collaboration_mode*/ None,
         /*reasoning_effort_override*/ None,
     );
-    render_lines(&composite.display_lines(/*width*/ 80))
+    let needle = format!("{label}:");
+    render_lines(&composite.display_lines(width))
         .iter()
-        .find(|line| line.contains("Permissions:"))
+        .find(|line| line.contains(&needle))
         .and_then(|line| {
-            line.split("Permissions:")
+            line.split(&needle)
                 .nth(1)
                 .map(str::trim)
                 .map(|text| text.trim_end_matches('│'))
                 .map(str::trim)
                 .map(ToString::to_string)
         })
+}
+
+fn permissions_text_for(config: &Config) -> Option<String> {
+    status_field_text_for(config, "Permissions", /*width*/ 80)
+}
+
+/// Guardian override summaries can exceed an 80-column card, so read them from an untruncated
+/// render to keep these assertions about the composed text rather than about line truncation.
+fn guardian_config_text_for(config: &Config) -> Option<String> {
+    status_field_text_for(config, "Guardian config", u16::MAX)
 }
 
 #[tokio::test]
@@ -543,6 +554,47 @@ async fn status_permissions_workspace_auto_review_shows_reviewer_label() {
     assert_eq!(
         permissions_text_for(&config).as_deref(),
         Some("Workspace (Approve for me)")
+    );
+}
+
+#[tokio::test]
+async fn status_guardian_config_without_overrides_adds_no_field() {
+    let temp_home = TempDir::new().expect("temp home");
+    let config = test_config(&temp_home).await;
+
+    assert_eq!(guardian_config_text_for(&config), None);
+}
+
+#[tokio::test]
+async fn status_guardian_config_auto_review_lists_loaded_overrides() {
+    let temp_home = TempDir::new().expect("temp home");
+    let mut config = test_config(&temp_home).await;
+    let evidence_dir = test_path_buf("/guardian/evidence").abs();
+    config.approvals_reviewer = ApprovalsReviewer::AutoReview;
+    config.guardian_model_config = Some("guardian-mini".to_string());
+    config.guardian_model_provider_config = Some("guardian-provider".to_string());
+    config.guardian_reasoning_effort_config = Some(ReasoningEffort::High);
+    config.guardian_evidence_dir = Some(evidence_dir.clone());
+
+    assert_eq!(
+        guardian_config_text_for(&config),
+        Some(format!(
+            "loaded for reviewer auto_review (model guardian-mini, provider guardian-provider, reasoning effort high, evidence dir {})",
+            evidence_dir.as_path().display()
+        ))
+    );
+}
+
+#[tokio::test]
+async fn status_guardian_config_user_reviewer_reports_overrides_as_unused() {
+    let temp_home = TempDir::new().expect("temp home");
+    let mut config = test_config(&temp_home).await;
+    config.approvals_reviewer = ApprovalsReviewer::User;
+    config.guardian_model_config = Some("guardian-mini".to_string());
+
+    assert_eq!(
+        guardian_config_text_for(&config).as_deref(),
+        Some("loaded, unused by reviewer user (model guardian-mini)")
     );
 }
 
@@ -850,6 +902,55 @@ async fn status_snapshot_shows_auto_review_permissions() {
     config.model = Some("gpt-5.1-codex-max".to_string());
     set_workspace_cwd(&mut config, test_path_buf("/workspace/tests").abs());
     config.approvals_reviewer = ApprovalsReviewer::AutoReview;
+    config
+        .permissions
+        .set_permission_profile_from_session_snapshot(PermissionProfileSnapshot::active(
+            PermissionProfile::workspace_write(),
+            ActivePermissionProfile::new(BUILT_IN_PERMISSION_PROFILE_WORKSPACE),
+        ))
+        .expect("set permission profile");
+
+    let usage = TokenUsage::default();
+    let captured_at = chrono::Local
+        .with_ymd_and_hms(2024, 1, 2, 3, 4, 5)
+        .single()
+        .expect("timestamp");
+    let model_slug = get_model_offline_for_tests(config.model.as_deref());
+    let token_info = token_info_for(&model_slug, &config, &usage);
+
+    let composite = new_status_output(
+        &config,
+        test_status_account_display().as_ref(),
+        Some(&token_info),
+        &usage,
+        &None,
+        /*thread_name*/ None,
+        /*forked_from*/ None,
+        /*rate_limits*/ None,
+        None,
+        captured_at,
+        &model_slug,
+        /*collaboration_mode*/ None,
+        /*reasoning_effort_override*/ None,
+    );
+    let mut rendered_lines = render_lines(&composite.display_lines(/*width*/ 80));
+    if cfg!(windows) {
+        for line in &mut rendered_lines {
+            *line = line.replace('\\', "/");
+        }
+    }
+    let sanitized = sanitize_snapshot(rendered_lines).join("\n");
+    assert_snapshot!(sanitized);
+}
+
+#[tokio::test]
+async fn status_snapshot_shows_guardian_config() {
+    let temp_home = TempDir::new().expect("temp home");
+    let mut config = test_config(&temp_home).await;
+    config.model = Some("gpt-5.1-codex-max".to_string());
+    set_workspace_cwd(&mut config, test_path_buf("/workspace/tests").abs());
+    config.approvals_reviewer = ApprovalsReviewer::AutoReview;
+    config.guardian_model_config = Some("guardian-mini".to_string());
     config
         .permissions
         .set_permission_profile_from_session_snapshot(PermissionProfileSnapshot::active(

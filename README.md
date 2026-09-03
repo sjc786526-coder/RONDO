@@ -219,6 +219,10 @@ cargo build --release --manifest-path mydev/codex-rs/Cargo.toml -p codex-cli
 
 基础用法与配置与上游 Codex CLI 一致，见各产品线下的 `docs/getting-started.md` 与 `docs/config.md`。
 
+> **RONDO 相对上游新增的配置**（公共 Guardian 的模型/provider/effort/证据目录，以及 Multi 的
+> Team State、Durable Team、Publication Critic）单独整理在 **[`doc/rondo-config.md`](doc/rondo-config.md)**。
+> Guardian 的 reviewer 默认仍为 `user`，四个 override 默认不设置；这里列出的 Multi 能力默认关闭。
+
 > **构建资源提示**：这是一个约 130 个 crate 的 Rust workspace（Multi 131、Local 129），完整构建吃内存也吃时间。
 > 本仓库的开发流程用 `scripts/with-build-lock.sh` 做单构建互斥和内存看门狗——那是为受限开发机准备的，
 > 你自己构建时不需要它。
@@ -331,6 +335,7 @@ RONDO/
 ├── scripts/      # 共享构建锁与资源看门狗
 ├── training/     # 轻量训练合同与门限内数据集（权重与训练输出不入库）
 ├── doc/          # WBS 规划、研究报告、审计快照
+│                 #   RONDO 增量配置说明见 doc/rondo-config.md
 ├── plan/         # 每次任务的冻结 ExecPlan
 └── agent_log/    # 执行日志
 ```
