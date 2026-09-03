@@ -186,15 +186,20 @@ Nextest 的完整 workspace 测试；自主诊断并修复测试实际暴露的�
   （JUnit 内 `tests="14714"` 比 nextest 计数多 1，是把 `@setup-script:publication-critic-service-unix` 也算作一项）。
   资源终态：项目 316.7 GB（峰值 320.3 GB）、Multi target 257.9 GB、Windows `C:` 可用 118.2 GB、
   内存峰值 8.3 GB、PSI 0。
+- 2026-09-02：计划制定者完成独立验收。复算最终/诊断 JUnit、summary、console、Nextest 生效行为、资源与 Git/ignored
+  现场均支持执行结论；没有重跑全 workspace。唯一额外观察是 107 内有一个未汇报的 12 KiB 空
+  `multidev/codex-rs/target/nextest/local/` 目录，无文件或构建产物，不参与最终门禁；审查者将其作为非阻断 bookkeeping
+  finding 关闭。用户随后明确授权顺手清理，审查者用 `rmdir` 精确移除三层空目录并复核路径不存在；不影响最终门禁。
+  无未关闭 correctness finding，验收 `ACCEPT`。
 
 ### 当前工作
 
-- 全部已知问题闭合，最终全量已通过并留证，等待计划制定者独立验收。
+- 实现、最终全量与独立验收均已完成；Multi 实质代码与功能已冻结，等待用户决定 main 集成与推送。
 
 ### 本任务剩余步骤
 
-- 计划制定者独立验收；finding 如需改代码则在同一分支修复、定向复验并重跑最终全量。
-- 验收通过后由审查者记录 `ACCEPTED / MULTI_FUNCTIONALLY_FROZEN` 并同步 WBS 与完成记录。
+- 无剩余实现、验证或审查步骤。用户若批准 main 集成与推送，按仓库流程执行并核验触发的轻量 CI；发布与 target 删除
+  仍按 WBS 另行处理。
 
 ### 阻塞项
 
@@ -202,7 +207,7 @@ Nextest 的完整 workspace 测试；自主诊断并修复测试实际暴露的�
 
 ### 当前验收状态
 
-- `PLANNED / SPACE_GATE_PASS / IMPLEMENTED@2199316c / FINAL_FULL_RUN_GREEN@39d5841f / NOT_MERGED / NOT_PUSHED / PENDING_REVIEW`。
+- `COMPLETED / FINAL_REVIEW_ACCEPTED / GOAL_COMPLETED / MULTI_FUNCTIONALLY_FROZEN / MAIN_INTEGRATION_PENDING / NOT_PUSHED`。
 
 ### 交接边界
 
@@ -224,3 +229,4 @@ Nextest 的完整 workspace 测试；自主诊断并修复测试实际暴露的�
 | 008 | 正式门禁在中性环境运行：清空 shell 的代理变量与 `FORCE_COLOR`，而不是改上游测试去适配这两个条件 | 二者都是 agent shell 的环境条件；产品刻意尊重 `FORCE_COLOR`，测试也全是 offline/loopback，改测试等于让冻结的 v0.147.0 基线迁就本机 shell | 运行口径、上游一致性 | 已采纳 |
 | 009 | fuzzy-file-search 的 10 秒 initialize 超时用既有 `app_server_integration`（max-threads=1）串行化解决，不放宽 timeout | 隔离实测 initialize 仅 0.2 秒，属宿主争用；相邻 zsh-fork override 对同一症状已有同样处置，复用比新建更一致 | 测试并发、稳定性 | 已采纳 |
 | 010 | 不自行删除 target 内任何资产（含本任务新增的 20 GB `debug/incremental/`），由 watchdog fail-closed 兜底并请用户决定 | 授权明确排除删除 target/缓存；停机可恢复且进度保留，不值得越界 | 磁盘、授权边界 | 已采纳；用户单独授权后只删该目录 |
+| 011 | 接受现有实现与最终证据，不重跑全 workspace；用户后续授权后精确移除 12 KiB 空 worktree-local target 元数据目录 | 完整最终轮已直接覆盖配置并零 retry 通过；空目录无构建产物或结果影响，清理只使用 `rmdir` 且不改变正式结果 | 独立验收、ignored 现场 | 已采纳 |
