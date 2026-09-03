@@ -2815,10 +2815,10 @@ Plan 103 的收口。仓库转为公开，两条产品线各发出首个正式�
   `agent_log/2026-09-02-plan104-multi-product-support-review-followup.md` 与
   `agent_log/2026-09-02-plan104-main-push-and-ci.md`。
 
-## Plan 105 · Multi 最终全 Workspace 测试与修复闭环（验收通过，2026-09-02）
+## Plan 105 · Multi 最终全 Workspace 测试与修复闭环（完成并集成，2026-09-02）
 
 **状态**：`COMPLETED / FINAL_REVIEW_ACCEPTED / GOAL_COMPLETED / MULTI_FUNCTIONALLY_FROZEN /
-MAIN_INTEGRATION_PENDING / NOT_PUSHED`。
+INTEGRATED / PUSHED / CI_PASS`。
 
 - 独立空间门先释放两条产品 target 的 incremental 缓存并保留可复用构建主体。Plan 105 随后以唯一共享
   `.codex/cargo-target/rondo-multi`、checksum-verified V8、`CARGO_BUILD_JOBS=1`、LLD 单线程与
@@ -2831,7 +2831,10 @@ MAIN_INTEGRATION_PENDING / NOT_PUSHED`。
   24 skipped，另有 1/1 setup passed；JUnit SHA-256 为
   `97fb4a43daf397c46d45b7f3ff3b82f7accb0604a614926d0e3f4c66ebb3c2fc`。watchdog 零 stop/cleanup，资源均在现行门内。
 - 独立验收复算 JUnit、summary、console、Nextest 生效行为和资源/Git 现场，无未关闭 correctness finding；没有重复运行
-  重型全 workspace。Multi 实质代码/功能自此冻结，但 107 尚未合入或推送，也未打 tag、发布或删除共享 target。
+  重型全 workspace。实现与验收以 merge `7d4bec37` 合入并推送 `main`；GitHub Actions `ci` run `33721472797`
+  全绿，其中 packaging scripts 8s、变更分类 7s、Multi check 11m22s，完整通过 fmt、release build、产品 crate、
+  core config loader 与 doctor update probe 门禁。Multi 实质代码/功能自此冻结；未打 tag、发布或删除共享 target。
 - 合同见 `plan/105-multi-final-full-workspace-repair-loop-execplan.md`，实施见
   `agent_log/2026-09-02-plan105-multi-final-full-workspace.md`，独立验收见
-  `agent_log/2026-09-02-plan105-multi-final-full-workspace-review.md`。
+  `agent_log/2026-09-02-plan105-multi-final-full-workspace-review.md`，集成与 CI 见
+  `agent_log/2026-09-02-plan105-main-push-and-ci.md`。

@@ -191,15 +191,17 @@ Nextest 的完整 workspace 测试；自主诊断并修复测试实际暴露的�
   `multidev/codex-rs/target/nextest/local/` 目录，无文件或构建产物，不参与最终门禁；审查者将其作为非阻断 bookkeeping
   finding 关闭。用户随后明确授权顺手清理，审查者用 `rmdir` 精确移除三层空目录并复核路径不存在；不影响最终门禁。
   无未关闭 correctness finding，验收 `ACCEPT`。
+- 2026-09-02：用户批准集成与推送。107 经非 fast-forward merge `7d4bec37` 合入 `main` 并推送；GitHub Actions
+  `ci` run `33721472797` 全绿，packaging scripts、变更分类和 Multi check 全部成功，Multi check 用时 11m22s。
+  本轮只补集成状态文档，没有修改已通过门禁的产品、测试配置或依赖。
 
 ### 当前工作
 
-- 实现、最终全量与独立验收均已完成；Multi 实质代码与功能已冻结，等待用户决定 main 集成与推送。
+- 实现、最终全量、独立验收、main 集成、推送与轻量 CI 均已完成；Multi 实质代码与功能已冻结。
 
 ### 本任务剩余步骤
 
-- 无剩余实现、验证或审查步骤。用户若批准 main 集成与推送，按仓库流程执行并核验触发的轻量 CI；发布与 target 删除
-  仍按 WBS 另行处理。
+- 无剩余实现、验证、审查或集成步骤。发布与 target 删除仍按 WBS 另行处理。
 
 ### 阻塞项
 
@@ -207,7 +209,7 @@ Nextest 的完整 workspace 测试；自主诊断并修复测试实际暴露的�
 
 ### 当前验收状态
 
-- `COMPLETED / FINAL_REVIEW_ACCEPTED / GOAL_COMPLETED / MULTI_FUNCTIONALLY_FROZEN / MAIN_INTEGRATION_PENDING / NOT_PUSHED`。
+- `COMPLETED / FINAL_REVIEW_ACCEPTED / GOAL_COMPLETED / MULTI_FUNCTIONALLY_FROZEN / INTEGRATED / PUSHED / CI_PASS`。
 
 ### 交接边界
 
