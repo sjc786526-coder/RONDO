@@ -153,10 +153,13 @@ Nextest 的完整 workspace 测试；自主诊断并修复测试实际暴露的�
   `doc/development-environment.md` 和当前 conservative/V8/watchdog 入口，并冻结本 ExecPlan。
 - 2026-09-02：用户说明前置任务已完成、空间资源正在释放；本规划没有运行 Cargo、写入共享 target/测试证据、删除资源，
   也没有执行 Docker、真实 API/模型、发布或其它外部动作。
+- 2026-09-02：并行的空间门任务随后完成并在 `main@d9dc3d51` 记录 `SPACE_GATE_PASS`：精确释放两条产品 target 的
+  `debug/incremental` 与 clean 的 106 历史 worktree，项目释放约 59.7 GiB，Windows `C:` 实测可用约 109.8 GB；
+  保留唯一 Multi target 的 `deps`、fingerprint 与 build 缓存。该提交只新增空间门日志，与 107 基线之间无产品或共享设施差异。
 
 ### 当前工作
 
-- ExecPlan 已就绪，等待用户把执行指令交给执行者；重型执行须在本轮空间释放完成并通过 preflight 后开始。
+- ExecPlan 与空间门均已就绪，等待用户把执行指令交给执行者；重型执行仍须先做紧邻 preflight，确认现场未发生资源漂移。
 
 ### 本任务剩余步骤
 
@@ -167,11 +170,11 @@ Nextest 的完整 workspace 测试；自主诊断并修复测试实际暴露的�
 
 ### 阻塞项
 
-- 当前无规划阻塞。执行前置为用户正在进行的空间释放完成；若交接时尚未完成，执行者等待而不自行删除资产。
+- 当前无规划或空间阻塞；执行者只需在启动前复核共享锁、重型进程与现行资源门。
 
 ### 当前验收状态
 
-- `PLANNED / EXECUTION_PENDING / SPACE_RELEASE_IN_PROGRESS / NOT_TESTED / NOT_MERGED / NOT_PUSHED`。
+- `PLANNED / SPACE_GATE_PASS / EXECUTION_READY / NOT_TESTED / NOT_MERGED / NOT_PUSHED`。
 
 ### 交接边界
 
@@ -189,3 +192,4 @@ Nextest 的完整 workspace 测试；自主诊断并修复测试实际暴露的�
 | 004 | 若首次完整轮在 clean exact HEAD 上全绿且之后无相关改动，允许同一轮成为最终轮 | 不牺牲证据对应关系，也不做没有新增信息的昂贵重复 | 验收、资源 | 已采纳 |
 | 005 | 只保留 wrapper 已有的轻量证据，不开发新的审计/可信设施 | 现有 JUnit、summary 和 metrics 已足以支撑正确性审查 | 证据、复杂度 | 已采纳 |
 | 006 | 执行者只提交 107 分支；审查、合并、推送、发布和 target 删除分离 | 遵守用户指定的 reviewer 与 Git 停止点 | Git、验收、后续任务 | 已采纳 |
+| 007 | 接受 `main@d9dc3d51` 的独立空间门结论，不为一份日志提交重建 107；执行仍以 107 的产品等价基线开展 | 新提交只含空间门日志，产品与共享设施相对 107 基线无差异；未来合回 main 时日志自然保留 | 执行基线、并行隔离 | 已采纳 |
