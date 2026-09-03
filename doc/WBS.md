@@ -16,7 +16,10 @@ Plan 102 五维云端判官实验性工程接入已以 `ENGINEERING_SEAM_PASS` �
 2026-09-02 另完成一次两条产品线的配套核对，并据此排定「先 Multi 收口、再 Local 收口」的两阶段路线，
 见下方「产品线配套补齐与逐条收口」；**阶段一 Multi 已整体收口**——Plan 104、独立空间门、Plan 105 最终全
 workspace 闭环、Plan 106 的 `multi-v0.1.1` 发布与公开复验，以及用户授权后的 `rondo-multi` 构建缓存删除
-（释放 257.9 GB）均已完成。当前工作包转入**阶段二 Local 配套补齐**。
+（释放 257.9 GB）均已完成。当前工作包为**阶段二 Local 配套补齐**：Plan 107 的 L-1 / L-2 已在专用工作树
+实现并通过定向验证；首次独立审查提出的两项窄整改（补充配置层前提、移除任务自产的第二 target 元数据目录）
+均已闭合并通过最终窄复验。当前等待用户批准合入与推送；Local 轻量 CI 通过后，下一工作包才是 Local 的独立
+空间盘点任务。
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段指针、跨方向关系、
 稳定工程边界和授权门；已完成成果与验收见 `doc/WBS-COMPLETED.md`，单次任务合同见 `plan/`，执行细节见
@@ -110,13 +113,13 @@ README 的下载链接是固定 tag，发新版本时需同步更新。
   只放在根 `doc/rondo-config.md`。
 - `/status` 原本只显示 reviewer 选择：`status_approval_label()` 在 `AskForApproval::OnRequest` 下按
   `ApprovalsReviewer` 显示 `Approve for me` / `Ask for approval`。两条线的 `Config` 都带四个 Guardian override；
-  当前 Multi 已按三态呈现显式加载值，Local 仍留待阶段二。
+  两条线现在都按三态呈现显式加载值，语义一致。
 - 是否路由给 Guardian 由 `routes_approval_policy_to_guardian()` 按审批策略与 reviewer 共同决定；
   实际 review 模型要到 Guardian session 创建时才按"显式配置 → catalog override → provider 默认"解析。
   因此**状态面板只能反映已加载的配置，不能证明某次 review 运行时确实用了该模型**。
 - Multi 已有自建 TUI 面板（`/sessions`、`/session-control`，三个 default-off 的 `Stage::Experimental`
   feature，带 UI 快照）与 `codex-rs/app-server/README.md` 的 v2 方法文档。Plan 104 已在根 README 增加配置入口并
-  新建公共 Guardian / Multi 指南；Local 专属配置仍留待阶段二。
+  新建公共 Guardian / Multi 指南；Plan 107 已补齐 Local 节，该指南现按公共 / Multi / Local 三节组织。
 - CI 仍不把 `codex-tui` 纳入轻量 test 子集。Plan 104 已把 `codex-team-state` 加入 Multi 选包；首次推送后的
   Multi check 10m38s 通过，该 crate 发现 160 个测试并得到 159 passed、1 ignored、0 failed。
 - Multi 独立空间门已释放两条产品 target 的 incremental 缓存并保留可复用构建主体；Plan 105 初始全量暴露的环境与
@@ -128,6 +131,14 @@ README 的下载链接是固定 tag，发新版本时需同步更新。
   恰好释放该 target 的 257.9 GB。`.codex/cargo-target/rondo-local`、retained test evidence 与已发布版本均未受影响。
   Windows `C:` 可用空间未同步增长——WSL ext4 的释放不会自动缩容 `.vhdx`，宿主容量需另行手动 compact。
   阶段一至此收口。
+- 阶段二 Plan 107 已交付 L-1 / L-2：Local `/status` 增加同语义的 Guardian override 摘要行，根
+  `doc/rondo-config.md` 补 Local 节并同步 README 入口。经核对上游只读快照，Local 相对上游只新增
+  `features.exec_command_repeat_guidance` 一个专属配置字段（默认关闭、`UnderDevelopment`）；方向 2
+  仍为"保留为实验、未采用"，本次未新增能力也未改任何默认值。定向门禁为 `codex-tui` 的 60/60。
+  首次独立审查确认实现与主要文档事实正确，另提出两项窄整改：Local provider 示例缺少 user-level 配置前提，
+  工作树遗留任务自产的 `mydev/codex-rs/target/`。前者已补写配置层前提并收窄开头的绝对表述，后者已在用户
+  对该精确路径单独授权后移除且共享 Local target 未受影响。最终窄复验已经通过，当前等待用户批准合入与推送；
+  推送后的 Local 轻量 CI 仍是本任务的集成终验。
 
 **本工作包只补配套呈现与文档，不新增产品能力、不改任何默认值、不解锁任何方向的工作包，
 也不产生质量或资格结论。**
@@ -220,10 +231,12 @@ M-1/M-2/M-3 与 L-1/L-2 之间无技术依赖，阶段内顺序可调；**阶段
 ## 2. 下一工作包与顺序
 
 跨方向「产品线配套补齐与逐条收口」**阶段一 Multi 已整体收口**（Plan 104 → 独立空间门 → Plan 105 全量闭环 →
-Plan 106 发布、公开复验与缓存删除）。**下一工作包是阶段二 Local 配套补齐**：L-1（Local `/status` 增加 Guardian
-override 行）与 L-2（在根 `doc/rondo-config.md` 补 Local 节），两项无技术依赖、顺序可调；随后同样要先完成独立
-空间任务通过全量前空间门，再跑禁用 incremental 的全 workspace，通过后冻结 Local 并发 `local-v*`。
-阶段二尚未立项，需另立 ExecPlan。各方向本身当前均无 active 工作包。
+Plan 106 发布、公开复验与缓存删除）。**当前工作包是阶段二 Local 配套补齐**：Plan 107 已交付 L-1（Local
+`/status` 增加 Guardian override 行）与 L-2（在根 `doc/rondo-config.md` 补 Local 节），实现与定向验证在专用
+工作树完成并提交；首次独立审查的两项整改已闭合且最终窄复验通过，合入与推送仍未授权。
+**合入后的下一工作包是 Local 的独立空间盘点任务**
+（默认只读盘点，任何删除须用户针对精确对象另行授权）；通过空间门后再跑禁用 incremental 的全 workspace，
+通过后才谈冻结 Local 与发 `local-v*`。这两步都尚未立项，需另立 ExecPlan。各方向本身当前均无 active 工作包。
 
 方向 3 三期原定路线如下；前三个工作包已串行完成，Plan 099 没有形成候选，因此本轮在工作包三停止，工作包四未解锁：
 

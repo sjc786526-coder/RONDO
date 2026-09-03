@@ -1,6 +1,6 @@
 # RONDO 配置指南
 
-最后同步：2026-09-02
+最后同步：2026-09-03
 
 本文**只写 RONDO 相对冻结上游 Codex CLI `v0.147.0` 新增的配置**。上游本来就有的通用配置项
 （`model`、`model_providers`、沙箱与审批策略、hooks、MCP 等）不在这里重复，请看：
@@ -8,11 +8,21 @@
 - 各产品线的 [`multidev/docs/config.md`](../multidev/docs/config.md) / [`mydev/docs/config.md`](../mydev/docs/config.md)
 - 上游官方参考：<https://developers.openai.com/codex/config-reference>
 
-配置文件位置、层级与优先级规则完全沿用上游，RONDO 没有改。
+配置文件位置、层级与优先级规则沿用上游，**只有一处例外**：RONDO 把 `auto_review.model_provider` 也加进了
+project-local 层的剥离名单。上游本来就会从项目层的 `.codex/config.toml` 里剥掉 `model_provider` /
+`model_providers` 等键，RONDO 只是让 Guardian 的 provider 选择遵循同一条规则。被剥离时是**告警而不是报错**：
+
+```
+Ignored unsupported project-local config keys in <path>: auto_review.model_provider.
+If you want these settings to apply, manually set them in your user-level config.toml.
+```
+
+所以凡是涉及 provider 的配置（含 §3.2 的本地推理示例），都要写在**用户级** `~/.codex/config.toml`
+（即 `CODEX_HOME` 下那份），写进项目层不会生效。
 
 > **口径**：本文所有字段以当前 `config/src/config_toml.rs`、`features/src/feature_configs.rs`
 > 与 `core/src/config/mod.rs` 的解析代码为准。默认 reviewer 是 `user`，四个 Guardian override 默认不设置；
-> 本文列出的 Multi 能力默认关闭或缺省。
+> 本文列出的 Multi 与 Local 专属能力默认关闭或缺省。
 
 ---
 
@@ -80,7 +90,7 @@ evidence_dir = "/private/guardian-evidence"   # RONDO 新增，必须是绝对�
 
 ### 1.4 在 `/status` 里查看
 
-RONDO Multi 的 `/status` 会为已加载的覆盖项显示一行 `Guardian config`：
+两条产品线的 `/status` 都会为已加载的覆盖项显示一行 `Guardian config`，语义完全相同：
 
 ```
  Guardian config:   loaded for reviewer auto_review (model gpt-5.1-codex-mini, reasoning effort low)
@@ -168,9 +178,98 @@ startup_timeout_ms = 60000         # 可选，默认 60000
 
 ---
 
-## 3. 不在本文范围内的
+## 3. RONDO Local 专属配置（`mydev/`）
 
-- **RONDO Local 专属配置**：留待第二阶段补充，本文不展开。
+先说结论：**Local 只新增了一个专属配置字段**，就是下面的
+`features.exec_command_repeat_guidance`。Guardian 那四项是两条线共用的（见 §1），
+除此之外 Local 没有再往 `config.toml` 里加任何产品字段。
+
+### 3.1 `features.exec_command_repeat_guidance`
+
+```toml
+[features]
+exec_command_repeat_guidance = true   # RONDO Local 新增，默认 false
+```
+
+| 项 | 事实 |
+|---|---|
+| 默认 | `false`，且 Stage 是 `UnderDevelopment`（不进 `/experimental` 菜单，但 `[features]` 里写了就生效） |
+| 做什么 | 在 `exec_command` 工具的**描述文本**后追加一段有界提示，劝阻"调用参数完全相同、且不会带来新信息"的重复调用 |
+| 生效范围 | 只作用于 unified exec 的 `exec_command`；`shell_command` 恒不带该提示 |
+| 不生效 | 子智能体（非 root）会话不带；Guardian 审批会话恒定关闭 |
+
+它**只改工具描述文本**，不拦截、不改写、不阻断任何命令——要不要重复仍由模型自己判断。
+提示语本身也写明了轮询/等待、状态变化后、恢复重试、用户明确要求继续等情形属于正常重复。
+
+打开它会照常触发上游的 under-development 警告（提示该类 feature 不完整、行为可能不可预期），
+可用上游既有的 `suppress_unstable_features_warning = true` 关掉。
+
+方向 1 已经收口，本项目不再推进这个 feature 的 Stage，也不对外给出它的效果数字
+（见 [README 的"诚实的结果"](../README.md#诚实的结果)）。
+
+### 3.2 本地推理审批：接缝存在，资格没有
+
+方向 2 的最终结论是**保留为实验、未采用**。这一节只说明"哪些东西是真的已经存在的"，
+避免读成"配上就能用"。
+
+**已经存在的**是一条纯配置路径，而且它用的全是上游既有字段加 §1 的公共 Guardian 增量，
+Local **没有**为此新增任何产品配置：
+
+```toml
+# 必须写在用户级 ~/.codex/config.toml，不能写进项目层 .codex/config.toml
+[model_providers.my-local]        # 上游既有字段，完整字段见开头的上游配置参考
+name = "local"
+base_url = "http://127.0.0.1:8080/v1"
+wire_api = "responses"
+
+[auto_review]                     # §1 的公共 RONDO 增量
+model_provider = "my-local"
+model = "<该本地服务实际提供的模型 id>"
+```
+
+上游本来就内置了 `ollama` 与 `lmstudio` 两个 OSS provider，用它们时不必自己写 `[model_providers]`，
+直接把 `model_provider` 填成对应 ID 即可。四个容易踩的运行前提：
+
+- **必须放在用户级配置层。** 这是最容易白忙一场的一条：项目层 `.codex/config.toml` 里的
+  `model_providers` 和 `auto_review.model_provider` 都会被剥掉（见本文开头），只留一条告警，
+  Guardian 仍然用父会话的 provider。放在 `~/.codex/config.toml` 才生效。
+- **本地服务必须讲 Responses 协议。** 冻结基线里 `wire_api` 只接受 `"responses"`；写 `"chat"`
+  会得到明确的"已移除"错误，写别的值报 unknown variant。纯 chat-completions 的本地服务接不进来
+  （老的 `ollama-chat` ID 同样会得到一条专门的"已不再支持"错误）。
+- **显式 provider 不继承父会话凭据**（§1.2 最后一条）。本地服务若需要 key，要自己用
+  `env_key` 之类的方式配。
+- **`model` 必须是该 provider 真正提供的 slug。** 它是最高优先级的 review 模型名，不会再回退到目录
+  或 provider 默认值。
+
+**不存在的**同样要说清楚：仓库不分发模型权重，也不分发推理运行时，更没有"内置本地审批模型"开关。
+把上面配上，只表示 Guardian 会把审批请求发到那个地址；**它不表示任何模型已经取得审批用途的质量资格**。
+方向 2 的历史结论不因为这条路径可配置而升级。
+
+### 3.3 别和 `rondo.local.toml` 搞混（两条独立链路）
+
+仓库根的两个受跟踪示例文件**不是产品配置，CLI 根本不读**。三个配置面并排看：
+
+| 配置面 | 谁读 | 装什么 |
+|---|---|---|
+| `~/.codex/config.toml` 及各配置层 | 产品 CLI 本身 | 上游配置面 + 本文列出的 RONDO 增量 |
+| 根 `rondo.local.example.toml` → ignored `rondo.local.toml` | `eval/` 测评设施（Python） | 本机测评参数：付费 provider 别名与价格、本地推理服务的启动参数等，**不放任何 API Key** |
+| 根 `rondo.secrets.example.env` → ignored `.env.local` | 测评设施的密钥加载器 | 只放 `KEY=VALUE` 形式的密钥 |
+
+也就是说：`rondo.local.toml` 里的 `[local_model]` 描述的是**测评侧**怎么起一个本地推理服务，
+和产品的 `[auto_review]` 是两条独立的链路——改前者不会改变 CLI 的任何行为。
+数据资产与目录规范见 [`doc/eval-data-layout.md`](eval-data-layout.md)。
+
+### 3.4 Local 没有的东西
+
+- **没有 Local 专属 TUI 面板。** Guardian 随审批流走，`/status` 那一行就够了。
+- **没有 §2 那些字段。** `[features.multi_agent_v2]` 这张表本身是上游的，Local 也有；但 RONDO 往里加的
+  `team_state_enabled` / `durable_team_enabled` / `publication_critic` **只存在于 Multi**。这张表是
+  `deny_unknown_fields`，所以在 Local 的 `config.toml` 里写这几个键会被当作未知键报错，不是静默忽略。
+
+---
+
+## 4. 不在本文范围内的
+
 - **上游通用配置**：见本文开头的链接。
 - **开发与构建设施**：构建锁、资源看门狗、CI 与发布流水线分别见
   [`doc/development-environment.md`](development-environment.md)、

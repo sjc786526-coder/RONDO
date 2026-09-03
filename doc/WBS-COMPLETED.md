@@ -2874,3 +2874,51 @@ FINAL_REVIEW_ACCEPTED / INTEGRATED / PUSHED / CI_PASS`。
   `agent_log/2026-09-02-plan106-multi-v0.1.1-release.md`，停止点独立验收见
   `agent_log/2026-09-03-plan106-release-and-cache-gate-review.md`，最终独立验收见
   `agent_log/2026-09-03-plan106-final-review.md`。
+
+## Plan 107 · Local 产品配套补齐（工作树交付通过最终审查，2026-09-03）
+
+**状态**：`IMPLEMENTED / TARGETED_GATE_PASS / REVIEW_FINDINGS_REMEDIATED / FINAL_REVIEW_ACCEPTED /
+MERGE_PUSH_NOT_AUTHORIZED`。**不是** Local 全量通过、功能冻结或发布就绪。
+
+- L-1：Local `/status` 增加 Guardian 显式 override 摘要行，与 Multi 同一用户语义。新增
+  `mydev/codex-rs/tui/src/status/guardian.rs`（`card.rs` 已 945 行，超过 800 行门槛，故不内联），
+  `card.rs` 只做四处窄改动。摘要取自当前有效 `Config` 的 model / provider / reasoning effort /
+  evidence dir 四项，`guardian_policy_config` 不进摘要；每项按 48 列截断。三态为：自动审批显示已加载、
+  用户审批显示配置存在但当前未选用、无 override 不增加行。措辞不声称某次 review 已运行或 provider
+  实际使用了配置值。
+- L-2：根 `doc/rondo-config.md` 新增 §3「RONDO Local 专属配置」，原「不在本文范围内的」顺延为 §4；
+  §1.4 的 `/status` 说明由 Multi 专述改为两条线通用。Multi 章节的内容与结论未改。README 的配置入口
+  段落同步为"公共 Guardian / Multi 专属 / Local 专属"三节结构。
+- 章节事实以上游只读快照逐文件核实为准：`core/config.schema.json` 的整份 diff 只有 `[auto_review]`
+  四个共用 Guardian 字段、`features.exec_command_repeat_guidance`（Local 独有，Multi 没有）与
+  `check_for_update_on_startup` 的描述/默认值三类，`features/src/feature_configs.rs` 与上游逐字节相同。
+  因此"Local 只新增一个专属配置字段"是可核对结论。
+- 该 feature 默认 `false`、Stage `UnderDevelopment`，只往 `exec_command` 的工具描述追加有界提示，
+  不拦截或改写命令，`shell_command`、子智能体与 Guardian 审批会话均不带。方向 2 的本地审批模型继续
+  如实标为"保留为实验、未采用"：文档只说明配置路径与工程接缝存在，明确不由"可配置"推导"已获资格"，
+  并区分产品 `config.toml` 与只被 `eval/` 读取的根 `rondo.local.toml` / `.env.local` 两条链路。
+- 验证：`just fmt` 无改动产出；`just test -p codex-tui status::` 经根共享锁与看门狗、复用唯一
+  `.codex/cargo-target/rondo-local`，最终 **60 tests run / 60 passed / 0 failed**，非零执行成立。
+  新快照逐行阅读后按单文件精确接受，未整包 accept；其余 20 份既有 status 快照零漂移，全仓库无遗留
+  `*.snap.new`。
+- 未新增产品能力、未改任何默认值、未实质修改 `multidev/`，未运行最终全 workspace、clippy、Docker、
+  训练、测评、真实 API、真实本地模型、空间盘点或清理、tag 与发布，未读取 `.env.local` 内容。
+- 首次独立审查确认产品实现、三态测试和主要 Local 文档事实正确，同时发现两项窄阻断：新 Local provider 示例
+  未说明 project-local 层会剥离 provider 注册/选择，工作树内另遗留任务自产的 16 KiB
+  `mydev/codex-rs/target/`。`check_for_update_on_startup = false` 的公共文档缺口经审查裁定延期，不阻断本任务。
+- 发现一已整改：配置指南开头的"配置层完全沿用上游"收窄为"只有一处例外"，写明 RONDO 新增的
+  `auto_review.model_provider` 项目层剥离及其实际告警文案（告警而非报错）；§3.2 示例块标注必须写在用户级
+  `~/.codex/config.toml`，并把该前提列为运行前提之首。整改只动文档，Rust、快照与测试代码零改动，
+  故 60/60 证据继续适用；复核为 `just fmt-check` 退出 0、`git diff --check` 干净、无 `*.snap.new`。
+- 发现二已闭合：该目录成因是接受快照时直接跑裸 `cargo insta`、未走 `just` 入口因而未继承看门狗导出的
+  `CARGO_TARGET_DIR`；受锁的两轮 `just test` 均正确写入共享 Local target。Plan 107 无删除授权，
+  故未自行删除，而是取得用户对该精确路径的单独授权后执行：删除前复核非符号链接且内容仅
+  `.rustc_info.json`（1718 B）与空 `nextest/local/`，只对该完整字面路径操作；删除后该路径不存在，
+  `.codex/cargo-target/rondo-local` 前后同为 `31,499,597,846` bytes 且仍存在，工作树内再无其他 `target`。
+- 最终窄复验确认两项整改闭合且没有新问题：整改没有改 Rust、快照或测试，既有 60/60 与独立 4/4 定向证据
+  继续有效；完整差异 `git diff --check` 通过、无 `*.snap.new`，Multi、CI、Local 配置核心和依赖零差异。
+  工作树交付已通过独立审查，仍等待用户批准合并、推送与 Local 轻量 CI 集成终验。
+- 合同见 `plan/107-local-product-support-completion-execplan.md`，实施见
+  `agent_log/2026-09-03-plan107-local-product-support.md`，首次独立审查见
+  `agent_log/2026-09-03-plan107-independent-review.md`，最终审查见
+  `agent_log/2026-09-03-plan107-final-review.md`。
