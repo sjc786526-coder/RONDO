@@ -146,28 +146,31 @@ Local 专属配置说明，并同步 README 入口与必要的当前规划记录
 
 ### 当前工作
 
-- 实现、验证与记录同步已完成并提交工作树分支，等待计划制定者独立审查。
+- 首次独立审查未接受当前提交：功能实现正确，但配置指南缺少 Local provider 的 user-level 配置前提，且工作树内
+  遗留任务时段生成的 `mydev/codex-rs/target/` 元数据目录。等待窄整改与复验。
 
 ### 本任务剩余步骤
 
-- 由计划制定者独立审查提交；执行者在同一工作树闭合全部任务内问题并复验、提交。
+- 在同一工作树补充 Local provider 的配置层前提并修正绝对化总述；取得精确删除授权后只移除任务自产的
+  `mydev/codex-rs/target/`，完成轻量自检并提交。
+- 由计划制定者窄复验整改提交，确认文档、范围、快照与意外产物问题闭合。
 - 审查通过后等待用户明确批准合并与推送；获批后完成主线合入、推送与 Local 轻量 CI 终验，再据实关闭任务。
 
 ### 阻塞项
 
-- 无技术阻塞。合并和推送尚未授权，属于实施与审查完成后的预定用户门。
+- 精确删除工作树内任务自产的 `mydev/codex-rs/target/` 尚未获得用户授权；不得扩张到任何其他 target、缓存或父目录。
+- 合并和推送尚未授权，属于整改复验完成后的预定用户门。
 
 ### 当前验收状态
 
-- `IMPLEMENTED / TARGETED_GATE_PASS / WORKTREE_COMMITTED / INDEPENDENT_REVIEW_PENDING /
+- `IMPLEMENTED / TARGETED_GATE_PASS / INDEPENDENT_REVIEW_NOT_ACCEPTED / REMEDIATION_REQUIRED /
   MERGE_PUSH_NOT_AUTHORIZED`。
 
 ### 交付中记录、留待另行立项的事项
 
-- 两处既有配置文档缺口不在本任务范围（硬约束 5），只记录不修改：`[auto_review].model_provider` 在
-  project-local 层被 `sanitize_project_config` 剥离并告警这一 RONDO 新增行为未写入 §1.2；
-  `check_for_update_on_startup` 默认改 `false`（E-X2）这一相对上游的真实差异未写入配置指南。
-  两处都是两条产品线共有。
+- 首次独立审查裁决：`[auto_review].model_provider` 的 project-local 限制直接影响新 Local provider 示例，
+  必须在本任务窄修；`check_for_update_on_startup` 默认改 `false` 的公共说明继续延期，不阻断本任务。
+- 首次独立审查报告：`agent_log/2026-09-03-plan107-independent-review.md`。
 
 ### 交接边界
 

@@ -2875,9 +2875,9 @@ FINAL_REVIEW_ACCEPTED / INTEGRATED / PUSHED / CI_PASS`。
   `agent_log/2026-09-03-plan106-release-and-cache-gate-review.md`，最终独立验收见
   `agent_log/2026-09-03-plan106-final-review.md`。
 
-## Plan 107 · Local 产品配套补齐（实现完成，待独立审查，2026-09-03）
+## Plan 107 · Local 产品配套补齐（实现完成，首次审查待整改，2026-09-03）
 
-**状态**：`IMPLEMENTED / TARGETED_GATE_PASS / WORKTREE_COMMITTED / INDEPENDENT_REVIEW_PENDING /
+**状态**：`IMPLEMENTED / TARGETED_GATE_PASS / INDEPENDENT_REVIEW_NOT_ACCEPTED / REMEDIATION_REQUIRED /
 MERGE_PUSH_NOT_AUTHORIZED`。**不是** Local 全量通过、功能冻结或发布就绪。
 
 - L-1：Local `/status` 增加 Guardian 显式 override 摘要行，与 Multi 同一用户语义。新增
@@ -2903,8 +2903,10 @@ MERGE_PUSH_NOT_AUTHORIZED`。**不是** Local 全量通过、功能冻结或发�
   `*.snap.new`。
 - 未新增产品能力、未改任何默认值、未实质修改 `multidev/`，未运行最终全 workspace、clippy、Docker、
   训练、测评、真实 API、真实本地模型、空间盘点或清理、tag 与发布，未读取 `.env.local` 内容。
-- 交付中另记录两处**不在本任务范围**的既有文档缺口，留待另行立项：`[auto_review].model_provider` 在
-  project-local 层被剥离并告警这一 RONDO 新增行为未写入 §1.2；`check_for_update_on_startup` 默认改
-  `false`（E-X2）这一相对上游的真实差异未写入配置指南。两处都是两条产品线共有。
+- 首次独立审查确认产品实现、三态测试和主要 Local 文档事实正确，同时发现两项窄阻断：新 Local provider 示例
+  未说明 project-local 层会剥离 provider 注册/选择，工作树内另遗留任务自产的 16 KiB
+  `mydev/codex-rs/target/`。前者须窄修，后者须在精确授权后只处理该目录；
+  `check_for_update_on_startup = false` 的公共文档缺口延期且不阻断本任务。
 - 合同见 `plan/107-local-product-support-completion-execplan.md`，实施见
-  `agent_log/2026-09-03-plan107-local-product-support.md`。
+  `agent_log/2026-09-03-plan107-local-product-support.md`，首次独立审查见
+  `agent_log/2026-09-03-plan107-independent-review.md`。
