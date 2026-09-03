@@ -171,26 +171,60 @@ Multi Cargo target 做只读盘点并停在明确删除授权门；只有用户�
   `.github/scripts/compose-release-notes.sh` 无构建渲染并审读正式 Release notes：banner、版本号说明、
   包布局、判官后端不在包内与 bubblewrap 许可段落均正确，无 Local 内容夹带。
 
+- 2026-09-02：第一阶段全部完成。候选 commit `29fb953e644611eb0a35f8817c97dc9edca2865f`；其 exact SHA 的
+  轻量 CI run `33723597611` 全绿；annotated tag `multi-v0.1.1`（tag 对象 `2ae1fc1f`）peeled 到该 commit，
+  推送后未移动；release run `33724503639` 的 validate/build/verify/publish 四 job 全部 success。
+  公开 Release 非 draft、非 prerelease，两个资产已以未认证 HTTP 在项目目录外下载复验：归档 SHA-256
+  `090458103cbcb343e530eaecd2791f8dfe24a56ce1eb0aa5cb547caa06dc4e2c` 与公开 `SHA256SUMS` 一致，
+  `bin/rondo-multi --version` 报 `0.147.0`，19 项必需文件非空、`THIRD-PARTY-LICENSES/` 17 份、
+  6 条许可内容断言通过，cargo-about 报告 HTML 转义计数为 0，公开 notes 与本地渲染逐字节相同。
+  `multi-v0.1.0` 未变。README 的 Multi 固定链接已后置切到 0.1.1，Local 链接不变；WBS、完成记录与
+  `agent_log/2026-09-02-plan106-multi-v0.1.1-release.md` 已同步。
+- 2026-09-02：完成唯一 Multi target 的只读盘点，未删除任何对象。
+
 ### 当前工作
 
-- 执行第一阶段：发布准备提交 → 合入推送 `main` → 等待候选 exact SHA 的轻量 CI → 打 tag → 发布与公开复验。
+- 停在缓存删除授权门，等待用户对精确路径的第二阶段批准。
+
+### 缓存删除方案（待授权，尚未执行）
+
+**唯一目标**（完整、已解析的 canonical path，不使用变量、glob 或父目录）：
+
+```
+/home/sjc/desktop/RONDO/.codex/cargo-target/rondo-multi
+```
+
+盘点结论（2026-09-02 实测）：
+
+| 项 | 实测值 |
+|---|---|
+| 占用 | `257,889,263,616` B = 240.2 GiB；`debug/deps` 约 247 G 为大头，`debug/incremental` 为空 |
+| 路径 | `namei -l` 每段均为真实目录，无符号链接；`readlink -f` 与给定路径一致 |
+| 使用者 | 无 cargo/rustc/nextest/lld 进程；构建锁（dev `00:4c`、inode 53）不在 `/proc/locks`；无 RONDO 重型 scope；`lsof +D` 句柄 0；`fuser` 无使用者；无进程 cwd 在内 |
+| 项目占用 | `316,658,225,152` B（316.66 GB），门限 350/365/370 GB |
+| Windows `C:` 可用 | `118,950,371,328` B（118.95 GB），高于 50 GB 下限 |
+
+- **预计释放**：项目占用降到约 `58.8` GB，距 350 GB 告警线的余量从约 33 GB 增至约 291 GB。
+- **对 Windows 容量的诚实说明**：这是 WSL 内 ext4 的释放，`.vhdx` 不会自动缩容，
+  Windows `C:` 实际可用空间**大概率不会同步增长**，除非另行手动 compact。不得把删除描述为宿主必然扩容。
+- **重建代价**：Multi 实质代码与功能已冻结，阶段二 Local 使用的是 `rondo-local` target，
+  因此删除不阻塞已排定的下游工作；代价只在将来另立 Multi 任务需要再跑全 workspace 时支付一次冷编译。
+- **明确不在范围**：`.codex/cargo-target/rondo-local`（`10,371,141,632` B）、retained test evidence、
+  其它缓存/target、Docker 对象、worktree、父目录 `.codex/cargo-target` 本身。
+- **执行方式**：获批后先复核占用、非符号链接、无使用者与 canonical path，再只对上述完整路径删除；
+  删除后确认该路径不存在、复测项目与宿主可用空间，并确认 Local target 与其它资产未受影响。
 
 ### 本任务剩余步骤
 
-1. 执行并提交发布准备，按已授权流程合入推送，等待候选 exact SHA 的轻量 CI 通过。
-2. 创建并推送 `multi-v0.1.1`，监控既有 Release workflow，完成未认证公开发布物复验。
-3. 后置更新 README 与权威状态文档，提交、合入、推送。
-4. 只读盘点唯一 Multi target，提交精确删除方案，记录
-   `RELEASE_VERIFIED / AWAITING_CACHE_DELETION_AUTHORIZATION` 并暂停。
-5. 用户明确批准精确路径后删除、复核、记录并交计划制定者最终验收。
+1. 用户明确批准上述精确路径后删除、复核、记录并交计划制定者最终验收。
 
 ### 阻塞项
 
-- 缓存删除必须在发布复验和只读盘点完成后，另取用户对精确路径的第二阶段授权；当前没有该授权。
+- 缓存删除等待用户对精确路径的第二阶段授权；第一阶段授权、发布成功与 WBS 排程均不构成该授权。
 
 ### 当前验收状态
 
-- `FIRST_STAGE_IN_PROGRESS / CACHE_DELETION_NOT_AUTHORIZED`。
+- `RELEASE_VERIFIED / AWAITING_CACHE_DELETION_AUTHORIZATION`。
 
 ### 交接边界
 

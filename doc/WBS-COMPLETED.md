@@ -2838,3 +2838,27 @@ INTEGRATED / PUSHED / CI_PASS`。
   `agent_log/2026-09-02-plan105-multi-final-full-workspace.md`，独立验收见
   `agent_log/2026-09-02-plan105-multi-final-full-workspace-review.md`，集成与 CI 见
   `agent_log/2026-09-02-plan105-main-push-and-ci.md`。
+
+## Plan 106 · RONDO Multi `multi-v0.1.1` 发布与公开复验（发布里程碑完成，2026-09-02）
+
+**状态**：`RELEASE_VERIFIED / AWAITING_CACHE_DELETION_AUTHORIZATION`（缓存收尾待用户二次授权，本条待补）。
+
+- 在 Plan 105 冻结候选上发布 Multi 第二个正式版。`multidev/CHANGELOG.md` 新增 `0.1.1` 小节，
+  覆盖 `/status` Guardian override 摘要行、根 `doc/rondo-config.md` 配置指南、CI 常跑
+  `codex-team-state`、fuzzy-file-search Nextest 串行化；`14713/14713` 明确限定为正确性与稳定性结果，
+  不作性能、质量资格或生产承诺。
+- 发布链全部绑定精确身份：候选 commit `29fb953e`，其 exact SHA 的轻量 CI run `33723597611` 全绿
+  （`check (multi)` 10m45s 真实执行）；annotated tag `multi-v0.1.1`（tag 对象 `2ae1fc1f`）peeled 到同一 commit；
+  release run `33724503639` 的 validate/build/verify/publish 四个 job 全部成功（build 58m02s）。
+  tag 推送后未移动，`multi-v0.1.0` 的 tag、Release 与资产未变。
+- 公开复验以**未认证** HTTP 在项目目录外完成：Release 非 draft、非 prerelease；归档 SHA-256
+  `090458103cbcb343e530eaecd2791f8dfe24a56ce1eb0aa5cb547caa06dc4e2c` 与公开 `SHA256SUMS` 一致；
+  `bin/rondo-multi --version` 仍报冻结基线 `0.147.0`；19 项必需文件非空、`THIRD-PARTY-LICENSES/` 17 份、
+  6 条许可内容断言在公开归档上重跑通过；另补跑 CD 文档不变量 I 点名的无自动断言缺口，
+  三份 cargo-about 报告 HTML 转义计数均为 0。公开 Release notes 与打 tag 前本地渲染逐字节相同，
+  为 Multi 专属、无 Local 内容。
+- 复验通过后 README 的 Multi 固定下载链接切到 0.1.1，Local 链接不变。未改动 Multi 产品代码、测试口径、
+  依赖、lockfile、发布 workflow、打包器或许可材料，Plan 105 最终全 workspace 结果继续适用于发布候选；
+  本任务未运行本地全 workspace、Docker、真实 API/模型，也未删除任何缓存。
+- 合同见 `plan/106-multi-v0.1.1-release-and-cache-closeout-execplan.md`，执行与只读缓存盘点见
+  `agent_log/2026-09-02-plan106-multi-v0.1.1-release.md`。
