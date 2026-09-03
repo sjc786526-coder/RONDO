@@ -18,8 +18,9 @@ Plan 102 五维云端判官实验性工程接入已以 `ENGINEERING_SEAM_PASS` �
 workspace 闭环、Plan 106 的 `multi-v0.1.1` 发布与公开复验，以及用户授权后的 `rondo-multi` 构建缓存删除
 （释放 257.9 GB）均已完成。**阶段二 Local 配套补齐（Plan 107）也已收口**：L-1 / L-2 实现、两轮独立审查、
 两项窄整改闭合，以及合入 `main`（merge `8fe3c6d6`）、推送与 Local 轻量 CI 全绿均已完成。
-**下一工作包是 Local 的独立空间盘点任务**，尚未立项。Plan 107 只补配套呈现与文档，不构成 Local 全量通过、
-功能冻结或发布就绪。
+**Local 独立空间门已通过**：经用户授权释放两个已合入工作树与 `rondo-local/debug/incremental`，
+共 12.09 GB，项目占用降至 67.5 GB。**下一工作包是禁用 incremental 的 Local 全 workspace 测试**，尚未立项。
+Plan 107 与空间门均只补配套呈现、文档与容量，不构成 Local 全量通过、功能冻结或发布就绪。
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段指针、跨方向关系、
 稳定工程边界和授权门；已完成成果与验收见 `doc/WBS-COMPLETED.md`，单次任务合同见 `plan/`，执行细节见
@@ -141,6 +142,15 @@ README 的下载链接是固定 tag，发新版本时需同步更新。
   合入并推送，集成终验的 Local 轻量 CI run `33749595924` 全绿（`check (local)` 10m51s，四个测试门禁
   合计 745 passed、0 failed，路径分流只跑 Local 选包）。`codex-tui` 仍不在 CI 选包内，Local TUI 正确性
   继续由本地 60/60 证明。阶段二至此收口。
+- Local 独立空间门已通过（2026-09-03）。经用户授权归档并关闭两个已合入工作树（109、110，分支保留为
+  `zz-done/`）、释放 `rondo-local/debug/incremental`，共 12.09 GB，项目占用由 79.6 GB 降至 67.5 GB、
+  `rondo-local` target 降至 19.8 GB；`deps/` 热缓存与 `eval-data/` 全部保留。关闭工作树前已把只存在于
+  工作树、git-ignored 的 Plan 107 门禁证据（含 60/60 那一轮的 JUnit）归档进主工作区 `.codex/build-watchdog/`
+  并逐字节校验。该 incremental 是 Multi 空间门删除后由 Plan 107 定向门禁重新长出的——`just test` 等日常窄
+  入口按设计保留 incremental，只有 `test-with-codex-v8-conservative` 设 `CARGO_INCREMENTAL=0`，
+  故全量后若再做定向复验它会再次增长。以 Plan 105 的 Multi 实测锚定，Local 全量预计使项目占用达
+  278–308 GB，低于 350 GB 告警线；WSL 增长落在 `ext4.vhdx` 已分配的 438.8 GB 内，`C:` 预期不变。
+  详见 `agent_log/2026-09-03-local-space-gate-release.md`。
 
 **本工作包只补配套呈现与文档，不新增产品能力、不改任何默认值、不解锁任何方向的工作包，
 也不产生质量或资格结论。**
@@ -236,9 +246,10 @@ M-1/M-2/M-3 与 L-1/L-2 之间无技术依赖，阶段内顺序可调；**阶段
 Plan 106 发布、公开复验与缓存删除）。**阶段二 Local 配套补齐也已收口**：Plan 107 交付的 L-1（Local
 `/status` 增加 Guardian override 行）与 L-2（在根 `doc/rondo-config.md` 补 Local 节）已通过两轮独立审查，
 并以 merge `8fe3c6d6` 合入 `main`、推送，Local 轻量 CI 全绿。
-**下一工作包是 Local 的独立空间盘点任务**
-（默认只读盘点，任何删除须用户针对精确对象另行授权）；通过空间门后再跑禁用 incremental 的全 workspace，
-通过后才谈冻结 Local 与发 `local-v*`。这两步都尚未立项，需另立 ExecPlan。各方向本身当前均无 active 工作包。
+**Local 独立空间门也已通过**（2026-09-03）：经用户逐对象授权释放 12.09 GB，项目占用降至 67.5 GB，
+预测 Local 全量峰值 278–308 GB 低于 350 GB 告警线，`C:` 预期不变。
+**下一工作包是禁用 incremental 的 Local 全 workspace 测试**（走 `test-with-codex-v8-conservative`），
+通过后才谈冻结 Local 与发 `local-v*`。该步尚未立项，需另立 ExecPlan。各方向本身当前均无 active 工作包。
 
 方向 3 三期原定路线如下；前三个工作包已串行完成，Plan 099 没有形成候选，因此本轮在工作包三停止，工作包四未解锁：
 
