@@ -2839,9 +2839,9 @@ INTEGRATED / PUSHED / CI_PASS`。
   `agent_log/2026-09-02-plan105-multi-final-full-workspace-review.md`，集成与 CI 见
   `agent_log/2026-09-02-plan105-main-push-and-ci.md`。
 
-## Plan 106 · RONDO Multi `multi-v0.1.1` 发布与公开复验（发布里程碑完成，2026-09-02）
+## Plan 106 · RONDO Multi `multi-v0.1.1` 发布、公开复验与缓存收尾（完成，2026-09-02 / 09-03）
 
-**状态**：`RELEASE_VERIFIED / AWAITING_CACHE_DELETION_AUTHORIZATION`（缓存收尾待用户二次授权，本条待补）。
+**状态**：`RELEASE_VERIFIED / CACHE_DELETED / STAGE_ONE_CLOSED`（待计划制定者最终复核）。
 
 - 在 Plan 105 冻结候选上发布 Multi 第二个正式版。`multidev/CHANGELOG.md` 新增 `0.1.1` 小节，
   覆盖 `/status` Guardian override 摘要行、根 `doc/rondo-config.md` 配置指南、CI 常跑
@@ -2860,5 +2860,14 @@ INTEGRATED / PUSHED / CI_PASS`。
 - 复验通过后 README 的 Multi 固定下载链接切到 0.1.1，Local 链接不变。未改动 Multi 产品代码、测试口径、
   依赖、lockfile、发布 workflow、打包器或许可材料，Plan 105 最终全 workspace 结果继续适用于发布候选；
   本任务未运行本地全 workspace、Docker、真实 API/模型，也未删除任何缓存。
-- 合同见 `plan/106-multi-v0.1.1-release-and-cache-closeout-execplan.md`，执行与只读缓存盘点见
-  `agent_log/2026-09-02-plan106-multi-v0.1.1-release.md`。
+- 停止点独立验收 `ACCEPT`、无整改要求；用户随后逐字批准删除 `.codex/cargo-target/rondo-multi`。
+  删除前重新复核 canonical path、非符号链接与四路无使用者，只对该完整字面路径执行：项目占用由
+  `316,658,561,024` B 降到 `58,769,297,408` B，恰好释放 `257,889,263,616` B（240.2 GiB），
+  与目标实测占用逐字节相符。`.codex/cargo-target/rondo-local`（`10,371,141,632` B）、`.codex/build-watchdog`、
+  `test-data/_retained-test-evidence` 与已发布的 `multi-v0.1.1` 均未受影响，未触碰 Docker 对象或 worktree。
+  Windows `C:` 可用空间未同步增长（实测微降约 1.1 MB）——WSL ext4 释放不会自动缩容 `.vhdx`，
+  宿主容量需另行手动 compact；WSL 侧 `/` 可用由约 601 GB 升到约 902 GB。
+- 阶段一 Multi 至此整体收口，下一工作包转为阶段二 Local 配套补齐（L-1、L-2）。
+- 合同见 `plan/106-multi-v0.1.1-release-and-cache-closeout-execplan.md`，执行、只读盘点与删除证据见
+  `agent_log/2026-09-02-plan106-multi-v0.1.1-release.md`，停止点独立验收见
+  `agent_log/2026-09-03-plan106-release-and-cache-gate-review.md`。
