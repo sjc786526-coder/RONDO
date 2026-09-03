@@ -2796,3 +2796,21 @@ Plan 103 的收口。仓库转为公开，两条产品线各发出首个正式�
   发新版本时需同步更新。发布节奏、版本策略与是否补平台只在 `doc/WBS.md` 的发布工程条目维护。
 - 合同（已冻结）见 `plan/103-release-engineering-and-cicd-execplan.md`，执行见
   `agent_log/2026-09-01-plan103-release-engineering-execution.md`。
+
+## Plan 104 · Multi 产品配套补齐（完成并冻结，2026-09-02）
+
+**状态**：`COMPLETED / FINAL_REVIEW_ACCEPTED / GOAL_COMPLETED / INTEGRATED / PUSHED / CI_PASS`。
+
+- Multi 轻量 CI 的 package gate 加入 `codex-team-state`，权威 CI 文档同步 package 表与两条产品线的本地复现命令；
+  未把 `codex-tui` 整体加入 CI。
+- Multi `/status` 增加 Guardian 显式 override 摘要：自动审批显示已加载，用户审批显示配置存在但当前未选用，
+  无 override 时不新增行；措辞不声称某次 review 已运行或 provider 实际使用了配置值。
+- 根 `doc/rondo-config.md` 已提供公共 Guardian 与 Multi 的 RONDO 增量配置指南，README 提供入口；Local 专属内容未混入。
+- 本地最终门禁为 3602/3602，独立审查窄复验为 163/163。实现与审查整改以 merge `8a8a14ff` 合入并推送 `main`；
+  GitHub Actions `ci` run `33710767703` 全绿，Multi check 10m38s，`codex-team-state` 发现 160 个测试并得到
+  159 passed、1 个既有显式 ignored、0 failed，排除了零测试假绿。
+- 未修改 Local 产品代码或默认行为，未运行最终全 workspace、Docker、真实 API、本地模型、清理、冻结、tag 或发布。
+  执行与最终验收见 `agent_log/2026-09-02-plan104-multi-product-support.md`、
+  `agent_log/2026-09-02-plan104-multi-product-support-review.md`、
+  `agent_log/2026-09-02-plan104-multi-product-support-review-followup.md` 与
+  `agent_log/2026-09-02-plan104-main-push-and-ci.md`。

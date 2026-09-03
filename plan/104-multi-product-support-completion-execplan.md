@@ -118,7 +118,7 @@ Guardian 与 Multi 的 RONDO 配置指南及清楚入口。本任务不新增产
 - 已冻结本 ExecPlan。
 - **M-1**：`.github/workflows/ci.yml` 的 Multi `TEST_PACKAGES` 加入 `-p codex-team-state`；
   `doc/ci-pipeline.md` 同步不变量 1 的措辞、package 表、Multi 本地复现命令块，并标注既有耗时数据
-  形成于该 crate 入 CI 之前、尚未实测。
+  形成于该 crate 入 CI 之前；首次纳入后的热缓存实测已补记。
 - **M-2**：新增 `multidev/codex-rs/tui/src/status/guardian.rs`（`card.rs` 已 945 行，超过
   `multidev/AGENTS.md` 的 800 行门槛，故新开模块而非继续堆入），`card.rs` 增加
   `guardian_config: Option<String>` 字段、标签与渲染行。三态断言与一份代表性快照落在既有
@@ -129,27 +129,26 @@ Guardian 与 Multi 的 RONDO 配置指南及清楚入口。本任务不新增产
   `codex-team-state` 全包加 4 个新增 status 测试完成 `163/163` 窄复验。
 - 首次独立审查发现的配置回退解释、默认状态措辞、Local 范围和任务状态记录问题均已完成窄文档修订并复核；
   产品代码无需整改。
+- 已以非快进 merge `8a8a14ff` 合入 `main` 并推送 `origin/main`；工作分支已归档为
+  `zz-done/worktree-106-multi-product-support`。
+- 推送触发的 GitHub Actions `ci` run `33710767703` 全部通过：Multi check 10m38s、Local check 10m52s；
+  Multi Gate 3a 明确选择 `-p codex-team-state`，该 crate 发现 160 个测试并得到 159 passed、1 ignored、0 failed。
 
 ### 当前工作
 
-- 本地实现、验证与独立审查整改均已完成；本地 `main` 合并已获用户授权并在本轮交付执行。
-- 远端推送与 Actions 验收尚未获本轮授权、尚未执行。
+- 本任务已完成并冻结；后续工作只按 WBS 另行立项，不在本计划继续展开。
 
 ### 本任务剩余步骤
 
-- 取得用户后续明确批准后推送 `main`，观察 Multi 轻量 CI。
-- 核对 Actions 中 `codex-team-state` 的非零测试数、CI 结果和耗时说明；如需窄修则在同一任务内修复、复验。
-- CI 与最终差异通过后，精炼同步任务完成记录并冻结本计划。
+- 无。
 
 ### 阻塞项
 
-- 本地实现、验证、审查和合并无阻塞。
-- 推送和推送后 CI 验收等待用户后续明确批准。
+- 无。
 
 ### 当前验收状态
 
-- `LOCAL_REVIEW_ACCEPTED / INTEGRATED / PUSH_PENDING`。
-- 推送后的轻量 CI 尚未触发，`codex-team-state` 在 Actions 中的非零测试数尚未核对，不得表述为通过。
+- `COMPLETED / FINAL_REVIEW_ACCEPTED / GOAL_COMPLETED / INTEGRATED / PUSHED / CI_PASS`。
 
 ### 交接边界
 
@@ -169,3 +168,4 @@ Guardian 与 Multi 的 RONDO 配置指南及清楚入口。本任务不新增产
 | 006 | Guardian 摘要逻辑放新模块 `status/guardian.rs`，而非继续写进 `card.rs` | `card.rs` 已 945 行，超过 `multidev/AGENTS.md` 的 800 行门槛；本计划 §2 也允许同模块下的小型专用文件 | Multi TUI | 已采纳 |
 | 007 | 状态行措辞定为 `loaded for reviewer auto_review (...)` / `loaded, unused by reviewer user (...)`，用 config 里的字面值指代 reviewer | 两态对称且都点名 reviewer，满足 WBS "显示 reviewer 与已加载 override"；显式 model 是最高优先级 slug，但 `loaded` 只陈述加载事实，不声称某次 review 已发生或 provider 已实际处理它 | Multi TUI、`doc/rondo-config.md` | 已采纳 |
 | 008 | 每项 override 值按 48 列上限截断 | 值来自自由文本配置，而 transcript 渲染宽度是 `u16::MAX`，不截断会让一条长路径撑爆整块记录 | Multi TUI | 已采纳 |
+| 009 | 保留 CI 文档中的既有冷/热历史表，并补记首次纳入 team-state 后的热缓存实测 | 新 Multi run 为 10m38s，未超原 13m50s 参考值；没有新的冷缓存数据，故不虚构或覆盖冷跑基线 | `doc/ci-pipeline.md` | 已采纳 |

@@ -179,9 +179,9 @@ Multi 多两个方向 3 的 crate，两个都很轻，不碰 V8、不碰 core：
 
 **预算**：冷 90 分钟（`timeout-minutes: 90`）、热 30 分钟。余量充足。
 
-> 这批数字实测于 `codex-team-state` 进入 Multi `TEST_PACKAGES` **之前**。该 crate 只依赖
-> protocol/serde/sha2/tokio/uuid，增量预期在分钟级以内，但**尚未实测**；下一次 Multi 跑完后
-> 若与上表明显不符，以实测为准更新本节。
+> 上表实测于 `codex-team-state` 进入 Multi `TEST_PACKAGES` **之前**。2026-09-02 首次纳入后的
+> 热缓存实跑中，Multi 整个 check job 为 10m38s（其中该 crate 发现 160 个测试，159 passed、
+> 1 个显式 ignored），未超出原有 13m50s 参考值；冷缓存耗时尚未重新测量，因此保留上表历史值与现行预算。
 
 **缓存**：local 1983 MB + multi 2058 MB，合计远低于 GitHub 单仓库 10 GB 上限。
 缓存 key 按产品线分开，两个 workspace 不会互相挤掉对方的产物。
