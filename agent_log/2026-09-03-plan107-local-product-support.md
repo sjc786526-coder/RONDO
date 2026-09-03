@@ -87,7 +87,7 @@
 - §3.2 的示例块顶部直接标注必须写在用户级 `~/.codex/config.toml`，并把"必须放在用户级配置层"
   列为四个运行前提中的第一条。
 
-### 二、工作树内遗留第二个 Cargo target（待授权处理）
+### 二、工作树内遗留第二个 Cargo target（已按精确授权移除）
 
 `mydev/codex-rs/target/` 16 KiB，只含 `.rustc_info.json`（1718 B）与空的 `nextest/local/`。
 **成因是我自己**：接受快照时直接跑了裸 `cargo insta pending-snapshots` / `cargo insta accept`，
@@ -95,7 +95,13 @@
 落了这个目录。受锁的 `just test` 两轮都正确写进了共享 `.codex/cargo-target/rondo-local`。
 
 教训：快照接受也要走受跟踪入口或显式带上共享 target，不能因为"只是读取 pending"就绕过。
-Plan 107 明确没有删除授权，故本轮不自行删除，已向用户申请对该精确路径的删除授权。
+
+Plan 107 明确没有删除授权，故未自行删除，而是向用户申请了对该精确路径的授权并获批后执行：
+
+- 删除前复核该路径非符号链接、内容只有上述两项，实占 1718 bytes。
+- 只对该完整字面路径执行删除，未触碰共享 target、主工作区、其他缓存或任何父目录。
+- 删除后复核：该路径不存在；`.codex/cargo-target/rondo-local` 删除前后同为
+  `31,499,597,846` bytes 且仍存在；工作树内再无其他 `target` 目录。
 
 ## 留待另行立项的文档缺口
 

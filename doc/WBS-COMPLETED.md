@@ -2875,10 +2875,10 @@ FINAL_REVIEW_ACCEPTED / INTEGRATED / PUSHED / CI_PASS`。
   `agent_log/2026-09-03-plan106-release-and-cache-gate-review.md`，最终独立验收见
   `agent_log/2026-09-03-plan106-final-review.md`。
 
-## Plan 107 · Local 产品配套补齐（实现完成，首次审查整改中，2026-09-03）
+## Plan 107 · Local 产品配套补齐（实现完成，首次审查整改已闭合，2026-09-03）
 
-**状态**：`IMPLEMENTED / TARGETED_GATE_PASS / REVIEW_FINDING_1_REMEDIATED /
-REVIEW_FINDING_2_AWAITING_DELETE_AUTH / MERGE_PUSH_NOT_AUTHORIZED`。**不是** Local 全量通过、功能冻结或发布就绪。
+**状态**：`IMPLEMENTED / TARGETED_GATE_PASS / REVIEW_FINDINGS_REMEDIATED / RE_REVIEW_PENDING /
+MERGE_PUSH_NOT_AUTHORIZED`。**不是** Local 全量通过、功能冻结或发布就绪。
 
 - L-1：Local `/status` 增加 Guardian 显式 override 摘要行，与 Multi 同一用户语义。新增
   `mydev/codex-rs/tui/src/status/guardian.rs`（`card.rs` 已 945 行，超过 800 行门槛，故不内联），
@@ -2910,9 +2910,11 @@ REVIEW_FINDING_2_AWAITING_DELETE_AUTH / MERGE_PUSH_NOT_AUTHORIZED`。**不是** 
   `auto_review.model_provider` 项目层剥离及其实际告警文案（告警而非报错）；§3.2 示例块标注必须写在用户级
   `~/.codex/config.toml`，并把该前提列为运行前提之首。整改只动文档，Rust、快照与测试代码零改动，
   故 60/60 证据继续适用；复核为 `just fmt-check` 退出 0、`git diff --check` 干净、无 `*.snap.new`。
-- 发现二待处理：该目录成因是接受快照时直接跑裸 `cargo insta`、未走 `just` 入口因而未继承看门狗导出的
+- 发现二已闭合：该目录成因是接受快照时直接跑裸 `cargo insta`、未走 `just` 入口因而未继承看门狗导出的
   `CARGO_TARGET_DIR`；受锁的两轮 `just test` 均正确写入共享 Local target。Plan 107 无删除授权，
-  已向用户申请对该精确路径的删除授权，未自行删除。
+  故未自行删除，而是取得用户对该精确路径的单独授权后执行：删除前复核非符号链接且内容仅
+  `.rustc_info.json`（1718 B）与空 `nextest/local/`，只对该完整字面路径操作；删除后该路径不存在，
+  `.codex/cargo-target/rondo-local` 前后同为 `31,499,597,846` bytes 且仍存在，工作树内再无其他 `target`。
 - 合同见 `plan/107-local-product-support-completion-execplan.md`，实施见
   `agent_log/2026-09-03-plan107-local-product-support.md`，首次独立审查见
   `agent_log/2026-09-03-plan107-independent-review.md`。

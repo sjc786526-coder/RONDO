@@ -150,22 +150,24 @@ Local 专属配置说明，并同步 README 入口与必要的当前规划记录
   `auto_review.model_provider` 项目层剥离与实际告警文案；§3.2 示例块标注必须写在用户级
   `~/.codex/config.toml`，并把该前提列为四条运行前提之首。仅改 `doc/rondo-config.md` 与实施日志，
   Rust、快照与测试代码零改动。轻量复核：`just fmt-check` 退出 0、`git diff --check` 干净、无 `*.snap.new`。
-- 审查发现二（自产 target）尚未处理：等待用户对 `mydev/codex-rs/target/` 这一精确路径的删除授权。
+- 审查发现二（自产 target）已闭合：用户对 `mydev/codex-rs/target/` 这一精确路径单独授权后执行删除。
+  删除前复核非符号链接、内容仅 `.rustc_info.json`（1718 B）与空 `nextest/local/`；只对该完整字面路径操作。
+  删除后该路径不存在，`.codex/cargo-target/rondo-local` 前后同为 `31,499,597,846` bytes 且仍存在，
+  工作树内再无其他 `target` 目录。
 
 ### 本任务剩余步骤
 
-- 取得精确删除授权后只移除任务自产的 `mydev/codex-rs/target/`，复核其不存在且共享 Local target 未受影响。
 - 由计划制定者窄复验整改提交，确认文档、范围、快照与意外产物问题闭合。
 - 审查通过后等待用户明确批准合并与推送；获批后完成主线合入、推送与 Local 轻量 CI 终验，再据实关闭任务。
 
 ### 阻塞项
 
-- 精确删除工作树内任务自产的 `mydev/codex-rs/target/` 尚未获得用户授权；不得扩张到任何其他 target、缓存或父目录。
+- 无技术阻塞；两项审查发现均已闭合。
 - 合并和推送尚未授权，属于整改复验完成后的预定用户门。
 
 ### 当前验收状态
 
-- `IMPLEMENTED / TARGETED_GATE_PASS / REVIEW_FINDING_1_REMEDIATED / REVIEW_FINDING_2_AWAITING_DELETE_AUTH /
+- `IMPLEMENTED / TARGETED_GATE_PASS / REVIEW_FINDINGS_REMEDIATED / RE_REVIEW_PENDING /
   MERGE_PUSH_NOT_AUTHORIZED`。
 
 ### 交付中记录、留待另行立项的事项
