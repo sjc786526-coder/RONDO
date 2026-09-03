@@ -2929,3 +2929,34 @@ FINAL_REVIEW_ACCEPTED / INTEGRATED / PUSHED / CI_PASS`。
   `agent_log/2026-09-03-plan107-local-product-support.md`，首次独立审查见
   `agent_log/2026-09-03-plan107-independent-review.md`，最终审查见
   `agent_log/2026-09-03-plan107-final-review.md`。
+
+## Plan 108 · Local 最终全 Workspace 测试与修复闭环（完成并集成，2026-09-03）
+
+**状态**：`COMPLETED / GOAL_COMPLETED / FINAL_REVIEW_ACCEPTED / LOCAL_FUNCTIONALLY_FROZEN /
+INTEGRATED / PUSHED / CI_PASS`。
+
+- 正式完整门禁始终使用 `just --justfile mydev/justfile test-with-codex-v8-conservative --locked`，复用唯一共享
+  `.codex/cargo-target/rondo-local`，并确认 `CARGO_INCREMENTAL=0`、jobs=1、LLD 单线程、checksum-verified V8、
+  全局构建锁、watchdog 与 Windows `C:` 空间门均生效。
+- 首次轮全部测试通过但有 2 项 retry/flaky：loopback HTTP fixture 存在 socket RST 竞争，sticky environment
+  fixture 的私有不可达端点会消耗产品默认连接预算。修复只让前者有界消费 request head 后响应并 half-close，后者只在
+  私有 fixture 配置 50ms connect budget；未改产品默认 timeout。新进程 `--retries 0` 定向复验 3/3 通过。
+- 第二轮暴露四项 `turn_start_shell_zsh_fork_` 并发争用。只把精确过滤器路由到既有
+  `app_server_integration` 单线程组，不改测试正文、断言、timeout、retry 或 skip；新进程 `--retries 0` 定向复验
+  4/4 通过。
+- clean candidate `fbe3484f0b69360bc957a00d71ad23053b9fbaf6` 的最终正式轮为 `14122/14122` passed、
+  4 slow、23 skipped，零 failure/error/timeout/retry/flaky。JUnit 为 14122 tests、0 failure/error，SHA-256
+  `ea17296f008abba2c0e56de32950301e089831f2b6494a214d34a487042d6ace`；资源均在门内。独立验收接受
+  watchdog 对成功命令退出后残留后代的本轮 cgroup 清理，无未关闭 correctness finding，也未重复运行重型全量。
+- 最终证据保留在主物理工作区 git-ignored 的
+  `test-data/_retained-test-evidence/plan108-local-final-full-workspace/`，包含两轮诊断、两组定向复验与最终轮的
+  JUnit、summary、metrics、Nextest 配置和 console，不依赖工作树永久存在。
+- 经用户批准，以 merge `44aca05c` 合入并推送 `main`。该 exact SHA 的 GitHub Actions `ci` run
+  `33772990495` 全绿：packaging scripts 10s、变更分类 6s、`check (local)` 10m42s；Local 路径分流正确，fmt、
+  release build 与四组测试门禁均通过，测试合计 745 passed、0 failed。Local 实质代码与功能自此冻结；本任务未打
+  tag、发布、删除共享 target，也未运行 Docker、真实 API/模型、训练或性能测评。下一工作包转为另行规划和授权的
+  Local `local-v0.1.1` 发布。
+- 合同见 `plan/108-local-final-full-workspace-repair-loop-execplan.md`，实施见
+  `agent_log/2026-09-03-plan108-local-final-full-workspace.md`，独立验收见
+  `agent_log/2026-09-03-plan108-local-final-full-workspace-review.md`，集成与 CI 见
+  `agent_log/2026-09-03-plan108-main-push-and-ci.md`。

@@ -182,23 +182,28 @@
 - 2026-09-03：计划制定者完成独立验收，接受三项测试设施/调度修复及最终证据，无未关闭 correctness finding。最终轮的
   residual cleanup 在任何修复前的首次完整轮已同样出现，且由既有 watchdog 于成功命令退出后只清理本轮 cgroup，判为非阻断；
   113 内 `mydev/codex-rs/target/nextest/local/` 只有三个空目录、不是第二套 target，按无删除授权保留。没有重跑完整 workspace。
+- 2026-09-03：用户批准集成。113 分支以 merge `44aca05c` 合入 `main` 并推送；该 exact SHA 的 GitHub Actions
+  `ci` run `33772990495` 全绿。路径分流只运行 Local，`check (local)` 10m42s，fmt、release build、产品 crates、
+  core config loader 与 doctor update probe 均通过，四组测试合计 745 passed、0 failed。
+- 2026-09-03：最终纯文档收口更新 WBS、WBS-COMPLETED 与集成日志，不改产品、测试、fixture、Cargo/Nextest 或
+  正式入口，因此 `fbe3484f` 的最终完整 workspace 结果继续对应冻结候选。
 
 ### 当前工作
 
-- 执行、最终完整 workspace、证据保留与独立验收均已完成；候选实质代码/测试口径冻结，等待用户批准 main 集成与推送。
+- Plan 108 已完成、验收、集成、推送并通过 exact-main Local 轻量 CI；Local 实质代码与功能冻结。
 
 ### 本任务剩余步骤
 
-- 验收通过后等待用户批准 main 合并与推送；获批后完成 Local 轻量 CI 终验和正确的 WBS/完成记录收口。
+- 无。下一工作包由 WBS 指向 Local 发布，须另立 ExecPlan 和取得发布授权。
 
 ### 阻塞项
 
-- 无 correctness 阻塞。main 合并和推送仍是后续停止点；当前没有这些动作的授权。
+- 无。
 
 ### 当前验收状态
 
-- `IMPLEMENTED / TARGETED_GATES_PASS / FINAL_FULL_WORKSPACE_PASS / FINAL_REVIEW_ACCEPTED /
-  WORKTREE_GOAL_COMPLETED / LOCAL_CANDIDATE_FUNCTIONALLY_FROZEN / MERGE_PUSH_NOT_AUTHORIZED`。
+- `COMPLETED / GOAL_COMPLETED / TARGETED_GATES_PASS / FINAL_FULL_WORKSPACE_PASS / FINAL_REVIEW_ACCEPTED /
+  LOCAL_FUNCTIONALLY_FROZEN / INTEGRATED / PUSHED / CI_PASS`。
 
 ### 交接边界
 
@@ -222,3 +227,4 @@
 | 010 | 仅把 `turn_start_shell_zsh_fork_` 路由到既有 `app_server_integration` 单线程组 | 两轮完整输出证明四路同波启动会耗尽初始化期限，隔离串行复验稳定；无需新机制或超时放宽 | Local Nextest 调度 | 已采纳 |
 | 011 | 接受最终轮成功后的 residual cleanup，不改 watchdog、不重跑完整 workspace | 首轮在修复前已有同一现象；既有 watchdog 只清理本轮 cgroup，命令/JUnit 成功且无重型残留 | 独立验收、资源 | 已采纳 |
 | 012 | 113 下三个空 `target/nextest/local` 目录保留到 worktree 后续获批释放 | 无文件或构建产物，不是第二套 Cargo target；主动删除无正确性收益且本任务无删除授权 | ignored 现场 | 已采纳 |
+| 013 | 合入并推送后以 exact-main Local 轻量 CI 收口，不因纯文档完成记录重跑全量 | CI 验证集成身份与既有轻量门禁；完成记录不改变冻结候选或正式测试口径 | 集成、终验、文档 | 已采纳 |

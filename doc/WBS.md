@@ -19,10 +19,11 @@ workspace 闭环、Plan 106 的 `multi-v0.1.1` 发布与公开复验，以及用
 （释放 257.9 GB）均已完成。**阶段二 Local 配套补齐（Plan 107）也已收口**：L-1 / L-2 实现、两轮独立审查、
 两项窄整改闭合，以及合入 `main`（merge `8fe3c6d6`）、推送与 Local 轻量 CI 全绿均已完成。
 **Local 独立空间门已通过**：经用户授权释放两个已合入工作树与 `rondo-local/debug/incremental`，
-共 12.09 GB，项目占用降至 67.5 GB。**Plan 108 已完成执行并通过独立验收**：clean candidate `fbe3484f`
-通过禁用 incremental 的 Local 全 workspace 正式门禁，`14122/14122` passed、23 skipped、零
-failure/error/timeout/retry/flaky；候选实质代码/测试口径已冻结，113 分支尚未合入或推送。main/CI 收口完成前，
-Local 主线尚不标记实质代码/功能冻结，也不解锁发布工作包。
+共 12.09 GB，项目占用降至 67.5 GB。**Plan 108 已完整收口**：clean candidate `fbe3484f` 通过禁用
+incremental 的 Local 全 workspace 正式门禁，`14122/14122` passed、23 skipped、零
+failure/error/timeout/retry/flaky；独立验收无 correctness finding，随后以 merge `44aca05c` 合入并推送，
+exact-main Local 轻量 CI run `33772990495` 全绿。Local 实质代码与功能现已冻结；下一工作包转为 Local `local-v0.1.1` 发布，
+但须另立 ExecPlan 并取得发布授权，本任务未打 tag 或发布。
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段指针、跨方向关系、
 稳定工程边界和授权门；已完成成果与验收见 `doc/WBS-COMPLETED.md`，单次任务合同见 `plan/`，执行细节见
@@ -104,7 +105,7 @@ RC 阶段的 4 个 Release 对象已清理，7 个 RC tag 与全部 Actions 记�
 **后续发布**：新版本走同一条流水线，打 `local-v*` / `multi-v*` tag 即可。
 README 的下载链接是固定 tag，发新版本时需同步更新。
 
-### 产品线配套补齐与逐条收口（跨方向，阶段一 Multi 已收口，当前进入阶段二 Local）
+### 产品线配套补齐与逐条收口（跨方向，Multi 与 Local 两阶段均已收口）
 
 2026-09-02 对两条产品线做了一次配套核对，方法是只读比对冻结上游快照 `codex-source-code/`，
 覆盖 `/status` 呈现、Guardian 配置字段、产品文档与 CI test 子集四处。
@@ -153,9 +154,16 @@ README 的下载链接是固定 tag，发新版本时需同步更新。
   故全量后若再做定向复验它会再次增长。以 Plan 105 的 Multi 实测锚定，Local 全量预计使项目占用达
   278–308 GB，低于 350 GB 告警线；WSL 增长落在 `ext4.vhdx` 已分配的 438.8 GB 内，`C:` 预期不变。
   详见 `agent_log/2026-09-03-local-space-gate-release.md`。
+- Plan 108 已完成 Local 最终全 workspace 与修复闭环。首次轮的 2 项 retry/flaky 由两个 test fixture 竞争导致；
+  第二轮的 4 项失败由四个 zsh-fork app-server 集成测试并发争用导致。修复只改测试 fixture，并把四项测试并入
+  既有单线程 Nextest 组；没有改产品默认值、断言、timeout、retry 或 skip。定向复验分别为 3/3 与 4/4、
+  `--retries 0`；clean `fbe3484f` 的最终正式轮为 `14122/14122` passed、23 skipped、零
+  failure/error/timeout/retry/flaky，独立验收无未关闭 finding。merge `44aca05c` 已合入并推送，exact-main
+  Local 轻量 CI run `33772990495` 全绿（`check (local)` 10m42s，745 passed、0 failed）。Local 实质代码与
+  功能自此冻结；下一工作包是另行规划和授权的 Local `local-v0.1.1` 发布，本任务未打 tag、发布或删除共享 target。
 
-**本工作包只补配套呈现与文档，不新增产品能力、不改任何默认值、不解锁任何方向的工作包，
-也不产生质量或资格结论。**
+Plan 107 只补配套呈现与文档；Plan 108 只建立 Local 最终正确性基线并闭合实际测试问题。两者都不产生性能、
+模型质量或生产资格结论，也不解锁方向 3 的工作包四。
 
 #### 路线：先 Multi 收口，再 Local 收口
 
@@ -250,9 +258,10 @@ Plan 106 发布、公开复验与缓存删除）。**阶段二 Local 配套补�
 并以 merge `8fe3c6d6` 合入 `main`、推送，Local 轻量 CI 全绿。
 **Local 独立空间门也已通过**（2026-09-03）：经用户逐对象授权释放 12.09 GB，项目占用降至 67.5 GB，
 预测 Local 全量峰值 278–308 GB 低于 350 GB 告警线，`C:` 预期不变。
-**当前工作包 Plan 108 已完成 Local 全 workspace、修复闭环与独立验收**：`14122/14122` passed、23 skipped、
-零 failure/error/timeout/retry/flaky。下一步是等待用户批准把 113 分支合入并推送，再以 exact main 的 Local 轻量 CI
-完成本包收口；此前不启动 Local 发布。各方向本身当前均无 active 工作包。
+**Plan 108 已完成并集成**：Local 最终全 workspace 为 `14122/14122` passed、23 skipped、零
+failure/error/timeout/retry/flaky；独立验收通过，merge `44aca05c` 已推送，exact-main Local 轻量 CI run
+`33772990495` 全绿。Local 实质代码与功能现已冻结。**下一工作包转为 Local `local-v0.1.1` 发布**；必须另立 ExecPlan、补 Local
+CHANGELOG、取得发布授权后才可打 `local-v*` tag 和发布，本任务未提前执行。各方向本身当前均无 active 工作包。
 
 方向 3 三期原定路线如下；前三个工作包已串行完成，Plan 099 没有形成候选，因此本轮在工作包三停止，工作包四未解锁：
 
