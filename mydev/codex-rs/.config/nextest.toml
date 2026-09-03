@@ -60,6 +60,12 @@ filter = 'package(codex-app-server) & kind(test)'
 test-group = 'app_server_integration'
 
 [[profile.local.overrides]]
+# These cases start app-server subprocesses plus zsh. Running all four together
+# can exhaust their initialization deadline under full-workspace I/O pressure.
+filter = 'package(codex-app-server) & test(turn_start_shell_zsh_fork_)'
+test-group = 'app_server_integration'
+
+[[profile.local.overrides]]
 # Use up to four app-server subprocesses locally. The global nextest pool still
 # limits this to the machine's logical CPU count.
 filter = 'package(codex-app-server) & kind(test)'
