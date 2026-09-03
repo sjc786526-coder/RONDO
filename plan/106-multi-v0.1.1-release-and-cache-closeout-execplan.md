@@ -165,9 +165,15 @@ Multi Cargo target 做只读盘点并停在明确删除授权门；只有用户�
 - 本次规划没有修改产品、workflow、许可材料或其它权威文档，没有运行构建/测试、写入共享 target、访问/修改 GitHub 远端、
   创建 tag/Release、下载发布物或删除任何对象。
 
+- 2026-09-02：用户下达第一阶段执行授权。`multidev/CHANGELOG.md` 已新增 `0.1.1` 小节，覆盖 `/status`
+  Guardian 配置行、根配置指南、CI `codex-team-state` 常跑覆盖与 fuzzy-file-search Nextest 串行化，
+  并把 `14713/14713`、0 retry 明确限定为正确性与稳定性结果。已用
+  `.github/scripts/compose-release-notes.sh` 无构建渲染并审读正式 Release notes：banner、版本号说明、
+  包布局、判官后端不在包内与 bubblewrap 许可段落均正确，无 Local 内容夹带。
+
 ### 当前工作
 
-- ExecPlan 已形成，等待用户把第一阶段执行授权提示交给执行者。
+- 执行第一阶段：发布准备提交 → 合入推送 `main` → 等待候选 exact SHA 的轻量 CI → 打 tag → 发布与公开复验。
 
 ### 本任务剩余步骤
 
@@ -180,12 +186,11 @@ Multi Cargo target 做只读盘点并停在明确删除授权门；只有用户�
 
 ### 阻塞项
 
-- 第一阶段外部执行尚待用户通过执行提示明确授权。
 - 缓存删除必须在发布复验和只读盘点完成后，另取用户对精确路径的第二阶段授权；当前没有该授权。
 
 ### 当前验收状态
 
-- `PLANNED / AWAITING_FIRST_STAGE_EXECUTION_AUTHORIZATION / CACHE_DELETION_NOT_AUTHORIZED`。
+- `FIRST_STAGE_IN_PROGRESS / CACHE_DELETION_NOT_AUTHORIZED`。
 
 ### 交接边界
 

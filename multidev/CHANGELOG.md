@@ -9,6 +9,39 @@ RONDO Local（`mydev/`）是独立产品线，有独立的发布轨与独立的
 > **版本号说明**：Release tag 形如 `multi-vX.Y.Z`，与二进制 `--version` 输出的 `0.147.0` **不是同一个东西**。
 > 后者沿用上游冻结基线版本号，以支持与原始 Codex 的字节级公平对比，全程不改。产品版本以 tag 为准。
 
+## 0.1.1 - 2026-09-02
+
+配套补齐与测试稳定性收口。**没有新增产品能力，没有改动任何默认值。**
+Publication Critic 仍默认完全关闭，判官模型仍**未获质量资格**——0.1.0 的研究结论逐条不变。
+
+### 变化
+
+- **`/status` 增加 `Guardian config` 行**：显示配置文件里显式写下的 Guardian override
+  （`model` / `provider` / `reasoning effort` / `evidence dir`）。三态：reviewer 为 `auto_review`
+  时显示"已加载"；reviewer 为 `user` 时显示配置存在但当前未选用；没有任何 override 时不增加这一行。
+  措辞只声明**配置已加载**——某次 review 实际用了哪个模型，由 Guardian 在会话创建时解析，
+  状态面板证明不了这件事。
+- **配置指南**：仓库根新增 `doc/rondo-config.md`，按"共用 Guardian / Multi"分节说明 RONDO 相对
+  上游的增量配置项，README 有入口。产品树内继承自上游的 `docs/` 与 `codex-rs/config.md` 不改，
+  以保持与上游可直接比较。
+- **持续测试覆盖**：仓库 CI 的 Multi 门禁把 `codex-team-state` 纳入常跑 crate 子集。
+- **测试稳定性**：12 个 app-server `fuzzy_file_search` 集成测试并入既有的单线程测试组。
+  它们与其它 app-server 用例同波启动时会耗尽 10 秒初始化期限；这是测试编排问题，修复只动
+  Nextest 分组，没有放宽 timeout、弱化断言，也没有增加 skip 或 ignore。
+
+### 测试
+
+Linux 完整 workspace（default features、checksum-verified V8、`CARGO_INCREMENTAL=0`）
+`14713 / 14713` 通过，0 failure / 0 retry；另有 24 个 skip，不计入通过数。
+
+这是**正确性与稳定性**的结果，不是性能数字，不构成任何质量资格或生产承诺。
+
+### 不变
+
+- 二进制 `--version` 仍报告冻结上游基线 `0.147.0`；产品版本以 tag 为准。
+- 包布局、入口名 `rondo-multi`、许可材料与发布目标（仅 `x86_64-unknown-linux-musl`）与 0.1.0 相同。
+- 依赖与 lockfile 未变。
+
 ## 0.1.0 - 2026-09-01
 
 首次公开发布。**实验性研究产物，不是生产工具，不附带任何性能或质量承诺。**
