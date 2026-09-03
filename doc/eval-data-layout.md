@@ -1,9 +1,9 @@
 # 测评结果与数据资产保存规范
 
-最后更新：2026-08-15
+最后更新：2026-09-03
 
 适用于全部测评产出：真实 Terminal-Bench 2.1 端到端（E-B）、静态影子审批横评（L3）、会话内人判定横评
-（Local M4）。离线冻结回放（E-A）的 schema 保留在本文件中，但该轨已随方向 1 挂起（见 `doc/WBS.md`）。
+（Local M4）。离线冻结回放（E-A）的 schema 保留在本文件中；方向 1 已正式收口，该轨当前不启用（见 `doc/WBS.md`）。
 目标是**结构清楚、便于管理、可长期追溯**，同时保持轻量——不做数据资产审计、可信链或权限系统。
 
 ## 1. 三个根目录，按职责分家
@@ -40,7 +40,7 @@ eval/                                  # 入库
 ├── templates/                         # 版本化 prompt / 产物模板，冻结后按版本记哈希
 │   ├── local-approval/                # 本地审批结构化输出模板
 │   └── cross-eval-judge/              # Local M4 裁判 prompt 与判定标准
-├── fixtures/                          # A3 冻结回放用例集（E-A 挂起；仅当体积可控时入库，见 §6）
+├── fixtures/                          # A3 冻结回放用例集（E-A 当前不启用；仅当体积可控时入库，见 §6）
 ├── results/
 │   ├── runs.jsonl                     # 可见任务结果库主表，只追加
 │   └── baselines/                     # campaign 公开聚合；holdout 未来只允许整批一条
@@ -108,7 +108,7 @@ training/                              # 按体积门限入库，不参与 Rust 
 **run_id**：`<YYYYMMDD-HHMMSSmmm>-<track>-<side>-r<round>`
 
 - 时间戳精确到**毫秒**，并带轮次后缀。只精确到秒时，并行跑批或同秒重试会覆盖同一个 artifacts 目录。
-- `track` ∈ `tb`（真实端到端）｜ `replay`（离线回放，随 E-A 挂起）｜ `shadow`（静态影子横评）
+- `track` ∈ `tb`（真实端到端）｜ `replay`（离线回放；schema 保留，当前不启用）｜ `shadow`（静态影子横评）
 - `side` ∈ `rondo` ｜ `codex` ｜ 影子横评时用模型标识（`sol-static` / `local-static` / `local-ft-static`；
   历史批次的 `luna-static` 保留不改）。`side` 只表达比较侧，产品身份另用独立字段记录（§3.1）。
   教师侧（`sol-static`）的行是**人在场生成后导入的冻结标签**，不是 `eval/` 自动运行产物；
@@ -215,7 +215,7 @@ training/                              # 按体积门限入库，不参与 Rust 
 - Harbor 私有归档只保留主动 allowlist；RONDO `E_final/meta` 在复核完整生产 meta、Guardian source
   tag/commit 与 effective policy hash 后单独归档，不复制 config、lock、raw log 或 exception trace。
 - `track = replay` 时 `tasks` 为 `null`，改填 `metrics`：`{ wall_ms, cpu_ms, peak_rss_kb, turns, tool_calls, drift }`。
-  该 track 随 E-A 挂起，schema 保留但当前不产生新行；若 RONDO replay 行带 `product`，
+  该 track 当前不启用，schema 保留但不产生新行；若 RONDO replay 行带 `product`，
   `config.product` 与 `config.binary_product` 必须三者相同，且不得携带 Terminal-Bench 的
   `auto_review_config` 或 campaign 产品字段。历史无产品行继续只读兼容。
 - `track = shadow` 且 `source = "auto"` 时 `metrics` 填**教师一致率**（相对 Sol 教师标签）、
@@ -388,7 +388,7 @@ M4 由 Opus 5 在 Claude Code 会话内判定，**不满足“自动运行、自
 | `eval-data/cross-eval/<batch_id>/` | 永久。会话内判定不可重跑复现，删掉就没有第二份 |
 | `eval-data/synthetic-training/<batch_id>/` | 至少保留到对应 L6 与 Local M4 收口；包含不可入库的 seed 投影、候选和过滤明细 |
 | `eval-data/local-approval/l6/<plan-id>/` | 至少保留到对应训练、产物回收与 Local M4 收口；权重/checkpoint 另按当前版+上一版策略 |
-| `eval-data/recordings/` | E-A 挂起期间不新增；已有录制按原规则保留 |
+| `eval-data/recordings/` | E-A 未启用期间不新增；已有录制按原规则保留 |
 | `eval-data/evidence/` | `seed` 与 `holdout` 永久（体量小）；`raw` 在完成划分后可清 |
 | `eval-data/models/` | 只保留当前在用与上一版权重，其余按需重新下载 |
 
