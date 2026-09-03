@@ -35,7 +35,7 @@ RONDO 是一个基于 [OpenAI Codex CLI](https://github.com/openai/codex) 源码
 | 上游基线 | OpenAI Codex CLI `v0.147.0`（`rust-v0.147.0`，commit `be6e8eac`），全程冻结不升级 |
 | 主要语言 | Rust（产品源码）+ Python（测评设施） |
 | 产品线 | 两条并列：**RONDO Local**（`mydev/`）、**RONDO Multi**（`multidev/`） |
-| 开发周期 | 2026-08-04 起，1272 次提交 |
+| 开发周期 | 2026-08-04 起，1355 次提交 |
 | 许可证 | Apache-2.0（继承上游） |
 
 **相对上游基线的改动量**（统计于 commit `d82a07f1`）：
@@ -146,7 +146,7 @@ RONDO 是一个基于 [OpenAI Codex CLI](https://github.com/openai/codex) 源码
 **第一层 · RONDO Multi 作为实验性研究产品** — 架构与工程链已通过
 
 - ✅ Event 驱动的 Team State、Fact 引用式共享证据、权限模型、Durable Team Session 均已实现并进入主线
-- ✅ Linux 全量 workspace 正确性基线 `14,660 / 14,660` 通过
+- ✅ Linux 全量 workspace 正确性基线 `14,713 / 14,713` 通过
 - ✅ `PublicationScorer → service → typed client → 发布` 整条链在 OFF / 本地模型 / 云端模型三种状态下均验证通过，
   包括重写循环、唯一提交、失败与取消路径、状态不变量；**双 backend 可替换性成立**
 
@@ -309,7 +309,7 @@ cargo build --release --manifest-path multidev/codex-rs/Cargo.toml \
 我认为这里真正的工程内容不是"手敲了多少行 Rust"，而是**如何让 AI 驱动的开发不失控**：
 
 1. **规划与执行分离**——`doc/WBS.md` 是当前阶段与跨任务路线的唯一来源；每个任务先冻结一份 ExecPlan
-   （目标、范围、硬约束、验收标准），执行期间不得自行修改目标。仓库里有 **97 份**这样的任务合同。
+   （目标、范围、硬约束、验收标准），执行期间不得自行修改目标。仓库里有 **98 份**这样的任务合同。
 2. **先建尺子再优化**——方向 0 的测评设施是其他所有方向的前置。没有可量化指标的优化不做。
 3. **验收门禁与证据分级**——fake / 离线 / 真实 API / 真实模型 / Docker 的证据严格区分；
    skip 与未运行**不得表述为通过**；不允许为了让指标好看而弱化测试或审批逻辑。
@@ -318,7 +318,7 @@ cargo build --release --manifest-path multidev/codex-rs/Cargo.toml \
 5. **资源与安全边界前置**——重型构建互斥锁与内存/磁盘看门狗、密钥文件的只读存在性检查、
    云 GPU 与付费 API 的逐任务授权门和预算上限（每次任务的实际花费都有记录，精确到小数点后若干位）。
 
-完整的过程证据都在仓库里：**558 份**执行日志（`agent_log/`）、**97 份**任务合同（`plan/`）、
+完整的过程证据都在仓库里：**581 份**执行日志（`agent_log/`）、**98 份**任务合同（`plan/`）、
 **5 份**审计快照（`doc/audit-snapshots/`）、**14 份**研究报告（`doc/research/`）、
 **67 份**测评结果（`eval/results/`）。
 
