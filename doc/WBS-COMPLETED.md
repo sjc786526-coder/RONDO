@@ -2874,3 +2874,37 @@ FINAL_REVIEW_ACCEPTED / INTEGRATED / PUSHED / CI_PASS`。
   `agent_log/2026-09-02-plan106-multi-v0.1.1-release.md`，停止点独立验收见
   `agent_log/2026-09-03-plan106-release-and-cache-gate-review.md`，最终独立验收见
   `agent_log/2026-09-03-plan106-final-review.md`。
+
+## Plan 107 · Local 产品配套补齐（实现完成，待独立审查，2026-09-03）
+
+**状态**：`IMPLEMENTED / TARGETED_GATE_PASS / WORKTREE_COMMITTED / INDEPENDENT_REVIEW_PENDING /
+MERGE_PUSH_NOT_AUTHORIZED`。**不是** Local 全量通过、功能冻结或发布就绪。
+
+- L-1：Local `/status` 增加 Guardian 显式 override 摘要行，与 Multi 同一用户语义。新增
+  `mydev/codex-rs/tui/src/status/guardian.rs`（`card.rs` 已 945 行，超过 800 行门槛，故不内联），
+  `card.rs` 只做四处窄改动。摘要取自当前有效 `Config` 的 model / provider / reasoning effort /
+  evidence dir 四项，`guardian_policy_config` 不进摘要；每项按 48 列截断。三态为：自动审批显示已加载、
+  用户审批显示配置存在但当前未选用、无 override 不增加行。措辞不声称某次 review 已运行或 provider
+  实际使用了配置值。
+- L-2：根 `doc/rondo-config.md` 新增 §3「RONDO Local 专属配置」，原「不在本文范围内的」顺延为 §4；
+  §1.4 的 `/status` 说明由 Multi 专述改为两条线通用。Multi 章节的内容与结论未改。README 的配置入口
+  段落同步为"公共 Guardian / Multi 专属 / Local 专属"三节结构。
+- 章节事实以上游只读快照逐文件核实为准：`core/config.schema.json` 的整份 diff 只有 `[auto_review]`
+  四个共用 Guardian 字段、`features.exec_command_repeat_guidance`（Local 独有，Multi 没有）与
+  `check_for_update_on_startup` 的描述/默认值三类，`features/src/feature_configs.rs` 与上游逐字节相同。
+  因此"Local 只新增一个专属配置字段"是可核对结论。
+- 该 feature 默认 `false`、Stage `UnderDevelopment`，只往 `exec_command` 的工具描述追加有界提示，
+  不拦截或改写命令，`shell_command`、子智能体与 Guardian 审批会话均不带。方向 2 的本地审批模型继续
+  如实标为"保留为实验、未采用"：文档只说明配置路径与工程接缝存在，明确不由"可配置"推导"已获资格"，
+  并区分产品 `config.toml` 与只被 `eval/` 读取的根 `rondo.local.toml` / `.env.local` 两条链路。
+- 验证：`just fmt` 无改动产出；`just test -p codex-tui status::` 经根共享锁与看门狗、复用唯一
+  `.codex/cargo-target/rondo-local`，最终 **60 tests run / 60 passed / 0 failed**，非零执行成立。
+  新快照逐行阅读后按单文件精确接受，未整包 accept；其余 20 份既有 status 快照零漂移，全仓库无遗留
+  `*.snap.new`。
+- 未新增产品能力、未改任何默认值、未实质修改 `multidev/`，未运行最终全 workspace、clippy、Docker、
+  训练、测评、真实 API、真实本地模型、空间盘点或清理、tag 与发布，未读取 `.env.local` 内容。
+- 交付中另记录两处**不在本任务范围**的既有文档缺口，留待另行立项：`[auto_review].model_provider` 在
+  project-local 层被剥离并告警这一 RONDO 新增行为未写入 §1.2；`check_for_update_on_startup` 默认改
+  `false`（E-X2）这一相对上游的真实差异未写入配置指南。两处都是两条产品线共有。
+- 合同见 `plan/107-local-product-support-completion-execplan.md`，实施见
+  `agent_log/2026-09-03-plan107-local-product-support.md`。

@@ -135,15 +135,21 @@ Local 专属配置说明，并同步 README 入口与必要的当前规划记录
 - ExecPlan 初稿已完成一次独立只读审查；格式/构建入口、非密钥本机配置读取边界以及本地 TUI 与轻量 CI 的证据职责
   已按当前仓库事实修正，无遗留阻断项。
 - 已冻结本 ExecPlan。规划阶段没有改产品代码或持续规划文档，没有运行构建/测试，也没有读取 ignored 配置。
+- L-1 已完成：新增 `mydev/codex-rs/tui/src/status/guardian.rs`，`card.rs` 四处窄改动，
+  `status/tests.rs` 增加三态断言与一份代表性快照，`permissions_text_for` 提成 `status_field_text_for`。
+- L-2 已完成：`doc/rondo-config.md` 新增 §3 Local 节（原 §3 顺延为 §4），§1.4 改为两条线通用，
+  README 配置入口同步为三节结构。章节事实以 `codex-source-code/` 上游只读快照逐文件核实。
+- 验证已完成：`just fmt` 无改动产出；`just test -p codex-tui status::` 最终 60 tests run / 60 passed /
+  0 failed，非零执行成立。新快照逐行阅读后按单文件精确接受，其余 20 份既有 status 快照零漂移，
+  全仓库无遗留 `*.snap.new`。构建经根共享锁与看门狗，复用唯一 `.codex/cargo-target/rondo-local`。
+- WBS、WBS-COMPLETED 与实施日志 `agent_log/2026-09-03-plan107-local-product-support.md` 已按职责同步。
 
 ### 当前工作
 
-- 规划完成，等待用户把执行提示词交给执行者。实现尚未开始。
+- 实现、验证与记录同步已完成并提交工作树分支，等待计划制定者独立审查。
 
 ### 本任务剩余步骤
 
-- 核实 Local 专属配置的当前事实边界，完成 L-1 / L-2 实现、相邻测试、快照和 README 入口。
-- 完成相称的本地验证，审查最终差异与意外产物，按职责更新任务记录并提交工作树分支。
 - 由计划制定者独立审查提交；执行者在同一工作树闭合全部任务内问题并复验、提交。
 - 审查通过后等待用户明确批准合并与推送；获批后完成主线合入、推送与 Local 轻量 CI 终验，再据实关闭任务。
 
@@ -153,7 +159,15 @@ Local 专属配置说明，并同步 README 入口与必要的当前规划记录
 
 ### 当前验收状态
 
-- `PLANNED / WORKTREE_CREATED / IMPLEMENTATION_NOT_STARTED / MERGE_PUSH_NOT_AUTHORIZED`。
+- `IMPLEMENTED / TARGETED_GATE_PASS / WORKTREE_COMMITTED / INDEPENDENT_REVIEW_PENDING /
+  MERGE_PUSH_NOT_AUTHORIZED`。
+
+### 交付中记录、留待另行立项的事项
+
+- 两处既有配置文档缺口不在本任务范围（硬约束 5），只记录不修改：`[auto_review].model_provider` 在
+  project-local 层被 `sanitize_project_config` 剥离并告警这一 RONDO 新增行为未写入 §1.2；
+  `check_for_update_on_startup` 默认改 `false`（E-X2）这一相对上游的真实差异未写入配置指南。
+  两处都是两条产品线共有。
 
 ### 交接边界
 
