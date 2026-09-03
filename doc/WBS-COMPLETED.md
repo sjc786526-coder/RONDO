@@ -2961,11 +2961,11 @@ INTEGRATED / PUSHED / CI_PASS`。
   `agent_log/2026-09-03-plan108-local-final-full-workspace-review.md`，集成与 CI 见
   `agent_log/2026-09-03-plan108-main-push-and-ci.md`。
 
-## Plan 109 · RONDO Local `local-v0.1.1` 发布与公开复验（第一阶段完成，2026-09-03）
+## Plan 109 · RONDO Local `local-v0.1.1` 发布、公开复验与空间收尾（完成，2026-09-03）
 
-**状态**：`LOCAL_RELEASE_VERIFIED / AWAITING_CLEANUP_AUTHORIZATION`。
-第一阶段（发布、公开复验、后置记录）与第二阶段的**只读盘点**已完成；未删除任何对象，
-等待用户逐对象精确授权后才做最终收口。
+**状态**：`COMPLETED / GOAL_COMPLETED / LOCAL_RELEASE_VERIFIED / FINAL_REVIEW_ACCEPTED /
+AUTHORIZED_CLEANUP_EXECUTED / INTEGRATED / PUSHED / CI_PASS`。
+发布、公开复验、只读盘点、停止点独立验收与用户逐对象授权后的清理均已完成。
 
 - 在 Plan 108 冻结候选上发布 Local 第二个正式版。`mydev/CHANGELOG.md` 新增 `0.1.1` 小节，覆盖
   `/status` 的 `Guardian config` 三态摘要行、根 `doc/rondo-config.md` 的 Local 节，以及完整 workspace
@@ -2998,3 +2998,19 @@ INTEGRATED / PUSHED / CI_PASS`。
   与已发布版本。删除 WSL 文件不会自动缩容 `.vhdx`，故 `C:` 可用空间预计不增加。
 - 合同见 `plan/109-local-v0.1.1-release-and-space-closeout-execplan.md`，执行、公开复验与只读盘点证据见
   `agent_log/2026-09-03-plan109-local-v0.1.1-release.md`。
+- 停止点独立验收 `ACCEPT`：发布链、公开复验与删除授权门均正确，两处主动纠偏（Local CHANGELOG 不照抄 Multi 的
+  CI 覆盖条目、README 仓库级 `latest` 说明按 live 状态订正）均被接受；审查另补测确认 111/113 clean、已完全进入
+  主线、无打开句柄，并指出盘点漏列 113 内约 15.2 MB ignored watchdog 内容（其中约 205 KB 独有早期 3/3 定向证据），
+  判定已被后续 retained 3/3 与最终 `14122/14122` 覆盖，无需重复归档，可随 113 删除。
+- 用户逐对象授权后的实际清理：删除 `.codex/cargo-target/rondo-local`（`103,070,741,200` B），
+  以 `git worktree remove` 正常移除 111、113 两个历史工作树并保留其 `zz-done/` 分支，
+  删除任务专属项目外临时目录，最后归档 114 分支并移除该工作树。删除前逐对象复核 canonical path、
+  非符号链接、零打开句柄、无构建进程、构建锁无持有者，并补做了 111/113 的 `git status` 复核。
+  项目占用 `151,221,708,658` → `47,772,685,781` B，实际释放 `103,449,022,877` B（约 96.34 GiB），
+  与三个项目内对象实测占用闭合（差额 `3,727,315` B 为被移除工作树的 `.git/worktrees/` 管理文件）。
+  Windows `C:` 可用 `119,884,623,872` → `119,931,330,560` B，基本不变——删除 WSL 文件不会自动缩容 `ext4.vhdx`。
+- 排除项全部未受影响并经删除后复测：`eval-data/`（`46,611,984,222` B）、
+  `test-data/_retained-test-evidence/`（`46,651,747` B）、主 `.codex/build-watchdog/`、Multi 与 Docker 对象，
+  以及 `local-v0.1.0` / `local-v0.1.1` / `multi-v0.1.0` / `multi-v0.1.1` 的全部 tag、Release 与资产。
+- 至此 Local 阶段与跨方向「产品线配套补齐与逐条收口」两阶段全部关闭，项目回到无 active 工作包状态。
+  停止点独立验收见 `agent_log/2026-09-03-plan109-release-and-cleanup-gate-review.md`。

@@ -23,9 +23,10 @@ workspace 闭环、Plan 106 的 `multi-v0.1.1` 发布与公开复验，以及用
 incremental 的 Local 全 workspace 正式门禁，`14122/14122` passed、23 skipped、零
 failure/error/timeout/retry/flaky；独立验收无 correctness finding，随后以 merge `44aca05c` 合入并推送，
 exact-main Local 轻量 CI run `33772990495` 全绿。Local 实质代码与功能已冻结。
-**Plan 109 第一阶段已完成**：`local-v0.1.1` 已发布并通过未认证公开复验，README 的 Local 固定链接已切到 0.1.1。
-当前停在计划规定的删除授权门，状态为 `LOCAL_RELEASE_VERIFIED / AWAITING_CLEANUP_AUTHORIZATION`：
-只读空间盘点已交付，任何删除都须由用户逐对象精确授权，本 WBS 的排程不构成删除授权。
+**Plan 109 已完整收口**：`local-v0.1.1` 已发布并通过未认证公开复验，README 的 Local 固定链接已切到 0.1.1；
+独立验收通过后，用户逐对象授权的清理已执行——删除唯一 Local target 与 111/113 两个历史工作树，
+实际释放 `103,449,022,877` B（约 96.34 GiB），项目占用降至约 44.5 GiB。
+**至此 Local 阶段与本轮两条产品线的配套、全量、冻结、发布收口路线全部完成，项目回到无 active 工作包状态。**
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段指针、跨方向关系、
 稳定工程边界和授权门；已完成成果与验收见 `doc/WBS-COMPLETED.md`，单次任务合同见 `plan/`，执行细节见
@@ -163,7 +164,7 @@ README 的下载链接是固定 tag，发新版本时需同步更新。
   failure/error/timeout/retry/flaky，独立验收无未关闭 finding。merge `44aca05c` 已合入并推送，exact-main
   Local 轻量 CI run `33772990495` 全绿（`check (local)` 10m42s，745 passed、0 failed）。Local 实质代码与
   功能自此冻结；下一工作包是另行规划和授权的 Local `local-v0.1.1` 发布，本任务未打 tag、发布或删除共享 target。
-- Plan 109 第一阶段已在该冻结候选上发布 `local-v0.1.1`：候选为 merge `e560d33f`（相对 `d97b6c3a` 只增加
+- Plan 109 已在该冻结候选上发布 `local-v0.1.1`：候选为 merge `e560d33f`（相对 `d97b6c3a` 只增加
   Local 0.1.1 CHANGELOG 与本任务 ExecPlan，未动产品代码、测试、依赖、workflow、打包器或许可材料，
   故 Plan 108 的最终全量结果继续适用）。该 exact SHA 的轻量 CI run `33779415523` 全绿后才打 annotated tag，
   tag peeled 到 `e560d33f`；release run `33780571720` 的 validate/build/verify/publish 四个 job 全部成功。
@@ -173,9 +174,19 @@ README 的下载链接是固定 tag，发新版本时需同步更新。
   `0.147.0`，17 个第三方许可文件齐备，Release notes 未出现质量或性能声明。README 的 Local 固定链接已切到 0.1.1，
   并按 live 状态订正了仓库级 `latest` 说明（该指针必然落在最近发布的正式版，现为 `local-v0.1.1`）。
   历史 `local-v0.1.0`、`multi-v0.1.0`、`multi-v0.1.1` 的 tag、Release 与资产均未改动。
+- Plan 109 的空间收尾已在停止点独立验收通过后按用户逐对象授权执行：删除唯一 Local target
+  `.codex/cargo-target/rondo-local`（`103,070,741,200` B），并以 `git worktree remove` 正常移除 111、113
+  两个历史工作树（各 `151,528,394` B / `223,025,968` B），其 `zz-done/` 分支保留。删除前逐对象复核了
+  canonical path、非符号链接、零打开句柄、无构建进程与构建锁无持有者，并补做了盘点时因工作树隔离
+  未能完成的 111/113 `git status` 复核（均 clean）。项目占用由 `151,221,708,658` B 降至
+  `47,772,685,781` B，实际释放 `103,449,022,877` B（约 96.34 GiB），与三个对象实测占用闭合。
+  `eval-data/`、`test-data/_retained-test-evidence/`、主 `.codex/build-watchdog/`、Multi/Docker 对象与
+  全部已发布 tag/Release/资产均经删除后复测确认未受影响。Windows `C:` 可用空间基本不变
+  （`119,884,623,872` → `119,931,330,560` B）——删除 WSL 文件不会自动缩容 `ext4.vhdx`，宿主容量需另行手动 compact。
+  今后若要重新运行 Local 定向复验或全量，需重建该 target。
 
-Plan 107 只补配套呈现与文档；Plan 108 只建立 Local 最终正确性基线并闭合实际测试问题。两者都不产生性能、
-模型质量或生产资格结论，也不解锁方向 3 的工作包四。
+Plan 107 只补配套呈现与文档；Plan 108 只建立 Local 最终正确性基线并闭合实际测试问题；Plan 109 只发布并收尾空间。
+三者都不产生性能、模型质量或生产资格结论，也不解锁方向 3 的工作包四。
 
 #### 路线：先 Multi 收口，再 Local 收口
 
@@ -273,11 +284,10 @@ Plan 106 发布、公开复验与缓存删除）。**阶段二 Local 配套补�
 **Plan 108 已完成并集成**：Local 最终全 workspace 为 `14122/14122` passed、23 skipped、零
 failure/error/timeout/retry/flaky；独立验收通过，merge `44aca05c` 已推送，exact-main Local 轻量 CI run
 `33772990495` 全绿。Local 实质代码与功能现已冻结。
-**Plan 109 第一阶段已完成**：`local-v0.1.1` 已发布（tag peeled `e560d33f`，release run `33780571720` 四 job 全绿）
-并通过未认证公开复验，README 已切到该固定 tag。**当前唯一 active 工作包是 Plan 109 的第二阶段收尾**，
-它停在删除授权门 `LOCAL_RELEASE_VERIFIED / AWAITING_CLEANUP_AUTHORIZATION`：只读盘点已交付，
-等待用户对精确路径逐对象授权；获批后只处置获批对象，随后才关闭 Local 阶段与两条产品线的收口路线。
-各方向本身当前均无 active 工作包。
+**Plan 109 已完整收口**：`local-v0.1.1` 已发布（tag peeled `e560d33f`，release run `33780571720` 四 job 全绿）
+并通过未认证公开复验，README 已切到该固定 tag；独立验收通过后按用户逐对象授权完成清理，
+释放约 96.34 GiB。**跨方向的「产品线配套补齐与逐条收口」两阶段至此全部关闭，
+项目当前无 active 工作包**：方向 0/1/2/3 与发布工程均无在办事项，任何新工作都须另行立项与授权。
 
 方向 3 三期原定路线如下；前三个工作包已串行完成，Plan 099 没有形成候选，因此本轮在工作包三停止，工作包四未解锁：
 
@@ -518,8 +528,10 @@ RONDO/
 
 - 重型 Cargo 构建与测试必须经仓库根共享 `scripts/with-build-lock.sh` 或已接入它的 `just` 配方。受支持 Unix 入口按产品把
   主工作区和 linked worktree 路由到物理仓库根的 `.codex/cargo-target/rondo-local` 或 `rondo-multi`；两产品叶子隔离，
-  `CARGO_TARGET_DIR` 必须位于项目根内并受看门狗监督。两个产品叶子当前都存在：`rondo-multi` 持有 Plan 093 全 workspace 基线，
-  `rondo-local` 也已建立构建缓存。两者都是可重建的构建产物且体积很大，是否清理由用户按当时的宿主容量决定。
+  `CARGO_TARGET_DIR` 必须位于项目根内并受看门狗监督。两个产品叶子当前**都不存在**：`rondo-multi` 已于 Plan 106、
+  `rondo-local` 已于 Plan 109 在用户逐对象授权后删除，`.codex/cargo-target/` 现为空目录。
+  两者都是可重建的构建产物且体积很大（各约 240 GiB / 96 GiB 量级），下次重型构建会重新长出；
+  是否再次清理仍由用户按当时的宿主容量逐对象决定。
 - 日常 Cargo 默认 `jobs=2`、GNU/Linux LLD 单线程、机器级 rustc 槽为 2；要求尽量一次跑完的完整 workspace 使用产品 Justfile 的
   `test-with-codex-v8-conservative`（`jobs=1`、LLD 单线程）。两套产品的重型构建、Docker、真实本地模型加载/推理仍全局串行。
   除具体 ExecPlan 已获得一次性授权外，后续重型批次不自动排队，须由用户逐批明确批准并人工决定运行时机；历史授权不转移。
