@@ -184,9 +184,24 @@ exact-main Local 轻量 CI 为 745 passed / 0 failed，Local 实质代码与功�
 - 本次规划没有修改产品、workflow、许可材料、README 或权威状态文档；没有运行构建/测试、写入共享 target、访问或修改
   GitHub 远端、下载发布物、创建 tag/Release，亦未删除任何对象。
 
+- 2026-09-03：用户已明确授权第一阶段（CHANGELOG/后置 README/状态记录、必要批次的 `main` 合并与
+  `origin main` 推送、annotated tag `local-v0.1.1` 的创建与推送、发布流水线监控、未认证公开复验、
+  项目外 task-owned 临时下载目录、只读盘点）。删除仍未授权。
+- 2026-09-03：复核 live 状态——主工作区 clean，`main == origin/main == d97b6c3a`，`local-v0.1.1`
+  在本地与 `origin` 均不存在；现存 tag 只有 `local-v0.1.0`/`local-v0.1.0-rc1`/`multi-v0.1.0`(+6 RC)/`multi-v0.1.1`。
+  公开 Release 三个（`multi-v0.1.1`、`multi-v0.1.0`、`local-v0.1.0`），仓库级 `latest` 现落在 `multi-v0.1.1`。
+- 2026-09-03：核对 `local-v0.1.0..d97b6c3a` 的实际 Local 差异，据此写入 `mydev/CHANGELOG.md` 的
+  `0.1.1` 小节，并用既有 `compose-release-notes.sh` 渲染审读正式 Release notes（Local 专属段正确、
+  无 Multi 内容、无性能/质量声明）。核实 `ci.yml` 本轮只改了 Multi 选包与文档指针注释，Local 选包未变，
+  因此 CHANGELOG 不声称 Local CI 覆盖变化。
+- 2026-09-03：查明 `local-v0.1.0` 的 release run `33609017890` 之所以红是 publish job 在 Release
+  已创建后被旧的"任一产品线都不得占用仓库级 latest"硬门禁判负；该门禁已在当前 `release.yml` 中改为
+  只对 prerelease 生效（`multi-v0.1.1` run 已实证通过）。故正式 `local-v0.1.1` 预期四个 job 全绿，
+  并预期由 GitHub 把 `latest` 指派给它——这是平台展示状态，不是版本权威。
+
 ### 当前工作
 
-- 本 ExecPlan 已制定，等待用户交给执行者并明确授权第一阶段。
+- 第一阶段进行中：CHANGELOG 已落地，等待候选 exact SHA 的 Local 轻量 CI 全绿后打 tag。
 
 ### 本任务剩余步骤
 
