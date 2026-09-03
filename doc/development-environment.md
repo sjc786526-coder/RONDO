@@ -263,6 +263,10 @@ cgroup 报告 OOM kill。短时 1–3GiB swap 只削峰，不会被当作故障�
 - 这些受支持的 Unix 正式重型入口以产品 identity 解析物理 Git common root，默认把 RONDO Local 与
   RONDO Multi 分别写入 `.codex/cargo-target/rondo-local` 和 `.codex/cargo-target/rondo-multi`。因此同一产品的
   主工作区和 linked worktree 共享构建缓存，两产品叶子不混用；显式专用 target 仍需由具体任务单独授权。
+- 两个产品叶子当前**都不存在**：`rondo-multi` 于 Plan 106、`rondo-local` 于 Plan 109 在用户逐对象授权后删除，
+  `.codex/cargo-target/` 现为空目录。**上面的路由规则不变**——下次对应产品的重型构建仍写入同一路径，
+  只是首次为冷构建并自动重建该目录。保持同一路径是有意的：后续构建的 target 口径与历史证据一致，
+  不会出现新旧行为对不上的情况。
 - 日常 Cargo 默认使用 `jobs=2` 与 GNU/Linux LLD 单线程，机器级 rustc 槽也默认为 2。要求尽量一次跑完的
   完整 workspace 使用产品 Justfile 的 `test-with-codex-v8-conservative`，它是受跟踪的 `jobs=1` 备选且继续
   继承 LLD 单线程、共享 target、全局锁和 watchdog；不要在临时命令中拼接并发设置。
