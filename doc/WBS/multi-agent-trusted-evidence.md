@@ -32,7 +32,7 @@ Producer、Critic、Harness、Root 的职责及现行 Team State 不变量以该
 |---|---|
 | Publication Critic 产品默认 | `OFF`；生产启用 `NO` |
 | 本地候选模型质量 | `NO-GO / 待替换`——工作包三没有形成候选，也没有 best checkpoint 或 inference-ready 权重 |
-| 云端 scorer 质量资格 | `NOT QUALIFIED`（headroom HIGH）；只作 eval/reference-only，不是产品 backend |
+| 云端 scorer 质量资格 | `NOT QUALIFIED`（headroom HIGH）。它是**默认关闭、仅限实验/reference 用途的产品 backend**——已在同一 `PublicationScorer → service → typed client → team_publish` 接缝内与本地 backend 并列且可显式选择，但尚未取得质量或生产资格 |
 | 云端判官接缝方向 | 五维 hard decision；**单标量接缝废弃**（保留历史身份与可复算路径，不再作为接入方向） |
 | 云端五维接缝工程状态 | `ENGINEERING_SEAM_PASS`——接缝工程可用，**不含任何质量或资格结论**，云端 backend 仍须显式选择 |
 | M3-D 产品价值 | 未验收 |
@@ -130,8 +130,11 @@ v9 test 已降格为 metadata-only 同分布辅助 holdout，不读取、不改�
 冻结测试释放和外部资源都在该任务开始前单独授权，历史余额与请求配额一律不转移。通过只解锁后续产品价值/启用决策，
 不自动改变 default-off 或生产状态。
 
-**重启方式**：若用户决定继续三期，须先决定路线（重新训练、更换基座，或直接以现有接缝做资格测量），再另立 ExecPlan 并重新取得授权；
+**重启方式**：若用户决定继续三期，须先决定形成候选的路线（重新训练、更换基座或改变任务方案），再另立 ExecPlan 并重新取得授权；
 本 WBS 的记录不构成任何授权。
+
+对现有云端五维接缝做质量或资格测量是**工作包四之外的独立诊断/测评任务**：它不按本包合同执行，不解锁本包，
+也不释放 `publication-critic-qualification-v1` 或 v9 test 正文。要动用冻结测试集，仍须先满足本包的解锁前置。
 
 ## 串并行与资源关系
 
