@@ -69,17 +69,39 @@
 很容易被读成"方向 2 可以用了"。所以这节把三件事分层写死：字段可以配置、工程接缝存在、
 用途资格**没有**取得，并明确指回 README 的"诚实的结果"。方向 2 的最终结论一个字没改。
 
-## 交付中记录、留待另行立项的两处文档缺口
+## 首次独立审查的两项窄整改
 
-都不属于 Plan 107 范围（§1 只允许为加入 Local 入口所必需的非语义性衔接），只记录不修改：
+审查报告：`agent_log/2026-09-03-plan107-independent-review.md`。两项发现都成立，均为本次执行引入。
 
-1. `[auto_review].model_provider` 在 **project-local `.codex/config.toml`** 层会被剥掉并给出
-   "Ignored unsupported project-local config keys"警告，只在 user 层生效
-   （`config/src/loader/mod.rs` 的 `sanitize_project_config`）。这是 RONDO 相对上游新增的行为，
-   两条产品线都有，但 §1.2 目前没写。
-2. `check_for_update_on_startup` 的默认值在 RONDO 改为 `false`（发布工程的 E-X2 窄例外），
-   两条线一致。它是相对上游的真实配置差异，但 `doc/rondo-config.md` 目前完全没提；
-   现在只记在 WBS / WBS-COMPLETED / `doc/cd-release-pipeline.md`。
+### 一、§3.2 的 provider 示例缺配置层前提（已修）
+
+我原先把这条当成"与本任务无关的历史缺口"记录后延期，这个判断是错的：**是新加的示例本身制造了这个坑**。
+`PROJECT_LOCAL_CONFIG_DENYLIST` 里 `model_providers` 是上游就有的，RONDO 额外把
+`auto_review.model_provider` 也加进项目层剥离（`config/src/loader/mod.rs` 的 `sanitize_project_config`）。
+读者若照示例写进项目层 `.codex/config.toml`，两个键都会被剥掉、只留一条告警，Guardian 仍用父会话 provider。
+
+按审查裁定作最小修订，未改产品代码、Multi 章节，也未另建说明设施：
+
+- 开头"配置层完全沿用上游"的绝对表述收窄为"只有一处例外"，写明 RONDO 新增的是
+  `auto_review.model_provider` 的项目层剥离，并给出实际告警文案（**告警不是报错**）。
+- §3.2 的示例块顶部直接标注必须写在用户级 `~/.codex/config.toml`，并把"必须放在用户级配置层"
+  列为四个运行前提中的第一条。
+
+### 二、工作树内遗留第二个 Cargo target（待授权处理）
+
+`mydev/codex-rs/target/` 16 KiB，只含 `.rustc_info.json`（1718 B）与空的 `nextest/local/`。
+**成因是我自己**：接受快照时直接跑了裸 `cargo insta pending-snapshots` / `cargo insta accept`，
+没走 `just` 入口，因而没有继承看门狗导出的 `CARGO_TARGET_DIR`，cargo 探测 rustc 时在默认位置
+落了这个目录。受锁的 `just test` 两轮都正确写进了共享 `.codex/cargo-target/rondo-local`。
+
+教训：快照接受也要走受跟踪入口或显式带上共享 target，不能因为"只是读取 pending"就绕过。
+Plan 107 明确没有删除授权，故本轮不自行删除，已向用户申请对该精确路径的删除授权。
+
+## 留待另行立项的文档缺口
+
+- `check_for_update_on_startup` 的默认值在 RONDO 改为 `false`（发布工程的 E-X2 窄例外），两条线一致。
+  它是相对上游的真实配置差异，但 `doc/rondo-config.md` 目前没提；现在只记在 WBS / WBS-COMPLETED /
+  `doc/cd-release-pipeline.md`。首次独立审查裁定该项延期，不阻断 Plan 107。
 
 ## 验收结果
 
@@ -94,3 +116,11 @@
 - 全仓库无遗留 `*.snap.new`。
 - 未运行：最终全 workspace、clippy、Docker、训练、测评、真实 API、真实本地模型、空间盘点或清理、
   tag 与发布。未读取 `.env.local` 内容。未实质修改 `multidev/`。
+
+### 整改轮复验（文档改动，不含 Rust）
+
+按审查裁定只做轻量复核，不重跑重型 TUI、clippy 或全 workspace：
+
+- `just fmt-check` 退出 0；`git diff --check` 干净。
+- 整改只改 `doc/rondo-config.md` 与本日志，Rust、快照与测试代码零改动，因此 60/60 的既有 TUI 证据继续适用。
+- 全仓库仍无 `*.snap.new`；受跟踪差异内无意外产物。

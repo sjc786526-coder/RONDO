@@ -2875,10 +2875,10 @@ FINAL_REVIEW_ACCEPTED / INTEGRATED / PUSHED / CI_PASS`。
   `agent_log/2026-09-03-plan106-release-and-cache-gate-review.md`，最终独立验收见
   `agent_log/2026-09-03-plan106-final-review.md`。
 
-## Plan 107 · Local 产品配套补齐（实现完成，首次审查待整改，2026-09-03）
+## Plan 107 · Local 产品配套补齐（实现完成，首次审查整改中，2026-09-03）
 
-**状态**：`IMPLEMENTED / TARGETED_GATE_PASS / INDEPENDENT_REVIEW_NOT_ACCEPTED / REMEDIATION_REQUIRED /
-MERGE_PUSH_NOT_AUTHORIZED`。**不是** Local 全量通过、功能冻结或发布就绪。
+**状态**：`IMPLEMENTED / TARGETED_GATE_PASS / REVIEW_FINDING_1_REMEDIATED /
+REVIEW_FINDING_2_AWAITING_DELETE_AUTH / MERGE_PUSH_NOT_AUTHORIZED`。**不是** Local 全量通过、功能冻结或发布就绪。
 
 - L-1：Local `/status` 增加 Guardian 显式 override 摘要行，与 Multi 同一用户语义。新增
   `mydev/codex-rs/tui/src/status/guardian.rs`（`card.rs` 已 945 行，超过 800 行门槛，故不内联），
@@ -2905,8 +2905,14 @@ MERGE_PUSH_NOT_AUTHORIZED`。**不是** Local 全量通过、功能冻结或发�
   训练、测评、真实 API、真实本地模型、空间盘点或清理、tag 与发布，未读取 `.env.local` 内容。
 - 首次独立审查确认产品实现、三态测试和主要 Local 文档事实正确，同时发现两项窄阻断：新 Local provider 示例
   未说明 project-local 层会剥离 provider 注册/选择，工作树内另遗留任务自产的 16 KiB
-  `mydev/codex-rs/target/`。前者须窄修，后者须在精确授权后只处理该目录；
-  `check_for_update_on_startup = false` 的公共文档缺口延期且不阻断本任务。
+  `mydev/codex-rs/target/`。`check_for_update_on_startup = false` 的公共文档缺口经审查裁定延期，不阻断本任务。
+- 发现一已整改：配置指南开头的"配置层完全沿用上游"收窄为"只有一处例外"，写明 RONDO 新增的
+  `auto_review.model_provider` 项目层剥离及其实际告警文案（告警而非报错）；§3.2 示例块标注必须写在用户级
+  `~/.codex/config.toml`，并把该前提列为运行前提之首。整改只动文档，Rust、快照与测试代码零改动，
+  故 60/60 证据继续适用；复核为 `just fmt-check` 退出 0、`git diff --check` 干净、无 `*.snap.new`。
+- 发现二待处理：该目录成因是接受快照时直接跑裸 `cargo insta`、未走 `just` 入口因而未继承看门狗导出的
+  `CARGO_TARGET_DIR`；受锁的两轮 `just test` 均正确写入共享 Local target。Plan 107 无删除授权，
+  已向用户申请对该精确路径的删除授权，未自行删除。
 - 合同见 `plan/107-local-product-support-completion-execplan.md`，实施见
   `agent_log/2026-09-03-plan107-local-product-support.md`，首次独立审查见
   `agent_log/2026-09-03-plan107-independent-review.md`。

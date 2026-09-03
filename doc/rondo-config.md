@@ -8,7 +8,17 @@
 - 各产品线的 [`multidev/docs/config.md`](../multidev/docs/config.md) / [`mydev/docs/config.md`](../mydev/docs/config.md)
 - 上游官方参考：<https://developers.openai.com/codex/config-reference>
 
-配置文件位置、层级与优先级规则完全沿用上游，RONDO 没有改。
+配置文件位置、层级与优先级规则沿用上游，**只有一处例外**：RONDO 把 `auto_review.model_provider` 也加进了
+project-local 层的剥离名单。上游本来就会从项目层的 `.codex/config.toml` 里剥掉 `model_provider` /
+`model_providers` 等键，RONDO 只是让 Guardian 的 provider 选择遵循同一条规则。被剥离时是**告警而不是报错**：
+
+```
+Ignored unsupported project-local config keys in <path>: auto_review.model_provider.
+If you want these settings to apply, manually set them in your user-level config.toml.
+```
+
+所以凡是涉及 provider 的配置（含 §3.2 的本地推理示例），都要写在**用户级** `~/.codex/config.toml`
+（即 `CODEX_HOME` 下那份），写进项目层不会生效。
 
 > **口径**：本文所有字段以当前 `config/src/config_toml.rs`、`features/src/feature_configs.rs`
 > 与 `core/src/config/mod.rs` 的解析代码为准。默认 reviewer 是 `user`，四个 Guardian override 默认不设置；
@@ -206,6 +216,7 @@ exec_command_repeat_guidance = true   # RONDO Local 新增，默认 false
 Local **没有**为此新增任何产品配置：
 
 ```toml
+# 必须写在用户级 ~/.codex/config.toml，不能写进项目层 .codex/config.toml
 [model_providers.my-local]        # 上游既有字段，完整字段见开头的上游配置参考
 name = "local"
 base_url = "http://127.0.0.1:8080/v1"
@@ -217,8 +228,11 @@ model = "<该本地服务实际提供的模型 id>"
 ```
 
 上游本来就内置了 `ollama` 与 `lmstudio` 两个 OSS provider，用它们时不必自己写 `[model_providers]`，
-直接把 `model_provider` 填成对应 ID 即可。三个容易踩的运行前提：
+直接把 `model_provider` 填成对应 ID 即可。四个容易踩的运行前提：
 
+- **必须放在用户级配置层。** 这是最容易白忙一场的一条：项目层 `.codex/config.toml` 里的
+  `model_providers` 和 `auto_review.model_provider` 都会被剥掉（见本文开头），只留一条告警，
+  Guardian 仍然用父会话的 provider。放在 `~/.codex/config.toml` 才生效。
 - **本地服务必须讲 Responses 协议。** 冻结基线里 `wire_api` 只接受 `"responses"`；写 `"chat"`
   会得到明确的"已移除"错误，写别的值报 unknown variant。纯 chat-completions 的本地服务接不进来
   （老的 `ollama-chat` ID 同样会得到一条专门的"已不再支持"错误）。

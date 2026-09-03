@@ -146,13 +146,15 @@ Local 专属配置说明，并同步 README 入口与必要的当前规划记录
 
 ### 当前工作
 
-- 首次独立审查未接受当前提交：功能实现正确，但配置指南缺少 Local provider 的 user-level 配置前提，且工作树内
-  遗留任务时段生成的 `mydev/codex-rs/target/` 元数据目录。等待窄整改与复验。
+- 审查发现一（文档）已整改：开头的配置层绝对表述收窄为"只有一处例外"，写明 RONDO 新增的
+  `auto_review.model_provider` 项目层剥离与实际告警文案；§3.2 示例块标注必须写在用户级
+  `~/.codex/config.toml`，并把该前提列为四条运行前提之首。仅改 `doc/rondo-config.md` 与实施日志，
+  Rust、快照与测试代码零改动。轻量复核：`just fmt-check` 退出 0、`git diff --check` 干净、无 `*.snap.new`。
+- 审查发现二（自产 target）尚未处理：等待用户对 `mydev/codex-rs/target/` 这一精确路径的删除授权。
 
 ### 本任务剩余步骤
 
-- 在同一工作树补充 Local provider 的配置层前提并修正绝对化总述；取得精确删除授权后只移除任务自产的
-  `mydev/codex-rs/target/`，完成轻量自检并提交。
+- 取得精确删除授权后只移除任务自产的 `mydev/codex-rs/target/`，复核其不存在且共享 Local target 未受影响。
 - 由计划制定者窄复验整改提交，确认文档、范围、快照与意外产物问题闭合。
 - 审查通过后等待用户明确批准合并与推送；获批后完成主线合入、推送与 Local 轻量 CI 终验，再据实关闭任务。
 
@@ -163,7 +165,7 @@ Local 专属配置说明，并同步 README 入口与必要的当前规划记录
 
 ### 当前验收状态
 
-- `IMPLEMENTED / TARGETED_GATE_PASS / INDEPENDENT_REVIEW_NOT_ACCEPTED / REMEDIATION_REQUIRED /
+- `IMPLEMENTED / TARGETED_GATE_PASS / REVIEW_FINDING_1_REMEDIATED / REVIEW_FINDING_2_AWAITING_DELETE_AUTH /
   MERGE_PUSH_NOT_AUTHORIZED`。
 
 ### 交付中记录、留待另行立项的事项
