@@ -172,36 +172,37 @@ Nextest 的完整 workspace 测试；自主诊断并修复测试实际暴露的�
   `FORCE_COLOR`。定向复验（新进程、`--retries 0`）22/22 通过，覆盖 fuzzy-file-search、zsh-fork、
   `sandbox_with_network_proxy` 与全部 4 项 exec。
 
+- 2026-09-02：GitHub 直连恢复后，用户单独授权删除本任务新增的
+  `.codex/cargo-target/rondo-multi/debug/incremental/`（20 GB，conservative 入口不使用），
+  仅删该目录，项目降至 316.2 GB。随后在 clean HEAD `39d5841f`（相对实现冻结点 `2199316c` 只多出 Plan/日志提交）
+  上完成最终同口径全量：
+
+  ```
+  14713 tests run: 14713 passed (4 slow), 24 skipped
+  ```
+
+  零 failure、零 error、零 timeout、**零 retry/flaky**；watchdog `stop_reason=none`、`cleanup_reason=none`。
+  JUnit SHA-256 `97fb4a43daf397c46d45b7f3ff3b82f7accb0604a614926d0e3f4c66ebb3c2fc`
+  （JUnit 内 `tests="14714"` 比 nextest 计数多 1，是把 `@setup-script:publication-critic-service-unix` 也算作一项）。
+  资源终态：项目 316.7 GB（峰值 320.3 GB）、Multi target 257.9 GB、Windows `C:` 可用 118.2 GB、
+  内存峰值 8.3 GB、PSI 0。
+
 ### 当前工作
 
-- **最终全量轮被基础设施阻断**：`test-with-codex-v8-conservative` 依赖的 V8 wrapper 每次都会重新下载
-  `.sha256`，而本机到 GitHub 的 HTTPS 自 2026-09-02 约 22:05 起经代理与直连均失败
-  （`SSL_ERROR_SYSCALL` / `SSL: UNEXPECTED_EOF_WHILE_READING`）。用户已确认由其处理网络，本轮正常中断。
-- 恢复网络后，直接在 `2199316c` 这个 exact HEAD 上执行
-  `.codex/build-watchdog/plan105-console/run-final.sh` 即可完成最终同口径全量；代码自初始轮以来只改了 nextest
-  runner 配置与文档，产品与依赖图未变。
-- **磁盘前置**：项目现为 336.4 GB（warn 350 / stop 365 / max 370）。执行者在定向复验时误用了非 conservative 入口
-  （无 `CARGO_INCREMENTAL=0`），使 workspace 成员按 incremental 指纹重建，target 由 190 GB 涨到 260 GB，其中
-  `debug/incremental/` 20 GB 为本任务新增、conservative 入口完全不使用。registry 依赖仍可复用，但最终轮切回
-  `CARGO_INCREMENTAL=0` 时 workspace 成员会再次全量重建，存在触及 365 GB 主动停机线的风险。执行者未删除任何资产，
-  等待用户就该 20 GB 目录另行授权。
+- 全部已知问题闭合，最终全量已通过并留证，等待计划制定者独立验收。
 
 ### 本任务剩余步骤
 
-- 网络恢复后在 `2199316c` 上跑最终同口径全 workspace，并确认零 failure/error/timeout。
-- 若磁盘不足以完成该轮，先由用户决定是否释放 `debug/incremental/`（20 GB），执行者不自行删除。
-- 把最终 JUnit/summary 复制到 `test-data/_retained-test-evidence/plan105-multi-final-full-workspace/`，
-  补记最终计数与 hash，提交 107 分支。
 - 计划制定者独立验收；finding 如需改代码则在同一分支修复、定向复验并重跑最终全量。
+- 验收通过后由审查者记录 `ACCEPTED / MULTI_FUNCTIONALLY_FROZEN` 并同步 WBS 与完成记录。
 
 ### 阻塞项
 
-- **基础设施阻断**：GitHub HTTPS 不可达，V8 wrapper 无法取得 `.sha256`，官方全量入口无法启动。由用户处理。
-- **磁盘风险**：最终轮需要 workspace 成员全量重建，当前余量距 365 GB 停机线约 28.6 GB。
+- 无。
 
 ### 当前验收状态
 
-- `PLANNED / SPACE_GATE_PASS / IMPLEMENTED@2199316c / TARGETED_VERIFIED / FINAL_FULL_RUN_BLOCKED_INFRA / NOT_MERGED / NOT_PUSHED`。
+- `PLANNED / SPACE_GATE_PASS / IMPLEMENTED@2199316c / FINAL_FULL_RUN_GREEN@39d5841f / NOT_MERGED / NOT_PUSHED / PENDING_REVIEW`。
 
 ### 交接边界
 
@@ -222,4 +223,4 @@ Nextest 的完整 workspace 测试；自主诊断并修复测试实际暴露的�
 | 007 | 接受 `main@d9dc3d51` 的独立空间门结论，不为一份日志提交重建 107；执行仍以 107 的产品等价基线开展 | 新提交只含空间门日志，产品与共享设施相对 107 基线无差异；未来合回 main 时日志自然保留 | 执行基线、并行隔离 | 已采纳 |
 | 008 | 正式门禁在中性环境运行：清空 shell 的代理变量与 `FORCE_COLOR`，而不是改上游测试去适配这两个条件 | 二者都是 agent shell 的环境条件；产品刻意尊重 `FORCE_COLOR`，测试也全是 offline/loopback，改测试等于让冻结的 v0.147.0 基线迁就本机 shell | 运行口径、上游一致性 | 已采纳 |
 | 009 | fuzzy-file-search 的 10 秒 initialize 超时用既有 `app_server_integration`（max-threads=1）串行化解决，不放宽 timeout | 隔离实测 initialize 仅 0.2 秒，属宿主争用；相邻 zsh-fork override 对同一症状已有同样处置，复用比新建更一致 | 测试并发、稳定性 | 已采纳 |
-| 010 | 不自行删除 target 内任何资产（含本任务新增的 20 GB `debug/incremental/`），由 watchdog fail-closed 兜底并请用户决定 | 授权明确排除删除 target/缓存；停机可恢复且进度保留，不值得越界 | 磁盘、授权边界 | 待用户决定 |
+| 010 | 不自行删除 target 内任何资产（含本任务新增的 20 GB `debug/incremental/`），由 watchdog fail-closed 兜底并请用户决定 | 授权明确排除删除 target/缓存；停机可恢复且进度保留，不值得越界 | 磁盘、授权边界 | 已采纳；用户单独授权后只删该目录 |
