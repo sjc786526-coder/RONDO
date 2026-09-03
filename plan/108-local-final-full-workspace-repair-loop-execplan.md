@@ -157,26 +157,46 @@
 - 2026-09-03：已阅读根/`mydev` 规则、README、当前 WBS、计划模板、Plan 105/107、相关实施/验收日志、Local 空间门和
   现行 Local conservative/V8/watchdog 入口，并冻结本 ExecPlan。规划阶段未运行 Cargo、未写共享 target/测试证据、未删除
   资源，也未执行 Docker、真实 API/模型、tag、发布、合并或推送。
+- 2026-09-03：在 clean `e7939823` 上运行首次完整诊断轮。正式入口执行成功，`14122/14122` 实际测试通过、23 skipped，
+  但出现 2 项 retry/flaky，因此该轮不计最终通过：loopback allowlist fixture 首次返回 502；sticky environment 选择测试首次
+  撞上远端环境默认连接等待边界。
+- 2026-09-03：修正两项 fixture 边界：loopback HTTP server 在响应前完整消费有界 request head 并有序 half-close；sticky
+  environment fixture 仅为预期不可达的测试端点配置 50ms 连接预算，不改产品默认 timeout。conservative 入口下新进程、
+  `--retries 0` 定向复验 3/3 通过，修复提交为 `869bdde7`。
+- 2026-09-03：`869bdde7` 上的下一完整诊断轮取得 `14118 passed / 4 failed / 23 skipped`。4 项失败均来自
+  `turn_start_shell_zsh_fork_` 同波启动四个 app-server 与 zsh 时的 I/O/进程争用；每项两次尝试都失败，不是偶发绿色。
+  Local Nextest 现有宽组允许这批用例四路并发，而既有 `app_server_integration` 单线程组正适合该类进程型集成测试。
+- 2026-09-03：仅把 `turn_start_shell_zsh_fork_` 路由到既有单线程组，没有放宽 timeout、retry、断言或 skip。conservative
+  入口下新进程、`--retries 0` 定向复验 4/4 通过（18.326s），调度修复提交为 `fbe3484f`。
+- 2026-09-03：在 clean exact candidate `fbe3484f0b69360bc957a00d71ad23053b9fbaf6` 上重新运行正式完整门禁，
+  `14122 tests run: 14122 passed (4 slow), 23 skipped`，零 failure/error/timeout/retry/flaky。JUnit 根为 14122 tests、0 failure、
+  0 error，SHA-256 为 `ea17296f008abba2c0e56de32950301e089831f2b6494a214d34a487042d6ace`；V8 两项 digest、
+  `CARGO_BUILD_JOBS=1`、`CARGO_INCREMENTAL=0`、Local 共享 target、锁和 watchdog 均按正式口径生效。
+- 2026-09-03：最终 wrapper 为 `run_rc=0 / final_rc=0 / stop_reason=none`；项目峰值 151,650,816,000 B、Local target
+  102,980,476,928 B、Windows `C:` 最低可用 120,187,826,176 B、内存峰值 2,940,092,416 B、swap 与两级 PSI 峰值均为 0。
+  wrapper 在命令成功后的 5s grace 后清理了仍留在受监督 cgroup 内的测试后代（`cleanup_reason=residual_processes_after_command`），
+  收尾复核无 Cargo/Nextest/rustc/LLD/app-server 残留；该事实保留给独立验收，不冒充 `cleanup=none`。
+- 2026-09-03：最终轮与必要诊断/定向证据已轻量复制到主物理工作区
+  `test-data/_retained-test-evidence/plan108-local-final-full-workspace/`；副本保留原始 JUnit、summary、metrics、Nextest 配置、
+  console 和中性环境/运行脚本，不依赖 113 worktree 永久存在。
 
 ### 当前工作
 
-- ExecPlan 已冻结，等待执行者在 113 worktree 内开始 preflight 与首次完整 workspace。
+- 执行实现、最终完整 workspace、轻量证据保留与记录同步均已完成；113 分支只等待独立验收，不进行 main 集成。
 
 ### 本任务剩余步骤
 
-- 完成轻量 preflight，在 clean exact candidate 上运行首次完整 Local workspace。
-- 若有问题，完成归因、范围内修复和相称定向复验；冻结新候选后重跑同一完整门禁，直至最终轮满足全部条件。
-- 轻量保留最终证据，更新动态 Plan 与精炼实施日志，提交并保持 113 worktree clean。
-- 由计划制定者独立验收；如有影响实质代码或正式口径的整改，完成定向复验与新的最终完整轮。
+- 由计划制定者独立验收；如整改影响产品、测试、fixture、Cargo/Nextest 或正式口径，完成定向复验与新的最终完整轮。
 - 验收通过后等待用户批准 main 合并与推送；获批后完成 Local 轻量 CI 终验和正确的 WBS/完成记录收口。
 
 ### 阻塞项
 
-- 无。执行授权由用户随执行者提示词一次性授予；合并和推送仍保留为后续停止点。
+- 无执行阻塞。独立验收、main 合并和推送仍是后续停止点；当前没有这些动作的授权。
 
 ### 当前验收状态
 
-- `PLANNED / EXECUTION_NOT_STARTED / MERGE_PUSH_NOT_AUTHORIZED`。
+- `IMPLEMENTED / TARGETED_GATES_PASS / FINAL_FULL_WORKSPACE_PASS / INDEPENDENT_REVIEW_PENDING /
+  MERGE_PUSH_NOT_AUTHORIZED`。
 
 ### 交接边界
 
@@ -195,3 +215,6 @@
 | 005 | 复用 wrapper 原生证据并把必要副本放入主物理 retained path，不新建审计或可信设施 | 现有 JUnit、summary、metrics、配置和日志足以支持独立验收 | 证据、复杂度 | 已采纳 |
 | 006 | 执行者只提交 113 分支；计划制定者审查，main 合并和推送必须再由用户批准 | 遵守用户指定的角色与 Git 停止点 | Git、验收 | 已采纳 |
 | 007 | 使用 worktree 序号 113，而不复用历史 `worktree-108-*` 命名 | 仓库已有 `zz-done/worktree-108-multi-space-gate-release`，新序号避免分支身份碰撞 | 工作树、历史 | 已采纳 |
+| 008 | loopback allowlist fixture 先有界消费 HTTP request head，再响应并 half-close | 关闭带未读接收队列的 socket 会发 RST，使代理把已写出的 204 误判成 upstream failure | Local CLI 测试 fixture | 已采纳 |
+| 009 | sticky environment 测试给其私有不可达端点配置 50ms connect timeout，不扩大通用读预算 | 用例验证环境选择优先级，不验证产品默认 10s 连接预算；让预期失败快速发生比放宽外层 timeout 更准确 | Local app-server 测试 fixture | 已采纳 |
+| 010 | 仅把 `turn_start_shell_zsh_fork_` 路由到既有 `app_server_integration` 单线程组 | 两轮完整输出证明四路同波启动会耗尽初始化期限，隔离串行复验稳定；无需新机制或超时放宽 | Local Nextest 调度 | 已采纳 |
