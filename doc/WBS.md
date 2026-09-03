@@ -14,9 +14,9 @@ Plan 101 对比测评已完成，据此把五维 hard decision 固定为云端�
 Plan 102 五维云端判官实验性工程接入已以 `ENGINEERING_SEAM_PASS` 完成并合入推送，方向 3 当前无 active 工作包；该方向不自动解锁产品质量、默认启用或生产。
 跨方向的 Plan 103 发布工程已完成并冻结，仓库转 public 且两条产品线各发首个正式版；全部云端资源已清空，见下方「云端资源终态」。
 2026-09-02 另完成一次两条产品线的配套核对，并据此排定「先 Multi 收口、再 Local 收口」的两阶段路线，
-见下方「产品线配套补齐与逐条收口」；阶段一 Plan 104、独立空间门、Plan 105 最终全 workspace 闭环与
-Plan 106 的 `multi-v0.1.1` 发布均已完成，Release 已以未认证访问公开复验、README 固定链接已切换到 0.1.1。
-阶段一现停在 `.codex/cargo-target/rondo-multi` 的精确缓存删除授权门，获批并完成后才整体转入阶段二 Local。
+见下方「产品线配套补齐与逐条收口」；**阶段一 Multi 已整体收口**——Plan 104、独立空间门、Plan 105 最终全
+workspace 闭环、Plan 106 的 `multi-v0.1.1` 发布与公开复验，以及用户授权后的 `rondo-multi` 构建缓存删除
+（释放 257.9 GB）均已完成。当前工作包转入**阶段二 Local 配套补齐**。
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段指针、跨方向关系、
 稳定工程边界和授权门；已完成成果与验收见 `doc/WBS-COMPLETED.md`，单次任务合同见 `plan/`，执行细节见
@@ -98,7 +98,7 @@ RC 阶段的 4 个 Release 对象已清理，7 个 RC tag 与全部 Actions 记�
 **后续发布**：新版本走同一条流水线，打 `local-v*` / `multi-v*` tag 即可。
 README 的下载链接是固定 tag，发新版本时需同步更新。
 
-### 产品线配套补齐与逐条收口（跨方向，Multi 已发布并公开复验，等待精确缓存删除授权）
+### 产品线配套补齐与逐条收口（跨方向，阶段一 Multi 已收口，当前进入阶段二 Local）
 
 2026-09-02 对两条产品线做了一次配套核对，方法是只读比对冻结上游快照 `codex-source-code/`，
 覆盖 `/status` 呈现、Guardian 配置字段、产品文档与 CI test 子集四处。
@@ -124,6 +124,10 @@ README 的下载链接是固定 tag，发新版本时需同步更新。
 - Plan 106 已在该冻结候选上发布 `multi-v0.1.1`：tag peeled 到 `29fb953e`，发布前该 exact SHA 的轻量 CI
   run `33723597611` 全绿，release run `33724503639` 的 validate/build/verify/publish 四个 job 全部成功。
   公开 Release 非 draft、非 prerelease，两个资产已以未认证访问下载复验通过。README 的 Multi 固定链接已切到 0.1.1。
+- 用户在停止点验收通过后授权删除 `.codex/cargo-target/rondo-multi`，已执行：项目占用由 316.7 GB 降到 58.8 GB，
+  恰好释放该 target 的 257.9 GB。`.codex/cargo-target/rondo-local`、retained test evidence 与已发布版本均未受影响。
+  Windows `C:` 可用空间未同步增长——WSL ext4 的释放不会自动缩容 `.vhdx`，宿主容量需另行手动 compact。
+  阶段一至此收口。
 
 **本工作包只补配套呈现与文档，不新增产品能力、不改任何默认值、不解锁任何方向的工作包，
 也不产生质量或资格结论。**
@@ -187,8 +191,8 @@ README 的下载链接是固定 tag，发新版本时需同步更新。
 根 `.cargo/config.toml`、根 `AGENTS.md` 与 `scripts/with-build-lock.sh` 的约束，包括 GNU/Linux LLD 单线程、
 全局构建互斥和资源看门狗。全量测试由用户安排时机并逐批批准；发布走 Plan 103 既有流水线，发版前补对应产品的
 `CHANGELOG.md`，打 `multi-v*` / `local-v*` tag，完成发布复验后同步 README 的固定 tag 下载链接。
-Multi 发布后的构建缓存删除只针对 `.codex/cargo-target/rondo-multi` 这一确定对象；实际执行前仍须取得用户对该
-精确目标的明确删除授权，删除时机由用户按当时宿主容量决定。
+Multi 的 `.codex/cargo-target/rondo-multi` 已在用户逐字授权后于阶段一收尾时删除。今后任何构建缓存释放同样
+只能针对确定的精确路径，并须取得用户对该目标的单独授权；本 WBS 的排程永远不构成删除授权。
 
 M-1/M-2/M-3 与 L-1/L-2 之间无技术依赖，阶段内顺序可调；**阶段一与阶段二之间的先后是硬顺序**。
 本节不预先给出各项工时或性价比排序——尚未测量。
@@ -215,11 +219,11 @@ M-1/M-2/M-3 与 L-1/L-2 之间无技术依赖，阶段内顺序可调；**阶段
 
 ## 2. 下一工作包与顺序
 
-当前 active 任务是跨方向「产品线配套补齐与逐条收口」阶段一的收尾 Plan 106。阶段一的 Plan 104、独立空间门、
-Plan 105 全量修复闭环与 `multi-v0.1.1` 发布及公开复验均已完成，Plan 106 现停在
-`.codex/cargo-target/rondo-multi` 的**精确缓存删除授权门**：本 WBS 的排程不构成删除授权，须用户针对该精确路径
-单独批准。该门闭合后阶段一收口，下一工作包正式转为**阶段二 Local 配套补齐**（L-1、L-2），并同样在 Local 全量前
-先完成独立空间任务。两个阶段之间是硬顺序，阶段内工作项顺序可调；各方向本身当前均无 active 工作包。
+跨方向「产品线配套补齐与逐条收口」**阶段一 Multi 已整体收口**（Plan 104 → 独立空间门 → Plan 105 全量闭环 →
+Plan 106 发布、公开复验与缓存删除）。**下一工作包是阶段二 Local 配套补齐**：L-1（Local `/status` 增加 Guardian
+override 行）与 L-2（在根 `doc/rondo-config.md` 补 Local 节），两项无技术依赖、顺序可调；随后同样要先完成独立
+空间任务通过全量前空间门，再跑禁用 incremental 的全 workspace，通过后冻结 Local 并发 `local-v*`。
+阶段二尚未立项，需另立 ExecPlan。各方向本身当前均无 active 工作包。
 
 方向 3 三期原定路线如下；前三个工作包已串行完成，Plan 099 没有形成候选，因此本轮在工作包三停止，工作包四未解锁：
 

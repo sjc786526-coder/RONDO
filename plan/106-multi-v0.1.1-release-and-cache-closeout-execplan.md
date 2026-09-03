@@ -182,11 +182,15 @@ Multi Cargo target 做只读盘点并停在明确删除授权门；只有用户�
   `agent_log/2026-09-02-plan106-multi-v0.1.1-release.md` 已同步。
 - 2026-09-02：完成唯一 Multi target 的只读盘点，未删除任何对象。
 
+- 2026-09-03：停止点独立验收 `ACCEPT`、无整改要求（审查提交 `01e694e1`，报告
+  `agent_log/2026-09-03-plan106-release-and-cache-gate-review.md`）。用户随后逐字批准删除精确路径，
+  删除已执行并复核完成，见下方「缓存删除结果」。
+
 ### 当前工作
 
-- 停在缓存删除授权门，等待用户对精确路径的第二阶段批准。
+- 任务内步骤已全部完成，等待计划制定者对最终收口的独立复核。
 
-### 缓存删除方案（待授权，尚未执行）
+### 缓存删除结果（已授权并执行）
 
 **唯一目标**（完整、已解析的 canonical path，不使用变量、glob 或父目录）：
 
@@ -194,37 +198,39 @@ Multi Cargo target 做只读盘点并停在明确删除授权门；只有用户�
 /home/sjc/desktop/RONDO/.codex/cargo-target/rondo-multi
 ```
 
-盘点结论（2026-09-02 实测）：
+删除前复核（2026-09-03 重新测量）：canonical path 与给定路径一致，`stat` 为 mode `0700` 的真实目录，
+`namei -l` 每段无符号链接；四路使用者检查全空——无 cargo/rustc/nextest/lld 进程、构建锁 dev `00:4c`
+不在 `/proc/locks`、无 RONDO 重型 scope、`lsof +D` 句柄 0、`fuser` 无使用者。
 
-| 项 | 实测值 |
-|---|---|
-| 占用 | `257,889,263,616` B = 240.2 GiB；`debug/deps` 约 247 G 为大头，`debug/incremental` 为空 |
-| 路径 | `namei -l` 每段均为真实目录，无符号链接；`readlink -f` 与给定路径一致 |
-| 使用者 | 无 cargo/rustc/nextest/lld 进程；构建锁（dev `00:4c`、inode 53）不在 `/proc/locks`；无 RONDO 重型 scope；`lsof +D` 句柄 0；`fuser` 无使用者；无进程 cwd 在内 |
-| 项目占用 | `316,658,225,152` B（316.66 GB），门限 350/365/370 GB |
-| Windows `C:` 可用 | `118,950,371,328` B（118.95 GB），高于 50 GB 下限 |
+| 计数器 | 删除前 | 删除后 |
+|---|---|---|
+| 目标占用 | `257,889,263,616` B（240.2 GiB） | 路径不存在 |
+| 项目占用 | `316,658,561,024` B | `58,769,297,408` B |
+| `rondo-local` | `10,371,141,632` B | `10,371,141,632` B（未变） |
+| Windows `C:` 可用 | `118,605,688,832` B | `118,604,554,240` B |
 
-- **预计释放**：项目占用降到约 `58.8` GB，距 350 GB 告警线的余量从约 33 GB 增至约 291 GB。
-- **对 Windows 容量的诚实说明**：这是 WSL 内 ext4 的释放，`.vhdx` 不会自动缩容，
-  Windows `C:` 实际可用空间**大概率不会同步增长**，除非另行手动 compact。不得把删除描述为宿主必然扩容。
-- **重建代价**：Multi 实质代码与功能已冻结，阶段二 Local 使用的是 `rondo-local` target，
-  因此删除不阻塞已排定的下游工作；代价只在将来另立 Multi 任务需要再跑全 workspace 时支付一次冷编译。
-- **明确不在范围**：`.codex/cargo-target/rondo-local`（`10,371,141,632` B）、retained test evidence、
-  其它缓存/target、Docker 对象、worktree、父目录 `.codex/cargo-target` 本身。
-- **执行方式**：获批后先复核占用、非符号链接、无使用者与 canonical path，再只对上述完整路径删除；
-  删除后确认该路径不存在、复测项目与宿主可用空间，并确认 Local target 与其它资产未受影响。
+- **实际释放**：项目占用恰好减少 `257,889,263,616` B，与目标实测占用逐字节相符，证明只命中了授权对象；
+  距 350 GB 告警线的余量由约 33 GB 增至约 291 GB。
+- **Windows 容量实测印证**：`C:` 可用不升反微降约 1.1 MB。删除是 WSL 内 ext4 的释放，`.vhdx` 不自动缩容；
+  WSL 侧 `/` 可用从约 601 GB 升到约 902 GB，宿主容量需另行手动 compact 才会回收。**不得把删除描述为宿主必然扩容。**
+- **重建代价**：Multi 实质代码与功能已冻结，阶段二 Local 使用独立的 `rondo-local` target，
+  删除不阻塞已排定的下游工作；代价只在将来另立 Multi 任务需要再跑全 workspace 时支付一次冷编译。
+- **未受影响（逐项确认）**：`.codex/cargo-target/rondo-local` 与父目录保留；`.codex/build-watchdog`、
+  `hooks`、`hooks.json` 保留；`test-data/_retained-test-evidence`（33 MB）保留；已发布的 `multi-v0.1.1`
+  仍为非 draft、非 prerelease 且 `updated_at == published_at`、两个资产 `uploaded`。
+  未触碰 Docker 对象、其它缓存或 worktree。
 
 ### 本任务剩余步骤
 
-1. 用户明确批准上述精确路径后删除、复核、记录并交计划制定者最终验收。
+- 无。等待计划制定者对最终收口的独立复核后记最终接受。
 
 ### 阻塞项
 
-- 缓存删除等待用户对精确路径的第二阶段授权；第一阶段授权、发布成功与 WBS 排程均不构成该授权。
+- 无。
 
 ### 当前验收状态
 
-- `RELEASE_VERIFIED / AWAITING_CACHE_DELETION_AUTHORIZATION`。
+- `RELEASE_VERIFIED / CACHE_DELETED / STAGE_ONE_CLOSED`，待计划制定者最终复核。
 
 ### 交接边界
 
