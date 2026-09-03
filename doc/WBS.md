@@ -19,8 +19,10 @@ workspace 闭环、Plan 106 的 `multi-v0.1.1` 发布与公开复验，以及用
 （释放 257.9 GB）均已完成。**阶段二 Local 配套补齐（Plan 107）也已收口**：L-1 / L-2 实现、两轮独立审查、
 两项窄整改闭合，以及合入 `main`（merge `8fe3c6d6`）、推送与 Local 轻量 CI 全绿均已完成。
 **Local 独立空间门已通过**：经用户授权释放两个已合入工作树与 `rondo-local/debug/incremental`，
-共 12.09 GB，项目占用降至 67.5 GB。**下一工作包是禁用 incremental 的 Local 全 workspace 测试**，尚未立项。
-Plan 107 与空间门均只补配套呈现、文档与容量，不构成 Local 全量通过、功能冻结或发布就绪。
+共 12.09 GB，项目占用降至 67.5 GB。**Plan 108 已完成执行并通过独立验收**：clean candidate `fbe3484f`
+通过禁用 incremental 的 Local 全 workspace 正式门禁，`14122/14122` passed、23 skipped、零
+failure/error/timeout/retry/flaky；候选实质代码/测试口径已冻结，113 分支尚未合入或推送。main/CI 收口完成前，
+Local 主线尚不标记实质代码/功能冻结，也不解锁发布工作包。
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段指针、跨方向关系、
 稳定工程边界和授权门；已完成成果与验收见 `doc/WBS-COMPLETED.md`，单次任务合同见 `plan/`，执行细节见
@@ -248,8 +250,9 @@ Plan 106 发布、公开复验与缓存删除）。**阶段二 Local 配套补�
 并以 merge `8fe3c6d6` 合入 `main`、推送，Local 轻量 CI 全绿。
 **Local 独立空间门也已通过**（2026-09-03）：经用户逐对象授权释放 12.09 GB，项目占用降至 67.5 GB，
 预测 Local 全量峰值 278–308 GB 低于 350 GB 告警线，`C:` 预期不变。
-**下一工作包是禁用 incremental 的 Local 全 workspace 测试**（走 `test-with-codex-v8-conservative`），
-通过后才谈冻结 Local 与发 `local-v*`。该步尚未立项，需另立 ExecPlan。各方向本身当前均无 active 工作包。
+**当前工作包 Plan 108 已完成 Local 全 workspace、修复闭环与独立验收**：`14122/14122` passed、23 skipped、
+零 failure/error/timeout/retry/flaky。下一步是等待用户批准把 113 分支合入并推送，再以 exact main 的 Local 轻量 CI
+完成本包收口；此前不启动 Local 发布。各方向本身当前均无 active 工作包。
 
 方向 3 三期原定路线如下；前三个工作包已串行完成，Plan 099 没有形成候选，因此本轮在工作包三停止，工作包四未解锁：
 

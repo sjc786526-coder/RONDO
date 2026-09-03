@@ -66,10 +66,11 @@ RONDO 是一个基于 [OpenAI Codex CLI](https://github.com/openai/codex) 源码
 |---|---|
 | 测评设施 `eval/`（Python） | 378 个文件，约 256,000 行 |
 | 测评设施自身的测试 | 96 个测试文件，2,025 个测试函数 |
-| RONDO Multi 的 Rust 正确性基线 | Linux 全量 workspace `14,660 / 14,660` 通过，0 failure（24 个 skip 不计入通过） |
+| RONDO Multi 的 Rust 正确性基线 | Linux 全量 workspace `14,713 / 14,713` 通过，0 failure/error/timeout/retry（24 个 skip 不计入通过） |
+| RONDO Local 的 Rust 正确性基线 | Linux 全量 workspace `14,122 / 14,122` 通过，0 failure/error/timeout/retry（23 个 skip 不计入通过） |
 
-> 该 `14,660` 基线由 Plan 093 在 `multidev/` 上建立，**只属于 RONDO Multi**。
-> RONDO Local 没有对应的公开全量基线数字。
+> Multi 的当前基线由 Plan 105 建立，Local 的当前基线由 Plan 108 建立；两者是各自 workspace 的独立正确性结果，
+> 测试数量不可跨产品线直接比较。
 
 ---
 

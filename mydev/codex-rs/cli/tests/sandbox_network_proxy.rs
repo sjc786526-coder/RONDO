@@ -8,6 +8,39 @@ use anyhow::Result;
 use tempfile::TempDir;
 
 const BWRAP_UNAVAILABLE_ERR: &str = "bubblewrap is unavailable";
+const MAX_REQUEST_HEAD_BYTES: usize = 64 * 1024;
+
+/// Consume the request head so the socket can be closed without resetting the peer.
+///
+/// The proxied request is a bodyless GET, so the head is everything the client
+/// sends; stopping at the blank line keeps this from blocking on a half-open
+/// connection. The read timeout and size limit keep a broken fixture bounded.
+fn drain_request_head(stream: &mut std::net::TcpStream) -> std::io::Result<()> {
+    let mut request = Vec::new();
+    let mut chunk = [0u8; 1024];
+    while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+        match std::io::Read::read(stream, &mut chunk) {
+            Ok(0) => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::UnexpectedEof,
+                    "loopback request ended before its header was complete",
+                ));
+            }
+            Ok(read) => {
+                request.extend_from_slice(&chunk[..read]);
+                if request.len() > MAX_REQUEST_HEAD_BYTES {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "loopback request header exceeded fixture limit",
+                    ));
+                }
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(err) => return Err(err),
+        }
+    }
+    Ok(())
+}
 
 #[test]
 fn sandbox_with_network_proxy_blocks_direct_loopback_access() -> Result<()> {
@@ -82,10 +115,22 @@ fn sandbox_with_network_proxy_allows_explicit_loopback_access() -> Result<()> {
         loop {
             match listener.accept() {
                 Ok((mut stream, _)) => {
+                    // Read the request before replying. Closing a socket whose receive
+                    // queue still holds unread bytes makes the kernel send RST instead
+                    // of FIN, and the proxy can observe that reset while it is still
+                    // reading this response. It then reports an upstream failure and
+                    // answers curl with 502 even though the target was allowlisted and
+                    // a 204 had already been written.
+                    stream.set_nonblocking(false)?;
+                    stream.set_read_timeout(Some(Duration::from_secs(2)))?;
+                    drain_request_head(&mut stream)?;
                     std::io::Write::write_all(
                         &mut stream,
                         b"HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n",
                     )?;
+                    std::io::Write::flush(&mut stream)?;
+                    // Half-close so the peer sees an orderly FIN for the response.
+                    stream.shutdown(std::net::Shutdown::Write)?;
                     return Ok(());
                 }
                 Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
