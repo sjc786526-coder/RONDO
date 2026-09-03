@@ -181,9 +181,9 @@ tar xzf rondo-multi-0.1.1-x86_64-unknown-linux-musl.tar.gz
 ./rondo-multi-0.1.1-x86_64-unknown-linux-musl/bin/rondo-multi --version
 
 # RONDO Local
-curl -fLO https://github.com/sjc786526-coder/RONDO/releases/download/local-v0.1.0/rondo-0.1.0-x86_64-unknown-linux-musl.tar.gz
-tar xzf rondo-0.1.0-x86_64-unknown-linux-musl.tar.gz
-./rondo-0.1.0-x86_64-unknown-linux-musl/bin/rondo --version
+curl -fLO https://github.com/sjc786526-coder/RONDO/releases/download/local-v0.1.1/rondo-0.1.1-x86_64-unknown-linux-musl.tar.gz
+tar xzf rondo-0.1.1-x86_64-unknown-linux-musl.tar.gz
+./rondo-0.1.1-x86_64-unknown-linux-musl/bin/rondo --version
 ```
 
 每个 Release 另附 `SHA256SUMS`，校验：`sha256sum -c SHA256SUMS`。
@@ -194,8 +194,9 @@ tar xzf rondo-0.1.0-x86_64-unknown-linux-musl.tar.gz
 > **版本号说明**：`--version` 输出 `0.147.0`，那是被冻结的上游基线版本号，全程不改，
 > 以支持与原始 Codex 的字节级公平对比。**产品版本以 Release tag 为准。**
 
-> 本仓库同时发布两条独立产品线，GitHub 的仓库级 "Latest" 指针只有一个，
-> 让任一条占用都会误导，因此**两条都不占用**。请始终使用上面的固定 tag 链接。
+> 本仓库同时发布两条独立产品线，而 GitHub 的仓库级 "Latest" 指针只有一个，
+> 它总是落在**最近发布的那个正式版**（当前是 `local-v0.1.1`）。这只是平台的展示状态，
+> **不代表版本权威，也不表示另一条产品线过时**。请始终使用上面各自的固定 tag 链接。
 
 ### 从源码构建
 

@@ -2960,3 +2960,41 @@ INTEGRATED / PUSHED / CI_PASS`。
   `agent_log/2026-09-03-plan108-local-final-full-workspace.md`，独立验收见
   `agent_log/2026-09-03-plan108-local-final-full-workspace-review.md`，集成与 CI 见
   `agent_log/2026-09-03-plan108-main-push-and-ci.md`。
+
+## Plan 109 · RONDO Local `local-v0.1.1` 发布与公开复验（第一阶段完成，2026-09-03）
+
+**状态**：`LOCAL_RELEASE_VERIFIED / AWAITING_CLEANUP_AUTHORIZATION`。
+第一阶段（发布、公开复验、后置记录）与第二阶段的**只读盘点**已完成；未删除任何对象，
+等待用户逐对象精确授权后才做最终收口。
+
+- 在 Plan 108 冻结候选上发布 Local 第二个正式版。`mydev/CHANGELOG.md` 新增 `0.1.1` 小节，覆盖
+  `/status` 的 `Guardian config` 三态摘要行、根 `doc/rondo-config.md` 的 Local 节，以及完整 workspace
+  暴露的两类测试编排修复（loopback fixture 的 RST 竞争、4 个 `turn_start_shell_zsh_fork_` 并入单线程
+  Nextest 组）；`14122/14122` 明确限定为正确性与稳定性结果，不作性能、质量资格或生产承诺。
+  经核对本轮 `ci.yml` 只改了 Multi 选包，Local 选包未变，故 CHANGELOG **不**声称 Local CI 覆盖变化。
+- 候选为 merge `e560d33f`，相对 `d97b6c3a` 只增加 CHANGELOG 与本任务 ExecPlan；
+  `git diff` 对产品代码、测试、依赖、lockfile、workflow、打包器与许可材料为空集，
+  故 Plan 108 的最终全量结果继续适用，本任务未重跑本地全 workspace。
+- 发布链全部绑定精确身份：该 exact SHA 的轻量 CI run `33779415523` 全绿（路径分流只跑 `check (local)`）；
+  annotated tag `local-v0.1.1`（tag 对象 `1e9c60e8`）peeled 到同一 commit；release run `33780571720` 的
+  validate/build/verify/publish **四个 job 全部成功**。tag 推送后未移动，历史 tag/Release/资产未变。
+  发布前已查清 `local-v0.1.0` 那条红色 publish 记录的成因（不可能满足的 latest 硬断言，现已收窄为
+  只对 prerelease 生效），按既定决定保留该历史记录不重建。
+- 公开复验以**未认证** HTTP 在项目目录外完成：Release 非 draft、非 prerelease，两个资产齐备；归档 SHA-256
+  `e3e7df4c0536e18d77189a0e1f9f1b87e5fb1caace57e16bb35a6f28141d30c6` 与公开 `SHA256SUMS` 一致；
+  包根与 `codex-package.json` 均为 Local 身份（`variant=rondo`、`entrypoint=bin/rondo`），无 `rondo-multi`；
+  `bin/rondo --version` 仍报冻结基线 `0.147.0`；21 项必需文件非空、`THIRD-PARTY-LICENSES/` 17 份；
+  Release notes 9 项必需内容命中、3 项 Multi 专属内容均不出现，无任何质量或性能声明。
+- 复验通过后 README 的 Local 固定下载链接切到 0.1.1（Multi 链接不变），并按 live 状态窄修仓库级 `latest`
+  说明：该指针必然落在最近发布的正式版（现为 `local-v0.1.1`），只是展示状态，不代表版本权威；
+  原先"两条都不占用"的表述已被实际状态证伪。
+- 第二阶段只读盘点（无删除授权）：项目占用 `151,221,396,157` B，Windows `C:` 可用 `119,884,623,872` B，
+  无构建进程、共享构建锁无持有者。五个候选为 `.codex/cargo-target/rondo-local`（`103,070,741,200` B，
+  0 句柄、无独有资产、重建代价高）、111 与 113 两个历史 worktree（`151,528,394` B / `223,025,968` B，
+  tracked 提交均已确认是 `main`/`origin/main` 祖先，113 多出的约 68 MiB 已查明为 `.venv`、
+  `sdk/python/` 与 0 字节 `target/` 骨架等可重建 ignored 产物，无独有证据）、项目外任务临时下载目录
+  （`579,464,212` B，不计入项目门禁）以及本任务自己的 114 worktree（现在不可释放）。
+  明确排除 `eval-data/`、`test-data/_retained-test-evidence/`、`.codex/build-watchdog/`、Multi/Docker 对象
+  与已发布版本。删除 WSL 文件不会自动缩容 `.vhdx`，故 `C:` 可用空间预计不增加。
+- 合同见 `plan/109-local-v0.1.1-release-and-space-closeout-execplan.md`，执行、公开复验与只读盘点证据见
+  `agent_log/2026-09-03-plan109-local-v0.1.1-release.md`。

@@ -199,26 +199,40 @@ exact-main Local 轻量 CI 为 745 passed / 0 failed，Local 实质代码与功�
   只对 prerelease 生效（`multi-v0.1.1` run 已实证通过）。故正式 `local-v0.1.1` 预期四个 job 全绿，
   并预期由 GitHub 把 `latest` 指派给它——这是平台展示状态，不是版本权威。
 
+- 2026-09-03：候选 merge `e560d33f` 已推送；其 exact SHA 的轻量 CI run `33779415523` 全绿
+  （`gh run watch --exit-status` 返回 0，路径分流只跑 `check (local)`）。随后创建并推送 annotated tag
+  `local-v0.1.1`（tag 对象 `1e9c60e8`，peeled 到 `e560d33f`）；release run `33780571720` 的
+  validate/build/verify/publish 四个 job 全部成功。tag 推送后未移动、未覆盖、未删除。
+- 2026-09-03：在项目目录外的 task-owned 临时目录完成未认证公开复验并全部通过——元数据非 draft/非
+  prerelease、两个资产齐备；归档 SHA-256 `e3e7df4c…41d30c6` 与公网 `SHA256SUMS` 一致；包根/入口/
+  `codex-package.json` 为 Local 身份且无 Multi 内容；`bin/rondo --version` 仍报 `0.147.0`；
+  21 项必需文件非空、`THIRD-PARTY-LICENSES/` 17 份；Release notes 9 项必需内容命中、3 项 Multi 专属内容缺席。
+  四个公开 Release 齐全，历史三个的时间戳与资产数未变。
+- 2026-09-03：复验通过后才更新 README 的 Local 固定链接到 0.1.1，并按 live 状态窄修仓库级 `latest` 说明；
+  同步 `doc/WBS.md`、`doc/WBS-COMPLETED.md`、本节与 `agent_log/2026-09-03-plan109-local-v0.1.1-release.md`。
+- 2026-09-03：完成第二阶段的完整只读盘点（五个候选 + 明确排除项 + 空间口径说明），**未删除任何对象**。
+  盘点的验证边界已如实记录：本会话被 worktree 隔离守卫限制，未能对 111/113 直接跑 `git status`，
+  该项须在删除前补做。
+
 ### 当前工作
 
-- 第一阶段进行中：CHANGELOG 已落地，等待候选 exact SHA 的 Local 轻量 CI 全绿后打 tag。
+- 第一阶段与只读盘点均已完成，停在删除授权门，等待用户逐对象精确授权与计划制定者独立审查。
 
 ### 本任务剩余步骤
 
-- 在 114 worktree 完成 0.1.1 CHANGELOG、发布前检查和提交；按授权合入推送后等待 exact-main Local CI 全绿。
-- 创建并推送 annotated tag，等待既有 release workflow 四个 job 全绿。
-- 未认证下载并复验公开资产；通过后更新 README 与必要状态记录并完成已授权 Git 交付。
-- 完整只读盘点所有明确候选，记录 `LOCAL_RELEASE_VERIFIED / AWAITING_CLEANUP_AUTHORIZATION`，暂停并交回独立验收。
-- 用户逐对象二次授权后只处置获批路径，记录删除与保留决定，复核发布和工作区，完成最终独立验收与路线收口。
+- 用户逐对象二次授权后只处置获批路径；删除前重新核对路径、符号链接、实时占用、使用者与独有资产
+  （含本次未能直接复测的 111/113 `git status`），记录删除与保留决定，复核发布与工作区，
+  完成最终独立验收与路线收口。
 
 ### 阻塞项
 
-- 第一阶段发布、GitHub 外部状态变更、main 合并与推送尚需用户在交给执行者的提示中明确授权。
-- 任何删除尚无授权；必须等第一阶段与只读盘点完成后，由用户针对精确对象另行决定。
+- 任何删除尚无授权。只读盘点已交付，必须由用户针对精确绝对路径逐对象另行决定；
+  盘点建议、WBS 排程与本计划文字均不构成删除授权。
 
 ### 当前验收状态
 
-- `PLANNED / AWAITING_EXECUTION_AUTHORIZATION / NO_RELEASE_ACTION_TAKEN / NO_DELETION_AUTHORIZED`。
+- `LOCAL_RELEASE_VERIFIED / AWAITING_CLEANUP_AUTHORIZATION`。
+  发布已完成并经未认证公开复验；只读盘点已交付；**未删除任何对象**，删除仍须用户逐对象精确授权。
 
 ### 交接边界
 
